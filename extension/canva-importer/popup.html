@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Canva Importer</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="container">
+      <h1>Canva Importer</h1>
+      <p class="hint">Import the active Canva tab into your dashboard templates.</p>
+
+      <label for="dashboardUrl">Dashboard URL</label>
+      <input id="dashboardUrl" type="url" placeholder="http://localhost:3000" />
+
+      <label for="importToken">Import token</label>
+      <textarea id="importToken" rows="3" placeholder="Paste token from /canva-import"></textarea>
+
+      <label for="templateName">Template name (optional)</label>
+      <input id="templateName" type="text" placeholder="Imported Canva template" />
+
+      <label for="templateSlug">Slug (optional)</label>
+      <input id="templateSlug" type="text" placeholder="imported-canva-template" />
+
+      <div class="actions">
+        <button id="saveButton" type="button" class="secondary">Save</button>
+        <button id="importButton" type="button">Import current tab</button>
+      </div>
+
+      <div id="status" class="status"></div>
+    </main>
+
+    <script src="logger.js"></script>
+    <script src="popup.js"></script>
+  </body>
+</html>

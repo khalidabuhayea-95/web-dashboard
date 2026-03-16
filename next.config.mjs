@@ -1,6 +1,9 @@
 /** @type {import('next').NextConfig} */
 const nextConfig = {
-  /* config options here */
+  experimental: {
+    // Needed for large PSD/PDF uploads routed through Next proxy/middleware.
+    proxyClientMaxBodySize: "64mb",
+  },
 };
 
 export default nextConfig;

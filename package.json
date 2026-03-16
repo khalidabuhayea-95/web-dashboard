@@ -6,17 +6,49 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint && npm run check:mobile-openapi",
+    "check:mobile-openapi": "node scripts/check-mobile-openapi-coverage.mjs",
+    "import:canva": "node scripts/import-canva-template.mjs",
+    "sign:mobile": "node scripts/sign-mobile-request.mjs"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@supabase/ssr": "^0.8.0",
+    "@supabase/supabase-js": "^2.98.0",
+    "ag-psd": "^30.1.0",
+    "canvas": "^3.2.1",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "fabric": "^7.2.0",
+    "fonteditor-core": "^2.6.3",
+    "gifenc": "^1.0.3",
+    "gifuct-js": "^2.1.2",
+    "imagetracerjs": "^1.2.6",
+    "konva": "^10.2.0",
+    "lucide-react": "^0.575.0",
     "next": "16.1.6",
+    "pngjs": "^7.0.0",
+    "prisma": "^5.22.0",
+    "radix-ui": "^1.4.3",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "react-konva": "^19.2.3",
+    "swagger-ui-dist": "^5.32.0",
+    "tailwind-merge": "^3.5.0",
+    "use-image": "^1.1.4",
+    "zustand": "^5.0.11"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
+    "@types/node": "^25.3.3",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
-    "tailwindcss": "^4"
+    "playwright": "^1.58.2",
+    "shadcn": "^3.8.5",
+    "tailwindcss": "^4",
+    "tw-animate-css": "^1.4.0",
+    "typescript": "^5.9.3"
   }
 }

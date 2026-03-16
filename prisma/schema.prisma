@@ -1,0 +1,57 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Template {
+  id              String             @id @default(uuid()) @db.Uuid
+  ownerId         String             @db.Uuid
+  name            String
+  slug            String             @unique
+  status          String             @default("draft")
+  version         Int                @default(1)
+  canvasSize      Json
+  category        String             @default("general")
+  subCategory     String             @default("general")
+  tags            Json
+  thumbnailDataUrl String?
+  data            Json
+  publishedAt DateTime?
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+  revisions       TemplateRevision[]
+
+  @@index([ownerId])
+  @@index([status])
+  @@unique([ownerId, name])
+}
+
+model TemplateRevision {
+  id         String   @id @default(uuid()) @db.Uuid
+  templateId String   @db.Uuid
+  version    Int
+  action     String
+  actorId    String   @db.Uuid
+  snapshot   Json
+  createdAt  DateTime @default(now())
+  template   Template @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@index([templateId, createdAt(sort: Desc)])
+}
+
+model AppSetting {
+  key       String   @id
+  value     Json
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}

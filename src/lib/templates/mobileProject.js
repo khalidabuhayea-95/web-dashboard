@@ -1,0 +1,1049 @@
+import { extractFabricData } from "@/lib/templates/editorData";
+import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
+import {
+  getShapeRasterFrame,
+  isRasterizableShapeLayer,
+  renderShapeLayerToDataUrl,
+} from "@/lib/templates/shapeRaster";
+
+function numberOr(value, fallback = 0) {
+  const next = Number(value);
+  return Number.isFinite(next) ? next : fallback;
+}
+
+function parseBoolean(value, fallback = false) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  if (typeof value === "string") {
+    const normalized = value.trim().toLowerCase();
+    if (["true", "1", "yes", "y", "on"].includes(normalized)) return true;
+    if (["false", "0", "no", "n", "off", ""].includes(normalized)) return false;
+  }
+  return fallback;
+}
+
+function asObject(value) {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function firstDefined(values) {
+  for (const value of values) {
+    if (typeof value === "undefined" || value === null) continue;
+    return value;
+  }
+  return undefined;
+}
+
+function resolveOptionalBoolean(values) {
+  const match = firstDefined(values);
+  if (typeof match === "undefined") return undefined;
+  return parseBoolean(match, false);
+}
+
+function resolveBoldFromWeight(value) {
+  if (typeof value === "undefined" || value === null) return undefined;
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return undefined;
+  const numeric = Number.parseInt(raw.replace(/[^\d]/g, ""), 10);
+  if (Number.isFinite(numeric)) return numeric >= 600;
+  if (raw.includes("bold")) return true;
+  if (["normal", "regular", "book", "roman", "light", "thin", "medium"].some((token) => raw.includes(token))) {
+    return false;
+  }
+  return undefined;
+}
+
+function resolveItalicFromStyle(value) {
+  if (typeof value === "undefined" || value === null) return undefined;
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return undefined;
+  if (raw.includes("italic") || raw.includes("oblique")) return true;
+  if (["normal", "regular", "roman", "book", "upright"].some((token) => raw.includes(token))) return false;
+  return undefined;
+}
+
+function parseTextDecoration(value) {
+  if (typeof value === "undefined" || value === null) return undefined;
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw) return undefined;
+  const underline = raw.includes("underline");
+  const strikethrough =
+    raw.includes("line-through") ||
+    raw.includes("linethrough") ||
+    raw.includes("strikethrough") ||
+    raw.includes("strike-through");
+  if (!underline && !strikethrough) return undefined;
+  return { underline, strikethrough };
+}
+
+function normalizeTextCase(value) {
+  if (typeof value === "undefined" || value === null) return undefined;
+  const raw = String(value || "").trim().toLowerCase();
+  if (!raw || ["none", "normal", "original", "default", "keep"].includes(raw)) return "ORIGINAL";
+  if (
+    raw === "uppercase" ||
+    raw === "upper" ||
+    raw === "allcaps" ||
+    raw === "all_caps" ||
+    raw.includes("upper")
+  ) {
+    return "UPPERCASE";
+  }
+  if (raw === "lowercase" || raw === "lower" || raw.includes("lower")) return "LOWERCASE";
+  return "ORIGINAL";
+}
+
+function resolveTextFormat(item) {
+  const format = asObject(item?.format);
+  const textStyle = asObject(item?.textStyle) || asObject(item?.text_style);
+  const style = asObject(item?.style);
+
+  const explicitBold = resolveOptionalBoolean([
+    item?.bold,
+    item?.isBold,
+    item?.is_bold,
+    format?.bold,
+    format?.isBold,
+    format?.is_bold,
+    textStyle?.bold,
+    textStyle?.isBold,
+    textStyle?.is_bold,
+    style?.bold,
+    style?.isBold,
+    style?.is_bold,
+  ]);
+  const boldFromWeight = resolveBoldFromWeight(
+    firstDefined([
+      item?.fontWeight,
+      item?.font_weight,
+      format?.fontWeight,
+      format?.font_weight,
+      textStyle?.fontWeight,
+      textStyle?.font_weight,
+      style?.fontWeight,
+      style?.font_weight,
+    ])
+  );
+
+  const explicitItalic = resolveOptionalBoolean([
+    item?.italic,
+    item?.isItalic,
+    item?.is_italic,
+    format?.italic,
+    format?.isItalic,
+    format?.is_italic,
+    textStyle?.italic,
+    textStyle?.isItalic,
+    textStyle?.is_italic,
+    style?.italic,
+    style?.isItalic,
+    style?.is_italic,
+  ]);
+  const italicFromStyle = resolveItalicFromStyle(
+    firstDefined([
+      item?.fontStyle,
+      item?.font_style,
+      format?.fontStyle,
+      format?.font_style,
+      textStyle?.fontStyle,
+      textStyle?.font_style,
+      style?.fontStyle,
+      style?.font_style,
+    ])
+  );
+
+  const decoration = parseTextDecoration(
+    firstDefined([
+      item?.textDecoration,
+      item?.text_decoration,
+      format?.textDecoration,
+      format?.text_decoration,
+      textStyle?.textDecoration,
+      textStyle?.text_decoration,
+      style?.textDecoration,
+      style?.text_decoration,
+    ])
+  );
+
+  const explicitUnderline = resolveOptionalBoolean([
+    item?.underline,
+    item?.isUnderline,
+    item?.is_underline,
+    format?.underline,
+    format?.isUnderline,
+    format?.is_underline,
+    textStyle?.underline,
+    textStyle?.isUnderline,
+    textStyle?.is_underline,
+    style?.underline,
+    style?.isUnderline,
+    style?.is_underline,
+  ]);
+  const explicitStrikethrough = resolveOptionalBoolean([
+    item?.strikethrough,
+    item?.lineThrough,
+    item?.linethrough,
+    item?.isStrikethrough,
+    item?.is_strikethrough,
+    format?.strikethrough,
+    format?.lineThrough,
+    format?.linethrough,
+    format?.isStrikethrough,
+    format?.is_strikethrough,
+    textStyle?.strikethrough,
+    textStyle?.lineThrough,
+    textStyle?.linethrough,
+    textStyle?.isStrikethrough,
+    textStyle?.is_strikethrough,
+    style?.strikethrough,
+    style?.lineThrough,
+    style?.linethrough,
+    style?.isStrikethrough,
+    style?.is_strikethrough,
+  ]);
+
+  const textCase = normalizeTextCase(
+    firstDefined([
+      item?.textCase,
+      item?.text_case,
+      item?.textTransform,
+      item?.text_transform,
+      format?.textCase,
+      format?.text_case,
+      format?.textTransform,
+      format?.text_transform,
+      textStyle?.textCase,
+      textStyle?.text_case,
+      textStyle?.textTransform,
+      textStyle?.text_transform,
+      style?.textCase,
+      style?.text_case,
+      style?.textTransform,
+      style?.text_transform,
+    ])
+  );
+
+  return {
+    bold: explicitBold ?? boldFromWeight ?? false,
+    italic: explicitItalic ?? italicFromStyle ?? false,
+    underline: explicitUnderline ?? decoration?.underline ?? false,
+    strikethrough: explicitStrikethrough ?? decoration?.strikethrough ?? false,
+    textCase: textCase || "ORIGINAL",
+  };
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function isDataUri(value) {
+  return /^data:[^;]+;base64,/i.test(String(value || "").trim());
+}
+
+function resolveMediaUri(rawUri, options) {
+  const value = String(rawUri || "").trim();
+  if (!value) return "";
+  if (!isDataUri(value)) return value;
+  if (typeof options?.assetResolver !== "function") return value;
+  const resolved = String(
+    options.assetResolver({
+      scope: options.scope || "layer",
+      elementId: options.elementId || "",
+      index: options.index ?? null,
+      field: options.field || "",
+    }) || ""
+  ).trim();
+  return resolved || value;
+}
+
+function normalizeHex(value, fallback = "#000000") {
+  const raw = String(value || "").trim();
+  const rgba = raw.match(
+    /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i
+  );
+  if (rgba) {
+    const r = clamp(Math.round(numberOr(rgba[1], 0)), 0, 255);
+    const g = clamp(Math.round(numberOr(rgba[2], 0)), 0, 255);
+    const b = clamp(Math.round(numberOr(rgba[3], 0)), 0, 255);
+    return `#${[r, g, b]
+      .map((item) => item.toString(16).padStart(2, "0"))
+      .join("")
+      .toUpperCase()}`;
+  }
+  const full = /^#([0-9a-f]{6})$/i;
+  const short = /^#([0-9a-f]{3})$/i;
+  if (full.test(raw)) return raw.toUpperCase();
+  if (short.test(raw)) {
+    const [, hex] = raw.match(short);
+    return `#${hex
+      .split("")
+      .map((it) => `${it}${it}`)
+      .join("")}`.toUpperCase();
+  }
+  return fallback;
+}
+
+function rgbaToHexWithOpacity(value, fallbackHex = "#000000") {
+  const input = String(value || "").trim();
+  if (!input) return { hex: fallbackHex, opacity: 1 };
+  if (input.startsWith("#")) return { hex: normalizeHex(input, fallbackHex), opacity: 1 };
+  const rgba = input.match(
+    /^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i
+  );
+  if (!rgba) return { hex: fallbackHex, opacity: 1 };
+  const r = clamp(Math.round(numberOr(rgba[1], 0)), 0, 255);
+  const g = clamp(Math.round(numberOr(rgba[2], 0)), 0, 255);
+  const b = clamp(Math.round(numberOr(rgba[3], 0)), 0, 255);
+  const a = clamp(numberOr(rgba[4], 1), 0, 1);
+  const hex = `#${[r, g, b]
+    .map((item) => item.toString(16).padStart(2, "0"))
+    .join("")
+    .toUpperCase()}`;
+  return { hex, opacity: a };
+}
+
+function mapBlendMode(value) {
+  const mapping = {
+    "source-over": "NORMAL",
+    multiply: "MULTIPLY",
+    screen: "SCREEN",
+    overlay: "OVERLAY",
+    darken: "DARKEN",
+    lighten: "LIGHTEN",
+    "color-dodge": "COLOR_DODGE",
+    "color-burn": "COLOR_BURN",
+    "soft-light": "SOFT_LIGHT",
+    "hard-light": "HARD_LIGHT",
+    difference: "DIFFERENCE",
+    exclusion: "EXCLUSION",
+    add: "ADD",
+    subtract: "SUBTRACT",
+  };
+  return mapping[String(value || "").toLowerCase()] || "NORMAL";
+}
+
+function mapTextAlignment(value) {
+  const mapping = {
+    left: "START",
+    center: "CENTER",
+    right: "END",
+    justify: "JUSTIFY",
+  };
+  return mapping[String(value || "").toLowerCase()] || "START";
+}
+
+function mapMediaShape(value) {
+  const mapping = {
+    rectangle: "RECTANGLE",
+    rounded: "ROUNDED",
+    circle: "CIRCLE",
+  };
+  return mapping[String(value || "").toLowerCase()] || "RECTANGLE";
+}
+
+function mapAnimationType(value) {
+  const allowed = new Set([
+    "NONE",
+    "FADE",
+    "WIPE",
+    "WIPE_GRADIENT",
+    "SLIDE",
+    "ZOOM",
+    "ZOOM_FADE",
+    "CIRCULAR",
+    "CIRCULAR_FADE",
+    "RADIAL",
+    "FLOAT",
+    "PULSE",
+    "SPIN",
+  ]);
+  const next = String(value || "NONE").toUpperCase();
+  return allowed.has(next) ? next : "NONE";
+}
+
+function mapAnimationMode(value) {
+  const allowed = new Set(["IN", "OUT", "LOOP"]);
+  const next = String(value || "LOOP").toUpperCase();
+  return allowed.has(next) ? next : "LOOP";
+}
+
+function mapTemplateCategory(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["business", "corporate", "work"].includes(normalized)) return "BUSINESS";
+  if (["education", "school", "course"].includes(normalized)) return "EDUCATION";
+  if (["ramadan"].includes(normalized)) return "RAMADAN";
+  if (["events", "event"].includes(normalized)) return "EVENTS";
+  return "SOCIAL";
+}
+
+const MIN_MEDIA_VISUAL_SCALE = 0.01;
+const MAX_MEDIA_VISUAL_SCALE = 16;
+const MIN_TEXT_VISUAL_SCALE = 0.05;
+const MAX_TEXT_VISUAL_SCALE = 20;
+const MEDIA_LAYER_BASE_MAX_EDGE_DP = 1080;
+const MEDIA_LAYER_BASE_MIN_EDGE_DP = 120;
+const MIN_MEDIA_CROP_SIZE = 0.05;
+const TEXT_LAYER_BASE_WIDTH_DP = 250;
+const TEXT_LAYER_BASE_HEIGHT_DP = 110;
+
+function readShadow(item) {
+  if (item?.shadow && typeof item.shadow === "object") {
+    return item.shadow;
+  }
+  return {
+    color: item?.shadowColor,
+    blur: item?.shadowBlur,
+    offsetX: item?.shadowOffsetX,
+    offsetY: item?.shadowOffsetY,
+  };
+}
+
+function readTextAlignment(item) {
+  return item?.textAlign || item?.align;
+}
+
+function readLetterSpacing(item) {
+  if (typeof item?.charSpacing !== "undefined") return item.charSpacing;
+  return item?.letterSpacing;
+}
+
+function readBlendMode(item) {
+  return item?.mediaBlendMode || item?.blendMode;
+}
+
+function readCornerRadiusRatio(item) {
+  if (typeof item?.mediaCornerRadius !== "undefined") {
+    return numberOr(item.mediaCornerRadius, 0.1);
+  }
+  const radius = Math.max(0, numberOr(item?.cornerRadius, 0));
+  const minEdge = Math.max(1, Math.min(numberOr(item?.width, 1), numberOr(item?.height, 1)));
+  return radius / minEdge;
+}
+
+function readVideoDurationMs(item) {
+  if (typeof item?.videoDurationSec !== "undefined") {
+    return Math.max(Math.round(numberOr(item.videoDurationSec, 0) * 1000), 0);
+  }
+  return Math.max(Math.round(numberOr(item?.videoDuration, 0) * 1000), 0);
+}
+
+function readVideoTrimStartMs(item) {
+  if (typeof item?.videoTrimStartMs !== "undefined") {
+    return Math.max(Math.round(numberOr(item.videoTrimStartMs, 0)), 0);
+  }
+  return Math.max(Math.round(numberOr(item?.videoStart, 0) * 1000), 0);
+}
+
+function readVideoTrimEndMs(item, durationMs, trimStartMs) {
+  const fallbackEndMs = durationMs > 0
+    ? durationMs
+    : Math.max(trimStartMs, Math.round(numberOr(item?.videoEnd, 3) * 1000));
+  if (typeof item?.videoTrimEndMs !== "undefined") {
+    return clamp(
+      Math.round(numberOr(item.videoTrimEndMs, fallbackEndMs)),
+      trimStartMs,
+      Math.max(fallbackEndMs, trimStartMs)
+    );
+  }
+  return clamp(
+    Math.round(numberOr(item?.videoEnd, fallbackEndMs / 1000) * 1000),
+    trimStartMs,
+    Math.max(fallbackEndMs, trimStartMs)
+  );
+}
+
+function computeMobileMediaBaseSize(sourceWidth, sourceHeight) {
+  const width = Math.max(numberOr(sourceWidth, 1), 1);
+  const height = Math.max(numberOr(sourceHeight, 1), 1);
+  const aspect = width / height;
+  if (aspect >= 1) {
+    return {
+      width: MEDIA_LAYER_BASE_MAX_EDGE_DP,
+      height: clamp(
+        MEDIA_LAYER_BASE_MAX_EDGE_DP / aspect,
+        MEDIA_LAYER_BASE_MIN_EDGE_DP,
+        MEDIA_LAYER_BASE_MAX_EDGE_DP
+      ),
+    };
+  }
+  return {
+    width: clamp(
+      MEDIA_LAYER_BASE_MAX_EDGE_DP * aspect,
+      MEDIA_LAYER_BASE_MIN_EDGE_DP,
+      MEDIA_LAYER_BASE_MAX_EDGE_DP
+    ),
+    height: MEDIA_LAYER_BASE_MAX_EDGE_DP,
+  };
+}
+
+function centerFromFabricItem(item) {
+  const width = Math.max(numberOr(item.width, 1), 1);
+  const height = Math.max(numberOr(item.height, 1), 1);
+  const rawScaleX = numberOr(item.scaleX, 1);
+  const rawScaleY = numberOr(item.scaleY, 1);
+  const rotationDegrees = numberOr(item.angle, numberOr(item.rotation, 0));
+  const rotationRadians = (rotationDegrees * Math.PI) / 180;
+  const cosR = Math.cos(rotationRadians);
+  const sinR = Math.sin(rotationRadians);
+
+  const originX = String(item.originX || "left").toLowerCase();
+  const originY = String(item.originY || "top").toLowerCase();
+  const originLocalX = originX === "center" ? width / 2 : originX === "right" ? width : 0;
+  const originLocalY = originY === "center" ? height / 2 : originY === "bottom" ? height : 0;
+  const deltaLocalX = (width / 2) - originLocalX;
+  const deltaLocalY = (height / 2) - originLocalY;
+  const deltaScaledX = deltaLocalX * rawScaleX;
+  const deltaScaledY = deltaLocalY * rawScaleY;
+  const deltaRotatedX = (deltaScaledX * cosR) - (deltaScaledY * sinR);
+  const deltaRotatedY = (deltaScaledX * sinR) + (deltaScaledY * cosR);
+
+  const left = numberOr(item.left, numberOr(item.x, 0));
+  const top = numberOr(item.top, numberOr(item.y, 0));
+  const centerX = left + deltaRotatedX;
+  const centerY = top + deltaRotatedY;
+
+  return {
+    centerX,
+    centerY,
+    rawScaleX,
+    rawScaleY,
+  };
+}
+
+function buildTransform({
+  item,
+  canvasSize,
+  centerX,
+  centerY,
+  rawScaleX,
+  rawScaleY,
+  baseWidth,
+  baseHeight,
+  scaleBounds = { min: 0.1, max: 16 },
+}) {
+  const signX = rawScaleX < 0 ? -1 : 1;
+  const signY = rawScaleY < 0 ? -1 : 1;
+  const displayWidth = Math.max(Math.abs(rawScaleX) * Math.max(numberOr(item.width, 1), 1), 1);
+  const displayHeight = Math.max(Math.abs(rawScaleY) * Math.max(numberOr(item.height, 1), 1), 1);
+
+  const effectiveScaleX = clamp(displayWidth / Math.max(baseWidth, 1), scaleBounds.min, scaleBounds.max);
+  const effectiveScaleY = clamp(displayHeight / Math.max(baseHeight, 1), scaleBounds.min, scaleBounds.max);
+  const scaleMagnitude = clamp(
+    Math.sqrt(Math.max(effectiveScaleX * effectiveScaleY, 0.0001)),
+    scaleBounds.min,
+    scaleBounds.max
+  );
+
+  return {
+    x: clamp(centerX, -canvasSize.width * 4, canvasSize.width * 4),
+    y: clamp(centerY, -canvasSize.height * 4, canvasSize.height * 4),
+    scale: scaleMagnitude,
+    scaleX: signX * clamp(effectiveScaleX / Math.max(scaleMagnitude, 0.0001), 0.1, 16),
+    scaleY: signY * clamp(effectiveScaleY / Math.max(scaleMagnitude, 0.0001), 0.1, 16),
+    rotation: numberOr(item.angle, numberOr(item.rotation, 0)),
+  };
+}
+
+function baseLayer(item, index, canvasSize) {
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const baseWidth = Math.max(numberOr(item.width, 1), 1);
+  const baseHeight = Math.max(numberOr(item.height, 1), 1);
+
+  return {
+    id: String(item.id || item.layerId || `layer-${index + 1}`),
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth,
+      baseHeight,
+    }),
+    opacity: clamp(numberOr(item.opacity, 1), 0, 1),
+    locked: parseBoolean(item.layerLocked, false),
+    hidden: parseBoolean(item.layerHidden, false),
+    zIndex: index,
+  };
+}
+
+function textTransformFromFabric(item, canvasSize) {
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const widthRatio = Math.max(numberOr(item.width, TEXT_LAYER_BASE_WIDTH_DP), 1) / TEXT_LAYER_BASE_WIDTH_DP;
+  const heightRatio =
+    Math.max(numberOr(item.height, TEXT_LAYER_BASE_HEIGHT_DP), 1) / TEXT_LAYER_BASE_HEIGHT_DP;
+  const absScaleX = Math.max(Math.abs(rawScaleX) * widthRatio, 0.0001);
+  const absScaleY = Math.max(Math.abs(rawScaleY) * heightRatio, 0.0001);
+  const signX = rawScaleX < 0 ? -1 : 1;
+  const signY = rawScaleY < 0 ? -1 : 1;
+  const scale = 1;
+
+  return {
+    x: clamp(centerX, -canvasSize.width * 4, canvasSize.width * 4),
+    y: clamp(centerY, -canvasSize.height * 4, canvasSize.height * 4),
+    scale,
+    scaleX: signX * clamp(absScaleX, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
+    scaleY: signY * clamp(absScaleY, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
+    rotation: numberOr(item.angle, numberOr(item.rotation, 0)),
+  };
+}
+
+function mapTextLayer(item, index, canvasSize) {
+  const base = baseLayer(item, index, canvasSize);
+  const strokeColor = rgbaToHexWithOpacity(item.stroke, "#000000");
+  const shadow = readShadow(item);
+  const shadowColor = rgbaToHexWithOpacity(shadow.color, "#000000");
+  const textFormat = resolveTextFormat(item);
+  const bgColor = normalizeHex(item.textBackgroundBaseColor || item.textBackgroundColor, "#000000");
+  const bgOpacity = clamp(numberOr(item.textBackgroundOpacity, item.textBackgroundColor ? 1 : 0), 0, 1);
+
+  return {
+    ...base,
+    transform: textTransformFromFabric(item, canvasSize),
+    type: "TEXT",
+    text: String(item.text || ""),
+    fontName: resolveEditorTextFontName(item),
+    size: numberOr(item.fontSize, 42),
+    bold: textFormat.bold,
+    italic: textFormat.italic,
+    underline: textFormat.underline,
+    strikethrough: textFormat.strikethrough,
+    textCase: textFormat.textCase,
+    colorHex: normalizeHex(item.color || item.fill, "#FFFFFF"),
+    shadow: {
+      enabled: Boolean(shadow.color || shadow.blur || shadow.offsetX || shadow.offsetY),
+      colorHex: shadowColor.hex,
+      opacity: shadowColor.opacity,
+      blurRadius: numberOr(shadow.blur, 0),
+      offsetX: numberOr(shadow.offsetX, 0),
+      offsetY: numberOr(shadow.offsetY, 0),
+    },
+    stroke: {
+      enabled: numberOr(item.strokeWidth, 0) > 0,
+      colorHex: strokeColor.hex,
+      opacity: strokeColor.opacity,
+      width: numberOr(item.strokeWidth, 0),
+    },
+    letterSpacing: numberOr(readLetterSpacing(item), 0),
+    lineHeight: numberOr(item.lineHeight, 1.2),
+    alignment: mapTextAlignment(readTextAlignment(item)),
+    curveConfig: {
+      enabled: false,
+      arcDegrees: 0,
+      radius: 200,
+    },
+    backgroundVisible: bgOpacity > 0,
+    backgroundColorHex: bgColor,
+    backgroundAngleSize: clamp(numberOr(item.textBackgroundAngleSize, 0), 0, 1),
+    backgroundOpacity: bgOpacity,
+  };
+}
+
+function toPoints(value) {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((point) => ({
+      x: clamp(numberOr(point?.x, 0), 0, 1),
+      y: clamp(numberOr(point?.y, 0), 0, 1),
+    }))
+    .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y));
+}
+
+function mediaFilters(item, options = {}) {
+  const stroke = rgbaToHexWithOpacity(item.stroke, "#FFFFFF");
+  const shadow = readShadow(item);
+  const shadowColor = rgbaToHexWithOpacity(shadow.color, "#000000");
+  const includeStroke = options.includeStroke !== false;
+  const includeShapeMask = options.includeShapeMask !== false;
+
+  return {
+    filterPresetId: item.mediaFilterPresetId ? String(item.mediaFilterPresetId) : null,
+    brightness: clamp(1 + numberOr(item.mediaBrightness, 0), 0, 2),
+    contrast: clamp(1 + numberOr(item.mediaContrast, 0), 0, 2),
+    saturation: clamp(1 + numberOr(item.mediaSaturation, 0), 0, 2),
+    blurRadius: clamp(numberOr(item.mediaBlur, 0), 0, 40),
+    tintColorHex: normalizeHex(item.mediaTintColor, "#FFFFFF"),
+    tintStrength: clamp(numberOr(item.mediaTintStrength, 0), 0, 1),
+    blendMode: mapBlendMode(readBlendMode(item)),
+    shape: includeShapeMask ? mapMediaShape(item.mediaShape) : "RECTANGLE",
+    cornerRadius: includeShapeMask ? clamp(readCornerRadiusRatio(item), 0, 0.5) : 0,
+    strokeColorHex: includeStroke ? stroke.hex : "#FFFFFF",
+    strokeOpacity: includeStroke ? stroke.opacity : 0,
+    strokeWidth: includeStroke ? clamp(numberOr(item.strokeWidth, 0), 0, 24) : 0,
+    shadowColorHex: shadowColor.hex,
+    shadowOpacity: shadowColor.opacity,
+    shadowBlurRadius: clamp(numberOr(shadow.blur, 0), 0, 40),
+    shadowOffsetX: clamp(numberOr(shadow.offsetX, 0), -80, 80),
+    shadowOffsetY: clamp(numberOr(shadow.offsetY, 0), -80, 80),
+    animationType: mapAnimationType(item.mediaAnimationType),
+    animationMode: mapAnimationMode(item.mediaAnimationMode),
+    animationStrength: clamp(numberOr(item.mediaAnimationStrength, 0), 0, 1),
+    animationSpeed: clamp(numberOr(item.mediaAnimationSpeed, 1), 0.2, 3),
+    eraserRadius: clamp(numberOr(item.mediaEraserRadius, 18), 2, 80),
+    eraserSoftness: clamp(numberOr(item.mediaEraserSoftness, 0.5), 0, 1),
+    eraserPoints: toPoints(item.mediaEraserPoints),
+    healingRadius: clamp(numberOr(item.mediaHealingRadius, 22), 2, 80),
+    healingStrength: clamp(numberOr(item.mediaHealingStrength, 0.55), 0, 1),
+    healingPoints: toPoints(item.mediaHealingPoints),
+  };
+}
+
+function mapCropRect(item, sourceWidth, sourceHeight) {
+  const rawRect = item?.cropRect;
+  if (rawRect && typeof rawRect === "object") {
+    const left = clamp(numberOr(rawRect.left, 0), 0, 1 - MIN_MEDIA_CROP_SIZE);
+    const top = clamp(numberOr(rawRect.top, 0), 0, 1 - MIN_MEDIA_CROP_SIZE);
+    const right = clamp(numberOr(rawRect.right, 1), MIN_MEDIA_CROP_SIZE, 1);
+    const bottom = clamp(numberOr(rawRect.bottom, 1), MIN_MEDIA_CROP_SIZE, 1);
+    return {
+      left: clamp(Math.min(left, right - MIN_MEDIA_CROP_SIZE), 0, 1 - MIN_MEDIA_CROP_SIZE),
+      top: clamp(Math.min(top, bottom - MIN_MEDIA_CROP_SIZE), 0, 1 - MIN_MEDIA_CROP_SIZE),
+      right: clamp(Math.max(right, left + MIN_MEDIA_CROP_SIZE), MIN_MEDIA_CROP_SIZE, 1),
+      bottom: clamp(Math.max(bottom, top + MIN_MEDIA_CROP_SIZE), MIN_MEDIA_CROP_SIZE, 1),
+    };
+  }
+
+  const hasExplicitCrop =
+    typeof item?.cropX !== "undefined" ||
+    typeof item?.cropY !== "undefined" ||
+    typeof item?.cropWidth !== "undefined" ||
+    typeof item?.cropHeight !== "undefined";
+
+  // If no explicit crop metadata exists, keep the full media frame.
+  if (!hasExplicitCrop) {
+    return {
+      left: 0,
+      top: 0,
+      right: 1,
+      bottom: 1,
+    };
+  }
+
+  const cropX = clamp(numberOr(item.cropX, 0), 0, sourceWidth);
+  const cropY = clamp(numberOr(item.cropY, 0), 0, sourceHeight);
+  const width = clamp(numberOr(item.cropWidth, numberOr(item.width, sourceWidth)), 1, sourceWidth);
+  const height = clamp(numberOr(item.cropHeight, numberOr(item.height, sourceHeight)), 1, sourceHeight);
+  const left = clamp(cropX / sourceWidth, 0, 1 - MIN_MEDIA_CROP_SIZE);
+  const top = clamp(cropY / sourceHeight, 0, 1 - MIN_MEDIA_CROP_SIZE);
+  const right = clamp((cropX + width) / sourceWidth, MIN_MEDIA_CROP_SIZE, 1);
+  const bottom = clamp((cropY + height) / sourceHeight, MIN_MEDIA_CROP_SIZE, 1);
+
+  const safeLeft = Math.min(left, right - MIN_MEDIA_CROP_SIZE);
+  const safeTop = Math.min(top, bottom - MIN_MEDIA_CROP_SIZE);
+  const safeRight = Math.max(right, safeLeft + MIN_MEDIA_CROP_SIZE);
+  const safeBottom = Math.max(bottom, safeTop + MIN_MEDIA_CROP_SIZE);
+
+  return {
+    left: clamp(safeLeft, 0, 1 - MIN_MEDIA_CROP_SIZE),
+    top: clamp(safeTop, 0, 1 - MIN_MEDIA_CROP_SIZE),
+    right: clamp(safeRight, MIN_MEDIA_CROP_SIZE, 1),
+    bottom: clamp(safeBottom, MIN_MEDIA_CROP_SIZE, 1),
+  };
+}
+
+function mapImageLayer(item, index, canvasSize, options) {
+  const base = baseLayer(item, index, canvasSize);
+  const sourceWidth = Math.max(Math.round(numberOr(item.sourceWidth, item.width || 1)), 1);
+  const sourceHeight = Math.max(Math.round(numberOr(item.sourceHeight, item.height || 1)), 1);
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const layerBaseWidth = Math.max(numberOr(item.width, sourceWidth), 1);
+  const layerBaseHeight = Math.max(numberOr(item.height, sourceHeight), 1);
+  return {
+    ...base,
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth: layerBaseWidth,
+      baseHeight: layerBaseHeight,
+      scaleBounds: { min: MIN_MEDIA_VISUAL_SCALE, max: MAX_MEDIA_VISUAL_SCALE },
+    }),
+    type: "IMAGE",
+    imageUri: resolveMediaUri(item.src || item.imageUri || "", {
+      assetResolver: options?.assetResolver,
+      scope: "layer",
+      elementId: item.id || item.layerId || "",
+      index,
+      field: "src",
+    }),
+    frameWidth: layerBaseWidth,
+    frameHeight: layerBaseHeight,
+    sourceWidth,
+    sourceHeight,
+    sourceHasAlpha: Boolean(item.sourceHasAlpha),
+    cropRect: mapCropRect(item, sourceWidth, sourceHeight),
+    filters: mediaFilters(item),
+  };
+}
+
+function mapVideoLayer(item, index, canvasSize, options) {
+  const base = baseLayer(item, index, canvasSize);
+  const sourceWidth = Math.max(Math.round(numberOr(item.sourceWidth, item.width || 1)), 1);
+  const sourceHeight = Math.max(Math.round(numberOr(item.sourceHeight, item.height || 1)), 1);
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const layerBaseWidth = Math.max(numberOr(item.width, sourceWidth), 1);
+  const layerBaseHeight = Math.max(numberOr(item.height, sourceHeight), 1);
+  const durationMs = readVideoDurationMs(item);
+  const trimStartMs = readVideoTrimStartMs(item);
+  const trimEndMs = readVideoTrimEndMs(item, durationMs, trimStartMs);
+  return {
+    ...base,
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth: layerBaseWidth,
+      baseHeight: layerBaseHeight,
+      scaleBounds: { min: MIN_MEDIA_VISUAL_SCALE, max: MAX_MEDIA_VISUAL_SCALE },
+    }),
+    type: "VIDEO_CLIP",
+    videoUri: resolveMediaUri(item.videoUri || item.src || "", {
+      assetResolver: options?.assetResolver,
+      scope: "layer",
+      elementId: item.id || item.layerId || "",
+      index,
+      field: item.videoUri ? "videoUri" : "src",
+    }),
+    frameWidth: layerBaseWidth,
+    frameHeight: layerBaseHeight,
+    thumbnailUri: resolveMediaUri(item.thumbnailUri || item.src || "", {
+      assetResolver: options?.assetResolver,
+      scope: "layer",
+      elementId: item.id || item.layerId || "",
+      index,
+      field: item.thumbnailUri ? "thumbnailUri" : "src",
+    }),
+    sourceWidth,
+    sourceHeight,
+    cropRect: mapCropRect(item, sourceWidth, sourceHeight),
+    filters: mediaFilters(item),
+    trimStartMs: Math.round(trimStartMs),
+    trimEndMs: Math.round(trimEndMs),
+  };
+}
+
+function mapShapeLayerAsImage(item, index, canvasSize, options) {
+  const frame = getShapeRasterFrame(item);
+  const rasterItem = {
+    ...item,
+    width: frame.width,
+    height: frame.height,
+  };
+  const base = baseLayer(rasterItem, index, canvasSize);
+  const imageUri =
+    typeof options?.assetResolver === "function"
+      ? String(
+          options.assetResolver({
+            scope: "layer",
+            elementId: item.id || item.layerId || "",
+            index,
+            field: "shape-raster",
+          }) || ""
+        ).trim()
+      : renderShapeLayerToDataUrl(item);
+
+  return {
+    ...base,
+    type: "IMAGE",
+    imageUri,
+    frameWidth: frame.width,
+    frameHeight: frame.height,
+    sourceWidth: frame.width,
+    sourceHeight: frame.height,
+    sourceHasAlpha: true,
+    cropRect: {
+      left: 0,
+      top: 0,
+      right: 1,
+      bottom: 1,
+    },
+    filters: mediaFilters(item, {
+      includeStroke: false,
+      includeShapeMask: false,
+    }),
+  };
+}
+
+function mapShapeLayer(item, index, canvasSize) {
+  const base = baseLayer(item, index, canvasSize);
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const shapeType = String(item.type || item.layerShapeType || "").toLowerCase();
+  const mappedShapeType =
+    shapeType.includes("circle") ? "CIRCLE" : shapeType.includes("round") ? "ROUNDED" : "RECTANGLE";
+  return {
+    ...base,
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth: 200,
+      baseHeight: 120,
+    }),
+    type: "SHAPE",
+    shapeType: mappedShapeType,
+    fillColorHex: normalizeHex(item.fill, "#00AEEF"),
+    strokeColorHex: normalizeHex(item.stroke, "#FFFFFF"),
+  };
+}
+
+function mapStickerLayer(item, index, canvasSize) {
+  const base = baseLayer(item, index, canvasSize);
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  return {
+    ...base,
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth: 120,
+      baseHeight: 120,
+    }),
+    type: "STICKER",
+    assetId: String(item.assetId || item.layerId || `sticker-${index + 1}`),
+    tintColorHex: normalizeHex(item.tintColorHex || item.fill, "#FFFFFF"),
+  };
+}
+
+function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
+  const layerType = String(item.layerType || item.type || "").toLowerCase();
+  if (layerType === "sticker") {
+    return mapStickerLayer(item, index, canvasSize);
+  }
+  if (layerType === "text" || String(item.type || "").toLowerCase().includes("text")) {
+    return mapTextLayer(item, index, canvasSize);
+  }
+  if (layerType === "video") {
+    return mapVideoLayer(item, index, canvasSize, options);
+  }
+  if (layerType === "image" || String(item.type || "").toLowerCase().includes("image")) {
+    return mapImageLayer(item, index, canvasSize, options);
+  }
+  if (isRasterizableShapeLayer(item)) {
+    return mapShapeLayerAsImage(item, index, canvasSize, options);
+  }
+  return mapShapeLayer(item, index, canvasSize);
+}
+
+function mapBackground(value, options) {
+  if (isDataUri(value)) {
+    const imageUri = resolveMediaUri(value, {
+      assetResolver: options?.assetResolver,
+      scope: "background",
+      field: "background",
+    });
+    if (imageUri) {
+      return { type: "image", imageUri };
+    }
+  }
+  if (value && typeof value === "string" && value.trim()) {
+    return { type: "solid", colorHex: normalizeHex(value, "#FFFFFF") };
+  }
+  if (value && typeof value === "object") {
+    if (value.type === "image" && value.imageUri) {
+      return {
+        type: "image",
+        imageUri: resolveMediaUri(value.imageUri, {
+          assetResolver: options?.assetResolver,
+          scope: "background",
+          field: "imageUri",
+        }),
+      };
+    }
+    if (
+      value.type === "gradient" &&
+      (value.startColorHex || value.gradientFrom) &&
+      (value.endColorHex || value.gradientTo)
+    ) {
+      return {
+        type: "gradient",
+        startColorHex: normalizeHex(value.startColorHex || value.gradientFrom, "#000000"),
+        endColorHex: normalizeHex(value.endColorHex || value.gradientTo, "#FFFFFF"),
+        angle: numberOr(value.angle, 0),
+      };
+    }
+    if (value.type === "color" && value.color) {
+      return { type: "solid", colorHex: normalizeHex(value.color, "#FFFFFF") };
+    }
+    if (value.type === "solid" && value.colorHex) {
+      return { type: "solid", colorHex: normalizeHex(value.colorHex, "#FFFFFF") };
+    }
+  }
+  return { type: "solid", colorHex: "#FFFFFF" };
+}
+
+function resolveCanvasSize(template) {
+  return {
+    width: Math.max(numberOr(template?.canvasSize?.width, 1080), 1),
+    height: Math.max(numberOr(template?.canvasSize?.height, 1080), 1),
+  };
+}
+
+export function toMobileProject(template, options = {}) {
+  const canvasSize = resolveCanvasSize(template);
+
+  const rawData = template?.data || {};
+  const data = extractFabricData(rawData) || rawData || {};
+  const objects = Array.isArray(data?.objects) ? data.objects : [];
+  const layers = objects.map((item, index) =>
+    mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options)
+  );
+
+  return {
+    id: String(template?.id || ""),
+    name: String(template?.name || "Untitled"),
+    createdAt: new Date(template?.createdAt || Date.now()).getTime(),
+    updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
+    canvasWidth: canvasSize.width,
+    canvasHeight: canvasSize.height,
+    background: mapBackground(data.background, options),
+    layers,
+    meta: {
+      source: "web-dashboard-fabric",
+      templateId: String(template?.id || ""),
+      version: template?.version || 1,
+      category: String(template?.category || "general"),
+      subCategory: String(template?.subCategory || "general"),
+    },
+  };
+}
+
+export function toMobileTemplate(template, options = {}) {
+  const includeProject = options.includeProject !== false;
+  const canvasSize = resolveCanvasSize(template);
+  const rawThumbnail = String(
+    template?.thumbnailDataUrl || template?.thumbnailUrl || template?.thumbnail || ""
+  );
+  const resolvedThumbnail = isDataUri(rawThumbnail)
+    ? resolveMediaUri(rawThumbnail, {
+        assetResolver: options?.assetResolver,
+        scope: "thumbnail",
+        field: "thumbnailDataUrl",
+      })
+    : rawThumbnail;
+  return {
+    id: String(template?.id || ""),
+    title: String(template?.name || "Untitled"),
+    version: numberOr(template?.version, 1),
+    updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
+    canvasWidth: canvasSize.width,
+    canvasHeight: canvasSize.height,
+    category: mapTemplateCategory(template?.category),
+    subCategory: String(template?.subCategory || "general"),
+    thumbnailUrl: resolvedThumbnail,
+    thumbnailDataUrl: resolvedThumbnail,
+    ...(includeProject ? { project: toMobileProject(template, options) } : {}),
+  };
+}

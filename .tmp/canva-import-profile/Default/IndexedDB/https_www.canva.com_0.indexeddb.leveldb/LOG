@@ -1,0 +1,14 @@
+2026/03/01-21:50:33.211 d72937 Reusing MANIFEST /Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/.tmp/canva-import-profile/Default/IndexedDB/https_www.canva.com_0.indexeddb.leveldb/MANIFEST-000001
+2026/03/01-21:50:33.211 d72937 Recovering log #9
+2026/03/01-21:50:33.212 d72937 Reusing old log /Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/.tmp/canva-import-profile/Default/IndexedDB/https_www.canva.com_0.indexeddb.leveldb/000009.log 
+2026/03/01-21:50:33.212 d72937 Delete type=2 #8
+2026/03/01-21:50:33.457 d72946 Level-0 table #14: started
+2026/03/01-21:50:33.458 d72946 Level-0 table #14: 38285 bytes OK
+2026/03/01-21:50:33.460 d72946 Delete type=0 #9
+2026/03/01-21:50:33.461 d72946 Manual compaction at level-0 from '\x00\x09\x00\x00\x00' @ 72057594037927935 : 1 .. '\x00\x0a\x00\x00\x00' @ 0 : 0; will stop at '\x00\x09\x00\x00\xc8\x12\x00s\x00t\x00o\x00r\x00a\x00g\x00e\x00_\x00l\x00a\x00y\x00e\x00r\x00_\x00n\x00a\x00m\x00e' @ 1719 : 1
+2026/03/01-21:50:33.461 d72946 Compacting 1@0 + 1@1 files
+2026/03/01-21:50:33.463 d72946 Generated table #15@0: 515 keys, 11552 bytes
+2026/03/01-21:50:33.463 d72946 Compacted 1@0 + 1@1 files => 11552 bytes
+2026/03/01-21:50:33.464 d72946 compacted to: files[ 0 1 1 0 0 0 0 ]
+2026/03/01-21:50:33.464 d72946 Delete type=2 #14
+2026/03/01-21:50:33.465 d72937 Manual compaction at level-0 from '\x00\x09\x00\x00\xc8\x12\x00s\x00t\x00o\x00r\x00a\x00g\x00e\x00_\x00l\x00a\x00y\x00e\x00r\x00_\x00n\x00a\x00m\x00e' @ 1719 : 1 .. '\x00\x0a\x00\x00\x00' @ 0 : 0; will stop at (end)

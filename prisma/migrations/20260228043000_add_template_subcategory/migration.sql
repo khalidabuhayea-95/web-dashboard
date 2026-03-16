@@ -1,0 +1,2 @@
+ALTER TABLE "Template"
+ADD COLUMN IF NOT EXISTS "subCategory" TEXT NOT NULL DEFAULT 'general';
