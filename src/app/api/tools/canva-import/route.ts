@@ -1,7 +1,7 @@
 import path from "node:path";
 import { spawn } from "node:child_process";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
 import { sanitizeImportPayloadAssets } from "@/lib/tools/importAssetSanitizer";
@@ -15,17 +15,19 @@ import {
 import {
   getEditorSession,
 } from "@/lib/templates/server";
+import { handleApiError, handleBadRequest } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-function clampNumber(value, fallback, min, max) {
+function clampNumber(value: any, fallback: number, min: number, max: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(max, Math.max(min, Math.round(numeric)));
 }
 
-function isCanvaUrl(value) {
+function isCanvaUrl(value: any): boolean {
   try {
     const parsed = new URL(String(value || "").trim());
     return /(\.|^)canva\.com$/i.test(parsed.hostname);
@@ -34,12 +36,12 @@ function isCanvaUrl(value) {
   }
 }
 
-function parseTemplateId(output) {
+function parseTemplateId(output: string): string {
   const match = String(output || "").match(/Template ID:\s*([0-9a-f-]+)/i);
   return match?.[1] || "";
 }
 
-function titleToTemplateName(title) {
+function titleToTemplateName(title: string): string {
   const source = String(title || "").trim();
   const cleaned = source
     .replace(/\s*\|\s*Canva\s*$/i, "")
@@ -48,17 +50,17 @@ function titleToTemplateName(title) {
   return cleaned || "Imported Canva Template";
 }
 
-function tail(text, maxLength = 2000) {
+function tail(text: string, maxLength = 2000): string {
   const value = String(text || "");
   if (value.length <= maxLength) return value;
   return value.slice(value.length - maxLength);
 }
 
-function escapeRegExp(value) {
+function escapeRegExp(value: string): string {
   return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function extractMetaContent(html, key, expectedValue) {
+function extractMetaContent(html: string, key: string, expectedValue: string): string {
   const safeValue = escapeRegExp(expectedValue);
   const directPattern = new RegExp(
     `<meta[^>]*${key}=["']${safeValue}["'][^>]*content=["']([^"']+)["'][^>]*>`,
@@ -71,12 +73,17 @@ function extractMetaContent(html, key, expectedValue) {
   return html.match(directPattern)?.[1] || html.match(reversePattern)?.[1] || "";
 }
 
-function extractDocumentTitle(html) {
+function extractDocumentTitle(html: string): string {
   const title = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i)?.[1] || "";
   return title.replace(/\s+/g, " ").trim();
 }
 
-function getImageDimensions(buffer) {
+interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
+function getImageDimensions(buffer: Buffer): ImageDimensions | null {
   if (!buffer || buffer.length < 24) return null;
 
   // PNG
@@ -136,7 +143,22 @@ function getImageDimensions(buffer) {
   return null;
 }
 
-async function runImporter({ url, name, slug, ownerId, maxDimension, timeoutMs, interactiveBrowser }) {
+interface ImporterResult {
+  stdout: string;
+  stderr: string;
+  code: number;
+}
+
+async function runImporter(options: {
+  url: string;
+  name?: string;
+  slug?: string;
+  ownerId: string;
+  maxDimension: number;
+  timeoutMs: number;
+  interactiveBrowser: boolean;
+}): Promise<ImporterResult> {
+  const { url, name, slug, ownerId, maxDimension, timeoutMs, interactiveBrowser } = options;
   const scriptPath = path.join(process.cwd(), "scripts", "import-canva-template.mjs");
   const args = [
     scriptPath,
@@ -195,7 +217,7 @@ async function runImporter({ url, name, slug, ownerId, maxDimension, timeoutMs, 
   });
 }
 
-async function fetchWithTimeout(url, timeoutMs, headers = {}) {
+async function fetchWithTimeout(url: string, timeoutMs: number, headers: Record<string, string> = {}): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
@@ -210,7 +232,16 @@ async function fetchWithTimeout(url, timeoutMs, headers = {}) {
   }
 }
 
-async function importFromPreviewScrape({ url, name, slug, ownerId, maxDimension, timeoutMs }) {
+async function importFromPreviewScrape(options: {
+  url: string;
+  name?: string;
+  slug?: string;
+  ownerId: string;
+  maxDimension: number;
+  timeoutMs: number;
+}): Promise<any> {
+  const { url, name, slug, ownerId, maxDimension, timeoutMs } = options;
+  
   const htmlResponse = await fetchWithTimeout(url, timeoutMs, {
     "User-Agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -313,6 +344,7 @@ async function importFromPreviewScrape({ url, name, slug, ownerId, maxDimension,
     imageDataUrl: sanitizedPayload.imageDataUrl,
     thumbnailDataUrl: sanitizedPayload.thumbnailDataUrl,
     fabricData: sanitizedFabricData,
+    editorData: undefined,
     name: requestedName,
     slug: requestedSlug,
     canvasWidth,
@@ -325,14 +357,14 @@ async function importFromPreviewScrape({ url, name, slug, ownerId, maxDimension,
   });
 }
 
-async function findTemplateForOwner(ownerId, templateId) {
+async function findTemplateForOwner(ownerId: string, templateId: string): Promise<any | null> {
   const template = await prisma.template.findUnique({ where: { id: templateId } });
   if (!template) return null;
   if (String(template.ownerId || "") !== String(ownerId || "")) return null;
   return template;
 }
 
-async function rewriteImportedTemplateAssets(template) {
+async function rewriteImportedTemplateAssets(template: any): Promise<any> {
   if (!template || !template.id || !template.ownerId) return template;
 
   const sanitizedPayload = await sanitizeImportPayloadAssets({
@@ -415,15 +447,30 @@ async function rewriteImportedTemplateAssets(template) {
   });
 }
 
-export async function runCanvaImportForOwner({
-  ownerId,
-  url,
-  name = "",
-  slug = "",
-  maxDimension = 1920,
-  timeoutMs = 180_000,
-  interactiveBrowser = false,
-}) {
+interface ImportResult {
+  status: number;
+  payload: any;
+}
+
+export async function runCanvaImportForOwner(options: {
+  ownerId: string;
+  url: string;
+  name?: string;
+  slug?: string;
+  maxDimension?: number;
+  timeoutMs?: number;
+  interactiveBrowser?: boolean;
+}): Promise<ImportResult> {
+  const {
+    ownerId,
+    url,
+    name = "",
+    slug = "",
+    maxDimension = 1920,
+    timeoutMs = 180_000,
+    interactiveBrowser = false,
+  } = options;
+
   const safeOwnerId = String(ownerId || "").trim();
   const safeUrl = String(url || "").trim();
   const safeName = String(name || "").trim();
@@ -434,17 +481,17 @@ export async function runCanvaImportForOwner({
 
   if (!safeOwnerId) {
     const error = new Error("Missing import owner.");
-    error.status = 400;
+    (error as any).status = 400;
     throw error;
   }
   if (!safeUrl) {
     const error = new Error("Canva URL is required.");
-    error.status = 400;
+    (error as any).status = 400;
     throw error;
   }
   if (!isCanvaUrl(safeUrl)) {
     const error = new Error("Expected a valid canva.com URL.");
-    error.status = 400;
+    (error as any).status = 400;
     throw error;
   }
 
@@ -473,7 +520,7 @@ export async function runCanvaImportForOwner({
     let rewriteWarning = "";
     try {
       template = await rewriteImportedTemplateAssets(template);
-    } catch (assetRewriteError) {
+    } catch (assetRewriteError: any) {
       rewriteWarning = `Imported template asset rewrite failed: ${assetRewriteError?.message || "unknown error"}`;
     }
     const importMeta = template?.data?.meta?.import;
@@ -492,7 +539,7 @@ export async function runCanvaImportForOwner({
         warnings,
       },
     };
-  } catch (error) {
+  } catch (error: any) {
     importerFailure = error?.message || "Unknown importer error.";
   }
 
@@ -524,7 +571,7 @@ export async function runCanvaImportForOwner({
         importerWarning: importerFailure || undefined,
       },
     };
-  } catch (fallbackError) {
+  } catch (fallbackError: any) {
     const detailParts = [];
     if (importerFailure) {
       detailParts.push(`Playwright import: ${importerFailure}`);
@@ -532,8 +579,8 @@ export async function runCanvaImportForOwner({
     detailParts.push(`Preview scrape: ${fallbackError?.message || "Unknown error."}`);
 
     const error = new Error("Failed to import Canva template.");
-    error.status = 422;
-    error.payload = {
+    (error as any).status = 422;
+    (error as any).payload = {
       error: "Failed to import Canva template.",
       details: detailParts.join(" | "),
     };
@@ -541,13 +588,23 @@ export async function runCanvaImportForOwner({
   }
 }
 
-export async function POST(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-
-  const body = await request.json().catch(() => ({}));
-
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_error) {
+      return handleBadRequest("Invalid JSON body");
+    }
+
+    logger.info("Starting Canva import", {
+      userId: session.userId,
+      hasUrl: !!body?.url,
+    });
+
     const result = await runCanvaImportForOwner({
       ownerId: session.userId,
       url: body?.url,
@@ -558,7 +615,10 @@ export async function POST(request) {
       interactiveBrowser: body?.interactiveBrowser === true,
     });
     return NextResponse.json(result.payload || {}, { status: result.status || 200 });
-  } catch (error) {
+  } catch (error: any) {
+    logger.error("Canva import failed", {
+      error: error?.message,
+    });
     const status = Number(error?.status || 422);
     const payload =
       error?.payload && typeof error.payload === "object"

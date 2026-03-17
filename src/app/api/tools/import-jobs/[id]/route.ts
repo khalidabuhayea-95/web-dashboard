@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
   checkRateLimit,
@@ -8,6 +8,8 @@ import {
 import { kickImportJob } from "@/lib/tools/importJobsRunner.server";
 import { getImportJobById, requeueStalledImportJob } from "@/lib/tools/importJobsStore.server";
 import { getEditorSession } from "@/lib/templates/server";
+import { handleBadRequest, handleNotFound, handleForbidden } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -16,7 +18,7 @@ const IMPORT_JOB_POLL_LIMIT = {
   windowMs: 60_000,
 };
 
-function publicJob(job) {
+function publicJob(job: any): any {
   return {
     id: job.id,
     type: job.type,
@@ -32,7 +34,10 @@ function publicJob(job) {
   };
 }
 
-export async function GET(request, { params }) {
+export async function GET(
+  request: NextRequest,
+  { params }: { params: Promise<{ id: string }> }
+): Promise<NextResponse> {
   const session = await getEditorSession();
   if (session.error) return session.error;
 
@@ -49,17 +54,23 @@ export async function GET(request, { params }) {
   const resolvedParams = await params;
   const jobId = String(resolvedParams?.id || "").trim();
   if (!jobId) {
-    return NextResponse.json({ error: "Missing job id." }, { status: 400 });
+    return handleBadRequest("Missing job id");
   }
 
   const job = await getImportJobById(jobId);
   if (!job) {
-    return NextResponse.json({ error: "Import job not found." }, { status: 404 });
+    return handleNotFound("Import job not found");
   }
 
   if (session.role !== "admin" && job.ownerId !== session.userId) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    return handleForbidden("Cannot access this import job");
   }
+
+  logger.info("Polling import job", {
+    userId: session.userId,
+    jobId,
+    status: job.status,
+  });
 
   if (job.status === "pending") {
     await kickImportJob(job.id);

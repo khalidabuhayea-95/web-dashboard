@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
   checkRateLimit,
@@ -15,6 +15,8 @@ import {
   getImportJobByIdempotency,
 } from "@/lib/tools/importJobsStore.server";
 import { getEditorSession } from "@/lib/templates/server";
+import { handleBadRequest } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -25,20 +27,20 @@ const CREATE_IMPORT_JOBS_LIMIT = {
   windowMs: 60_000,
 };
 
-function createJobId() {
+function createJobId(): string {
   if (typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function") {
     return globalThis.crypto.randomUUID();
   }
   return randomUUID();
 }
 
-function clampNumber(value, fallback, min, max) {
+function clampNumber(value: any, fallback: number, min: number, max: number): number {
   const numeric = Number(value);
   if (!Number.isFinite(numeric)) return fallback;
   return Math.min(max, Math.max(min, Math.round(numeric)));
 }
 
-function isCanvaUrl(value) {
+function isCanvaUrl(value: any): boolean {
   try {
     const parsed = new URL(String(value || "").trim());
     return /(\.|^)canva\.com$/i.test(parsed.hostname);
@@ -47,7 +49,7 @@ function isCanvaUrl(value) {
   }
 }
 
-function sanitizeFileName(value) {
+function sanitizeFileName(value: any): string {
   return String(value || "")
     .trim()
     .replace(/^.*[\\/]/, "")
@@ -56,9 +58,14 @@ function sanitizeFileName(value) {
     .slice(0, 120);
 }
 
-function resolveRasterFormat({ format, fileName, mimeType }) {
+function resolveRasterFormat(options: {
+  format?: any;
+  fileName?: string;
+  mimeType?: string;
+}): "pdf" | "psd" | "" {
+  const { format, fileName, mimeType } = options;
   const explicit = String(format || "").trim().toLowerCase();
-  if (explicit === "pdf" || explicit === "psd") return explicit;
+  if (explicit === "pdf" || explicit === "psd") return explicit as "pdf" | "psd";
 
   const safeFileName = String(fileName || "").trim().toLowerCase();
   const safeMimeType = String(mimeType || "").trim().toLowerCase();
@@ -75,7 +82,7 @@ function resolveRasterFormat({ format, fileName, mimeType }) {
   return "";
 }
 
-function sanitizeIdempotencyKey(value) {
+function sanitizeIdempotencyKey(value: any): string {
   if (typeof value !== "string") return "";
   return value
     .trim()
@@ -84,12 +91,12 @@ function sanitizeIdempotencyKey(value) {
     .slice(0, 128);
 }
 
-function resolveHeaderIdempotencyKey(request) {
+function resolveHeaderIdempotencyKey(request: NextRequest): string {
   const keyFromHeader = request.headers.get("idempotency-key") || request.headers.get("x-idempotency-key");
   return sanitizeIdempotencyKey(keyFromHeader);
 }
 
-function publicJob(job) {
+function publicJob(job: any): any {
   return {
     id: job.id,
     type: job.type,
@@ -105,22 +112,26 @@ function publicJob(job) {
   };
 }
 
-function sanitizeFreepikSelectedItems(value) {
+function sanitizeFreepikSelectedItems(value: any): any[] {
   if (!Array.isArray(value)) return [];
   return value
     .filter((item) => item && typeof item === "object")
     .slice(0, 300);
 }
 
-async function createCanvaJob(session, body, requestIdempotencyKey) {
+async function createCanvaJob(
+  session: any,
+  body: any,
+  requestIdempotencyKey: string
+): Promise<NextResponse> {
   const type = "canva-url";
 
   const url = String(body?.url || "").trim();
   if (!url) {
-    return NextResponse.json({ error: "Canva URL is required." }, { status: 400 });
+    return handleBadRequest("Canva URL is required");
   }
   if (!isCanvaUrl(url)) {
-    return NextResponse.json({ error: "Expected a valid canva.com URL." }, { status: 400 });
+    return handleBadRequest("Expected a valid canva.com URL");
   }
 
   const idempotencyKey = requestIdempotencyKey || sanitizeIdempotencyKey(body?.idempotencyKey);
@@ -166,14 +177,15 @@ async function createCanvaJob(session, body, requestIdempotencyKey) {
   return NextResponse.json({ job: publicJob(job) }, { status: deduped ? 200 : 202 });
 }
 
-async function createFreepikIconsJob(session, body, requestIdempotencyKey) {
+async function createFreepikIconsJob(
+  session: any,
+  body: any,
+  requestIdempotencyKey: string
+): Promise<NextResponse> {
   const type = "freepik-icons";
   const selectedItems = sanitizeFreepikSelectedItems(body?.selectedItems);
   if (selectedItems.length === 0) {
-    return NextResponse.json(
-      { error: "At least one selected Freepik icon is required." },
-      { status: 400 }
-    );
+    return handleBadRequest("At least one selected Freepik icon is required");
   }
 
   const idempotencyKey = requestIdempotencyKey || sanitizeIdempotencyKey(body?.idempotencyKey);
@@ -215,19 +227,23 @@ async function createFreepikIconsJob(session, body, requestIdempotencyKey) {
   return NextResponse.json({ job: publicJob(job) }, { status: deduped ? 200 : 202 });
 }
 
-async function createVectorRasterJob(session, request, requestIdempotencyKey) {
-  let formData;
+async function createVectorRasterJob(
+  session: any,
+  request: NextRequest,
+  requestIdempotencyKey: string
+): Promise<NextResponse> {
+  let formData: any;
   try {
     formData = await request.formData();
   } catch (_error) {
-    return NextResponse.json({ error: "Invalid multipart form data." }, { status: 400 });
+    return handleBadRequest("Invalid multipart form data");
   }
 
   const type = String(formData.get("type") || "")
     .trim()
     .toLowerCase();
   if (type !== "vector-raster") {
-    return NextResponse.json({ error: "Unsupported import job type." }, { status: 400 });
+    return handleBadRequest("Unsupported import job type");
   }
 
   const idempotencyKey = requestIdempotencyKey || sanitizeIdempotencyKey(formData.get("idempotencyKey"));
@@ -247,10 +263,10 @@ async function createVectorRasterJob(session, request, requestIdempotencyKey) {
 
   const file = formData.get("file");
   if (!(file instanceof File)) {
-    return NextResponse.json({ error: "Missing file upload." }, { status: 400 });
+    return handleBadRequest("Missing file upload");
   }
   if (Number(file.size || 0) <= 0) {
-    return NextResponse.json({ error: "Uploaded file is empty." }, { status: 400 });
+    return handleBadRequest("Uploaded file is empty");
   }
 
   const fileName = sanitizeFileName(file.name) || "upload.bin";
@@ -260,7 +276,7 @@ async function createVectorRasterJob(session, request, requestIdempotencyKey) {
     mimeType: file.type,
   });
   if (!format) {
-    return NextResponse.json({ error: "Only PDF and PSD are supported for raster import jobs." }, { status: 400 });
+    return handleBadRequest("Only PDF and PSD are supported for raster import jobs");
   }
 
   const requestedJobId = createJobId();
@@ -299,7 +315,7 @@ async function createVectorRasterJob(session, request, requestIdempotencyKey) {
     }
 
     return NextResponse.json({ job: publicJob(job) }, { status: deduped ? 200 : 202 });
-  } catch (error) {
+  } catch (error: any) {
     await fs.rm(tempFilePath, { force: true }).catch(() => {});
     return NextResponse.json(
       {
@@ -310,40 +326,56 @@ async function createVectorRasterJob(session, request, requestIdempotencyKey) {
   }
 }
 
-export async function POST(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-
-  const rateLimitState = checkRateLimit({
-    scope: "api:tools:import-jobs:create",
-    identifier: session.userId || resolveRequestIp(request),
-    limit: CREATE_IMPORT_JOBS_LIMIT.limit,
-    windowMs: CREATE_IMPORT_JOBS_LIMIT.windowMs,
-  });
-  if (!rateLimitState.allowed) {
-    return createRateLimitResponse("Too many import job requests. Please retry shortly.", rateLimitState);
-  }
-
-  const headerIdempotencyKey = resolveHeaderIdempotencyKey(request);
-  const contentType = String(request.headers.get("content-type") || "").toLowerCase();
-  if (contentType.includes("multipart/form-data")) {
-    return createVectorRasterJob(session, request, headerIdempotencyKey);
-  }
-
-  let body = {};
+export async function POST(request: NextRequest): Promise<NextResponse> {
   try {
-    body = await request.json();
-  } catch (_error) {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+    const session = await getEditorSession();
+    if (session.error) return session.error;
 
-  const type = String(body?.type || "").trim().toLowerCase();
-  if (type === "canva-url") {
-    return createCanvaJob(session, body, headerIdempotencyKey);
-  }
-  if (type === "freepik-icons") {
-    return createFreepikIconsJob(session, body, headerIdempotencyKey);
-  }
+    const rateLimitState = checkRateLimit({
+      scope: "api:tools:import-jobs:create",
+      identifier: session.userId || resolveRequestIp(request),
+      limit: CREATE_IMPORT_JOBS_LIMIT.limit,
+      windowMs: CREATE_IMPORT_JOBS_LIMIT.windowMs,
+    });
+    if (!rateLimitState.allowed) {
+      return createRateLimitResponse("Too many import job requests. Please retry shortly.", rateLimitState);
+    }
 
-  return NextResponse.json({ error: "Unsupported import job type." }, { status: 400 });
+    const headerIdempotencyKey = resolveHeaderIdempotencyKey(request);
+    const contentType = String(request.headers.get("content-type") || "").toLowerCase();
+    
+    logger.info("Creating import job", {
+      userId: session.userId,
+      contentType: contentType.includes("multipart") ? "multipart" : "json",
+    });
+
+    if (contentType.includes("multipart/form-data")) {
+      return createVectorRasterJob(session, request, headerIdempotencyKey);
+    }
+
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_error) {
+      return handleBadRequest("Invalid JSON body");
+    }
+
+    const type = String(body?.type || "").trim().toLowerCase();
+    if (type === "canva-url") {
+      return createCanvaJob(session, body, headerIdempotencyKey);
+    }
+    if (type === "freepik-icons") {
+      return createFreepikIconsJob(session, body, headerIdempotencyKey);
+    }
+
+    return handleBadRequest("Unsupported import job type");
+  } catch (error: any) {
+    logger.error("Failed to create import job", {
+      error: error?.message,
+    });
+    return NextResponse.json(
+      { error: error?.message || "Failed to create import job" },
+      { status: 500 }
+    );
+  }
 }

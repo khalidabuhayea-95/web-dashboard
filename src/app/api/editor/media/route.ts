@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
   checkRateLimit,
@@ -7,6 +7,8 @@ import {
 } from "@/lib/security/rateLimit.server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { getEditorSession } from "@/lib/templates/server";
+import { handleApiError, handleBadRequest } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -31,23 +33,23 @@ const ALLOWED_FONT_MIME_TYPES = new Set([
 ]);
 const ALLOWED_FONT_EXTENSIONS = new Set(["ttf", "otf", "woff", "woff2", "eot"]);
 
-function sanitizeKind(value) {
+function sanitizeKind(value: unknown): "image" | "video" | "font" | "" {
   const kind = String(value || "").trim().toLowerCase();
   if (kind === "image" || kind === "video" || kind === "font") return kind;
   return "";
 }
 
-function sanitizeFileName(value) {
+function sanitizeFileName(value: unknown): string {
   const source = String(value || "").trim();
   const withoutPath = source.replace(/^.*[\\/]/, "");
   return withoutPath.replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/-+/g, "-").slice(0, 120);
 }
 
-function normalizeMimeType(value) {
+function normalizeMimeType(value: unknown): string {
   return String(value || "").trim().toLowerCase();
 }
 
-function extensionFromMimeType(mimeType) {
+function extensionFromMimeType(mimeType: string): string {
   const value = normalizeMimeType(mimeType);
   if (value.includes("png")) return "png";
   if (value.includes("jpeg") || value.includes("jpg")) return "jpg";
@@ -66,12 +68,12 @@ function extensionFromMimeType(mimeType) {
   return "";
 }
 
-function extensionFromFileName(fileName) {
+function extensionFromFileName(fileName: unknown): string {
   const match = String(fileName || "").toLowerCase().match(/\.([a-z0-9]{1,10})$/);
   return match?.[1] || "";
 }
 
-function mimeTypeFromExtension(extension) {
+function mimeTypeFromExtension(extension: unknown): string {
   const value = String(extension || "").trim().toLowerCase();
   if (value === "ttf") return "font/ttf";
   if (value === "otf") return "font/otf";
@@ -81,7 +83,17 @@ function mimeTypeFromExtension(extension) {
   return "";
 }
 
-function ensureValidUpload({ kind, mimeType, size, extension }) {
+function ensureValidUpload({
+  kind,
+  mimeType,
+  size,
+  extension,
+}: {
+  kind: string;
+  mimeType: string;
+  size: number;
+  extension: string;
+}): void {
   if (kind === "image") {
     if (!mimeType.startsWith("image/")) {
       throw new Error("Only image files are allowed for image uploads.");
@@ -116,7 +128,7 @@ function ensureValidUpload({ kind, mimeType, size, extension }) {
   throw new Error("Invalid upload kind.");
 }
 
-async function ensurePublicBucket(admin) {
+async function ensurePublicBucket(admin: any): Promise<void> {
   const { data, error } = await admin.storage.getBucket(BUCKET_NAME);
   if (error) {
     const create = await admin.storage.createBucket(BUCKET_NAME, {
@@ -136,7 +148,17 @@ async function ensurePublicBucket(admin) {
   }
 }
 
-function makeObjectPath({ ownerId, kind, fileName, extension }) {
+function makeObjectPath({
+  ownerId,
+  kind,
+  fileName,
+  extension,
+}: {
+  ownerId: string;
+  kind: string;
+  fileName: string;
+  extension: string;
+}): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -144,92 +166,106 @@ function makeObjectPath({ ownerId, kind, fileName, extension }) {
   const safeBase = sanitizeFileName(fileName).replace(/\.[^.]+$/, "") || kind;
   const ext = extension || "bin";
   const uniqueId =
-    typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
-      ? crypto.randomUUID()
+    typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function"
+      ? globalThis.crypto.randomUUID()
       : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
   return `users/${ownerId}/${kind}/${yyyy}/${mm}/${dd}/${safeBase}-${uniqueId}.${ext}`;
 }
 
-export async function POST(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-
-  const rateLimitState = checkRateLimit({
-    scope: "api:editor:media:upload",
-    identifier: session.userId || resolveRequestIp(request),
-    limit: MEDIA_UPLOAD_LIMIT.limit,
-    windowMs: MEDIA_UPLOAD_LIMIT.windowMs,
-  });
-  if (!rateLimitState.allowed) {
-    return createRateLimitResponse("Too many media uploads. Please retry shortly.", rateLimitState);
-  }
-
-  const formData = await request.formData().catch(() => null);
-  if (!formData) {
-    return NextResponse.json({ error: "Invalid multipart form data." }, { status: 400 });
-  }
-
-  const kind = sanitizeKind(formData.get("kind"));
-  const fileEntry = formData.get("file");
-  if (!(fileEntry instanceof File)) {
-    return NextResponse.json({ error: "Missing file upload." }, { status: 400 });
-  }
-
-  const mimeType = normalizeMimeType(fileEntry.type);
-  const fileSize = Number(fileEntry.size || 0);
-  if (!kind || fileSize <= 0) {
-    return NextResponse.json({ error: "Invalid upload payload." }, { status: 400 });
-  }
-  const fileName = sanitizeFileName(fileEntry.name) || `${kind}.bin`;
-  const extension = extensionFromMimeType(mimeType) || extensionFromFileName(fileName);
-  const resolvedMimeType = mimeType || mimeTypeFromExtension(extension);
-
+export async function POST(request: NextRequest) {
   try {
-    ensureValidUpload({ kind, mimeType: resolvedMimeType, size: fileSize, extension });
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+
+    const rateLimitState = checkRateLimit({
+      scope: "api:editor:media:upload",
+      identifier: session.userId || resolveRequestIp(request),
+      limit: MEDIA_UPLOAD_LIMIT.limit,
+      windowMs: MEDIA_UPLOAD_LIMIT.windowMs,
+    });
+    if (!rateLimitState.allowed) {
+      return createRateLimitResponse(
+        "Too many media uploads. Please retry shortly.",
+        rateLimitState
+      );
+    }
+
+    const formData = await request.formData().catch(() => null);
+    if (!formData) {
+      return handleBadRequest("Invalid multipart form data");
+    }
+
+    const kind = sanitizeKind(formData.get("kind"));
+    const fileEntry = formData.get("file");
+    if (!(fileEntry instanceof File)) {
+      return handleBadRequest("Missing file upload");
+    }
+
+    const mimeType = normalizeMimeType(fileEntry.type);
+    const fileSize = Number(fileEntry.size || 0);
+    if (!kind || fileSize <= 0) {
+      return handleBadRequest("Invalid upload payload");
+    }
+
+    const fileName = sanitizeFileName(fileEntry.name) || `${kind}.bin`;
+    const extension = extensionFromMimeType(mimeType) || extensionFromFileName(fileName);
+    const resolvedMimeType = mimeType || mimeTypeFromExtension(extension);
+
+    try {
+      ensureValidUpload({ kind, mimeType: resolvedMimeType, size: fileSize, extension });
+    } catch (error) {
+      return handleBadRequest(
+        error instanceof Error ? error.message : "Invalid upload"
+      );
+    }
+
+    const path = makeObjectPath({
+      ownerId: session.userId,
+      kind,
+      fileName,
+      extension,
+    });
+
+    const admin = createAdminClient();
+    try {
+      await ensurePublicBucket(admin);
+    } catch (error) {
+      return handleApiError(error, "Failed to prepare media storage bucket", 500);
+    }
+
+    const { error: uploadError } = await admin.storage.from(BUCKET_NAME).upload(path, fileEntry, {
+      cacheControl: "31536000",
+      contentType: resolvedMimeType || "application/octet-stream",
+      upsert: false,
+    });
+
+    if (uploadError) {
+      return handleApiError(uploadError, "Failed to upload media", 422);
+    }
+
+    const { data: publicUrlData } = admin.storage.from(BUCKET_NAME).getPublicUrl(path);
+    const url = String(publicUrlData?.publicUrl || "").trim();
+    if (!url) {
+      return handleApiError(
+        new Error("Media URL unavailable"),
+        "Upload succeeded but media URL is unavailable",
+        500
+      );
+    }
+
+    logger.info("Media uploaded", {
+      userId: session.userId,
+      kind,
+      size: fileSize,
+    });
+
+    return NextResponse.json({
+      kind,
+      bucket: BUCKET_NAME,
+      path,
+      url,
+    });
   } catch (error) {
-    return NextResponse.json(
-      { error: error instanceof Error ? error.message : "Invalid upload." },
-      { status: 422 }
-    );
+    return handleApiError(error, "Failed to upload media");
   }
-
-  const path = makeObjectPath({
-    ownerId: session.userId,
-    kind,
-    fileName,
-    extension,
-  });
-
-  const admin = createAdminClient();
-  try {
-    await ensurePublicBucket(admin);
-  } catch (_error) {
-    return NextResponse.json({ error: "Failed to prepare media storage bucket." }, { status: 500 });
-  }
-
-  const { error: uploadError } = await admin.storage.from(BUCKET_NAME).upload(path, fileEntry, {
-    cacheControl: "31536000",
-    contentType: resolvedMimeType || "application/octet-stream",
-    upsert: false,
-  });
-
-  if (uploadError) {
-    return NextResponse.json({ error: uploadError.message || "Failed to upload media." }, { status: 422 });
-  }
-
-  const { data: publicUrlData } = admin.storage.from(BUCKET_NAME).getPublicUrl(path);
-  const url = String(publicUrlData?.publicUrl || "").trim();
-  if (!url) {
-    return NextResponse.json({ error: "Upload succeeded but media URL is unavailable." }, { status: 500 });
-  }
-
-  return NextResponse.json({
-    kind,
-    bucket: BUCKET_NAME,
-    path,
-    url,
-    mimeType: resolvedMimeType,
-    size: fileSize,
-    fileName,
-  });
 }

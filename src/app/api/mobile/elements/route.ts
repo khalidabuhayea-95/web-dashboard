@@ -1,35 +1,44 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import { listImportedElementAssets } from "@/lib/editor/importedElements.server";
+import { handleApiError } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 
-function parsePositiveInt(value, fallback, max = 100) {
+function parsePositiveInt(value: unknown, fallback: number, max = 100): number {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return Math.min(parsed, max);
 }
 
-export async function GET(request) {
-  const { searchParams } = new URL(request.url);
-  const locale = resolveMobileLocale(request, searchParams);
-  const page = parsePositiveInt(searchParams.get("page"), 1, 10_000);
-  const pageSize = parsePositiveInt(
-    searchParams.get("pageSize") ||
-      searchParams.get("page_size") ||
-      searchParams.get("per_page") ||
-      searchParams.get("limit"),
-    100,
-    100
-  );
-  const query =
-    searchParams.get("query") ||
-    searchParams.get("search") ||
-    searchParams.get("q") ||
-    "";
-
+export async function GET(request: NextRequest) {
   try {
+    const { searchParams } = new URL(request.url);
+    const locale = resolveMobileLocale(request, searchParams);
+    const page = parsePositiveInt(searchParams.get("page"), 1, 10_000);
+    const pageSize = parsePositiveInt(
+      searchParams.get("pageSize") ||
+        searchParams.get("page_size") ||
+        searchParams.get("per_page") ||
+        searchParams.get("limit"),
+      100,
+      100
+    );
+    const query =
+      searchParams.get("query") ||
+      searchParams.get("search") ||
+      searchParams.get("q") ||
+      "";
+
+    logger.info("Mobile elements requested", {
+      locale,
+      page,
+      pageSize,
+      query,
+    });
+
     const result = await listImportedElementAssets({
       source: searchParams.get("source") || "all",
       kind: searchParams.get("kind") || "all",
@@ -39,7 +48,7 @@ export async function GET(request) {
       locale,
     });
 
-    const elements = result.items.map((item) => ({
+    const elements = result.items.map((item: any) => ({
       id: item.id,
       source: item.source,
       sourceAssetId: item.sourceAssetId,
@@ -81,11 +90,6 @@ export async function GET(request) {
       }
     );
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: error?.message || "Failed to fetch mobile elements.",
-      },
-      { status: 500 }
-    );
+    return handleApiError(error, "Failed to fetch mobile elements");
   }
 }

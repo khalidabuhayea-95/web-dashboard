@@ -7,6 +7,7 @@ import Toolbar from "@/components/editor/Toolbar";
 import SidePanel from "@/components/editor/SidePanel";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
 import PagesTimeline from "@/components/editor/PagesTimeline";
+import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useEditorStore } from "@/store/editorStore";
 import { buildGoogleFontsStylesheetUrl } from "@/lib/editor/fonts";
 
@@ -232,7 +233,9 @@ export default function EditorLayout() {
 
         <div className="relative flex min-w-0 flex-1 flex-col">
           <div className="min-h-0 flex-1 bg-[#d7d7d9]">
-            <CanvasEditor />
+            <ErrorBoundary>
+              <CanvasEditor />
+            </ErrorBoundary>
           </div>
           <PagesTimeline />
         </div>

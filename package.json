@@ -36,6 +36,7 @@
     "swagger-ui-dist": "^5.32.0",
     "tailwind-merge": "^3.5.0",
     "use-image": "^1.1.4",
+    "zod": "^4.3.6",
     "zustand": "^5.0.11"
   },
   "devDependencies": {

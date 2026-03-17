@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { createLogger } from "@/lib/logging/logger";
 import {
@@ -19,16 +19,25 @@ import {
 } from "@/lib/mobile/taxonomy";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
+import { handleApiError } from "@/lib/api/errors";
 
 const logger = createLogger("api.mobile.templates");
 
-function parsePositiveInt(value, fallback) {
+function parsePositiveInt(value: any, fallback: number): number {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.floor(parsed);
 }
 
-function buildEmptyPayload({ locale, categories, page, pageSize }) {
+interface EmptyPayloadInput {
+  locale: string;
+  categories: any[];
+  page: number;
+  pageSize: number;
+}
+
+function buildEmptyPayload(input: EmptyPayloadInput) {
+  const { locale, categories, page, pageSize } = input;
   return {
     locale,
     categories,
@@ -42,7 +51,7 @@ function buildEmptyPayload({ locale, categories, page, pageSize }) {
   };
 }
 
-export async function GET(request) {
+export async function GET(request: NextRequest): Promise<NextResponse> {
   const requestId = resolveRequestId(request);
   const requestLogger = logger.child(getRequestLogContext(request, requestId));
   try {
@@ -132,7 +141,7 @@ export async function GET(request) {
       prisma.template.count({ where }),
     ]);
 
-    const templates = rows.map((template) => {
+    const templates = rows.map((template: any) => {
       const localized = localizeTemplateTaxonomy(template, taxonomy, locale);
       const assetResolver = createTemplateAssetResolver(request, template);
       return {
@@ -146,16 +155,16 @@ export async function GET(request) {
       };
     });
 
-    const categoryOrder = new Map(categories.map((item, index) => [String(item.value || ""), index]));
+    const categoryOrder = new Map(categories.map((item: any, index: number) => [String(item.value || ""), index]));
     const subCategoryOrder = new Map(
-      categories.map((item) => [
+      categories.map((item: any) => [
         String(item.value || ""),
-        new Map((Array.isArray(item.subCategories) ? item.subCategories : []).map((sub, index) => [sub.value, index])),
+        new Map((Array.isArray(item.subCategories) ? item.subCategories : []).map((sub: any, index: number) => [sub.value, index])),
       ])
     );
-    const groupedBySubCategoryMap = new Map();
+    const groupedBySubCategoryMap = new Map<string, any>();
 
-    templates.forEach((template, index) => {
+    templates.forEach((template: any, index: number) => {
       const categoryValueKey = String(template.categoryValue || "");
       const subCategoryValueKey = String(template.subCategoryValue || "");
       const key = `${categoryValueKey}::${subCategoryValueKey}`;
@@ -177,32 +186,38 @@ export async function GET(request) {
     });
 
     const templatesBySubCategory = Array.from(groupedBySubCategoryMap.values())
-      .sort((left, right) => {
+      .sort((left: any, right: any) => {
         const leftCategoryOrder =
-          categoryOrder.get(left.categoryValue) ?? Number.MAX_SAFE_INTEGER;
+          (categoryOrder.get(left.categoryValue) ?? Number.MAX_SAFE_INTEGER) as number;
         const rightCategoryOrder =
-          categoryOrder.get(right.categoryValue) ?? Number.MAX_SAFE_INTEGER;
+          (categoryOrder.get(right.categoryValue) ?? Number.MAX_SAFE_INTEGER) as number;
         if (leftCategoryOrder !== rightCategoryOrder) {
           return leftCategoryOrder - rightCategoryOrder;
         }
 
         const leftSubCategoryOrder =
-          subCategoryOrder.get(left.categoryValue)?.get(left.subCategoryValue) ??
-          Number.MAX_SAFE_INTEGER;
+          ((subCategoryOrder.get(left.categoryValue) as Map<string, number>)?.get(left.subCategoryValue) ??
+          Number.MAX_SAFE_INTEGER) as number;
         const rightSubCategoryOrder =
-          subCategoryOrder.get(right.categoryValue)?.get(right.subCategoryValue) ??
-          Number.MAX_SAFE_INTEGER;
+          ((subCategoryOrder.get(right.categoryValue) as Map<string, number>)?.get(right.subCategoryValue) ??
+          Number.MAX_SAFE_INTEGER) as number;
         if (leftSubCategoryOrder !== rightSubCategoryOrder) {
           return leftSubCategoryOrder - rightSubCategoryOrder;
         }
 
         return left._firstIndex - right._firstIndex;
       })
-      .map(({ _firstIndex, ...group }) => group);
+      .map(({ _firstIndex, ...group }: any) => group);
 
     const totalPages = Math.max(Math.ceil(total / pageSize), 1);
     const hasNextPage = page < totalPages;
     const hasPrevPage = page > 1;
+
+    requestLogger.info("Fetched mobile templates", {
+      total,
+      page,
+      pageSize,
+    });
 
     const response = NextResponse.json({
       locale,
@@ -221,14 +236,9 @@ export async function GET(request) {
     });
     return attachRequestIdHeader(response, requestId);
   } catch (error) {
-    requestLogger.error("Failed to fetch templates list", {}, error);
+    requestLogger.error("Failed to fetch templates list", error, {});
     return attachRequestIdHeader(
-      NextResponse.json(
-        {
-          error: "Failed to fetch templates.",
-        },
-        { status: 500 }
-      ),
+      handleApiError(error, "Failed to fetch templates"),
       requestId
     );
   }

@@ -1,25 +1,29 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
-import { buildMobileFontCatalog, normalizeMobileFontCategory } from "@/lib/mobile/fontsCatalog.server";
+import {
+  buildMobileFontCatalog,
+  normalizeMobileFontCategory,
+} from "@/lib/mobile/fontsCatalog.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
   getRequestLogContext,
   resolveRequestId,
 } from "@/lib/logging/request";
+import { handleApiError } from "@/lib/api/errors";
 
 export const runtime = "nodejs";
 const logger = createLogger("api.mobile.fonts");
 
 const FONTS_PAGE_SIZE = 100;
 
-function parsePositiveInt(value, fallback = 1) {
+function parsePositiveInt(value: unknown, fallback = 1): number {
   const parsed = Number.parseInt(String(value || ""), 10);
   if (!Number.isFinite(parsed) || parsed < 1) return fallback;
   return parsed;
 }
 
-function normalizeLanguage(value) {
+function normalizeLanguage(value: unknown): string {
   const normalized = String(value || "").trim().toLowerCase();
   if (!normalized) return "";
   if (normalized === "ar" || normalized === "arabic") return "ARABIC";
@@ -27,9 +31,10 @@ function normalizeLanguage(value) {
   return "";
 }
 
-export async function GET(request) {
+export async function GET(request: NextRequest) {
   const requestId = resolveRequestId(request);
-  const requestLogger = logger.child(getRequestLogContext(request, requestId));
+  const requestLogger = logger;
+
   try {
     const { searchParams } = new URL(request.url);
     const search = String(searchParams.get("search") || searchParams.get("query") || "")
@@ -42,7 +47,7 @@ export async function GET(request) {
     const page = parsePositiveInt(searchParams.get("page"), 1);
 
     const allFonts = await buildMobileFontCatalog(request);
-    const fonts = allFonts.filter((font) => {
+    const fonts = allFonts.filter((font: any) => {
       if (category && !font.categories.includes(category)) {
         return false;
       }
@@ -69,6 +74,14 @@ export async function GET(request) {
     const start = (safePage - 1) * FONTS_PAGE_SIZE;
     const paginatedFonts = fonts.slice(start, start + FONTS_PAGE_SIZE);
 
+    requestLogger.info("Mobile fonts retrieved", {
+      search,
+      category,
+      language,
+      page: safePage,
+      count: paginatedFonts.length,
+    });
+
     const response = NextResponse.json(
       {
         fonts: paginatedFonts,
@@ -87,16 +100,10 @@ export async function GET(request) {
     );
     return attachRequestIdHeader(response, requestId);
   } catch (error) {
-    requestLogger.error("Failed to fetch mobile fonts", {}, error);
+    requestLogger.error("Failed to fetch mobile fonts", error);
     return attachRequestIdHeader(
-      NextResponse.json(
-        {
-          error: "Failed to fetch fonts.",
-        },
-        { status: 500 }
-      ),
+      handleApiError(error, "Failed to fetch fonts"),
       requestId
     );
   }
 }
-

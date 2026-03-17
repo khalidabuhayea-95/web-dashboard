@@ -9,8 +9,8 @@ import {
   requeueStalledImportJob,
   updateImportJobProgress,
 } from "@/lib/tools/importJobsStore.server";
-import { runCanvaImportForOwner } from "@/app/api/tools/canva-import/route";
-import { runVectorRasterImportForOwner } from "@/app/api/tools/vector-import/route";
+import { runCanvaImportForOwner } from "@/app/api/tools/canva-import/route.ts";
+import { runVectorRasterImportForOwner } from "@/app/api/tools/vector-import/route.js";
 import { runFreepikImportForOwner } from "@/lib/tools/freepikImport.server";
 
 const activeJobs = new Set();

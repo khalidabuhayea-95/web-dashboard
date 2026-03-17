@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import {
   checkRateLimit,
@@ -12,6 +12,8 @@ import {
   upsertEditorCustomFont,
 } from "@/lib/editor/customFonts.server";
 import { getEditorSyncedFonts } from "@/lib/editor/syncedFonts.server";
+import { handleApiError, handleBadRequest } from "@/lib/api/errors";
+import { logger } from "@/lib/logging/logger";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -20,11 +22,11 @@ const EDITOR_FONTS_RATE_LIMIT = {
   windowMs: 60_000,
 };
 
-function containsArabicScript(value) {
+function containsArabicScript(value: unknown): boolean {
   return /[\u0600-\u06FF]/.test(String(value || ""));
 }
 
-function normalizeCategories(value, fallbackSample = "") {
+function normalizeCategories(value: unknown, fallbackSample = ""): string[] {
   const categories = Array.isArray(value)
     ? value
         .map((item) => String(item || "").trim().toUpperCase())
@@ -37,7 +39,7 @@ function normalizeCategories(value, fallbackSample = "") {
   return Array.from(new Set(categories));
 }
 
-function toEditorCustomFont(font) {
+function toEditorCustomFont(font: any) {
   return {
     ...font,
     categories: normalizeCategories(font?.categories, font?.family),
@@ -46,7 +48,7 @@ function toEditorCustomFont(font) {
   };
 }
 
-function toEditorSyncedFont(font) {
+function toEditorSyncedFont(font: any) {
   const id = String(font?.id || "").trim();
   const resolvedFileUrl = id
     ? `/api/mobile/fonts/${encodeURIComponent(id)}/file`
@@ -69,7 +71,7 @@ function toEditorSyncedFont(font) {
   };
 }
 
-function normalizeFontKey(value) {
+function normalizeFontKey(value: unknown): string {
   return String(value || "")
     .trim()
     .replace(/^['"]+|['"]+$/g, "")
@@ -83,8 +85,8 @@ async function buildEditorFontList() {
     getEditorSyncedFonts().catch(() => []),
   ]);
 
-  const byId = new Set();
-  const byFamily = new Set();
+  const byId = new Set<string>();
+  const byFamily = new Set<string>();
   const merged = [
     ...(Array.isArray(customFonts) ? customFonts.map(toEditorCustomFont) : []),
     ...(Array.isArray(syncedFonts) ? syncedFonts.map(toEditorSyncedFont) : []),
@@ -101,7 +103,7 @@ async function buildEditorFontList() {
   return merged;
 }
 
-function applyFontsRateLimit(request, session, scopeSuffix) {
+function applyFontsRateLimit(request: NextRequest, session: any, scopeSuffix: string) {
   const rateLimitState = checkRateLimit({
     scope: `api:editor:fonts:${scopeSuffix}`,
     identifier: session.userId || resolveRequestIp(request),
@@ -114,30 +116,35 @@ function applyFontsRateLimit(request, session, scopeSuffix) {
   return null;
 }
 
-export async function GET(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-  const rateLimitedResponse = applyFontsRateLimit(request, session, "list");
-  if (rateLimitedResponse) return rateLimitedResponse;
+export async function GET(request: NextRequest) {
+  try {
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+    const rateLimitedResponse = applyFontsRateLimit(request, session, "list");
+    if (rateLimitedResponse) return rateLimitedResponse;
 
-  const fonts = await buildEditorFontList();
-  return NextResponse.json({ fonts });
+    logger.info("Editor fonts list requested", { userId: session.userId });
+    const fonts = await buildEditorFontList();
+    return NextResponse.json({ fonts });
+  } catch (error) {
+    return handleApiError(error, "Failed to retrieve fonts");
+  }
 }
 
-export async function POST(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-  const rateLimitedResponse = applyFontsRateLimit(request, session, "upsert");
-  if (rateLimitedResponse) return rateLimitedResponse;
-
-  let body = {};
+export async function POST(request: NextRequest) {
   try {
-    body = await request.json();
-  } catch (_error) {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+    const rateLimitedResponse = applyFontsRateLimit(request, session, "upsert");
+    if (rateLimitedResponse) return rateLimitedResponse;
 
-  try {
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_error) {
+      return handleBadRequest("Invalid JSON body");
+    }
+
     const result = await upsertEditorCustomFont({
       family: body?.family,
       fileName: body?.fileName,
@@ -146,33 +153,40 @@ export async function POST(request) {
       mimeType: body?.mimeType,
       categories: body?.categories,
     });
+
     const fonts = await buildEditorFontList();
     const statusCode = result?.skippedDuplicate ? 200 : 201;
+
+    logger.info("Font saved", {
+      userId: session.userId,
+      family: body?.family,
+      isDuplicate: result?.skippedDuplicate,
+    });
+
     return NextResponse.json({ ...result, fonts }, { status: statusCode });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: error?.message || "Failed to save custom font.",
-      },
-      { status: 422 }
+    return handleApiError(
+      error,
+      error instanceof Error ? error.message : "Failed to save custom font",
+      422
     );
   }
 }
 
-export async function DELETE(request) {
-  const session = await getEditorSession();
-  if (session.error) return session.error;
-  const rateLimitedResponse = applyFontsRateLimit(request, session, "delete");
-  if (rateLimitedResponse) return rateLimitedResponse;
-
-  let body = {};
+export async function DELETE(request: NextRequest) {
   try {
-    body = await request.json();
-  } catch (_error) {
-    return NextResponse.json({ error: "Invalid JSON body." }, { status: 400 });
-  }
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+    const rateLimitedResponse = applyFontsRateLimit(request, session, "delete");
+    if (rateLimitedResponse) return rateLimitedResponse;
 
-  try {
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_error) {
+      return handleBadRequest("Invalid JSON body");
+    }
+
     const targetId = String(body?.id || "").trim();
     if (targetId.startsWith("synced-")) {
       return NextResponse.json(
@@ -187,14 +201,20 @@ export async function DELETE(request) {
       id: body?.id,
       family: body?.family,
     });
+
     const fonts = await buildEditorFontList();
+
+    logger.info("Font deleted", {
+      userId: session.userId,
+      fontId: body?.id,
+    });
+
     return NextResponse.json({ ...result, fonts });
   } catch (error) {
-    return NextResponse.json(
-      {
-        error: error?.message || "Failed to delete custom font.",
-      },
-      { status: 422 }
+    return handleApiError(
+      error,
+      error instanceof Error ? error.message : "Failed to delete custom font",
+      422
     );
   }
 }
