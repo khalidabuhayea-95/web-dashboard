@@ -9,6 +9,7 @@ import { getEditorSession } from "@/lib/templates/server";
 import {
   deleteImportedElementAsset,
   listImportedElementAssets,
+  upsertImportedElementAsset,
 } from "@/lib/editor/importedElements.server";
 import { handleApiError, handleBadRequest, handleNotFound } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
@@ -130,6 +131,91 @@ export async function DELETE(request: NextRequest) {
     return handleApiError(
       error,
       error instanceof Error ? error.message : "Failed to delete imported element",
+      422
+    );
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    const session = await getEditorSession();
+    if (session.error) return session.error;
+
+    const rateLimitState = checkRateLimit({
+      scope: "api:editor:elements:imported",
+      identifier: session.userId || resolveRequestIp(request),
+      limit: IMPORTED_ELEMENTS_RATE_LIMIT.limit,
+      windowMs: IMPORTED_ELEMENTS_RATE_LIMIT.windowMs,
+    });
+    if (!rateLimitState.allowed) {
+      return createRateLimitResponse(
+        "Too many imported elements requests. Please retry shortly.",
+        rateLimitState
+      );
+    }
+
+    let body: any = {};
+    try {
+      body = await request.json();
+    } catch (_error) {
+      return handleBadRequest("Invalid JSON body");
+    }
+
+    const source = String(body?.source || "").trim().toLowerCase() || "upload";
+    const sourceAssetId = String(body?.sourceAssetId || body?.source_asset_id || "").trim();
+    const assetUrl = String(body?.assetUrl || body?.asset_url || "").trim();
+    const thumbnailUrl = String(body?.thumbnailUrl || body?.thumbnail_url || assetUrl).trim();
+    const title = String(body?.title || body?.titleEn || body?.title_en || "").trim();
+    const kind = String(body?.kind || "vector").trim().toLowerCase() || "vector";
+
+    if (!sourceAssetId) {
+      return handleBadRequest("Imported element sourceAssetId is required");
+    }
+    if (!assetUrl) {
+      return handleBadRequest("Imported element assetUrl is required");
+    }
+
+    logger.info("Upserting imported element", {
+      userId: session.userId,
+      source,
+      sourceAssetId,
+      kind,
+    });
+
+    const result = await upsertImportedElementAsset({
+      source,
+      sourceAssetId,
+      ownerId: session.userId,
+      kind,
+      titleEn: title || sourceAssetId,
+      titleAr: String(body?.titleAr || body?.title_ar || title || sourceAssetId).trim(),
+      tagsEn: Array.isArray(body?.tagsEn || body?.tags_en) ? (body?.tagsEn || body?.tags_en) : [],
+      tagsAr: Array.isArray(body?.tagsAr || body?.tags_ar) ? (body?.tagsAr || body?.tags_ar) : [],
+      labelsEn: Array.isArray(body?.labelsEn || body?.labels_en) ? (body?.labelsEn || body?.labels_en) : [],
+      labelsAr: Array.isArray(body?.labelsAr || body?.labels_ar) ? (body?.labelsAr || body?.labels_ar) : [],
+      slug: String(body?.slug || "").trim(),
+      assetUrl,
+      thumbnailUrl,
+      width: body?.width,
+      height: body?.height,
+      freeSvg: Boolean(body?.freeSvg ?? true),
+      sourcePayload:
+        body?.sourcePayload && typeof body.sourcePayload === "object" && !Array.isArray(body.sourcePayload)
+          ? body.sourcePayload
+          : {},
+      translationStatus: String(body?.translationStatus || "fallback").trim().toLowerCase(),
+      createdSourceAt: body?.createdSourceAt || body?.created_source_at || null,
+    });
+
+    return NextResponse.json(result, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
+    });
+  } catch (error) {
+    return handleApiError(
+      error,
+      error instanceof Error ? error.message : "Failed to create imported element",
       422
     );
   }

@@ -42,7 +42,7 @@ function readFileAsDataUrl(file: File) {
 
 function isLikelyImageUrl(value: string) {
   const safe = String(value || "").trim();
-  return /^https?:\/\/\S+\.(png|jpe?g|gif|webp|svg|avif|bmp)(\?.*)?$/i.test(safe);
+  return /^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|bmp)(\?.*)?$/i.test(safe);
 }
 
 export default function EditorLayout() {

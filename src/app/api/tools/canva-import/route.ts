@@ -12,6 +12,7 @@ import {
   buildLayerTreeFromFabricObjects,
   deriveLayerStatsFromFabricObjects,
 } from "@/lib/tools/importParity";
+import { hydrateFabricRasterPalettes } from "@/lib/tools/rasterPalette.server";
 import {
   getEditorSession,
 } from "@/lib/templates/server";
@@ -305,14 +306,23 @@ async function importFromPreviewScrape(options: {
     fabricData: templateData,
     sourceLabel: "canva-preview-scrape",
     preserveSvg: true,
-    traceRasterToSvg: true,
+    traceRasterToSvg: false,
     rewriteExternalUrls: true,
   });
 
   const sanitizedFabricData = sanitizedPayload.fabricData;
+  const rasterPaletteHydration = await hydrateFabricRasterPalettes(sanitizedFabricData, {
+    maxColors: 6,
+  });
   const sanitizedObjects = Array.isArray(sanitizedFabricData?.objects)
     ? sanitizedFabricData.objects
     : [];
+  const importWarnings = Array.isArray(sanitizedPayload.warnings) ? [...sanitizedPayload.warnings] : [];
+  if (rasterPaletteHydration.failedCount > 0) {
+    importWarnings.push(
+      `Raster palette extraction failed for ${rasterPaletteHydration.failedCount} imported Canva image layer${rasterPaletteHydration.failedCount === 1 ? "" : "s"}.`
+    );
+  }
   const importMetadata = buildImportMetadata(
     {
       source: "canva-preview-scrape",
@@ -328,7 +338,7 @@ async function importFromPreviewScrape(options: {
       layerTree: buildLayerTreeFromFabricObjects(sanitizedObjects),
       layerStats: deriveLayerStatsFromFabricObjects(sanitizedObjects),
       usedFonts: [],
-      warnings: Array.isArray(sanitizedPayload.warnings) ? sanitizedPayload.warnings : [],
+      warnings: importWarnings,
       assetManifest: sanitizedPayload.assetManifest,
     },
     {
@@ -374,11 +384,14 @@ async function rewriteImportedTemplateAssets(template: any): Promise<any> {
     fabricData: template.data,
     sourceLabel: "canva-playwright",
     preserveSvg: true,
-    traceRasterToSvg: true,
+    traceRasterToSvg: false,
     rewriteExternalUrls: true,
   });
 
   const nextFabricData = sanitizedPayload.fabricData || template.data;
+  const rasterPaletteHydration = await hydrateFabricRasterPalettes(nextFabricData, {
+    maxColors: 6,
+  });
   const hasExistingImportMetadata =
     template?.data &&
     typeof template.data === "object" &&
@@ -390,6 +403,15 @@ async function rewriteImportedTemplateAssets(template: any): Promise<any> {
   const canvasWidth = Math.max(1, Math.round(Number(template?.canvasSize?.width || 1080)));
   const canvasHeight = Math.max(1, Math.round(Number(template?.canvasSize?.height || 1080)));
   const objects = Array.isArray(nextFabricData?.objects) ? nextFabricData.objects : [];
+  const importWarnings =
+    Array.isArray(existingImportMetadata?.warnings) && existingImportMetadata.warnings.length > 0
+      ? [...existingImportMetadata.warnings]
+      : [];
+  if (rasterPaletteHydration.failedCount > 0) {
+    importWarnings.push(
+      `Raster palette extraction failed for ${rasterPaletteHydration.failedCount} imported Canva image layer${rasterPaletteHydration.failedCount === 1 ? "" : "s"}.`
+    );
+  }
   const importMetadata = buildImportMetadata(
     {
       source: existingImportMetadata?.source || "canva-playwright",
@@ -418,10 +440,7 @@ async function rewriteImportedTemplateAssets(template: any): Promise<any> {
         Array.isArray(existingImportMetadata?.usedFonts) && existingImportMetadata.usedFonts.length > 0
           ? existingImportMetadata.usedFonts
           : [],
-      warnings:
-        Array.isArray(existingImportMetadata?.warnings) && existingImportMetadata.warnings.length > 0
-          ? existingImportMetadata.warnings
-          : [],
+      warnings: importWarnings,
       assetManifest: sanitizedPayload.assetManifest,
     },
     {

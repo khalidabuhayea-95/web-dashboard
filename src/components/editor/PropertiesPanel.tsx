@@ -5,11 +5,11 @@ import { SlidersHorizontal } from "lucide-react";
 
 import { Input, Label, Select } from "@/components/ui/form";
 import {
-  extractSvgPaletteFromSource,
-  isSvgSource,
-  normalizeHexColor,
-  normalizeSvgColorMap,
-} from "@/lib/editor/svgColors";
+  extractImagePaletteFromSource,
+  normalizeRasterColorMap,
+  RASTER_PALETTE_VERSION,
+} from "@/lib/editor/imagePalette";
+import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import { useEditorStore } from "@/store/editorStore";
 
 function numberOr(value: string, fallback: number) {
@@ -45,45 +45,48 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const activeElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const activeImageElement = activeElement?.type === "image" ? activeElement : null;
   const activeImageId = String(activeImageElement?.id || "");
-  const activeImageSvgOriginalSrc = String(activeImageElement?.svgOriginalSrc || "").trim();
-  const activeSvgSource = (() => {
-    const source = String(activeImageElement?.svgOriginalSrc || activeImageElement?.src || "").trim();
-    if (!source || !isSvgSource(source)) return "";
-    return source;
+  const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
+  const activeRasterSource = (() => {
+    const source = String(activeImageElement?.rasterOriginalSrc || activeImageElement?.src || "").trim();
+    return source || "";
   })();
-  const activeSvgPalette = Array.isArray(activeImageElement?.svgPalette)
-    ? activeImageElement.svgPalette
+  const activeRasterPalette = Array.isArray(activeImageElement?.rasterPalette)
+    ? activeImageElement.rasterPalette
         .map((value) => normalizeHexColor(String(value || "")))
         .filter((value): value is string => Boolean(value))
     : ([] as string[]);
-  const activeSvgColorMap = normalizeSvgColorMap(activeImageElement?.svgColorMap);
+  const activeRasterPaletteVersion = Math.max(0, Number(activeImageElement?.rasterPaletteVersion || 0));
+  const activeRasterColorMap = normalizeRasterColorMap(activeImageElement?.rasterColorMap);
 
   useEffect(() => {
-    if (!activeImageId || !activeSvgSource) {
+    if (!activeImageId || !activeRasterSource) {
       return;
     }
 
-    const hasPalette = activeSvgPalette.length > 0;
-    const sourceWasPersisted = activeImageSvgOriginalSrc === activeSvgSource;
-    if (hasPalette && sourceWasPersisted) {
+    const hasPalette = activeRasterPalette.length > 0;
+    const sourceWasPersisted = activeImageRasterOriginalSrc === activeRasterSource;
+    const paletteIsCurrent = activeRasterPaletteVersion >= RASTER_PALETTE_VERSION;
+    if (hasPalette && sourceWasPersisted && paletteIsCurrent) {
       return;
     }
 
     let cancelled = false;
 
-    void extractSvgPaletteFromSource(activeSvgSource)
+    void extractImagePaletteFromSource(activeRasterSource, 6)
       .then((palette) => {
         if (cancelled) return;
-        const patch: { svgOriginalSrc?: string; svgPalette?: string[] } = {};
+        const patch: {
+          rasterOriginalSrc?: string;
+          rasterPalette?: string[];
+          rasterPaletteVersion?: number;
+        } = {
+          rasterPaletteVersion: RASTER_PALETTE_VERSION,
+          rasterPalette: Array.isArray(palette) ? palette : [],
+        };
         if (!sourceWasPersisted) {
-          patch.svgOriginalSrc = activeSvgSource;
+          patch.rasterOriginalSrc = activeRasterSource;
         }
-        if (Array.isArray(palette) && palette.length > 0) {
-          patch.svgPalette = palette;
-        }
-        if (Object.keys(patch).length > 0) {
-          updateElement(activeImageId, patch, { recordHistory: false });
-        }
+        updateElement(activeImageId, patch, { recordHistory: false });
       })
       .catch(() => undefined);
 
@@ -92,9 +95,10 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
     };
   }, [
     activeImageId,
-    activeImageSvgOriginalSrc,
-    activeSvgPalette.length,
-    activeSvgSource,
+    activeImageRasterOriginalSrc,
+    activeRasterPalette.length,
+    activeRasterPaletteVersion,
+    activeRasterSource,
     updateElement,
   ]);
   const fontFamilies = useMemo(() => {
@@ -459,32 +463,30 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 </Select>
               </div>
 
-              {activeSvgSource ? (
+              {activeRasterSource ? (
                 <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
                   <div className="flex items-center justify-between gap-2">
-                    <Label className="m-0">SVG Colors</Label>
+                    <Label className="m-0">Image Colors</Label>
                     <button
                       type="button"
                       className="text-xs font-medium text-slate-600 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300"
-                      disabled={Object.keys(activeSvgColorMap).length === 0}
-                      onClick={() =>
-                        updateElement(activeElement.id, { svgColorMap: {} })
-                      }
+                      disabled={Object.keys(activeRasterColorMap).length === 0}
+                      onClick={() => updateElement(activeElement.id, { rasterColorMap: {} })}
                     >
                       Reset all
                     </button>
                   </div>
 
-                  {activeSvgPalette.length === 0 ? (
+                  {activeRasterPalette.length === 0 ? (
                     <div className="text-xs text-slate-500 dark:text-slate-400">
-                      No editable SVG colors were detected in this image.
+                      No dominant raster colors were detected in this image yet.
                     </div>
                   ) : null}
 
-                  {activeSvgPalette.length > 0 ? (
+                  {activeRasterPalette.length > 0 ? (
                     <div className="space-y-2">
-                      {activeSvgPalette.map((originalColor) => {
-                        const mappedColor = activeSvgColorMap[originalColor] || originalColor;
+                      {activeRasterPalette.map((originalColor) => {
+                        const mappedColor = activeRasterColorMap[originalColor] || originalColor;
                         return (
                           <div key={originalColor} className="grid grid-cols-[auto,1fr,auto,auto] items-center gap-2">
                             <span
@@ -501,22 +503,22 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                               className="h-8 w-10 cursor-pointer p-1"
                               onChange={(event) => {
                                 const nextColor = normalizeHexColor(event.target.value) || originalColor;
-                                const nextMap = { ...activeSvgColorMap };
+                                const nextMap = { ...activeRasterColorMap };
                                 if (nextColor === originalColor) {
                                   delete nextMap[originalColor];
                                 } else {
                                   nextMap[originalColor] = nextColor;
                                 }
-                                updateElement(activeElement.id, { svgColorMap: nextMap });
+                                updateElement(activeElement.id, { rasterColorMap: nextMap });
                               }}
                             />
                             <button
                               type="button"
                               className="text-xs text-slate-600 underline underline-offset-2 dark:text-slate-300"
                               onClick={() => {
-                                const nextMap = { ...activeSvgColorMap };
+                                const nextMap = { ...activeRasterColorMap };
                                 delete nextMap[originalColor];
-                                updateElement(activeElement.id, { svgColorMap: nextMap });
+                                updateElement(activeElement.id, { rasterColorMap: nextMap });
                               }}
                             >
                               Reset
@@ -526,6 +528,16 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                       })}
                     </div>
                   ) : null}
+                </div>
+              ) : null}
+
+              {activeRasterSource ? (
+                <div className="space-y-2 rounded-xl border border-amber-200 bg-amber-50 p-3 dark:border-amber-900/60 dark:bg-amber-950/20">
+                  <Label className="m-0 text-amber-900 dark:text-amber-200">Image recolor</Label>
+                  <div className="text-xs leading-5 text-amber-800 dark:text-amber-300">
+                    This layer uses palette-based image recolor. It works best on flat illustrations
+                    and decorative assets with a limited number of dominant colors.
+                  </div>
                 </div>
               ) : null}
             </>

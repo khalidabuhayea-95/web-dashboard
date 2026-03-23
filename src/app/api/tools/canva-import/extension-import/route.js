@@ -11,6 +11,7 @@ import {
   createImportedTemplate,
   normalizeCanvasInput,
 } from "@/lib/tools/canvaImportTemplate";
+import { hydrateFabricRasterPalettes } from "@/lib/tools/rasterPalette.server";
 import {
   buildImportMetadata,
   buildLayerTreeFromFabricObjects,
@@ -1210,6 +1211,7 @@ export async function POST(request) {
       fabricData: rawFabricData,
       sourceLabel: "canva-extension",
       preserveSvg: true,
+      traceRasterToSvg: false,
       rewriteExternalUrls: true,
     });
   } catch (error) {
@@ -1258,6 +1260,7 @@ export async function POST(request) {
             fabricData: workingFabricData,
             sourceLabel: "canva-extension-layer-crop-fallback",
             preserveSvg: true,
+            traceRasterToSvg: false,
             rewriteExternalUrls: true,
           });
           break;
@@ -1307,6 +1310,7 @@ export async function POST(request) {
         fabricData: snapshotFabricData,
         sourceLabel: "canva-extension-snapshot-fallback",
         preserveSvg: true,
+        traceRasterToSvg: false,
         rewriteExternalUrls: true,
       });
       forcedSnapshotFallbackWarning =
@@ -1369,6 +1373,9 @@ export async function POST(request) {
       `Applied page background color ${resolvedBackgroundColor}.`
     );
   }
+  const rasterPaletteHydration = await hydrateFabricRasterPalettes(fabricData, {
+    maxColors: 6,
+  });
   const removedSyntheticLayerIds = [
     ...(Array.isArray(prunedSyntheticBackground.removedLayerIds)
       ? prunedSyntheticBackground.removedLayerIds
@@ -1487,6 +1494,11 @@ export async function POST(request) {
   }
   if (Array.isArray(sanitizedImportPayload?.warnings) && sanitizedImportPayload.warnings.length > 0) {
     importWarnings.push(...sanitizedImportPayload.warnings);
+  }
+  if (rasterPaletteHydration.failedCount > 0) {
+    importWarnings.push(
+      `Raster palette extraction failed for ${rasterPaletteHydration.failedCount} imported Canva image layer${rasterPaletteHydration.failedCount === 1 ? "" : "s"}.`
+    );
   }
   if (forcedSnapshotFallbackWarning) {
     importWarnings.push(forcedSnapshotFallbackWarning);

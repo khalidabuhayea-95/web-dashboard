@@ -224,6 +224,7 @@ interface ImportedElementRecord {
   animatedVideoUrl?: string;
   width?: number | null;
   height?: number | null;
+  freeSvg?: boolean;
 }
 
 function buildTemplateLoadSignature(templateId: string, updatedAt = "") {
@@ -705,19 +706,23 @@ function toEditorDesignFromTemplate(
       };
 
       if (type === "image" && typeof item.src === "string" && item.src) {
-        const svgOriginalSrc = String(item.svgOriginalSrc || "").trim();
-        const svgPalette = Array.isArray(item.svgPalette)
-          ? item.svgPalette
+        const rasterOriginalSrc = String(item.rasterOriginalSrc || "").trim();
+        const rasterPalette = Array.isArray(item.rasterPalette)
+          ? item.rasterPalette
               .map((value) => String(value || "").trim())
               .filter(Boolean)
           : [];
-        const rawSvgColorMap =
-          item.svgColorMap && typeof item.svgColorMap === "object"
-            ? (item.svgColorMap as Record<string, unknown>)
+        const rasterPaletteVersion = Math.max(
+          0,
+          Number(item.rasterPaletteVersion || 0)
+        );
+        const rawRasterColorMap =
+          item.rasterColorMap && typeof item.rasterColorMap === "object"
+            ? (item.rasterColorMap as Record<string, unknown>)
             : null;
-        const svgColorMap = rawSvgColorMap
+        const rasterColorMap = rawRasterColorMap
           ? Object.fromEntries(
-              Object.entries(rawSvgColorMap)
+              Object.entries(rawRasterColorMap)
                 .map(([key, value]) => [String(key || "").trim(), String(value || "").trim()] as const)
                 .filter(([key, value]) => Boolean(key) && Boolean(value))
             )
@@ -728,9 +733,10 @@ function toEditorDesignFromTemplate(
             ...common,
             type: "image",
             src: item.src,
-            ...(svgOriginalSrc ? { svgOriginalSrc } : {}),
-            ...(svgPalette.length > 0 ? { svgPalette } : {}),
-            ...(Object.keys(svgColorMap).length > 0 ? { svgColorMap } : {}),
+            ...(rasterOriginalSrc ? { rasterOriginalSrc } : {}),
+            ...(rasterPalette.length > 0 ? { rasterPalette } : {}),
+            ...(rasterPaletteVersion > 0 ? { rasterPaletteVersion } : {}),
+            ...(Object.keys(rasterColorMap).length > 0 ? { rasterColorMap } : {}),
           })
         );
         return;
@@ -1383,7 +1389,77 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           name: file.name.replace(/\.[^.]+$/, "") || "upload",
           width: Math.min(780, activePage.width * 0.65),
           height: Math.min(780, activePage.height * 0.48),
+          rasterOriginalSrc: uploaded.url,
         });
+
+        const importedResponse = await fetch("/api/editor/elements/imported", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            source: "upload",
+            sourceAssetId: uploaded.path || uploaded.url,
+            kind: "image",
+            title: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
+            titleEn: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
+            titleAr: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
+            assetUrl: uploaded.url,
+            thumbnailUrl: uploaded.url,
+            freeSvg: false,
+            sourcePayload: {
+              mimeType: uploaded.mimeType || file.type || "image/png",
+              fileName: uploaded.fileName || file.name || "",
+              uploadedPath: uploaded.path || "",
+            },
+          }),
+        }).catch(() => null);
+        if (activeTab === "elements" && importedResponse?.ok) {
+          const importedPayload = await importedResponse.json().catch(() => null);
+          if (importedPayload?.id && importedPayload?.assetUrl) {
+            const normalizedItem: ImportedElementRecord = {
+              id: String(importedPayload.id || ""),
+              source: String(importedPayload.source || "upload"),
+              sourceAssetId: String(importedPayload.sourceAssetId || uploaded.path || uploaded.url),
+              kind:
+                importedPayload?.kind === "icon" ||
+                importedPayload?.kind === "vector" ||
+                importedPayload?.kind === "image"
+                  ? importedPayload.kind
+                  : "image",
+              title: String(
+                importedPayload.title ||
+                  importedPayload.titleEn ||
+                  importedPayload.titleAr ||
+                  file.name.replace(/\.[^.]+$/, "") ||
+                  "Image Upload"
+              ),
+              titleEn: String(importedPayload.titleEn || importedPayload.title || ""),
+              titleAr: String(importedPayload.titleAr || importedPayload.title || ""),
+              tags: Array.isArray(importedPayload.tags)
+                ? importedPayload.tags.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
+              labels: Array.isArray(importedPayload.labels)
+                ? importedPayload.labels.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
+              assetUrl: String(importedPayload.assetUrl || uploaded.url),
+              thumbnailUrl: String(importedPayload.thumbnailUrl || importedPayload.assetUrl || uploaded.url),
+              animatedVideoUrl: String(importedPayload.animatedVideoUrl || ""),
+              width: Number.isFinite(Number(importedPayload.width)) ? Number(importedPayload.width) : null,
+              height: Number.isFinite(Number(importedPayload.height)) ? Number(importedPayload.height) : null,
+              freeSvg: Boolean(importedPayload.freeSvg ?? false),
+            };
+            setImportedElements((current) => {
+              const deduped = new Map<string, ImportedElementRecord>();
+              deduped.set(normalizedItem.id, normalizedItem);
+              current.forEach((item) => {
+                if (!deduped.has(item.id)) deduped.set(item.id, item);
+              });
+              return Array.from(deduped.values());
+            });
+            setImportedElementsTotal((current) => current + 1);
+          }
+        }
       } catch (_error) {
       }
     }
@@ -1536,7 +1612,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       }
       try {
         const params = new URLSearchParams({
-          source: "freepik",
+          source: "all",
           kind: importedElementsKindTab,
           query: elementSearch.trim(),
           page: String(importedElementsPage),
@@ -1571,6 +1647,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             animatedVideoUrl: String(item?.animatedVideoUrl || ""),
             width: Number.isFinite(Number(item?.width)) ? Number(item.width) : null,
             height: Number.isFinite(Number(item?.height)) ? Number(item.height) : null,
+            freeSvg: Boolean(item?.freeSvg),
           }))
           .filter((item) => item.id && item.assetUrl);
         setImportedElements((current) => {
@@ -2334,15 +2411,25 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               key={item.id}
                               type="button"
                               draggable
-                              onDragStart={(event) =>
+                              onDragStart={(event) => {
+                                const payload = addAsVideo
+                                  ? assetPayload({
+                                      kind: "video",
+                                      src: videoSource,
+                                    })
+                                  : assetPayload({
+                                        payload: {
+                                          type: "image",
+                                          src: item.assetUrl,
+                                          name: item.title || "Imported Icon",
+                                          rasterOriginalSrc: item.assetUrl,
+                                        },
+                                      });
                                 event.dataTransfer.setData(
                                   "application/x-editor-asset",
-                                  assetPayload({
-                                    kind: addAsVideo ? "video" : "photo",
-                                    src: addAsVideo ? videoSource : item.assetUrl,
-                                  })
-                                )
-                              }
+                                  payload
+                                );
+                              }}
                               onClick={() =>
                                 addAsVideo
                                   ? addVideoElement(videoSource, {
@@ -2350,6 +2437,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                     })
                                   : addImageElement(item.assetUrl, {
                                       name: item.title || "Imported Icon",
+                                      rasterOriginalSrc: item.assetUrl,
                                     })
                               }
                               className="rounded-md border border-[#d3d8e1] bg-white p-2 text-left hover:bg-[#f7f9fc]"
@@ -2413,8 +2501,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
                     {!importedElementsLoading && !importedElementsError && importedElements.length === 0 ? (
                       <div className="py-2 text-xs text-[#64748b]">
-                        No imported elements found. Go to Freepik Import, fetch preview, select icons, then click
-                        Import selected.
+                        No imported elements found. Import from Freepik or upload an image to build a recolorable elements library.
                       </div>
                     ) : null}
                   </div>

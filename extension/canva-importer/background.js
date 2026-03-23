@@ -326,24 +326,6 @@ async function cropScreenshotToCanvas(screenshotDataUrl, canvasMeta) {
   };
 }
 
-async function rasterizeDataUrlToPng(dataUrl, targetWidth, targetHeight) {
-  const source = String(dataUrl || "");
-  if (!source.startsWith("data:image/")) return "";
-  try {
-    const bitmap = await decodeDataUrlToBitmap(source);
-    const width = Math.max(1, Math.round(numberOr(targetWidth, bitmap.width || 1)));
-    const height = Math.max(1, Math.round(numberOr(targetHeight, bitmap.height || 1)));
-    const offscreenCanvas = new OffscreenCanvas(width, height);
-    const ctx = offscreenCanvas.getContext("2d", { willReadFrequently: false });
-    if (!ctx) return "";
-    ctx.drawImage(bitmap, 0, 0, width, height);
-    const pngBlob = await offscreenCanvas.convertToBlob({ type: "image/png" });
-    return blobToDataUrl(pngBlob);
-  } catch (_error) {
-    return "";
-  }
-}
-
 function buildSingleImageFabricObject(imageDataUrl, width, height, options = {}) {
   return {
     type: "Image",
@@ -691,44 +673,6 @@ function orderFontCandidatesForTarget(candidates, target) {
     .map((entry) => entry.candidate);
 }
 
-function decodeSvgTextFromDataUrl(dataUrl) {
-  const source = String(dataUrl || "");
-  if (!source.startsWith("data:image/svg+xml")) return "";
-  const commaIndex = source.indexOf(",");
-  if (commaIndex < 0) return "";
-  const header = source.slice(0, commaIndex).toLowerCase();
-  const payload = source.slice(commaIndex + 1);
-  try {
-    if (header.includes(";base64")) {
-      return atob(payload);
-    }
-    return decodeURIComponent(payload);
-  } catch (_error) {
-    return "";
-  }
-}
-
-function parseSvgIntrinsicSizeFromDataUrl(dataUrl) {
-  const text = decodeSvgTextFromDataUrl(dataUrl);
-  if (!text) return { width: 0, height: 0 };
-  const viewBoxMatch = text.match(/viewBox\s*=\s*["']([^"']+)["']/i);
-  if (viewBoxMatch?.[1]) {
-    const parts = viewBoxMatch[1]
-      .trim()
-      .split(/[\s,]+/)
-      .map((part) => Number(part))
-      .filter((part) => Number.isFinite(part));
-    if (parts.length === 4 && parts[2] > 0 && parts[3] > 0) {
-      return { width: parts[2], height: parts[3] };
-    }
-  }
-  const widthMatch = text.match(/width\s*=\s*["']([^"']+)["']/i);
-  const heightMatch = text.match(/height\s*=\s*["']([^"']+)["']/i);
-  const width = parseNumericDimension(widthMatch?.[1] || "");
-  const height = parseNumericDimension(heightMatch?.[1] || "");
-  return { width, height };
-}
-
 async function layerToFabricObject(layer, index) {
   const left = numberOr(layer?.x, 0);
   const top = numberOr(layer?.y, 0);
@@ -831,19 +775,8 @@ async function layerToFabricObject(layer, index) {
     imageSrc = rawImageSrc;
   }
   if (!imageSrc || /^blob:/i.test(imageSrc)) return null;
-  if (/^data:image\/svg\+xml/i.test(imageSrc)) {
-    const rasterizedPng = await rasterizeDataUrlToPng(imageSrc, width, height);
-    if (rasterizedPng.startsWith("data:image/")) {
-      imageSrc = rasterizedPng;
-    }
-  }
   let intrinsicWidth = Math.max(0, numberOr(layer?.sourceWidth, 0));
   let intrinsicHeight = Math.max(0, numberOr(layer?.sourceHeight, 0));
-  if (intrinsicWidth < 1 || intrinsicHeight < 1) {
-    const svgIntrinsic = parseSvgIntrinsicSizeFromDataUrl(imageSrc);
-    if (intrinsicWidth < 1) intrinsicWidth = svgIntrinsic.width;
-    if (intrinsicHeight < 1) intrinsicHeight = svgIntrinsic.height;
-  }
   const objectWidth = Math.max(1, Math.round(intrinsicWidth || width));
   const objectHeight = Math.max(1, Math.round(intrinsicHeight || height));
   const objectScaleX = width / Math.max(1, objectWidth);

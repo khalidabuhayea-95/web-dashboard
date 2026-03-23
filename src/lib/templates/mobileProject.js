@@ -749,6 +749,25 @@ function mapImageLayer(item, index, canvasSize, options) {
   const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
   const layerBaseWidth = Math.max(numberOr(item.width, sourceWidth), 1);
   const layerBaseHeight = Math.max(numberOr(item.height, sourceHeight), 1);
+  const rasterSourceRaw = String(item.rasterOriginalSrc || item.src || item.imageUri || "").trim();
+  const rasterPalette = Array.isArray(item.rasterPalette)
+    ? item.rasterPalette.map((value) => String(value || "").trim()).filter(Boolean)
+    : [];
+  const rasterColorMap =
+    item?.rasterColorMap && typeof item.rasterColorMap === "object" && !Array.isArray(item.rasterColorMap)
+      ? Object.fromEntries(
+          Object.entries(item.rasterColorMap)
+            .map(([key, value]) => [String(key || "").trim(), String(value || "").trim()])
+            .filter(([key, value]) => key && value)
+        )
+      : {};
+  const rasterUri = resolveMediaUri(rasterSourceRaw || item.src || item.imageUri || "", {
+    assetResolver: options?.assetResolver,
+    scope: "layer",
+    elementId: item.id || item.layerId || "",
+    index,
+    field: item.rasterOriginalSrc ? "rasterOriginalSrc" : "src",
+  });
   return {
     ...base,
     transform: buildTransform({
@@ -777,6 +796,11 @@ function mapImageLayer(item, index, canvasSize, options) {
     sourceHasAlpha: Boolean(item.sourceHasAlpha),
     cropRect: mapCropRect(item, sourceWidth, sourceHeight),
     filters: mediaFilters(item),
+    assetKind: "raster",
+    colorEditMode: rasterPalette.length > 0 ? "raster" : "none",
+    rasterOriginalUri: rasterUri || null,
+    rasterPalette,
+    rasterColorMap,
   };
 }
 

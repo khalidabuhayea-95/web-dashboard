@@ -26,13 +26,12 @@ import {
   computeClipToCanvasPatch,
   computeFitToCanvasPatch,
 } from "@/lib/editor/imageCrop";
+import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import {
-  extractSvgPaletteFromSource,
-  isSvgSource,
-  normalizeHexColor,
-  normalizeSvgColorMap,
-} from "@/lib/editor/svgColors";
-import { extractImagePaletteFromSource } from "@/lib/editor/imagePalette";
+  extractImagePaletteFromSource,
+  normalizeRasterColorMap,
+  RASTER_PALETTE_VERSION,
+} from "@/lib/editor/imagePalette";
 import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/editorStore";
 
 interface ToolbarProps {
@@ -84,10 +83,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const [videoTrimDragEdge, setVideoTrimDragEdge] = useState<"start" | "end" | null>(null);
   const [videoTrimPlayhead, setVideoTrimPlayhead] = useState(0);
   const [videoTrimFrameStrip, setVideoTrimFrameStrip] = useState<string[]>([]);
-  const [rasterPaletteEntry, setRasterPaletteEntry] = useState<{ key: string; colors: string[] }>({
-    key: "",
-    colors: [],
-  });
   const trimTrackRef = useRef<HTMLDivElement | null>(null);
   const videoTrimDraftRef = useRef<TrimRange>({ start: 0, end: 1 });
   const videoTrimFrameCacheRef = useRef<Map<string, string[]>>(new Map());
@@ -174,26 +169,24 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const activeVideoElement = hasSingleVideoSelection ? selectedVideoElements[0] : null;
   const activeImageId = String(activeImageElement?.id || "");
   const activeImageSrc = String(activeImageElement?.src || "").trim();
-  const activeImageSvgOriginalSrc = String(activeImageElement?.svgOriginalSrc || "").trim();
-  const activeSvgSource = useMemo(() => {
-    const source = String(activeImageElement?.svgOriginalSrc || activeImageSrc || "").trim();
-    if (!source || !isSvgSource(source)) return "";
-    return source;
-  }, [activeImageElement?.svgOriginalSrc, activeImageSrc]);
-  const activeSvgPalette = Array.isArray(activeImageElement?.svgPalette)
-    ? activeImageElement.svgPalette
+  const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
+  const activeRasterSource = useMemo(() => {
+    const source = String(activeImageElement?.rasterOriginalSrc || activeImageSrc || "").trim();
+    return source || "";
+  }, [activeImageElement?.rasterOriginalSrc, activeImageSrc]);
+  const activeRasterPalette = Array.isArray(activeImageElement?.rasterPalette)
+    ? activeImageElement.rasterPalette
         .map((value) => normalizeHexColor(String(value || "")))
         .filter((value): value is string => Boolean(value))
     : ([] as string[]);
-  const activeSvgColorMap = normalizeSvgColorMap(activeImageElement?.svgColorMap);
-  const rasterPaletteKey = useMemo(() => {
-    if (!hasSingleImageSelection || !activeImageId || !activeImageSrc || activeSvgSource) return "";
-    return `${activeImageId}::${activeImageSrc}`;
-  }, [activeImageId, activeImageSrc, activeSvgSource, hasSingleImageSelection]);
-  const activeRasterPalette =
-    rasterPaletteKey && rasterPaletteEntry.key === rasterPaletteKey ? rasterPaletteEntry.colors : [];
-  const activeRasterPaletteLoading =
-    Boolean(rasterPaletteKey) && rasterPaletteEntry.key !== rasterPaletteKey;
+  const activeRasterPaletteVersion = Math.max(0, Number(activeImageElement?.rasterPaletteVersion || 0));
+  const activeRasterColorMap = normalizeRasterColorMap(activeImageElement?.rasterColorMap);
+  const activeRasterPaletteLoading = Boolean(
+    hasSingleImageSelection &&
+      activeImageId &&
+      activeRasterSource &&
+      (activeImageRasterOriginalSrc !== activeRasterSource || activeRasterPaletteVersion < RASTER_PALETTE_VERSION)
+  );
   const activeVideoDuration = Number(activeVideoElement?.videoDuration || 0);
   const resolvedVideoDuration = useMemo(() => {
     if (Number.isFinite(activeVideoDuration) && activeVideoDuration > 0) return activeVideoDuration;
@@ -318,27 +311,29 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   }, [activeImageElement, activePage, updateElement]);
 
   useEffect(() => {
-    if (!activeImageId || !activeSvgSource) return;
-
-    const hasPalette = activeSvgPalette.length > 0;
-    const sourceWasPersisted = activeImageSvgOriginalSrc === activeSvgSource;
-    if (hasPalette && sourceWasPersisted) return;
+    if (!activeImageId || !activeRasterSource) return;
+    const hasPalette = activeRasterPalette.length > 0;
+    const sourceWasPersisted = activeImageRasterOriginalSrc === activeRasterSource;
+    const paletteIsCurrent = activeRasterPaletteVersion >= RASTER_PALETTE_VERSION;
+    if (hasPalette && sourceWasPersisted && paletteIsCurrent) return;
 
     let cancelled = false;
 
-    void extractSvgPaletteFromSource(activeSvgSource)
-      .then((palette) => {
+    void extractImagePaletteFromSource(activeRasterSource, 6)
+      .then((colors) => {
         if (cancelled) return;
-        const patch: { svgOriginalSrc?: string; svgPalette?: string[] } = {};
+        const patch: {
+          rasterOriginalSrc?: string;
+          rasterPalette?: string[];
+          rasterPaletteVersion?: number;
+        } = {
+          rasterPaletteVersion: RASTER_PALETTE_VERSION,
+          rasterPalette: Array.isArray(colors) ? colors : [],
+        };
         if (!sourceWasPersisted) {
-          patch.svgOriginalSrc = activeSvgSource;
+          patch.rasterOriginalSrc = activeRasterSource;
         }
-        if (Array.isArray(palette) && palette.length > 0) {
-          patch.svgPalette = palette;
-        }
-        if (Object.keys(patch).length > 0) {
-          updateElement(activeImageId, patch, { recordHistory: false });
-        }
+        updateElement(activeImageId, patch, { recordHistory: false });
       })
       .catch(() => undefined);
 
@@ -347,36 +342,12 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     };
   }, [
     activeImageId,
-    activeImageSvgOriginalSrc,
-    activeSvgPalette.length,
-    activeSvgSource,
+    activeImageRasterOriginalSrc,
+    activeRasterPalette.length,
+    activeRasterPaletteVersion,
+    activeRasterSource,
     updateElement,
   ]);
-
-  useEffect(() => {
-    if (!rasterPaletteKey || !activeImageSrc) return;
-    let cancelled = false;
-
-    void extractImagePaletteFromSource(activeImageSrc, 8)
-      .then((colors) => {
-        if (cancelled) return;
-        setRasterPaletteEntry({
-          key: rasterPaletteKey,
-          colors: Array.isArray(colors) ? colors : [],
-        });
-      })
-      .catch(() => {
-        if (cancelled) return;
-        setRasterPaletteEntry({
-          key: rasterPaletteKey,
-          colors: [],
-        });
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, [activeImageSrc, rasterPaletteKey]);
 
   const fitSelectedVideoToPage = useCallback(() => {
     if (!activeVideoElement || !activePage) return;
@@ -1166,51 +1137,49 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
               </button>
               {hasSingleImageSelection ? (
                 <div className="flex max-w-[380px] items-center gap-1 overflow-x-auto rounded border border-[#d7dbe1] bg-white px-1 py-1">
-                  {activeSvgSource && activeSvgPalette.length > 0 ? (
-                    activeSvgPalette.map((originalColor) => {
-                      const mappedColor = activeSvgColorMap[originalColor] || originalColor;
-                      return (
-                        <label
-                          key={`toolbar-svg-color-${originalColor}`}
-                          className="group relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded border border-[#d7dbe1]"
-                          title={`${originalColor} → ${mappedColor}`}
-                        >
-                          <span
-                            className="h-5 w-5 rounded-sm border border-black/10"
-                            style={{ backgroundColor: mappedColor }}
-                          />
-                          <input
-                            type="color"
-                            className="absolute inset-0 cursor-pointer opacity-0"
-                            value={mappedColor}
-                            onChange={(event) => {
-                              const nextColor = normalizeHexColor(event.target.value) || originalColor;
-                              const nextMap = { ...activeSvgColorMap };
-                              if (nextColor === originalColor) {
-                                delete nextMap[originalColor];
-                              } else {
-                                nextMap[originalColor] = nextColor;
-                              }
-                              updateElement(activeImageId, { svgColorMap: nextMap });
-                            }}
-                          />
-                        </label>
-                      );
-                    })
-                  ) : activeSvgSource ? (
-                    <span className="px-2 text-xs text-[#667085]">No SVG palette</span>
-                  ) : activeRasterPaletteLoading ? (
+                  {activeRasterPaletteLoading ? (
                     <span className="px-2 text-xs text-[#667085]">Analyzing colors...</span>
                   ) : activeRasterPalette.length > 0 ? (
-                    activeRasterPalette.map((color) => (
-                      <span
-                        key={`toolbar-raster-color-${color}`}
-                        className="inline-flex h-7 w-7 shrink-0 rounded border border-[#d7dbe1]"
-                        style={{ backgroundColor: color }}
-                        title={color}
-                        aria-label={`Detected color ${color}`}
-                      />
-                    ))
+                    <div className="flex items-center gap-1.5 px-1">
+                      {activeRasterPalette.map((originalColor) => {
+                        const mappedColor = activeRasterColorMap[originalColor] || originalColor;
+                        return (
+                          <label
+                            key={`toolbar-raster-color-${originalColor}`}
+                            className="group relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded border border-[#d7dbe1]"
+                            title={`${originalColor} → ${mappedColor}`}
+                          >
+                            <span
+                              className="h-5 w-5 rounded-sm border border-black/10"
+                              style={{ backgroundColor: mappedColor }}
+                            />
+                            <input
+                              type="color"
+                              className="absolute inset-0 cursor-pointer opacity-0"
+                              value={mappedColor}
+                              onChange={(event) => {
+                                const nextColor = normalizeHexColor(event.target.value) || originalColor;
+                                const nextMap = { ...activeRasterColorMap };
+                                if (nextColor === originalColor) {
+                                  delete nextMap[originalColor];
+                                } else {
+                                  nextMap[originalColor] = nextColor;
+                                }
+                                updateElement(activeImageId, { rasterColorMap: nextMap });
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                      <button
+                        type="button"
+                        className="whitespace-nowrap px-1 text-[11px] text-[#667085] underline underline-offset-2"
+                        onClick={() => updateElement(activeImageId, { rasterColorMap: {} })}
+                        disabled={Object.keys(activeRasterColorMap).length === 0}
+                      >
+                        Reset
+                      </button>
+                    </div>
                   ) : (
                     <span className="px-2 text-xs text-[#667085]">No palette</span>
                   )}

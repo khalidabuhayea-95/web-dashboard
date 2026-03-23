@@ -12,6 +12,7 @@
     "sign:mobile": "node scripts/sign-mobile-request.mjs"
   },
   "dependencies": {
+    "@neplex/vectorizer": "^0.0.5",
     "@prisma/client": "^5.22.0",
     "@supabase/ssr": "^0.8.0",
     "@supabase/supabase-js": "^2.98.0",

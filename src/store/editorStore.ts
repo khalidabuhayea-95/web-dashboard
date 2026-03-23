@@ -54,9 +54,10 @@ export interface EditorElement {
   cornerRadius: number;
   points: number[];
   src: string;
-  svgOriginalSrc?: string;
-  svgPalette?: string[];
-  svgColorMap?: Record<string, string>;
+  rasterOriginalSrc?: string;
+  rasterPalette?: string[];
+  rasterPaletteVersion?: number;
+  rasterColorMap?: Record<string, string>;
   text: string;
   fontFamily: string;
   fontSize: number;

@@ -25,11 +25,10 @@ import {
   type ShapeType,
 } from "@/store/editorStore";
 import {
-  isSvgSource,
-  normalizeSvgColorMap,
-  recolorSvgSourceToDataUrl,
-  serializeSvgColorMap,
-} from "@/lib/editor/svgColors";
+  normalizeRasterColorMap,
+  recolorRasterSourceToDataUrl,
+  serializeRasterColorMap,
+} from "@/lib/editor/imagePalette";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 
@@ -100,70 +99,92 @@ function CanvasImageNode({
   registerRef,
   onImageMetadata,
 }: ImageNodeProps) {
-  const baseSvgSource = useMemo(
-    () => String(element.svgOriginalSrc || element.src || "").trim(),
-    [element.src, element.svgOriginalSrc]
+  const baseRasterSource = useMemo(() => {
+    const source = String(element.rasterOriginalSrc || element.src || "").trim();
+    return source || "";
+  }, [element.rasterOriginalSrc, element.src]);
+  const normalizedRasterColorMap = useMemo(
+    () => normalizeRasterColorMap(element.rasterColorMap),
+    [element.rasterColorMap]
   );
-  const normalizedSvgColorMap = useMemo(
-    () => normalizeSvgColorMap(element.svgColorMap),
-    [element.svgColorMap]
+  const normalizedRasterPalette = useMemo(
+    () =>
+      Array.isArray(element.rasterPalette)
+        ? element.rasterPalette.map((value) => String(value || "").trim()).filter(Boolean)
+        : [],
+    [element.rasterPalette]
   );
-  const svgColorMapKey = useMemo(
-    () => serializeSvgColorMap(normalizedSvgColorMap),
-    [normalizedSvgColorMap]
+  const rasterColorMapKey = useMemo(
+    () => serializeRasterColorMap(normalizedRasterColorMap),
+    [normalizedRasterColorMap]
   );
-  const shouldRecolorSvg = Boolean(
-    baseSvgSource && isSvgSource(baseSvgSource) && svgColorMapKey !== "[]"
-  );
+  const shouldRecolorRaster = Boolean(baseRasterSource && rasterColorMapKey !== "{}");
   const recolorRequestKey = useMemo(
-    () => `${baseSvgSource}::${svgColorMapKey}`,
-    [baseSvgSource, svgColorMapKey]
+    () => `${baseRasterSource}::${rasterColorMapKey}::${normalizedRasterPalette.join(",")}`,
+    [
+      baseRasterSource,
+      normalizedRasterPalette,
+      rasterColorMapKey,
+    ]
   );
   const [recoloredEntry, setRecoloredEntry] = useState<{ key: string; src: string }>({
     key: "",
     src: "",
   });
   const resolvedSource = useMemo(() => {
-    if (shouldRecolorSvg) {
+    if (shouldRecolorRaster) {
       if (recoloredEntry.key === recolorRequestKey && recoloredEntry.src) {
         return recoloredEntry.src;
       }
-      return baseSvgSource || String(element.src || "");
-    }
-    if (baseSvgSource && isSvgSource(baseSvgSource)) {
-      return baseSvgSource;
+      return baseRasterSource || String(element.src || "");
     }
     return String(element.src || "");
-  }, [baseSvgSource, element.src, recolorRequestKey, recoloredEntry, shouldRecolorSvg]);
+  }, [
+    baseRasterSource,
+    element.src,
+    recolorRequestKey,
+    recoloredEntry,
+    shouldRecolorRaster,
+  ]);
   const [image] = useImage(resolvedSource, "anonymous");
   const imageRef = useRef<Konva.Image | null>(null);
   const onImageMetadataRef = useRef(onImageMetadata);
   const isGif = useMemo(() => isGifSource(resolvedSource), [resolvedSource]);
 
   useEffect(() => {
-    if (!shouldRecolorSvg) return;
+    if (!shouldRecolorRaster) return;
     let cancelled = false;
     const requestKey = recolorRequestKey;
-    void recolorSvgSourceToDataUrl(baseSvgSource, normalizedSvgColorMap)
+    void recolorRasterSourceToDataUrl(
+      baseRasterSource,
+      normalizedRasterPalette,
+      normalizedRasterColorMap
+    )
       .then((nextSource) => {
         if (cancelled) return;
         setRecoloredEntry({
           key: requestKey,
-          src: String(nextSource || baseSvgSource || ""),
+          src: String(nextSource || baseRasterSource || ""),
         });
       })
       .catch(() => {
         if (cancelled) return;
         setRecoloredEntry({
           key: requestKey,
-          src: String(baseSvgSource || ""),
+          src: String(baseRasterSource || ""),
         });
       });
 
     return () => {
       cancelled = true;
     };
-  }, [baseSvgSource, normalizedSvgColorMap, recolorRequestKey, shouldRecolorSvg]);
+  }, [
+    baseRasterSource,
+    normalizedRasterColorMap,
+    normalizedRasterPalette,
+    recolorRequestKey,
+    shouldRecolorRaster,
+  ]);
 
   useEffect(() => {
     onImageMetadataRef.current = onImageMetadata;

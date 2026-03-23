@@ -10,7 +10,7 @@ const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
 const MAX_CANVA_REFERENCE_RESULTS = 32;
 const MAX_SVG_RASTER_SIDE = 8192;
 const MAX_TRACE_SIDE = 1024;
-const TRACE_OPTIONS = {
+const IMAGE_TRACER_OPTIONS = {
   ltres: 1,
   qtres: 1,
   pathomit: 2,
@@ -21,6 +21,19 @@ const TRACE_OPTIONS = {
   scale: 1,
   roundcoords: 1,
   strokewidth: 0,
+};
+const VECTORIZER_CONFIG = {
+  colorMode: 0,
+  colorPrecision: 6,
+  filterSpeckle: 4,
+  spliceThreshold: 45,
+  cornerThreshold: 60,
+  hierarchical: 0,
+  mode: 2,
+  layerDifference: 5,
+  lengthThreshold: 5,
+  maxIterations: 2,
+  pathPrecision: 2,
 };
 
 const CANVA_HOST_PATTERNS = [
@@ -373,6 +386,7 @@ async function fetchUrlAsAsset(url, timeoutMs) {
 
 let canvasLibPromise = null;
 let imageTracerLibPromise = null;
+let vectorizerLibPromise = null;
 
 async function getCanvasLib() {
   if (canvasLibPromise) return canvasLibPromise;
@@ -391,6 +405,14 @@ async function getImageTracerLib() {
     .then((module) => module?.default || module)
     .catch((_error) => null);
   return imageTracerLibPromise;
+}
+
+async function getVectorizerLib() {
+  if (vectorizerLibPromise) return vectorizerLibPromise;
+  vectorizerLibPromise = import("@neplex/vectorizer")
+    .then((module) => module?.default || module)
+    .catch((_error) => null);
+  return vectorizerLibPromise;
 }
 
 function estimateSvgPixelSize(svgText) {
@@ -490,14 +512,11 @@ function buildDataUrlFromBytes(bytes, mimeType) {
   return `data:${safeMimeType};base64,${Buffer.from(bytes || []).toString("base64")}`;
 }
 
-async function tryTraceRasterToSvg({ bytes, mimeType }) {
+async function normalizeRasterForTracing({ bytes, mimeType }) {
   if (!bytes || bytes.length === 0) return null;
-  if (!isRasterImageMimeType(mimeType)) return null;
 
   const canvasLib = await getCanvasLib();
-  const imageTracer = await getImageTracerLib();
   if (!canvasLib?.createCanvas || !canvasLib?.loadImage) return null;
-  if (!imageTracer || typeof imageTracer.imagedataToSVG !== "function") return null;
 
   try {
     const sourceDataUrl = buildDataUrlFromBytes(bytes, mimeType || "image/png");
@@ -513,8 +532,38 @@ async function tryTraceRasterToSvg({ bytes, mimeType }) {
     context.clearRect(0, 0, width, height);
     context.drawImage(sourceImage, 0, 0, width, height);
 
-    const imageData = context.getImageData(0, 0, width, height);
-    const tracedSvg = imageTracer.imagedataToSVG(imageData, TRACE_OPTIONS);
+    return {
+      width,
+      height,
+      imageData: context.getImageData(0, 0, width, height),
+      pngBytes: canvas.toBuffer("image/png"),
+    };
+  } catch (_error) {
+    return null;
+  }
+}
+
+async function tryTraceRasterToSvg({ bytes, mimeType }) {
+  if (!bytes || bytes.length === 0) return null;
+  if (!isRasterImageMimeType(mimeType)) return null;
+
+  const preparedRaster = await normalizeRasterForTracing({ bytes, mimeType });
+  if (!preparedRaster?.pngBytes || !preparedRaster?.imageData) return null;
+
+  const vectorizer = await getVectorizerLib();
+  const imageTracer = await getImageTracerLib();
+
+  try {
+    let tracedSvg = "";
+
+    if (vectorizer && typeof vectorizer.vectorize === "function") {
+      tracedSvg = await vectorizer.vectorize(preparedRaster.pngBytes, VECTORIZER_CONFIG);
+    } else if (imageTracer && typeof imageTracer.imagedataToSVG === "function") {
+      tracedSvg = imageTracer.imagedataToSVG(preparedRaster.imageData, IMAGE_TRACER_OPTIONS);
+    } else {
+      return null;
+    }
+
     const safeSvg = asString(tracedSvg);
     if (!safeSvg || !safeSvg.includes("<svg")) return null;
 
@@ -555,7 +604,12 @@ async function maybeTraceRasterToSvgAsset({
   }
 
   const normalizedFieldName = asString(fieldName).toLowerCase();
-  if (normalizedFieldName.includes("thumbnail") || normalizedFieldName.includes("poster")) {
+  if (
+    normalizedFieldName === "imagedataurl" ||
+    normalizedFieldName === "thumbnaildataurl" ||
+    normalizedFieldName.includes("thumbnail") ||
+    normalizedFieldName.includes("poster")
+  ) {
     return {
       bytes,
       mimeType,
