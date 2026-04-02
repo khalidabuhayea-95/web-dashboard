@@ -2,6 +2,7 @@
 
 import { ZoomIn, ZoomOut } from "lucide-react";
 
+import ElementPublishStrip from "@/components/editor/ElementPublishStrip";
 import { useEditorStore } from "@/store/editorStore";
 
 export default function PagesTimeline() {
@@ -9,8 +10,9 @@ export default function PagesTimeline() {
   const stageApi = useEditorStore((state) => state.stageApi);
 
   return (
-    <div className="relative border-t border-[#cbd1da] bg-[#eceef1] px-3 py-1.5">
-      <div className="flex items-center justify-center">
+    <div className="relative border-t border-[#cbd1da] bg-[#eceef1] px-3 py-2">
+      <div className="flex items-center gap-3">
+        <ElementPublishStrip />
         <div className="flex items-center gap-2 rounded-md border border-[#cad1db] bg-white px-2 py-1 text-[#334155]">
           <button type="button" onClick={() => stageApi?.zoomOut()} className="rounded p-1 hover:bg-[#eef2f8]">
             <ZoomOut size={14} />

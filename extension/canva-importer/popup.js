@@ -47,6 +47,17 @@ function collectSettings() {
   };
 }
 
+function formatPhaseTimings(phaseTimings) {
+  const entries = Object.entries(phaseTimings || {})
+    .filter((entry) => Number.isFinite(Number(entry[1])) && Number(entry[1]) >= 0)
+    .sort((a, b) => Number(b[1]) - Number(a[1]));
+  if (entries.length === 0) return "";
+  return entries
+    .slice(0, 4)
+    .map(([name, value]) => `${name}: ${Math.round(Number(value))}ms`)
+    .join(" | ");
+}
+
 function applySettings(settings = {}) {
   $("dashboardUrl").value = settings.dashboardUrl || "http://localhost:3000";
   $("importToken").value = settings.importToken || "";
@@ -105,6 +116,7 @@ async function importActiveTab() {
         token: settings.importToken,
         name: settings.templateName,
         slug: settings.templateSlug,
+        captureMetadata: false,
       },
       (response) => {
         const runtimeError = chrome.runtime.lastError;
@@ -157,8 +169,11 @@ async function main() {
         ? result.warnings.map((item) => String(item || "").trim()).filter(Boolean)
         : [];
       const warningSuffix = warnings.length > 0 ? `\nWarnings: ${warnings.join(" | ")}` : "";
+      const phaseTimingSummary = formatPhaseTimings(result?.phaseTimings);
+      const timingSuffix = phaseTimingSummary ? `\nTimings: ${phaseTimingSummary}` : "";
+      const metadataSuffix = result?.captureMetadata ? "\nMetadata scrape: on" : "\nMetadata scrape: off";
       setStatus(
-        `Imported: ${template.name || "-"}\nCanvas: ${template?.canvasSize?.width || "-"}x${template?.canvasSize?.height || "-"}\nLayers: ${layerCount || "-"}\nFonts imported: ${importedCustomFonts}${warningSuffix}`,
+        `Imported: ${template.name || "-"}\nCanvas: ${template?.canvasSize?.width || "-"}x${template?.canvasSize?.height || "-"}\nLayers: ${layerCount || "-"}\nFonts imported: ${importedCustomFonts}${metadataSuffix}${timingSuffix}${warningSuffix}`,
         "success"
       );
     } catch (error) {

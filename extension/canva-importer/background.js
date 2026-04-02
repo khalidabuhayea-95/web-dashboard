@@ -184,7 +184,7 @@ function isAllowedFontMimeType(mimeType) {
 
 function parseMimeTypeFromDataUrl(dataUrl) {
   const source = String(dataUrl || "").trim();
-  const match = source.match(/^data:([^;,]+);base64,/i);
+  const match = source.match(/^data:([^;,]+)(?:;[^,]*)?,/i);
   return String(match?.[1] || "").trim().toLowerCase();
 }
 
@@ -268,6 +268,114 @@ async function decodeDataUrlToBitmap(dataUrl) {
   return createImageBitmap(blob);
 }
 
+const TRIMMABLE_IMAGE_MIME_TYPES = new Set([
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "image/svg+xml",
+]);
+
+async function trimTransparentPaddingFromDataUrl(dataUrl, options = {}) {
+  const sourceDataUrl = String(dataUrl || "").trim();
+  const mimeType = parseMimeTypeFromDataUrl(sourceDataUrl);
+  if (!sourceDataUrl.startsWith("data:image/")) return null;
+  if (!TRIMMABLE_IMAGE_MIME_TYPES.has(mimeType)) return null;
+
+  const alphaThreshold = Math.max(1, Math.min(255, Number(options?.alphaThreshold || 8)));
+  const bitmap = await decodeDataUrlToBitmap(sourceDataUrl);
+  const sourceWidth = Math.max(1, Number(bitmap.width || 0));
+  const sourceHeight = Math.max(1, Number(bitmap.height || 0));
+  const scanCanvas = new OffscreenCanvas(sourceWidth, sourceHeight);
+  const scanContext = scanCanvas.getContext("2d", { willReadFrequently: true });
+  if (!scanContext) {
+    throw new Error("Failed to create trim scan context.");
+  }
+  scanContext.drawImage(bitmap, 0, 0, sourceWidth, sourceHeight);
+  const imageData = scanContext.getImageData(0, 0, sourceWidth, sourceHeight);
+  const pixels = imageData.data;
+
+  let minX = sourceWidth;
+  let minY = sourceHeight;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < sourceHeight; y += 1) {
+    for (let x = 0; x < sourceWidth; x += 1) {
+      const alpha = pixels[(y * sourceWidth + x) * 4 + 3];
+      if (alpha < alphaThreshold) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) {
+    return {
+      trimmed: false,
+      dataUrl: sourceDataUrl,
+      offsetX: 0,
+      offsetY: 0,
+      width: sourceWidth,
+      height: sourceHeight,
+      originalWidth: sourceWidth,
+      originalHeight: sourceHeight,
+    };
+  }
+
+  const shouldForceRasterize = Boolean(options?.forceRasterize);
+  const alreadyTight =
+    minX === 0 &&
+    minY === 0 &&
+    maxX === sourceWidth - 1 &&
+    maxY === sourceHeight - 1;
+  if (alreadyTight && !shouldForceRasterize) {
+    return {
+      trimmed: false,
+      dataUrl: sourceDataUrl,
+      offsetX: 0,
+      offsetY: 0,
+      width: sourceWidth,
+      height: sourceHeight,
+      originalWidth: sourceWidth,
+      originalHeight: sourceHeight,
+    };
+  }
+
+  const trimmedWidth = alreadyTight ? sourceWidth : Math.max(1, maxX - minX + 1);
+  const trimmedHeight = alreadyTight ? sourceHeight : Math.max(1, maxY - minY + 1);
+  const offsetX = alreadyTight ? 0 : minX;
+  const offsetY = alreadyTight ? 0 : minY;
+  const trimmedCanvas = new OffscreenCanvas(trimmedWidth, trimmedHeight);
+  const trimmedContext = trimmedCanvas.getContext("2d", { willReadFrequently: false });
+  if (!trimmedContext) {
+    throw new Error("Failed to create trim output context.");
+  }
+  trimmedContext.drawImage(
+    scanCanvas,
+    offsetX,
+    offsetY,
+    trimmedWidth,
+    trimmedHeight,
+    0,
+    0,
+    trimmedWidth,
+    trimmedHeight
+  );
+  const trimmedBlob = await trimmedCanvas.convertToBlob({ type: "image/png" });
+  const trimmedDataUrl = await blobToDataUrl(trimmedBlob);
+  return {
+    trimmed: trimmedDataUrl.startsWith("data:image/"),
+    dataUrl: trimmedDataUrl.startsWith("data:image/") ? trimmedDataUrl : sourceDataUrl,
+    offsetX,
+    offsetY,
+    width: trimmedWidth,
+    height: trimmedHeight,
+    originalWidth: sourceWidth,
+    originalHeight: sourceHeight,
+  };
+}
+
 async function cropBitmapToDataUrl(bitmap, rect, options = {}) {
   const dpr = Number(options?.dpr || 1);
   const crop = cleanCropRect(rect, dpr, bitmap.width, bitmap.height);
@@ -342,7 +450,7 @@ function buildSingleImageFabricObject(imageDataUrl, width, height, options = {})
     opacity: 1,
     src: imageDataUrl,
     layerType: "image",
-    layerName: "Imported Canva Snapshot",
+    layerName: String(options?.layerName || "Imported Canva Snapshot"),
     layerLocked: false,
     layerHidden: false,
     sourceWidth: width,
@@ -350,6 +458,7 @@ function buildSingleImageFabricObject(imageDataUrl, width, height, options = {})
     importNodeId: String(options?.importNodeId || "canva-snapshot-1"),
     importParentId: options?.importParentId ? String(options.importParentId) : null,
     importKind: String(options?.importKind || "image"),
+    importZIndex: Number.isFinite(Number(options?.importZIndex)) ? Number(options.importZIndex) : undefined,
     fallback: typeof options?.fallback === "boolean" ? options.fallback : true,
     fallbackReason: String(options?.fallbackReason || "full-snapshot"),
   };
@@ -367,6 +476,10 @@ function annotateImportMetadata(object, layer, fallbackOverride) {
     importNodeId: String(layer?.id || object.importNodeId || ""),
     importParentId: String(layer?.parentId || "").trim() || null,
     importKind: String(layer?.kind || object.layerType || "unknown"),
+    sourceAssetId: sanitizeMetadataText(layer?.sourceAssetId || object.sourceAssetId || ""),
+    titleEn: sanitizeMetadataText(layer?.titleEn || object.titleEn || ""),
+    tagsEn: uniqueMetadataStrings(layer?.tagsEn || object.tagsEn || []),
+    labelsEn: uniqueMetadataStrings(layer?.labelsEn || object.labelsEn || []),
     fallback,
     fallbackReason,
   };
@@ -673,15 +786,43 @@ function orderFontCandidatesForTarget(candidates, target) {
     .map((entry) => entry.candidate);
 }
 
+function resolveRotatedTopLeftAnchor(left, top, width, height, angle) {
+  const normalizedAngle = ((numberOr(angle, 0) % 360) + 360) % 360;
+  if (Math.abs(normalizedAngle) <= 0.2 || Math.abs(normalizedAngle - 360) <= 0.2) {
+    return {
+      left,
+      top,
+    };
+  }
+
+  const radians = (normalizedAngle * Math.PI) / 180;
+  const cos = Math.cos(radians);
+  const sin = Math.sin(radians);
+  const halfWidth = Math.max(1, Number(width || 1)) / 2;
+  const halfHeight = Math.max(1, Number(height || 1)) / 2;
+  const centerX = Number(left || 0) + halfWidth;
+  const centerY = Number(top || 0) + halfHeight;
+
+  return {
+    left: centerX - halfWidth * cos + halfHeight * sin,
+    top: centerY - halfWidth * sin - halfHeight * cos,
+  };
+}
+
 async function layerToFabricObject(layer, index) {
-  const left = numberOr(layer?.x, 0);
-  const top = numberOr(layer?.y, 0);
-  const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
-  const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
+  let left = numberOr(layer?.x, 0);
+  let top = numberOr(layer?.y, 0);
+  let width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
+  let height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
   const angle = numberOr(layer?.angle, 0);
   const opacity = Math.max(0, Math.min(1, numberOr(layer?.opacity, 1)));
   const flipX = Boolean(layer?.flipX);
   const flipY = Boolean(layer?.flipY);
+  const normalizedAngle = ((angle % 360) + 360) % 360;
+  const isAxisAlignedImage =
+    !flipX &&
+    !flipY &&
+    (Math.abs(normalizedAngle) <= 0.2 || Math.abs(normalizedAngle - 360) <= 0.2);
   if (layer?.kind === "text" && String(layer?.text || "").trim()) {
     const text = String(layer.text || "").trim();
     const fontSize = Math.max(8, numberOr(layer?.fontSize, 28));
@@ -697,13 +838,14 @@ async function layerToFabricObject(layer, index) {
       Boolean(textBackgroundColor) &&
       textBackgroundColor.toLowerCase() !== "transparent" &&
       textBackgroundColor.toLowerCase() !== "rgba(0, 0, 0, 0)";
+    const resolvedAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
     return annotateImportMetadata({
       type: "textbox",
       version: "7.0.0",
       originX: "left",
       originY: "top",
-      left,
-      top,
+      left: resolvedAnchor.left,
+      top: resolvedAnchor.top,
       width,
       height,
       angle,
@@ -730,13 +872,14 @@ async function layerToFabricObject(layer, index) {
   }
 
   if (layer?.kind === "shape") {
+    const resolvedAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
     return annotateImportMetadata({
       type: "rect",
       version: "7.0.0",
       originX: "left",
       originY: "top",
-      left,
-      top,
+      left: resolvedAnchor.left,
+      top: resolvedAnchor.top,
       width,
       height,
       scaleX: 1,
@@ -756,18 +899,13 @@ async function layerToFabricObject(layer, index) {
 
   const embeddedImageDataUrl = String(layer?.imageDataUrl || "");
   const rawImageSrc = String(layer?.imageSrc || "");
-  const safeEmbeddedImageDataUrl =
-    embeddedImageDataUrl.startsWith("data:image/") &&
-    embeddedImageDataUrl.length <= MAX_INLINE_IMAGE_DATA_URL_LENGTH
-      ? embeddedImageDataUrl
-      : "";
+  const safeEmbeddedImageDataUrl = embeddedImageDataUrl.startsWith("data:image/")
+    ? embeddedImageDataUrl
+    : "";
   let imageSrc = "";
   if (safeEmbeddedImageDataUrl) {
     imageSrc = safeEmbeddedImageDataUrl;
-  } else if (
-    rawImageSrc.startsWith("data:image/") &&
-    rawImageSrc.length <= MAX_INLINE_IMAGE_DATA_URL_LENGTH
-  ) {
+  } else if (rawImageSrc.startsWith("data:image/")) {
     imageSrc = rawImageSrc;
   } else if (/^https?:\/\//i.test(rawImageSrc)) {
     imageSrc = rawImageSrc;
@@ -777,18 +915,44 @@ async function layerToFabricObject(layer, index) {
   if (!imageSrc || /^blob:/i.test(imageSrc)) return null;
   let intrinsicWidth = Math.max(0, numberOr(layer?.sourceWidth, 0));
   let intrinsicHeight = Math.max(0, numberOr(layer?.sourceHeight, 0));
+  if (isAxisAlignedImage && imageSrc.startsWith("data:image/")) {
+    try {
+      const sourceMimeType = parseMimeTypeFromDataUrl(imageSrc);
+      const shouldForceRasterizeThinSvg =
+        sourceMimeType === "image/svg+xml" && (width <= 16 || height <= 16);
+      const trimmedImage = await trimTransparentPaddingFromDataUrl(imageSrc, {
+        forceRasterize: shouldForceRasterizeThinSvg,
+      });
+      if (trimmedImage?.trimmed) {
+        const sourceScaleX =
+          width / Math.max(1, Math.round(intrinsicWidth || trimmedImage.originalWidth || width));
+        const sourceScaleY =
+          height / Math.max(1, Math.round(intrinsicHeight || trimmedImage.originalHeight || height));
+        left += trimmedImage.offsetX * sourceScaleX;
+        top += trimmedImage.offsetY * sourceScaleY;
+        width = Math.max(1, Math.round(trimmedImage.width * sourceScaleX));
+        height = Math.max(1, Math.round(trimmedImage.height * sourceScaleY));
+        intrinsicWidth = Math.max(1, Math.round(trimmedImage.width));
+        intrinsicHeight = Math.max(1, Math.round(trimmedImage.height));
+        imageSrc = trimmedImage.dataUrl;
+      }
+    } catch (_error) {
+      // Keep import resilient when transparent-bound trimming fails.
+    }
+  }
   const objectWidth = Math.max(1, Math.round(intrinsicWidth || width));
   const objectHeight = Math.max(1, Math.round(intrinsicHeight || height));
   const objectScaleX = width / Math.max(1, objectWidth);
   const objectScaleY = height / Math.max(1, objectHeight);
+  const resolvedAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
 
   const imageObject = {
     type: "image",
     version: "7.0.0",
     originX: "left",
     originY: "top",
-    left,
-    top,
+    left: resolvedAnchor.left,
+    top: resolvedAnchor.top,
     width: objectWidth,
     height: objectHeight,
     scaleX: objectScaleX,
@@ -872,6 +1036,19 @@ async function buildHybridFabricObjects(
       /^file:\/\//i.test(src)
     );
   }).length;
+  const looksLikeDecorativeFrameLayer = (layer) => {
+    const metadata = [
+      layer?.name,
+      layer?.titleEn,
+      Array.isArray(layer?.labelsEn) ? layer.labelsEn.join(" ") : "",
+      Array.isArray(layer?.tagsEn) ? layer.tagsEn.join(" ") : "",
+      layer?.sourceAssetId,
+    ]
+      .map((value) => sanitizeMetadataText(value).toLowerCase())
+      .filter(Boolean)
+      .join(" ");
+    return /\b(frame|border)\b/.test(metadata);
+  };
 
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
@@ -903,6 +1080,9 @@ async function buildHybridFabricObjects(
               kind: "image",
               imageSrc: cropped.dataUrl,
               imageDataUrl: cropped.dataUrl,
+              angle: 0,
+              flipX: false,
+              flipY: false,
               sourceWidth: layerWidth,
               sourceHeight: layerHeight,
               fallback: true,
@@ -932,7 +1112,11 @@ async function buildHybridFabricObjects(
     const layerWidth = Math.max(1, Math.round(numberOr(layer?.width, 1)));
     const layerHeight = Math.max(1, Math.round(numberOr(layer?.height, 1)));
     const layerArea = layerWidth * layerHeight;
-    if (resolvableImageLayerCount > 0 && layerArea > canvasArea * 0.8) {
+    if (
+      resolvableImageLayerCount > 0 &&
+      layerArea > canvasArea * 0.8 &&
+      !looksLikeDecorativeFrameLayer(layer)
+    ) {
       continue;
     }
     const viewportRect = layer?.viewportRect;
@@ -957,6 +1141,9 @@ async function buildHybridFabricObjects(
         ...layer,
         imageSrc: cropped.dataUrl,
         imageDataUrl: cropped.dataUrl,
+        angle: 0,
+        flipX: false,
+        flipY: false,
         sourceWidth: layerWidth,
         sourceHeight: layerHeight,
         fallback: true,
@@ -1006,11 +1193,30 @@ function compactRequestBody(body, fallbackImageDataUrl, fallbackWidth, fallbackH
   }
 
   const objects = Array.isArray(nextBody?.fabricData?.objects) ? nextBody.fabricData.objects : [];
+  const canvasWidth = Math.max(1, Math.round(numberOr(nextBody?.canvasWidth, fallbackWidth || 1)));
+  const canvasHeight = Math.max(1, Math.round(numberOr(nextBody?.canvasHeight, fallbackHeight || 1)));
+  const pageArea = Math.max(1, canvasWidth * canvasHeight);
+  const isEssentialOversizedInlineImageObject = (object) => {
+    const src = String(object?.src || "");
+    if (!src.startsWith("data:image/")) return false;
+    if (src.length <= MAX_INLINE_IMAGE_DATA_URL_LENGTH) return false;
+    const scaleX = Math.max(0.0001, Math.abs(numberOr(object?.scaleX, 1)));
+    const scaleY = Math.max(0.0001, Math.abs(numberOr(object?.scaleY, 1)));
+    const width = Math.max(1, numberOr(object?.width, 1) * scaleX);
+    const height = Math.max(1, numberOr(object?.height, 1) * scaleY);
+    const coverage = (width * height) / pageArea;
+    const layerName = String(object?.layerName || object?.titleEn || "").toLowerCase();
+    const labels = Array.isArray(object?.labelsEn) ? object.labelsEn.join(" ").toLowerCase() : "";
+    const looksLikeFrame =
+      /\b(frame|border)\b/.test(layerName) ||
+      /\b(frame|border)\b/.test(labels);
+    return coverage >= 0.78 || looksLikeFrame;
+  };
   if (objects.length > 0) {
     const compactObjects = objects.filter((object) => {
       const src = String(object?.src || "");
       if (!src.startsWith("data:image/")) return true;
-      return src.length <= MAX_INLINE_IMAGE_DATA_URL_LENGTH;
+      return src.length <= MAX_INLINE_IMAGE_DATA_URL_LENGTH || isEssentialOversizedInlineImageObject(object);
     });
     if (compactObjects.length > 0) {
       nextBody = {
@@ -1191,6 +1397,352 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, Math.max(0, Number(ms) || 0)));
 }
 
+function sanitizeMetadataText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function uniqueMetadataStrings(values = []) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => sanitizeMetadataText(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function normalizeMetadataKey(value) {
+  return sanitizeMetadataText(value)
+    .toLowerCase()
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function tokenizeMetadataLabel(value) {
+  return uniqueMetadataStrings(
+    normalizeMetadataKey(value)
+      .split(" ")
+      .map((token) => token.trim())
+      .filter((token) => token.length >= 2)
+  );
+}
+
+function isVisibleDomElement(node) {
+  if (!node || typeof node.getBoundingClientRect !== "function") return false;
+  const rect = node.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return false;
+  const style = window.getComputedStyle(node);
+  return style.display !== "none" && style.visibility !== "hidden" && Number(style.opacity || 1) > 0.01;
+}
+
+function isKeywordChipButton(node) {
+  if (!node || typeof node.getAttribute !== "function") return false;
+  const ariaLabel = String(node.getAttribute("aria-label") || "").toLowerCase();
+  return (
+    ariaLabel.includes("الكلمة الرئيسية") ||
+    ariaLabel.includes("keyword") ||
+    ariaLabel.includes("search for keyword")
+  );
+}
+
+function isKeywordExpandToggle(node) {
+  if (!node) return false;
+  const text = sanitizeMetadataText(
+    node.textContent || node.getAttribute?.("aria-label") || node.getAttribute?.("title") || ""
+  ).toLowerCase();
+  if (!text) return false;
+  const mentionsKeywords =
+    text.includes("keyword") ||
+    text.includes("keywords") ||
+    text.includes("كلمات رئيسية") ||
+    text.includes("الكلمات الرئيسية");
+  const wantsMore =
+    text.includes(" more") ||
+    text.startsWith("more") ||
+    text.includes("show all") ||
+    text.includes("all keywords") ||
+    text.includes("عرض كل") ||
+    text.includes("كل الكلمات") ||
+    text.includes("المزيد") ||
+    text.includes("أكثر");
+  const wantsLess =
+    text.includes(" less") ||
+    text.includes("fewer") ||
+    text.includes("show fewer") ||
+    text.includes("show less") ||
+    text.includes("عرض أقل") ||
+    text.includes("أقل");
+  return mentionsKeywords && wantsMore && !wantsLess;
+}
+
+async function expandVisibleCanvaKeywordList() {
+  const toggle = Array.from(document.querySelectorAll("button,[role='button']")).find(
+    (candidate) => isVisibleDomElement(candidate) && isKeywordExpandToggle(candidate)
+  );
+  if (!toggle) return false;
+  toggle.dispatchEvent(
+    new MouseEvent("click", {
+      bubbles: true,
+      cancelable: true,
+      composed: true,
+      view: window,
+    })
+  );
+  await sleep(180);
+  return true;
+}
+
+function findMetadataContainerForChip(node) {
+  let current = node?.parentElement || null;
+  let best = null;
+  let bestCount = 0;
+  while (current && current !== document.body) {
+    if (!isVisibleDomElement(current)) {
+      current = current.parentElement;
+      continue;
+    }
+    const visibleKeywordButtons = Array.from(current.querySelectorAll("button,[role='button']"))
+      .filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+    const hasHeading = Boolean(
+      Array.from(current.querySelectorAll("h1,h2,h3,h4")).find(
+        (heading) => isVisibleDomElement(heading) && sanitizeMetadataText(heading.textContent).length >= 3
+      )
+    );
+    if (visibleKeywordButtons.length >= 2 && hasHeading) {
+      if (visibleKeywordButtons.length >= bestCount) {
+        best = current;
+        bestCount = visibleKeywordButtons.length;
+      }
+    }
+    current = current.parentElement;
+  }
+  return best;
+}
+
+function scrapeVisibleCanvaAssetMetadata() {
+  const keywordButtons = Array.from(document.querySelectorAll("button,[role='button']"))
+    .filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+  if (keywordButtons.length === 0) return null;
+
+  const containers = new Map();
+  keywordButtons.forEach((button) => {
+    const container = findMetadataContainerForChip(button);
+    if (!container) return;
+    const key = container;
+    const existing = containers.get(key) || [];
+    existing.push(button);
+    containers.set(key, existing);
+  });
+
+  const sortedContainers = Array.from(containers.entries())
+    .map(([container, buttons]) => ({ container, buttons }))
+    .sort((left, right) => right.buttons.length - left.buttons.length);
+  const selected = sortedContainers[0] || null;
+  if (!selected) return null;
+
+  const titleNode = Array.from(selected.container.querySelectorAll("h1,h2,h3,h4"))
+    .find((heading) => isVisibleDomElement(heading) && sanitizeMetadataText(heading.textContent).length >= 3);
+  const titleEn = sanitizeMetadataText(titleNode?.textContent || "");
+  const tagsEn = uniqueMetadataStrings(
+    selected.buttons
+      .map((button) => sanitizeMetadataText(button.textContent || ""))
+      .filter((value) => value.length >= 2)
+  );
+
+  if (!titleEn && tagsEn.length === 0) return null;
+
+  return {
+    titleEn,
+    tagsEn,
+    labelsEn: uniqueMetadataStrings([titleEn, ...tagsEn, ...tokenizeMetadataLabel(titleEn)]),
+  };
+}
+
+function dispatchSyntheticLayerClick(node) {
+  if (!node || typeof node.dispatchEvent !== "function") return;
+  const rect = node.getBoundingClientRect();
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  const pointTarget = document.elementFromPoint?.(clientX, clientY);
+  const target =
+    (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+    node.querySelector?.("img,image,canvas") ||
+    node;
+  ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
+    target.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX,
+        clientY,
+      })
+    );
+  });
+}
+
+function dispatchSyntheticContextMenu(node) {
+  if (!node || typeof node.dispatchEvent !== "function") return;
+  const rect = node.getBoundingClientRect();
+  const clientX = rect.left + rect.width / 2;
+  const clientY = rect.top + rect.height / 2;
+  const pointTarget = document.elementFromPoint?.(clientX, clientY);
+  const target =
+    (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+    node.querySelector?.("img,image,canvas") ||
+    node;
+  ["pointerdown", "mousedown", "contextmenu", "mouseup"].forEach((type) => {
+    target.dispatchEvent(
+      new MouseEvent(type, {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+        clientX,
+        clientY,
+        button: 2,
+        buttons: type === "mouseup" ? 0 : 2,
+      })
+    );
+  });
+}
+
+function findVisibleEditorActionButtonNearNode(node) {
+  if (!node || typeof node.getBoundingClientRect !== "function") return null;
+  const rect = node.getBoundingClientRect();
+  let best = null;
+  let bestScore = Number.POSITIVE_INFINITY;
+  Array.from(document.querySelectorAll("button,[role='button']")).forEach((candidate) => {
+    if (!isVisibleDomElement(candidate)) return;
+    if (candidate === node || node.contains(candidate) || candidate.contains(node)) return;
+    const candidateRect = candidate.getBoundingClientRect?.();
+    if (!candidateRect || candidateRect.width <= 0 || candidateRect.height <= 0) return;
+    if (candidateRect.width < 18 || candidateRect.width > 80) return;
+    if (candidateRect.height < 18 || candidateRect.height > 80) return;
+    const verticalDistance =
+      candidateRect.bottom < rect.top
+        ? rect.top - candidateRect.bottom
+        : candidateRect.top > rect.bottom
+          ? candidateRect.top - rect.bottom
+          : 0;
+    const horizontalDistance =
+      candidateRect.right < rect.left
+        ? rect.left - candidateRect.right
+        : candidateRect.left > rect.right
+          ? candidateRect.left - rect.right
+          : 0;
+    if (verticalDistance > 180 || horizontalDistance > 180) return;
+    const iconLike =
+      sanitizeMetadataText(candidate.textContent || "").length <= 2 ||
+      Boolean(candidate.querySelector?.("svg"));
+    if (!iconLike) return;
+    const score = verticalDistance * 4 + horizontalDistance;
+    if (score < bestScore) {
+      best = candidate;
+      bestScore = score;
+    }
+  });
+  return best;
+}
+
+async function openVisibleCanvaMetadataForNode(node) {
+  if (!node) return false;
+  if (scrapeVisibleCanvaAssetMetadata()) return true;
+  dispatchSyntheticContextMenu(node);
+  await sleep(220);
+  await expandVisibleCanvaKeywordList();
+  if (scrapeVisibleCanvaAssetMetadata()) return true;
+  const actionButton = findVisibleEditorActionButtonNearNode(node);
+  if (actionButton) {
+    if (typeof actionButton.click === "function") {
+      actionButton.click();
+    }
+    actionButton.dispatchEvent(
+      new MouseEvent("click", {
+        bubbles: true,
+        cancelable: true,
+        composed: true,
+        view: window,
+      })
+    );
+    await sleep(320);
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      await expandVisibleCanvaKeywordList();
+      if (scrapeVisibleCanvaAssetMetadata()) return true;
+      await sleep(200);
+    }
+  }
+  return false;
+}
+
+function isBackgroundLikeMetadataCandidate(candidate, pageWidth, pageHeight) {
+  if (!candidate) return true;
+  if (candidate.isBackgroundNode || candidate.isFullPageBackground) return true;
+  const width = Math.max(1, Number(candidate.width || 0));
+  const height = Math.max(1, Number(candidate.height || 0));
+  const pageArea = Math.max(1, Number(pageWidth || 0) * Number(pageHeight || 0));
+  const areaRatio = (width * height) / pageArea;
+  return areaRatio >= 0.8 || (width >= pageWidth * 0.9 && height >= pageHeight * 0.9);
+}
+
+function metadataMatchesCandidate(metadata, candidate) {
+  if (!metadata || !candidate) return false;
+  const metadataTitle = normalizeMetadataKey(metadata.titleEn);
+  const candidateName = normalizeMetadataKey(candidate.name);
+  if (!metadataTitle || !candidateName) return false;
+  if (metadataTitle === candidateName) return true;
+  if (metadataTitle.includes(candidateName) || candidateName.includes(metadataTitle)) return true;
+  const metadataTokens = new Set(tokenizeMetadataLabel(metadataTitle));
+  const candidateTokens = tokenizeMetadataLabel(candidateName);
+  if (metadataTokens.size === 0 || candidateTokens.length === 0) return false;
+  const shared = candidateTokens.filter((token) => metadataTokens.has(token)).length;
+  return shared >= Math.max(1, Math.min(metadataTokens.size, candidateTokens.length) - 1);
+}
+
+async function collectCanvaLayerMetadata(candidates, pageWidth, pageHeight) {
+  const byId = new Map();
+  const pending = (Array.isArray(candidates) ? candidates : []).filter(
+    (candidate) =>
+      candidate &&
+      candidate.kind === "image" &&
+      candidate.node &&
+      !isBackgroundLikeMetadataCandidate(candidate, pageWidth, pageHeight)
+  );
+  if (pending.length === 0) return byId;
+
+  await expandVisibleCanvaKeywordList();
+  const visibleMetadata = scrapeVisibleCanvaAssetMetadata();
+  if (visibleMetadata) {
+    const matchedCandidate = pending.find((candidate) => metadataMatchesCandidate(visibleMetadata, candidate));
+    if (matchedCandidate) {
+      byId.set(matchedCandidate.id, visibleMetadata);
+    }
+  }
+
+  const maxMetadataScrapes = Math.min(18, pending.length);
+  for (let index = 0; index < maxMetadataScrapes; index += 1) {
+    const candidate = pending[index];
+    if (byId.has(candidate.id)) continue;
+    dispatchSyntheticLayerClick(candidate.node);
+    await sleep(180);
+    await openVisibleCanvaMetadataForNode(candidate.node);
+    await expandVisibleCanvaKeywordList();
+    let scraped = null;
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      scraped = scrapeVisibleCanvaAssetMetadata();
+      if (scraped && (scraped.tagsEn.length > 0 || scraped.titleEn)) break;
+      await sleep(120);
+    }
+    if (!scraped) continue;
+    if (!metadataMatchesCandidate(scraped, candidate) && scraped.tagsEn.length === 0) continue;
+    byId.set(candidate.id, scraped);
+  }
+
+  return byId;
+}
+
 async function waitForTabReady(tabId, timeoutMs = 6000) {
   const deadline = Date.now() + Math.max(800, Number(timeoutMs) || 6000);
   while (Date.now() < deadline) {
@@ -1313,13 +1865,16 @@ async function getBasicCaptureMetaFromTab(tabId) {
   return result && typeof result === "object" ? result : null;
 }
 
-async function getCaptureMetaFromTab(tabId) {
+async function getCaptureMetaFromTab(tabId, options = {}) {
+  const shouldCollectLayerMetadata = Boolean(options?.captureMetadata);
   let results = null;
   let primaryError = "";
   try {
     results = await chrome.scripting.executeScript({
       target: { tabId },
-      func: async () => {
+      args: [{ captureMetadata: shouldCollectLayerMetadata }],
+      func: async (runtimeOptions = {}) => {
+      const shouldCollectLayerMetadata = Boolean(runtimeOptions?.captureMetadata);
       const viewportCenter = {
         x: window.innerWidth / 2,
         y: window.innerHeight / 2,
@@ -1358,6 +1913,383 @@ async function getCaptureMetaFromTab(tabId) {
         );
         const numeric = Number(match?.[1]);
         return Number.isFinite(numeric) ? numeric : 0;
+      };
+
+      const sleep = (ms) =>
+        new Promise((resolve) => {
+          window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+        });
+
+      const sanitizeMetadataText = (value) =>
+        String(value || "").replace(/\s+/g, " ").trim();
+
+      const uniqueMetadataStrings = (values) =>
+        Array.from(
+          new Set(
+            (Array.isArray(values) ? values : [])
+              .map((value) => sanitizeMetadataText(value))
+              .filter(Boolean)
+          )
+        );
+
+      const normalizeMetadataKey = (value) =>
+        sanitizeMetadataText(value)
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const tokenizeMetadataLabel = (value) =>
+        uniqueMetadataStrings(
+          normalizeMetadataKey(value)
+            .split(/\s+/)
+            .filter((token) => token.length >= 2)
+        );
+
+      const getImageElementTitleHint = (element) => {
+        if (!element) return "";
+        return sanitizeMetadataText(
+          element.getAttribute?.("alt") ||
+            element.getAttribute?.("aria-label") ||
+            element.getAttribute?.("title") ||
+            ""
+        );
+      };
+
+      const looksLikeDecorativeFrameLabel = (value) =>
+        /\b(frame|border)\b/.test(
+          sanitizeMetadataText(value)
+            .toLowerCase()
+        );
+
+      const isVisibleDomElement = (element) => {
+        if (!element || typeof element.getBoundingClientRect !== "function") return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width < 2 || rect.height < 2) return false;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0.01
+        );
+      };
+
+      const isKeywordChipButton = (element) => {
+        if (!element) return false;
+        const text = sanitizeMetadataText(element.textContent || "");
+        if (!text || text.length < 2 || text.length > 40) return false;
+        const aria = sanitizeMetadataText(
+          element.getAttribute?.("aria-label") ||
+            element.getAttribute?.("title") ||
+            ""
+        ).toLowerCase();
+        const className = sanitizeMetadataText(element.className || "").toLowerCase();
+        return (
+          aria.includes("الكلمة الرئيسية") ||
+          aria.includes("keyword") ||
+          className.includes("chip") ||
+          className.includes("tag")
+        );
+      };
+
+      const isKeywordExpandToggle = (element) => {
+        if (!element) return false;
+        const text = sanitizeMetadataText(
+          element.textContent || element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""
+        ).toLowerCase();
+        if (!text) return false;
+        const mentionsKeywords =
+          text.includes("keyword") ||
+          text.includes("keywords") ||
+          text.includes("كلمات رئيسية") ||
+          text.includes("الكلمات الرئيسية");
+        const wantsMore =
+          text.includes(" more") ||
+          text.startsWith("more") ||
+          text.includes("show all") ||
+          text.includes("all keywords") ||
+          text.includes("عرض كل") ||
+          text.includes("كل الكلمات") ||
+          text.includes("المزيد") ||
+          text.includes("أكثر");
+        const wantsLess =
+          text.includes(" less") ||
+          text.includes("fewer") ||
+          text.includes("show fewer") ||
+          text.includes("show less") ||
+          text.includes("عرض أقل") ||
+          text.includes("أقل");
+        return mentionsKeywords && wantsMore && !wantsLess;
+      };
+
+      const expandVisibleCanvaKeywordList = async () => {
+        const toggle = Array.from(document.querySelectorAll("button,[role='button']")).find(
+          (candidate) => isVisibleDomElement(candidate) && isKeywordExpandToggle(candidate)
+        );
+        if (!toggle) return false;
+        toggle.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+          })
+        );
+        await sleep(180);
+        return true;
+      };
+
+      const findMetadataContainerForChip = (element) => {
+        let current = element?.parentElement || null;
+        let depth = 0;
+        let best = null;
+        let bestCount = 0;
+        while (current && depth < 8) {
+          const visibleKeywordButtons = Array.from(
+            current.querySelectorAll("button,[role='button']")
+          ).filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+          const hasHeading = Array.from(current.querySelectorAll("h1,h2,h3,h4")).some(
+            (heading) =>
+              isVisibleDomElement(heading) &&
+              sanitizeMetadataText(heading.textContent).length >= 3
+          );
+          if (visibleKeywordButtons.length >= 2 && hasHeading) {
+            if (visibleKeywordButtons.length >= bestCount) {
+              best = current;
+              bestCount = visibleKeywordButtons.length;
+            }
+          }
+          current = current.parentElement;
+          depth += 1;
+        }
+        return best;
+      };
+
+      const scrapeVisibleCanvaAssetMetadata = () => {
+        const keywordButtons = Array.from(document.querySelectorAll("button,[role='button']"))
+          .filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+        if (keywordButtons.length === 0) return null;
+
+        const containers = new Map();
+        keywordButtons.forEach((button) => {
+          const container = findMetadataContainerForChip(button);
+          if (!container) return;
+          const existing = containers.get(container) || [];
+          existing.push(button);
+          containers.set(container, existing);
+        });
+
+        const selected =
+          Array.from(containers.entries())
+            .map(([container, buttons]) => ({ container, buttons }))
+            .sort((left, right) => right.buttons.length - left.buttons.length)[0] || null;
+        if (!selected) return null;
+
+        const titleNode = Array.from(selected.container.querySelectorAll("h1,h2,h3,h4")).find(
+          (heading) =>
+            isVisibleDomElement(heading) &&
+            sanitizeMetadataText(heading.textContent).length >= 3
+        );
+        const titleEn = sanitizeMetadataText(titleNode?.textContent || "");
+        const tagsEn = uniqueMetadataStrings(
+          selected.buttons
+            .map((button) => sanitizeMetadataText(button.textContent || ""))
+            .filter((value) => value.length >= 2)
+        );
+
+        if (!titleEn && tagsEn.length === 0) return null;
+
+        return {
+          titleEn,
+          tagsEn,
+          labelsEn: uniqueMetadataStrings([titleEn, ...tagsEn, ...tokenizeMetadataLabel(titleEn)]),
+        };
+      };
+
+      const dispatchSyntheticLayerClick = (node) => {
+        if (!node || typeof node.dispatchEvent !== "function") return;
+        const rect = node.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const pointTarget = document.elementFromPoint?.(clientX, clientY);
+        const target =
+          (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+          node.querySelector?.("img,image,canvas") ||
+          node;
+        ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
+          target.dispatchEvent(
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX,
+              clientY,
+            })
+          );
+        });
+      };
+
+      const dispatchSyntheticContextMenu = (node) => {
+        if (!node || typeof node.dispatchEvent !== "function") return;
+        const rect = node.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const pointTarget = document.elementFromPoint?.(clientX, clientY);
+        const target =
+          (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+          node.querySelector?.("img,image,canvas") ||
+          node;
+        ["pointerdown", "mousedown", "contextmenu", "mouseup"].forEach((type) => {
+          target.dispatchEvent(
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX,
+              clientY,
+              button: 2,
+              buttons: type === "mouseup" ? 0 : 2,
+            })
+          );
+        });
+      };
+
+      const findVisibleEditorActionButtonNearNode = (node) => {
+        if (!node || typeof node.getBoundingClientRect !== "function") return null;
+        const rect = node.getBoundingClientRect();
+        let best = null;
+        let bestScore = Number.POSITIVE_INFINITY;
+        Array.from(document.querySelectorAll("button,[role='button']")).forEach((candidate) => {
+          if (!isVisibleDomElement(candidate)) return;
+          if (candidate === node || node.contains(candidate) || candidate.contains(node)) return;
+          const candidateRect = candidate.getBoundingClientRect?.();
+          if (!candidateRect || candidateRect.width <= 0 || candidateRect.height <= 0) return;
+          if (candidateRect.width < 18 || candidateRect.width > 80) return;
+          if (candidateRect.height < 18 || candidateRect.height > 80) return;
+          const verticalDistance =
+            candidateRect.bottom < rect.top
+              ? rect.top - candidateRect.bottom
+              : candidateRect.top > rect.bottom
+                ? candidateRect.top - rect.bottom
+                : 0;
+          const horizontalDistance =
+            candidateRect.right < rect.left
+              ? rect.left - candidateRect.right
+              : candidateRect.left > rect.right
+                ? candidateRect.left - rect.right
+                : 0;
+          if (verticalDistance > 180 || horizontalDistance > 180) return;
+          const iconLike =
+            sanitizeMetadataText(candidate.textContent || "").length <= 2 ||
+            Boolean(candidate.querySelector?.("svg"));
+          if (!iconLike) return;
+          const score = verticalDistance * 4 + horizontalDistance;
+          if (score < bestScore) {
+            best = candidate;
+            bestScore = score;
+          }
+        });
+        return best;
+      };
+
+      const openVisibleCanvaMetadataForNode = async (node) => {
+        if (!node) return false;
+        if (scrapeVisibleCanvaAssetMetadata()) return true;
+        dispatchSyntheticContextMenu(node);
+        await sleep(220);
+        await expandVisibleCanvaKeywordList();
+        if (scrapeVisibleCanvaAssetMetadata()) return true;
+        const actionButton = findVisibleEditorActionButtonNearNode(node);
+        if (actionButton) {
+          if (typeof actionButton.click === "function") {
+            actionButton.click();
+          }
+          actionButton.dispatchEvent(
+            new MouseEvent("click", {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+            })
+          );
+          await sleep(320);
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            await expandVisibleCanvaKeywordList();
+            if (scrapeVisibleCanvaAssetMetadata()) return true;
+            await sleep(200);
+          }
+        }
+        return false;
+      };
+
+      const isBackgroundLikeMetadataCandidate = (candidate, pageWidth, pageHeight) => {
+        if (!candidate) return true;
+        if (candidate.isBackgroundNode || candidate.isFullPageBackground) return true;
+        const width = Math.max(1, Number(candidate.width || 0));
+        const height = Math.max(1, Number(candidate.height || 0));
+        const pageArea = Math.max(1, Number(pageWidth || 0) * Number(pageHeight || 0));
+        const areaRatio = (width * height) / pageArea;
+        return areaRatio >= 0.8 || (width >= pageWidth * 0.9 && height >= pageHeight * 0.9);
+      };
+
+      const metadataMatchesCandidate = (metadata, candidate) => {
+        if (!metadata || !candidate) return false;
+        const metadataTitle = normalizeMetadataKey(metadata.titleEn);
+        const candidateName = normalizeMetadataKey(candidate.name);
+        if (!metadataTitle || !candidateName) return false;
+        if (metadataTitle === candidateName) return true;
+        if (metadataTitle.includes(candidateName) || candidateName.includes(metadataTitle)) return true;
+        const metadataTokens = new Set(tokenizeMetadataLabel(metadataTitle));
+        const candidateTokens = tokenizeMetadataLabel(candidateName);
+        if (metadataTokens.size === 0 || candidateTokens.length === 0) return false;
+        const shared = candidateTokens.filter((token) => metadataTokens.has(token)).length;
+        return shared >= Math.max(1, Math.min(metadataTokens.size, candidateTokens.length) - 1);
+      };
+
+      const collectCanvaLayerMetadata = async (candidates, pageWidth, pageHeight) => {
+        const byId = new Map();
+        const pending = (Array.isArray(candidates) ? candidates : []).filter(
+          (candidate) =>
+            candidate &&
+            candidate.kind === "image" &&
+            candidate.node &&
+            !isBackgroundLikeMetadataCandidate(candidate, pageWidth, pageHeight)
+        );
+        if (pending.length === 0) return byId;
+
+        await expandVisibleCanvaKeywordList();
+        const visibleMetadata = scrapeVisibleCanvaAssetMetadata();
+        if (visibleMetadata) {
+          const matchedCandidate = pending.find((candidate) =>
+            metadataMatchesCandidate(visibleMetadata, candidate)
+          );
+          if (matchedCandidate) {
+            byId.set(matchedCandidate.id, visibleMetadata);
+          }
+        }
+
+        const maxMetadataScrapes = Math.min(18, pending.length);
+        for (let index = 0; index < maxMetadataScrapes; index += 1) {
+          const candidate = pending[index];
+          if (byId.has(candidate.id)) continue;
+          dispatchSyntheticLayerClick(candidate.node);
+          await sleep(180);
+          await openVisibleCanvaMetadataForNode(candidate.node);
+          await expandVisibleCanvaKeywordList();
+          let scraped = null;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            scraped = scrapeVisibleCanvaAssetMetadata();
+            if (scraped && (scraped.tagsEn.length > 0 || scraped.titleEn)) break;
+            await sleep(120);
+          }
+          if (!scraped) continue;
+          if (!metadataMatchesCandidate(scraped, candidate) && scraped.tagsEn.length === 0) continue;
+          byId.set(candidate.id, scraped);
+        }
+
+        return byId;
       };
 
       const parseComputedTransform = (transformText = "") => {
@@ -1540,11 +2472,22 @@ async function getCaptureMetaFromTab(tabId) {
           .split("\n")
           .map((line) => line.replace(/\s+/g, " ").trim())
           .filter(Boolean);
-        const unique = [];
+        if (lines.length === 0) return "";
+
+        const shortLineCount = lines.filter((line) => line.length <= 2).length;
+        const isCharacterStack =
+          lines.length >= 4 && shortLineCount / Math.max(1, lines.length) >= 0.7;
+        if (isCharacterStack) {
+          return lines.join("");
+        }
+
+        const deduped = [];
         lines.forEach((line) => {
-          if (!unique.includes(line)) unique.push(line);
+          if (deduped[deduped.length - 1] !== line) {
+            deduped.push(line);
+          }
         });
-        return unique.join("\n");
+        return deduped.join("\n");
       };
 
       const parseFontWeight = (value) => {
@@ -1903,6 +2846,26 @@ async function getCaptureMetaFromTab(tabId) {
         );
       };
 
+      const getScopedTextPreview = (node) => {
+        if (!node) return "";
+        const parts = [];
+        try {
+          const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+          let current = walker.nextNode();
+          while (current) {
+            const parentElement = current.parentElement || null;
+            if (!isInsideForeignLayer(parentElement, node)) {
+              const value = String(current.textContent || "").trim();
+              if (value) parts.push(value);
+            }
+            current = walker.nextNode();
+          }
+        } catch (_error) {
+          return "";
+        }
+        return dedupeTextLines(parts.join("\n"));
+      };
+
       const getNodeVisualAssetKey = (node) => {
         if (!node) return "";
         const images = getScopedImageElements(node);
@@ -2117,6 +3080,354 @@ async function getCaptureMetaFromTab(tabId) {
         } catch (_error) {
           return "";
         }
+      };
+
+      const SVG_RENDER_STYLE_PROPERTIES = [
+        "fill",
+        "fill-rule",
+        "fill-opacity",
+        "stroke",
+        "clip-rule",
+        "stroke-opacity",
+        "stroke-width",
+        "stroke-linecap",
+        "stroke-linejoin",
+        "stroke-dasharray",
+        "stroke-dashoffset",
+        "opacity",
+        "filter",
+        "clip-path",
+        "mask",
+        "transform",
+        "transform-origin",
+        "mix-blend-mode",
+      ];
+
+      const copyComputedSvgStyles = (sourceNode, targetNode) => {
+        if (!(sourceNode instanceof Element) || !(targetNode instanceof Element)) return;
+        try {
+          const computed = window.getComputedStyle(sourceNode);
+          SVG_RENDER_STYLE_PROPERTIES.forEach((property) => {
+            const value = computed.getPropertyValue(property);
+            if (value) {
+              targetNode.style.setProperty(property, value);
+            }
+          });
+        } catch (_error) {
+          // Ignore style copy failures and keep the inline SVG as-is.
+        }
+
+        const sourceChildren = Array.from(sourceNode.children || []);
+        const targetChildren = Array.from(targetNode.children || []);
+        const childCount = Math.min(sourceChildren.length, targetChildren.length);
+        for (let index = 0; index < childCount; index += 1) {
+          copyComputedSvgStyles(sourceChildren[index], targetChildren[index]);
+        }
+      };
+
+      const extractUrlFragmentId = (value) => {
+        const source = String(value || "");
+        const match = source.match(/url\((['"]?)#([^'")]+)\1\)/i);
+        return match?.[2] ? String(match[2]).trim() : "";
+      };
+
+      const hasRenderableSvgContent = (svgElement) => {
+        if (!(svgElement instanceof SVGElement)) return false;
+        const renderableTags = [
+          "path",
+          "rect",
+          "circle",
+          "ellipse",
+          "line",
+          "polyline",
+          "polygon",
+          "image",
+          "text",
+          "use",
+        ];
+        return renderableTags.some((tagName) =>
+          Array.from(svgElement.querySelectorAll(tagName)).some(
+            (candidate) => !candidate.closest("defs")
+          )
+        );
+      };
+
+      const findBestSvgRenderCandidate = (layerNode) => {
+        if (!layerNode) return null;
+        const candidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "svg" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("svg")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        let best = null;
+        let bestArea = 0;
+        candidates.forEach((candidate) => {
+          if (!(candidate instanceof SVGElement)) return;
+          if (!hasRenderableSvgContent(candidate)) return;
+          const rect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, rect)) return;
+          const area = Math.max(1, rect.width * rect.height);
+          if (area > bestArea) {
+            best = candidate;
+            bestArea = area;
+          }
+        });
+        return best;
+      };
+
+      const hasRenderableVectorSignal = (layerNode) => {
+        if (!layerNode) return false;
+        if (findBestClipPathShapeCandidate(layerNode)) return true;
+        if (findBestSvgRenderCandidate(layerNode)) return true;
+        const canvasCandidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "canvas" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("canvas")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        return canvasCandidates.some((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return isVisible(candidate, rect);
+        });
+      };
+
+      const serializeSvgElementToDataUrl = (svgElement, targetWidth, targetHeight) => {
+        if (!(svgElement instanceof SVGElement)) return "";
+        try {
+          const clone = svgElement.cloneNode(true);
+          copyComputedSvgStyles(svgElement, clone);
+
+          const rect = svgElement.getBoundingClientRect();
+          const width = Math.max(
+            1,
+            Math.round(targetWidth || parseNumericDimension(svgElement.getAttribute("width")) || rect.width || 1)
+          );
+          const height = Math.max(
+            1,
+            Math.round(targetHeight || parseNumericDimension(svgElement.getAttribute("height")) || rect.height || 1)
+          );
+
+          clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+          clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+          clone.setAttribute("width", String(width));
+          clone.setAttribute("height", String(height));
+          if (!clone.getAttribute("viewBox")) {
+            clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+          }
+          clone.setAttribute("preserveAspectRatio", clone.getAttribute("preserveAspectRatio") || "none");
+
+          const serialized = new XMLSerializer().serializeToString(clone);
+          if (!serialized.includes("<svg")) return "";
+          return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const rasterizeDataUrlWithCanvas = async (dataUrl, targetWidth, targetHeight) => {
+        if (!String(dataUrl || "").startsWith("data:image/")) return "";
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("image-load-failed"));
+            element.src = dataUrl;
+          });
+          const width = Math.max(
+            1,
+            Math.round(
+              targetWidth || Number(image?.naturalWidth || image?.width || 0) || 1
+            )
+          );
+          const height = Math.max(
+            1,
+            Math.round(
+              targetHeight || Number(image?.naturalHeight || image?.height || 0) || 1
+            )
+          );
+          const rasterCanvas = document.createElement("canvas");
+          rasterCanvas.width = width;
+          rasterCanvas.height = height;
+          const rasterContext = rasterCanvas.getContext("2d");
+          if (!rasterContext) return "";
+          rasterContext.drawImage(image, 0, 0, width, height);
+          return rasterCanvas.toDataURL("image/png");
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const findBestClipPathShapeCandidate = (layerNode) => {
+        if (!layerNode) return null;
+        const layerRect = layerNode.getBoundingClientRect();
+        const candidates = [
+          layerNode,
+          ...Array.from(layerNode.querySelectorAll("*")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        let best = null;
+        let bestArea = 0;
+        candidates.forEach((candidate) => {
+          if (!(candidate instanceof Element)) return;
+          let style = null;
+          try {
+            style = window.getComputedStyle(candidate);
+          } catch (_error) {
+            style = null;
+          }
+          if (!style) return;
+          const clipPathId =
+            extractUrlFragmentId(style.clipPath) ||
+            extractUrlFragmentId(style.webkitClipPath) ||
+            extractUrlFragmentId(candidate.getAttribute("style"));
+          if (!clipPathId) return;
+          const backgroundColor = String(style.backgroundColor || "").trim();
+          if (isTransparentColor(backgroundColor)) return;
+          const candidateRect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, candidateRect)) return;
+          const clippedRect = intersectRects(candidateRect, layerRect);
+          const area = Math.max(1, rectArea(clippedRect || candidateRect));
+          if (area > bestArea) {
+            best = {
+              candidate,
+              rect: candidateRect,
+              clipPathId,
+              backgroundColor,
+              opacity: Math.max(0, Math.min(1, Number.parseFloat(style.opacity || "1") || 1)),
+            };
+            bestArea = area;
+          }
+        });
+        return best;
+      };
+
+      const serializeClipPathShapeToDataUrl = (
+        layerNode,
+        clipPathShapeCandidate,
+        targetWidth,
+        targetHeight
+      ) => {
+        if (!layerNode || !clipPathShapeCandidate?.clipPathId) return "";
+        try {
+          const clipPathElement = Array.from(layerNode.querySelectorAll("clipPath")).find(
+            (candidate) => String(candidate.id || "").trim() === clipPathShapeCandidate.clipPathId
+          );
+          if (!(clipPathElement instanceof Element)) return "";
+          const shapeElements = Array.from(
+            clipPathElement.querySelectorAll(
+              "path,rect,circle,ellipse,line,polyline,polygon"
+            )
+          );
+          if (shapeElements.length === 0) return "";
+
+          const clipBounds =
+            typeof clipPathElement.getBBox === "function"
+              ? clipPathElement.getBBox()
+              : shapeElements[0].getBBox?.();
+          if (!clipBounds || clipBounds.width <= 0 || clipBounds.height <= 0) return "";
+
+          const layerRect = layerNode.getBoundingClientRect();
+          const candidateRect = clipPathShapeCandidate.rect;
+          const width = Math.max(1, Math.round(targetWidth || layerRect.width || candidateRect.width || 1));
+          const height = Math.max(1, Math.round(targetHeight || layerRect.height || candidateRect.height || 1));
+          const scaleX = candidateRect.width / Math.max(1, clipBounds.width);
+          const scaleY = candidateRect.height / Math.max(1, clipBounds.height);
+          const translateX =
+            candidateRect.left - layerRect.left - clipBounds.x * scaleX;
+          const translateY =
+            candidateRect.top - layerRect.top - clipBounds.y * scaleY;
+          const serializer = new XMLSerializer();
+          const serializedShapes = shapeElements
+            .map((shapeElement) => {
+              const clone = shapeElement.cloneNode(true);
+              copyComputedSvgStyles(shapeElement, clone);
+              if (clone instanceof Element) {
+                clone.removeAttribute("clip-path");
+                clone.removeAttribute("fill");
+                clone.style.removeProperty("clip-path");
+                clone.style.removeProperty("fill");
+                clone.style.removeProperty("fill-opacity");
+                clone.removeAttribute("stroke");
+                clone.style.removeProperty("stroke");
+                clone.style.removeProperty("stroke-opacity");
+                clone.style.removeProperty("stroke-width");
+                clone.removeAttribute("opacity");
+                clone.style.removeProperty("opacity");
+              }
+              return serializer.serializeToString(clone);
+            })
+            .join("");
+          if (!serializedShapes) return "";
+
+          const svgMarkup = [
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`,
+            `<g fill="${clipPathShapeCandidate.backgroundColor}" opacity="${clipPathShapeCandidate.opacity}" transform="translate(${translateX} ${translateY}) scale(${scaleX} ${scaleY})">`,
+            serializedShapes,
+            "</g>",
+            "</svg>",
+          ].join("");
+          return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const extractShapeImageDataUrl = (layerNode, targetWidth, targetHeight) => {
+        if (!layerNode) return "";
+
+        const clipPathShapeCandidate = findBestClipPathShapeCandidate(layerNode);
+        if (clipPathShapeCandidate) {
+          const clipPathDataUrl = serializeClipPathShapeToDataUrl(
+            layerNode,
+            clipPathShapeCandidate,
+            targetWidth,
+            targetHeight
+          );
+          if (clipPathDataUrl.startsWith("data:image/")) {
+            return clipPathDataUrl;
+          }
+        }
+
+        const svgCandidate = findBestSvgRenderCandidate(layerNode);
+        if (svgCandidate) {
+          const svgDataUrl = serializeSvgElementToDataUrl(svgCandidate, targetWidth, targetHeight);
+          if (svgDataUrl.startsWith("data:image/")) {
+            return svgDataUrl;
+          }
+        }
+
+        const canvasCandidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "canvas" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("canvas")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        let bestCanvas = null;
+        let bestCanvasArea = 0;
+        canvasCandidates.forEach((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, rect)) return;
+          const area = Math.max(1, rect.width * rect.height);
+          if (area > bestCanvasArea) {
+            bestCanvas = candidate;
+            bestCanvasArea = area;
+          }
+        });
+
+        if (bestCanvas && typeof bestCanvas.toDataURL === "function") {
+          try {
+            const canvasDataUrl = bestCanvas.toDataURL("image/png");
+            if (String(canvasDataUrl).startsWith("data:image/")) {
+              return canvasDataUrl;
+            }
+          } catch (_error) {
+            return "";
+          }
+        }
+
+        return "";
       };
 
       const blobUrlToDataUrl = async (blobUrl, maxBytes = 8_000_000) => {
@@ -2364,6 +3675,8 @@ async function getCaptureMetaFromTab(tabId) {
           ...uniqueLayerNodes,
         ];
 
+        const imageMetadataCandidates = [];
+
         for (let layerIndex = 0; layerIndex < layerNodes.length; layerIndex += 1) {
           const node = layerNodes[layerIndex];
           const styleText = node.getAttribute("style") || "";
@@ -2402,23 +3715,31 @@ async function getCaptureMetaFromTab(tabId) {
           };
           const minLayerSide = Math.max(14, Math.min(rect.width, rect.height) * 0.012);
           const minLayerArea = Math.max(320, rect.width * rect.height * 0.00035);
-          const textPreview = dedupeTextLines(String(node?.innerText || ""));
+          const textPreview = getScopedTextPreview(node);
           const hasTextPreview = textPreview.length >= 2;
+          const hasVectorSignal = hasRenderableVectorSignal(node);
           const minTextLayerSide = Math.max(4, Math.min(rect.width, rect.height) * 0.004);
           const minTextLayerArea = Math.max(16, rect.width * rect.height * 0.00001);
+          const minVectorLayerSide = Math.max(1, Math.min(rect.width, rect.height) * 0.0012);
+          const minVectorLayerArea = Math.max(4, rect.width * rect.height * 0.000003);
           const viewportArea = viewportRect.width * viewportRect.height;
           const isLargeEnough = viewportRect.width >= minLayerSide && viewportRect.height >= minLayerSide;
           const hasEnoughArea = viewportArea >= minLayerArea;
           const isTextLayerLargeEnough =
             viewportRect.width >= minTextLayerSide && viewportRect.height >= minTextLayerSide;
           const hasEnoughTextArea = viewportArea >= minTextLayerArea;
+          const isVectorLayerLargeEnough =
+            viewportRect.width >= minVectorLayerSide && viewportRect.height >= 1.5;
+          const hasEnoughVectorArea = viewportArea >= minVectorLayerArea;
           const isInsidePageFrame = viewportInfo.coverage >= 0.2;
           const passesDefaultSizeGate = isLargeEnough && hasEnoughArea;
           const passesSmallTextGate =
             hasTextPreview && isTextLayerLargeEnough && hasEnoughTextArea;
+          const passesThinVectorGate =
+            hasVectorSignal && isVectorLayerLargeEnough && hasEnoughVectorArea;
           if (
             !isBackgroundNode &&
-            (!isInsidePageFrame || (!passesDefaultSizeGate && !passesSmallTextGate))
+            (!isInsidePageFrame || (!passesDefaultSizeGate && !passesSmallTextGate && !passesThinVectorGate))
           ) {
             continue;
           }
@@ -2426,7 +3747,19 @@ async function getCaptureMetaFromTab(tabId) {
           const styleWidth = parseStyleDimension(styleText, "width");
           const styleHeight = parseStyleDimension(styleText, "height");
           const hasStyleGeometry = styleWidth >= 2 && styleHeight >= 2;
-          const rawRect = viewportInfo.rawRect || viewportRect;
+          const imageElements = getScopedImageElements(node);
+          const imageElement =
+            imageElements
+              .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+              .sort((a, b) => rectArea(b.rect) - rectArea(a.rect))[0]?.element || null;
+          const imageTitleHint = getImageElementTitleHint(imageElement);
+          const shouldUseVisibleGeometry =
+            !isBackgroundNode &&
+            Boolean(imageElement) &&
+            detectMaskedImageLayer(node, imageElement, viewportRect);
+          const rawRect = shouldUseVisibleGeometry
+            ? viewportRect
+            : viewportInfo.rawRect || viewportRect;
           const nodeScale = getCompositeScaleToAncestor(node, bestPage.node);
           const layerScaleX = Math.max(0.01, Number(transform.scaleX || 1));
           const layerScaleY = Math.max(0.01, Number(transform.scaleY || 1));
@@ -2473,11 +3806,6 @@ async function getCaptureMetaFromTab(tabId) {
           const layerFlipY = isFullPageBackground ? false : Boolean(transform.flipY);
           if (width < 2 || height < 2) continue;
 
-          const imageElements = getScopedImageElements(node);
-          const imageElement =
-            imageElements
-              .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-              .sort((a, b) => rectArea(b.rect) - rectArea(a.rect))[0]?.element || null;
           const textFromParagraphs = Array.from(node.querySelectorAll("p"))
             .filter((item) => !isInsideForeignLayer(item, node))
             .map((item) => item.innerText || "")
@@ -2488,8 +3816,14 @@ async function getCaptureMetaFromTab(tabId) {
           const textStyleElement = findBestTextStyleElement(node, node);
 
           let shapeFill = "";
+          let shapeImageDataUrl = "";
           if (!imageElement && !text) {
-            const shapeCandidates = [node, ...Array.from(node.querySelectorAll("*"))];
+            const shapeCandidates = [
+              node,
+              ...Array.from(node.querySelectorAll("*")).filter(
+                (candidate) => !isInsideForeignLayer(candidate, node)
+              ),
+            ];
             for (let index = 0; index < shapeCandidates.length; index += 1) {
               const candidate = shapeCandidates[index];
               const style = window.getComputedStyle(candidate);
@@ -2503,6 +3837,23 @@ async function getCaptureMetaFromTab(tabId) {
                 break;
               }
             }
+            shapeImageDataUrl = extractShapeImageDataUrl(node, width, height);
+            const shouldRasterizeThinVectorShape =
+              shapeImageDataUrl.startsWith("data:image/svg+xml") &&
+              hasVectorSignal &&
+              (Math.max(1, Math.round(width)) <= 24 ||
+                Math.max(1, Math.round(height)) <= 16 ||
+                viewportRect.height <= 8);
+            if (shouldRasterizeThinVectorShape) {
+              const rasterizedShapeImageDataUrl = await rasterizeDataUrlWithCanvas(
+                shapeImageDataUrl,
+                Math.max(1, Math.round(width)),
+                Math.max(1, Math.round(height))
+              );
+              if (rasterizedShapeImageDataUrl.startsWith("data:image/")) {
+                shapeImageDataUrl = rasterizedShapeImageDataUrl;
+              }
+            }
           }
 
           const effectiveOpacity = getEffectiveOpacity(node, bestPage.node);
@@ -2511,6 +3862,10 @@ async function getCaptureMetaFromTab(tabId) {
           let imageDataUrl = "";
           let preferSnapshot = false;
           const backgroundImageSignals = [];
+          if (shapeImageDataUrl.startsWith("data:image/")) {
+            imageSrc = shapeImageDataUrl;
+            imageDataUrl = shapeImageDataUrl;
+          }
           if (imageElement) {
             imageSrc = getImageElementSource(imageElement);
             if (String(imageSrc).startsWith("data:image/")) {
@@ -2556,7 +3911,7 @@ async function getCaptureMetaFromTab(tabId) {
           }
 
           if (imageElement && (imageSrc || imageDataUrl)) {
-            preferSnapshot = detectMaskedImageLayer(node, imageElement, viewportRect);
+            preferSnapshot = shouldUseVisibleGeometry;
           }
 
           const textStyle = textStyleElement ? window.getComputedStyle(textStyleElement) : null;
@@ -2589,6 +3944,7 @@ async function getCaptureMetaFromTab(tabId) {
           const opacitySignal = effectiveOpacity > 0.03;
           let imageConfidence = 0;
           if (imageElement) imageConfidence += 3;
+          if (shapeImageDataUrl) imageConfidence += 4;
           if (imageSrc) imageConfidence += 2;
           if (imageDataUrl) imageConfidence += 2;
           if (hasMediaDimensions) imageConfidence += 1;
@@ -2605,7 +3961,15 @@ async function getCaptureMetaFromTab(tabId) {
             opacitySignal &&
             imageConfidence >= 5;
 
-          const kind = isLikelyImageLayer ? "image" : text ? "text" : shapeFill ? "shape" : "unknown";
+          const kind = shapeImageDataUrl
+            ? "image"
+            : isLikelyImageLayer
+              ? "image"
+              : text
+                ? "text"
+                : shapeFill
+                  ? "shape"
+                  : "unknown";
           if (kind === "unknown") continue;
           const parentLayerNode = node.parentElement?.closest?.('[id^="LB"]');
           const parentId =
@@ -2625,7 +3989,8 @@ async function getCaptureMetaFromTab(tabId) {
             name:
               String(node.getAttribute?.("aria-label") || "").trim() ||
               String(node.getAttribute?.("data-element-name") || "").trim() ||
-              `${kind === "text" ? "Text" : kind === "shape" ? "Shape" : "Image"} ${layerIndex + 1}`,
+              imageTitleHint ||
+              `${kind === "text" ? "Text" : shapeImageDataUrl ? "Shape" : kind === "shape" ? "Shape" : "Image"} ${layerIndex + 1}`,
             kind,
             x,
             y,
@@ -2649,8 +4014,10 @@ async function getCaptureMetaFromTab(tabId) {
             imageSrc,
             imageDataUrl,
             preferSnapshot,
-            sourceWidth: mediaWidth > 0 ? mediaWidth : undefined,
-            sourceHeight: mediaHeight > 0 ? mediaHeight : undefined,
+            sourceWidth:
+              mediaWidth > 0 ? mediaWidth : shapeImageDataUrl ? Math.max(1, Math.round(width)) : undefined,
+            sourceHeight:
+              mediaHeight > 0 ? mediaHeight : shapeImageDataUrl ? Math.max(1, Math.round(height)) : undefined,
             text: kind === "text" ? text : "",
             textAlign: textStyle?.textAlign || "left",
             color: textStyle?.color || "#111827",
@@ -2666,11 +4033,58 @@ async function getCaptureMetaFromTab(tabId) {
             fill: shapeFill || "",
             zIndex: zIndex ?? layerIndex,
             opacity: effectiveOpacity,
+            titleEn: kind === "image" ? imageTitleHint : "",
+            tagsEn:
+              kind === "image" && imageTitleHint
+                ? uniqueMetadataStrings(tokenizeMetadataLabel(imageTitleHint))
+                : [],
+            labelsEn:
+              kind === "image" && imageTitleHint
+                ? uniqueMetadataStrings([imageTitleHint, ...tokenizeMetadataLabel(imageTitleHint)])
+                : [],
             fallback: Boolean(fallbackReason),
             fallbackReason,
           };
+          if (kind === "image") {
+            imageMetadataCandidates.push({
+              id: layerRecord.id,
+              node,
+              kind,
+              name: layerRecord.name,
+              width: layerRecord.width,
+              height: layerRecord.height,
+              fallback: layerRecord.fallback,
+              isBackgroundNode,
+              isFullPageBackground,
+            });
+          }
           if (!isDuplicateLayerEntry(layerRecord)) {
             layers.push(layerRecord);
+          }
+        }
+
+        const imageMetadataById = shouldCollectLayerMetadata
+          ? await collectCanvaLayerMetadata(
+              imageMetadataCandidates,
+              Number(designWidth || rect.width),
+              Number(designHeight || rect.height)
+            )
+          : new Map();
+        if (imageMetadataById.size > 0) {
+          for (let index = 0; index < layers.length; index += 1) {
+            const layer = layers[index];
+            if (String(layer?.kind || "").toLowerCase() !== "image") continue;
+            const metadata = imageMetadataById.get(String(layer.id || ""));
+            if (!metadata) continue;
+            layer.titleEn = sanitizeMetadataText(metadata.titleEn || layer.name || "");
+            layer.tagsEn = uniqueMetadataStrings(metadata.tagsEn);
+            layer.labelsEn = uniqueMetadataStrings(
+              metadata.labelsEn && metadata.labelsEn.length > 0
+                ? metadata.labelsEn
+                : [layer.titleEn, ...layer.tagsEn, ...tokenizeMetadataLabel(layer.titleEn)]
+            );
+            layer.sourceAssetId =
+              sanitizeMetadataText(layer.sourceAssetId || layer.imageSrc || layer.imageDataUrl || layer.id);
           }
         }
 
@@ -2796,7 +4210,7 @@ async function getCaptureMetaFromTab(tabId) {
           }
 
           if (fallbackCandidates.length < maxFallbackLayers) {
-            const mediaNodes = Array.from(bestPage.node.querySelectorAll("img,image,canvas"));
+            const mediaNodes = Array.from(bestPage.node.querySelectorAll("img,image,canvas,svg"));
             for (let index = 0; index < mediaNodes.length; index += 1) {
               const node = mediaNodes[index];
               if (!node) continue;
@@ -2806,9 +4220,15 @@ async function getCaptureMetaFromTab(tabId) {
               if (!layerRect) continue;
               const area = Math.max(1, layerRect.width * layerRect.height);
               if (area < minImageArea) continue;
-              if (area > pageArea * 0.96 && layers.length > 0) continue;
 
               const tagName = String(node.tagName || "").toLowerCase();
+              const imageTitleHint =
+                tagName === "img" || tagName === "image"
+                  ? getImageElementTitleHint(node)
+                  : "";
+              const isDecorativeFrame = looksLikeDecorativeFrameLabel(imageTitleHint);
+              if (area > pageArea * 0.96 && layers.length > 0 && !isDecorativeFrame) continue;
+
               let imageSrc = "";
               if (tagName === "img" || tagName === "image") {
                 imageSrc = getImageElementSource(node);
@@ -2817,6 +4237,14 @@ async function getCaptureMetaFromTab(tabId) {
                   imageSrc = node.toDataURL("image/png");
                 } catch (_error) {
                   imageSrc = "";
+                }
+              } else if (tagName === "svg") {
+                if (hasRenderableSvgContent(node)) {
+                  imageSrc = serializeSvgElementToDataUrl(
+                    node,
+                    Math.max(1, Math.round(layerRect.width)),
+                    Math.max(1, Math.round(layerRect.height))
+                  );
                 }
               }
               if (!imageSrc) {
@@ -2841,6 +4269,7 @@ async function getCaptureMetaFromTab(tabId) {
                 parentId: null,
                 name:
                   String(node.getAttribute?.("aria-label") || "").trim() ||
+                  imageTitleHint ||
                   `Image ${fallbackCandidates.length + 1}`,
                 kind: "image",
                 x: layerRect.x,
@@ -2873,6 +4302,12 @@ async function getCaptureMetaFromTab(tabId) {
                 fill: "",
                 zIndex: getNumericZIndex(node, bestPage.node) ?? 2000 + index,
                 opacity,
+                sourceAssetId: sanitizeMetadataText(imageSrc || node.id || ""),
+                titleEn: imageTitleHint,
+                tagsEn: imageTitleHint ? uniqueMetadataStrings(tokenizeMetadataLabel(imageTitleHint)) : [],
+                labelsEn: imageTitleHint
+                  ? uniqueMetadataStrings([imageTitleHint, ...tokenizeMetadataLabel(imageTitleHint)])
+                  : [],
                 fallback: Boolean(fallbackReason),
                 fallbackReason,
               };
@@ -3234,30 +4669,6 @@ async function postToDashboard(payload) {
     }
 
     try {
-      await fetchWithTimeout(
-        endpoint,
-        {
-          method: "OPTIONS",
-        },
-        5_000
-      );
-    } catch (probeError) {
-      const detail = `Probe failed for ${endpoint}: ${describeError(probeError)}`;
-      failures.push(detail);
-      logger.error(
-        "Dashboard import probe failed",
-        {
-          endpoint,
-          payloadSizeKb,
-          attempt: index + 1,
-          totalAttempts: attempts.length,
-          note: "Proceeding to POST attempt despite probe failure",
-        },
-        probeError
-      );
-    }
-
-    try {
       response = await fetchWithTimeout(
         endpoint,
         {
@@ -3543,9 +4954,31 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
 async function importActiveCanvaTab(message) {
   const dashboardUrl = normalizeDashboardUrl(message.dashboardUrl);
   const token = String(message.token || "").trim();
+  const captureMetadata = Boolean(message?.captureMetadata);
   if (!token) {
     throw new Error("Import token is required.");
   }
+
+  const phaseTimings = {};
+  const phaseStart = (typeof performance !== "undefined" && typeof performance.now === "function")
+    ? () => performance.now()
+    : () => Date.now();
+  const timePhase = async (phaseName, run) => {
+    const startedAt = phaseStart();
+    try {
+      return await run();
+    } finally {
+      phaseTimings[phaseName] = Math.max(0, Math.round(phaseStart() - startedAt));
+    }
+  };
+  const timeSyncPhase = (phaseName, run) => {
+    const startedAt = phaseStart();
+    try {
+      return run();
+    } finally {
+      phaseTimings[phaseName] = Math.max(0, Math.round(phaseStart() - startedAt));
+    }
+  };
 
   const tab = await chrome.tabs.get(message.tabId);
   if (!tab?.id || !tab?.url) {
@@ -3555,8 +4988,10 @@ async function importActiveCanvaTab(message) {
     throw new Error("Active tab is not a Canva page.");
   }
 
-  await waitForTabReady(tab.id);
-  const captureMeta = await getCaptureMetaFromTab(tab.id);
+  await timePhase("waitForTabReady", () => waitForTabReady(tab.id));
+  const captureMeta = await timePhase("getCaptureMetaFromTab", () =>
+    getCaptureMetaFromTab(tab.id, { captureMetadata })
+  );
   if (!captureMeta?.ok) {
     throw new Error(captureMeta?.error || "Could not detect Canva design frame.");
   }
@@ -3565,13 +5000,19 @@ async function importActiveCanvaTab(message) {
   let sourceWidth = Number(captureMeta.designWidth || 0);
   let sourceHeight = Number(captureMeta.designHeight || 0);
   let screenshotDataUrl = "";
+  const hasExtractedLayerMetadata =
+    Array.isArray(captureMeta.layers) && captureMeta.layers.length > 0;
 
-  if (!imageDataUrl.startsWith("data:image/") || Array.isArray(captureMeta.layers)) {
-    screenshotDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
+  if (!imageDataUrl.startsWith("data:image/") || hasExtractedLayerMetadata) {
+    screenshotDataUrl = await timePhase("captureVisibleTab", () =>
+      chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" })
+    );
   }
 
   if (!imageDataUrl.startsWith("data:image/")) {
-    const cropped = await cropScreenshotToCanvas(screenshotDataUrl, captureMeta);
+    const cropped = await timePhase("cropScreenshotToCanvas", () =>
+      cropScreenshotToCanvas(screenshotDataUrl, captureMeta)
+    );
     imageDataUrl = cropped.dataUrl;
     sourceWidth = sourceWidth || cropped.width;
     sourceHeight = sourceHeight || cropped.height;
@@ -3581,7 +5022,7 @@ async function importActiveCanvaTab(message) {
     throw new Error("Failed to build image payload from Canva tab.");
   }
 
-  const extractedLayers = Array.isArray(captureMeta.layers) ? captureMeta.layers : [];
+  const extractedLayers = hasExtractedLayerMetadata ? captureMeta.layers : [];
   const extractionLikelyDegraded = extractedLayers.length <= 1;
   const usedFontsFromLayers = collectUsedFontFamilies(extractedLayers);
   const fontTargetsByFamily = buildUsedFontTargetsByFamily(extractedLayers);
@@ -3620,31 +5061,34 @@ async function importActiveCanvaTab(message) {
   if (String(captureMeta?.sourceType || "").toLowerCase().startsWith("fallback")) {
     importWarnings.push("Canvas frame detection used fallback mode.");
   }
-  const resolvedFonts = await resolveImportedCustomFonts(
+  const fontResolutionWarnings = [];
+  const resolvedFontsPromise = resolveImportedCustomFonts(
     usedFonts,
     fontAssetMap,
     fontTargetsByFamily,
-    importWarnings
+    fontResolutionWarnings
   );
-  const importedCustomFonts = Array.isArray(resolvedFonts?.importedFonts)
-    ? resolvedFonts.importedFonts
-    : [];
-  const unsupportedTextFamilies = Array.isArray(resolvedFonts?.unsupportedFamilies)
-    ? resolvedFonts.unsupportedFamilies
-    : [];
   let fabricObjects = [];
+  let backgroundNoTextDataUrl = "";
   if (shouldUseTextOverlayFallback) {
-    let backgroundNoTextDataUrl = "";
     try {
       await setCanvaLayerVisibility(tab.id, textLayerIds, true);
-      const hiddenTextScreenshotDataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" });
-      const croppedNoText = await cropScreenshotToCanvas(hiddenTextScreenshotDataUrl, captureMeta);
+      const hiddenTextScreenshotDataUrl = await timePhase("captureVisibleTabWithoutText", () =>
+        chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" })
+      );
+      const croppedNoText = await timePhase("cropScreenshotToCanvasWithoutText", () =>
+        cropScreenshotToCanvas(hiddenTextScreenshotDataUrl, captureMeta)
+      );
       backgroundNoTextDataUrl = String(croppedNoText?.dataUrl || "");
     } finally {
       await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
     }
+  }
+  if (shouldUseTextOverlayFallback) {
     if (backgroundNoTextDataUrl.startsWith("data:image/")) {
-      const textObjects = await buildFabricObjects(textLayers);
+      const textObjects = await timePhase("buildFabricObjectsTextFallback", () =>
+        buildFabricObjects(textLayers)
+      );
       fabricObjects = [
         buildSingleImageFabricObject(
           backgroundNoTextDataUrl,
@@ -3661,25 +5105,41 @@ async function importActiveCanvaTab(message) {
       importWarnings.push("Text-only fallback used: background snapshot with editable text overlays.");
     }
   }
+  const resolvedFonts = await timePhase("resolveImportedCustomFonts", () => resolvedFontsPromise);
+  if (fontResolutionWarnings.length > 0) {
+    importWarnings.push(...fontResolutionWarnings);
+  }
+  const importedCustomFonts = Array.isArray(resolvedFonts?.importedFonts)
+    ? resolvedFonts.importedFonts
+    : [];
+  const unsupportedTextFamilies = Array.isArray(resolvedFonts?.unsupportedFamilies)
+    ? resolvedFonts.unsupportedFamilies
+    : [];
   if (fabricObjects.length === 0 && screenshotDataUrl && extractedLayers.length > 0) {
     try {
-      const screenshotBitmap = await decodeDataUrlToBitmap(screenshotDataUrl);
-      fabricObjects = await buildHybridFabricObjects(
-        extractedLayers,
-        screenshotBitmap,
-        Number(captureMeta.devicePixelRatio || 1),
-        sourceWidth || Number(captureMeta.designWidth || 0),
-        sourceHeight || Number(captureMeta.designHeight || 0),
-        {
-          unsupportedTextFamilies,
-        }
+      const screenshotBitmap = await timePhase("decodeScreenshotBitmap", () =>
+        decodeDataUrlToBitmap(screenshotDataUrl)
+      );
+      fabricObjects = await timePhase("buildHybridFabricObjects", () =>
+        buildHybridFabricObjects(
+          extractedLayers,
+          screenshotBitmap,
+          Number(captureMeta.devicePixelRatio || 1),
+          sourceWidth || Number(captureMeta.designWidth || 0),
+          sourceHeight || Number(captureMeta.designHeight || 0),
+          {
+            unsupportedTextFamilies,
+          }
+        )
       );
     } catch (_error) {
       fabricObjects = [];
     }
   }
   if (fabricObjects.length === 0) {
-    fabricObjects = await buildFabricObjects(extractedLayers);
+    fabricObjects = await timePhase("buildFabricObjectsFallback", () =>
+      buildFabricObjects(extractedLayers)
+    );
   }
   const fallbackWidth = Math.max(1, Math.round(sourceWidth || 1080));
   const fallbackHeight = Math.max(1, Math.round(sourceHeight || 1080));
@@ -3717,62 +5177,81 @@ async function importActiveCanvaTab(message) {
 
   let thumbnailDataUrl = imageDataUrl;
   try {
-    thumbnailDataUrl = await createThumbnailDataUrl(imageDataUrl);
+    thumbnailDataUrl = await timePhase("createThumbnailDataUrl", () =>
+      createThumbnailDataUrl(imageDataUrl)
+    );
   } catch (_error) {
     thumbnailDataUrl = imageDataUrl;
   }
 
-  const requestBody = compactRequestBody(
-    {
-      sourceUrl: String(captureMeta.sourceUrl || tab.url || ""),
-      title: String(captureMeta.title || ""),
-      imageDataUrl: hasExtractedLayers ? undefined : imageDataUrl,
-      thumbnailDataUrl,
-      fabricData,
-      canvasWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
-      canvasHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
-      sourceWidth,
-      sourceHeight,
-      extractedLayerCount: fabricObjects.length,
-      importVersion: 2,
-      editorData: {
+  const requestBody = timeSyncPhase("compactRequestBody", () =>
+    compactRequestBody(
+      {
+        sourceUrl: String(captureMeta.sourceUrl || tab.url || ""),
+        title: String(captureMeta.title || ""),
+        imageDataUrl: hasExtractedLayers ? undefined : imageDataUrl,
+        thumbnailDataUrl,
+        fabricData,
+        canvasWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
+        canvasHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
+        sourceWidth,
+        sourceHeight,
+        extractedLayerCount: fabricObjects.length,
         importVersion: 2,
-        source: "canva-extension",
-        page: {
-          id: "canva-page-1",
-          name: "Canva Page 1",
-          width: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
-          height: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
-          sourceWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
-          sourceHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
+        editorData: {
+          importVersion: 2,
+          source: "canva-extension",
+          page: {
+            id: "canva-page-1",
+            name: "Canva Page 1",
+            width: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
+            height: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
+            sourceWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
+            sourceHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
+          },
+          layerTree,
+          layerStats,
+          usedFonts,
+          customFonts: importedCustomFonts,
+          warnings: importWarnings,
         },
-        layerTree,
-        layerStats,
-        usedFonts,
-        customFonts: importedCustomFonts,
-        warnings: importWarnings,
+        maxDimension: 1920,
+        name: String(message.name || "").trim() || undefined,
+        slug: String(message.slug || "").trim() || undefined,
       },
-      maxDimension: 1920,
-      name: String(message.name || "").trim() || undefined,
-      slug: String(message.slug || "").trim() || undefined,
-    },
-    imageDataUrl,
-    fallbackWidth,
-    fallbackHeight
+      imageDataUrl,
+      fallbackWidth,
+      fallbackHeight
+    )
   );
 
   const endpoint = `${dashboardUrl}/api/tools/canva-import/extension-import`;
-  const result = await postToDashboard({
-    endpoint,
-    token,
-    body: requestBody,
+  const result = await timePhase("postToDashboard", () =>
+    postToDashboard({
+      endpoint,
+      token,
+      body: requestBody,
+    })
+  );
+
+  const sortedPhaseTimings = Object.entries(phaseTimings).sort((a, b) => b[1] - a[1]);
+  logger.info("Canva import phase timings", {
+    captureMetadata,
+    timings: Object.fromEntries(sortedPhaseTimings),
   });
 
-  return result;
+  return {
+    ...result,
+    phaseTimings,
+    captureMetadata,
+  };
 }
 
-chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
-  if (message?.type !== "IMPORT_ACTIVE_CANVA_TAB") return;
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  const messageType = String(message?.type || "").trim();
+  if (!messageType) return;
+
+  if (messageType !== "IMPORT_ACTIVE_CANVA_TAB") return;
 
   try {
     logger.info("Received import request from popup", {
@@ -3794,6 +5273,11 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           layerCount: Number(result?.layerCount || 0),
           warnings: Array.isArray(result?.warnings) ? result.warnings : [],
           importedCustomFonts: Number(result?.importedCustomFonts || 0),
+          phaseTimings:
+            result?.phaseTimings && typeof result.phaseTimings === "object"
+              ? result.phaseTimings
+              : {},
+          captureMetadata: Boolean(result?.captureMetadata),
         });
       })
       .catch((error) => {

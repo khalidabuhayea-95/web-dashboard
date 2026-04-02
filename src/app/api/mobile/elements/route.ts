@@ -53,6 +53,7 @@ export async function GET(request: NextRequest) {
       source: item.source,
       sourceAssetId: item.sourceAssetId,
       kind: item.kind,
+      category: item.categoryValue,
       name: item.title,
       nameEn: item.titleEn,
       nameAr: item.titleAr,

@@ -1,10 +1,14 @@
+import { createHash } from "node:crypto";
+
 import { NextResponse } from "next/server";
 
 import { upsertEditorCustomFont } from "@/lib/editor/customFonts.server";
+import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
 import { createLogger } from "@/lib/logging/logger";
 import { attachRequestIdHeader, getRequestLogContext, resolveRequestId } from "@/lib/logging/request";
 import { checkRateLimit, createRateLimitResponse, resolveRequestIp } from "@/lib/security/rateLimit.server";
 import { verifyCanvaImportToken } from "@/lib/tools/canvaImportAuth";
+import { translateBatchToArabic } from "@/lib/tools/arabicTranslate.server";
 import { sanitizeImportPayloadAssets } from "@/lib/tools/importAssetSanitizer";
 import {
   buildFabricData,
@@ -38,6 +42,13 @@ const CORS_HEADERS = {
   "Access-Control-Allow-Private-Network": "true",
 };
 
+const CANVA_IMPORTED_ELEMENT_SKIP_FALLBACKS = new Set([
+  "full-snapshot",
+  "text-overlay-background",
+  "payload-limit-full-snapshot",
+  "backdrop-crop-server",
+]);
+
 function withCors(response) {
   Object.entries(CORS_HEADERS).forEach(([key, value]) => {
     response.headers.set(key, value);
@@ -62,9 +73,205 @@ function parseTitle(rawTitle) {
   return cleaned || "Imported Canva Template";
 }
 
+function sanitizeElementMetadataText(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
+}
+
+function uniqueElementMetadataStrings(values) {
+  return Array.from(
+    new Set(
+      (Array.isArray(values) ? values : [])
+        .map((value) => sanitizeElementMetadataText(value))
+        .filter(Boolean)
+    )
+  );
+}
+
+function isGenericElementMetadataName(value) {
+  const normalized = sanitizeElementMetadataText(value)
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+  return /^(image|shape|text)( \d+)?$/.test(normalized);
+}
+
+function tokenizeElementMetadataName(value) {
+  if (isGenericElementMetadataName(value)) return [];
+  return uniqueElementMetadataStrings(
+    sanitizeElementMetadataText(value)
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+      .split(/\s+/)
+      .filter((token) => token.length >= 2)
+  );
+}
+
 function numberOr(value, fallback = 0) {
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function renderedObjectWidth(object) {
+  return Math.max(1, numberOr(object?.width, 1) * Math.max(0.0001, Math.abs(numberOr(object?.scaleX, 1))));
+}
+
+function renderedObjectHeight(object) {
+  return Math.max(1, numberOr(object?.height, 1) * Math.max(0.0001, Math.abs(numberOr(object?.scaleY, 1))));
+}
+
+function getImportedElementSkipReason(object, canvasWidth, canvasHeight) {
+  if (String(object?.type || "").toLowerCase() !== "image") return "not-image";
+  const src = sanitizeElementMetadataText(object?.src);
+  if (!src) return "missing-source";
+  const fallbackReason = sanitizeElementMetadataText(object?.fallbackReason);
+  if (CANVA_IMPORTED_ELEMENT_SKIP_FALLBACKS.has(fallbackReason)) return fallbackReason;
+  const nodeId = sanitizeElementMetadataText(object?.importNodeId).toLowerCase();
+  if (nodeId.startsWith("canva-background") || nodeId.startsWith("canva-snapshot")) {
+    return "background-like";
+  }
+  const width = renderedObjectWidth(object);
+  const height = renderedObjectHeight(object);
+  const pageWidth = Math.max(1, numberOr(canvasWidth, width));
+  const pageHeight = Math.max(1, numberOr(canvasHeight, height));
+  const coverage = (width * height) / Math.max(1, pageWidth * pageHeight);
+  if (coverage >= 0.8) return "background-like";
+  if (width >= pageWidth * 0.9 && height >= pageHeight * 0.9) return "background-like";
+  return "";
+}
+
+function buildFabricObjectMetadata(object) {
+  const titleEn = sanitizeElementMetadataText(object?.titleEn || object?.layerName || object?.name || "Image");
+  const tagsEn = uniqueElementMetadataStrings(
+    Array.isArray(object?.tagsEn) && object.tagsEn.length > 0
+      ? object.tagsEn
+      : tokenizeElementMetadataName(titleEn)
+  );
+  const labelsEn = uniqueElementMetadataStrings(
+    Array.isArray(object?.labelsEn) && object.labelsEn.length > 0
+      ? object.labelsEn
+      : [titleEn, ...tagsEn]
+  );
+  return { titleEn, tagsEn, labelsEn };
+}
+
+function buildImportedElementSourceAssetId(object, templateId, assetUrl) {
+  const explicit = sanitizeElementMetadataText(object?.sourceAssetId);
+  if (explicit) {
+    const normalized = explicit.startsWith("http") || explicit.startsWith("data:")
+      ? createHash("sha256").update(explicit).digest("hex").slice(0, 24)
+      : explicit;
+    return `canva:${normalized}`;
+  }
+  const importNodeId = sanitizeElementMetadataText(object?.importNodeId);
+  if (importNodeId) {
+    return `canva:${sanitizeElementMetadataText(templateId || "template")}:${importNodeId}`;
+  }
+  const seed = [
+    sanitizeElementMetadataText(templateId || "template"),
+    sanitizeElementMetadataText(assetUrl),
+    sanitizeElementMetadataText(object?.layerName || object?.name || "Image"),
+    String(Math.round(renderedObjectWidth(object))),
+    String(Math.round(renderedObjectHeight(object))),
+  ].join("::");
+  return `canva:${createHash("sha256").update(seed).digest("hex").slice(0, 24)}`;
+}
+
+async function publishImportedCanvaElements({
+  ownerId,
+  templateId,
+  fabricData,
+  canvasWidth,
+  canvasHeight,
+}) {
+  const objects = Array.isArray(fabricData?.objects) ? fabricData.objects : [];
+  const eligibleObjects = [];
+  const skipped = [];
+
+  objects.forEach((object, index) => {
+    const skipReason = getImportedElementSkipReason(object, canvasWidth, canvasHeight);
+    if (skipReason) {
+      if (skipReason !== "not-image") {
+        skipped.push({
+          objectId: sanitizeElementMetadataText(object?.importNodeId || `layer-${index + 1}`),
+          reason: skipReason,
+        });
+      }
+      return;
+    }
+    eligibleObjects.push(object);
+  });
+
+  if (eligibleObjects.length === 0) {
+    return { imported: [], skipped };
+  }
+
+  const metadataByObject = new Map();
+  const textInputs = new Set();
+  eligibleObjects.forEach((object) => {
+    const metadata = buildFabricObjectMetadata(object);
+    metadataByObject.set(object, metadata);
+    textInputs.add(metadata.titleEn);
+    metadata.tagsEn.forEach((tag) => textInputs.add(tag));
+    metadata.labelsEn.forEach((label) => textInputs.add(label));
+  });
+
+  const translations = await translateBatchToArabic(Array.from(textInputs));
+  const imported = [];
+
+  for (const object of eligibleObjects) {
+    const assetUrl = sanitizeElementMetadataText(object?.src);
+    const metadata = metadataByObject.get(object) || buildFabricObjectMetadata(object);
+    const titleAr = sanitizeElementMetadataText(translations.get(metadata.titleEn) || metadata.titleEn);
+    const tagsAr = uniqueElementMetadataStrings(
+      metadata.tagsEn.map((tag) => translations.get(tag) || tag)
+    );
+    const labelsAr = uniqueElementMetadataStrings(
+      metadata.labelsEn.map((label) => translations.get(label) || label)
+    );
+    const result = await upsertImportedElementAsset({
+      source: "canva",
+      sourceAssetId: buildImportedElementSourceAssetId(object, templateId, assetUrl),
+      ownerId,
+      kind: "image",
+      titleEn: metadata.titleEn,
+      titleAr,
+      tagsEn: metadata.tagsEn,
+      tagsAr,
+      labelsEn: metadata.labelsEn,
+      labelsAr,
+      assetUrl,
+      thumbnailUrl: assetUrl,
+      width: Math.round(renderedObjectWidth(object)),
+      height: Math.round(renderedObjectHeight(object)),
+      freeSvg: false,
+      translationStatus:
+        titleAr !== metadata.titleEn || tagsAr.some((tag, index) => tag !== metadata.tagsEn[index])
+          ? "translated"
+          : "fallback",
+      sourcePayload: {
+        templateId,
+        importNodeId: sanitizeElementMetadataText(object?.importNodeId),
+        importParentId: sanitizeElementMetadataText(object?.importParentId),
+        importKind: sanitizeElementMetadataText(object?.importKind),
+        fallback: Boolean(object?.fallback),
+        fallbackReason: sanitizeElementMetadataText(object?.fallbackReason),
+        rasterOriginalSrc: assetUrl,
+        rasterPalette: Array.isArray(object?.rasterPalette)
+          ? object.rasterPalette.map((value) => sanitizeElementMetadataText(value)).filter(Boolean)
+          : [],
+        rasterPaletteVersion: Math.max(0, Number(object?.rasterPaletteVersion || 0)),
+        rasterColorMap:
+          object?.rasterColorMap && typeof object.rasterColorMap === "object" && !Array.isArray(object.rasterColorMap)
+            ? object.rasterColorMap
+            : {},
+      },
+    });
+    imported.push({
+      objectId: sanitizeElementMetadataText(object?.importNodeId || ""),
+      assetId: sanitizeElementMetadataText(result?.id),
+    });
+  }
+
+  return { imported, skipped };
 }
 
 const GENERIC_FONT_FAMILIES = new Set([
@@ -1210,7 +1417,7 @@ export async function POST(request) {
       thumbnailDataUrl: rawThumbnailDataUrl,
       fabricData: rawFabricData,
       sourceLabel: "canva-extension",
-      preserveSvg: true,
+      preserveSvg: false,
       traceRasterToSvg: false,
       rewriteExternalUrls: true,
     });
@@ -1259,7 +1466,7 @@ export async function POST(request) {
             thumbnailDataUrl: rawThumbnailDataUrl,
             fabricData: workingFabricData,
             sourceLabel: "canva-extension-layer-crop-fallback",
-            preserveSvg: true,
+            preserveSvg: false,
             traceRasterToSvg: false,
             rewriteExternalUrls: true,
           });
@@ -1309,7 +1516,7 @@ export async function POST(request) {
         thumbnailDataUrl: rawThumbnailDataUrl,
         fabricData: snapshotFabricData,
         sourceLabel: "canva-extension-snapshot-fallback",
-        preserveSvg: true,
+        preserveSvg: false,
         traceRasterToSvg: false,
         rewriteExternalUrls: true,
       });
@@ -1360,8 +1567,8 @@ export async function POST(request) {
   };
   const resolvedBackgroundColor =
     parseColorToHex(fabricData.backgroundColor) ||
-    parseColorToHex(inferredBackgroundColor) ||
-    parseColorToHex(prunedBaseShape.promotedBackgroundColor);
+    parseColorToHex(prunedBaseShape.promotedBackgroundColor) ||
+    parseColorToHex(inferredBackgroundColor);
   if (resolvedBackgroundColor && !String(fabricData.backgroundColor || "").trim()) {
     fabricData.backgroundColor = resolvedBackgroundColor;
   }
@@ -1555,10 +1762,14 @@ export async function POST(request) {
       importMetadata,
     });
 
+    const importedElementSummary = { imported: [], skipped: [] };
+
     requestLogger.info("Canva extension template imported", {
       templateId: String(template?.id || ""),
       layerCount,
       importedCustomFonts,
+      importedElements: importedElementSummary.imported.length,
+      skippedImportedElements: importedElementSummary.skipped.length,
       warningsCount: Array.isArray(importMetadata.warnings)
         ? importMetadata.warnings.length
         : 0,
@@ -1576,6 +1787,8 @@ export async function POST(request) {
           usedFonts: importMetadata.usedFonts,
           warnings: importMetadata.warnings,
           importedCustomFonts,
+          importedElements: importedElementSummary.imported,
+          skippedImportedElements: importedElementSummary.skipped,
         },
         { status: 201 }
       )

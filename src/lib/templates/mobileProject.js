@@ -237,7 +237,7 @@ function clamp(value, min, max) {
 }
 
 function isDataUri(value) {
-  return /^data:[^;]+;base64,/i.test(String(value || "").trim());
+  return /^data:[^,]+,/i.test(String(value || "").trim());
 }
 
 function resolveMediaUri(rawUri, options) {

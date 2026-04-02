@@ -49,6 +49,7 @@ export async function GET(request: NextRequest) {
 
     const source = searchParams.get("source") || "freepik";
     const kind = searchParams.get("kind") || "all";
+    const categoryValue = searchParams.get("category") || searchParams.get("categoryValue") || "";
     const query = searchParams.get("query") || "";
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), 40);
@@ -65,6 +66,7 @@ export async function GET(request: NextRequest) {
     const result = await listImportedElementAssets({
       source,
       kind,
+      categoryValue,
       query,
       page,
       pageSize,
@@ -194,6 +196,7 @@ export async function POST(request: NextRequest) {
       labelsEn: Array.isArray(body?.labelsEn || body?.labels_en) ? (body?.labelsEn || body?.labels_en) : [],
       labelsAr: Array.isArray(body?.labelsAr || body?.labels_ar) ? (body?.labelsAr || body?.labels_ar) : [],
       slug: String(body?.slug || "").trim(),
+      categoryValue: String(body?.categoryValue || body?.category || "").trim(),
       assetUrl,
       thumbnailUrl,
       width: body?.width,

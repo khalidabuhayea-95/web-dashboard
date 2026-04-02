@@ -305,7 +305,7 @@ async function importFromPreviewScrape(options: {
     thumbnailDataUrl: dataUrl,
     fabricData: templateData,
     sourceLabel: "canva-preview-scrape",
-    preserveSvg: true,
+    preserveSvg: false,
     traceRasterToSvg: false,
     rewriteExternalUrls: true,
   });
@@ -383,7 +383,7 @@ async function rewriteImportedTemplateAssets(template: any): Promise<any> {
     thumbnailDataUrl: String(template.thumbnailDataUrl || ""),
     fabricData: template.data,
     sourceLabel: "canva-playwright",
-    preserveSvg: true,
+    preserveSvg: false,
     traceRasterToSvg: false,
     rewriteExternalUrls: true,
   });

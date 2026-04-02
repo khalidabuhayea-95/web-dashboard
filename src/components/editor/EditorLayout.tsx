@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 
 import Toolbar from "@/components/editor/Toolbar";
 import SidePanel from "@/components/editor/SidePanel";
@@ -10,6 +10,18 @@ import PagesTimeline from "@/components/editor/PagesTimeline";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useEditorStore } from "@/store/editorStore";
 import { buildGoogleFontsStylesheetUrl } from "@/lib/editor/fonts";
+import {
+  extractImageSourceFromClipboardHtml,
+  extractTextFromClipboardHtml,
+  getClipboardHtml,
+  getClipboardImageFile,
+  getClipboardSvgDataUrl,
+  getClipboardText,
+  hasInternalEditorClipboardMarker,
+  readImageSourceFromAsyncClipboard,
+  renderClipboardHtmlToImageDataUrl,
+  writeInternalEditorClipboardMarker,
+} from "@/lib/editor/clipboardImport";
 
 const CanvasEditor = dynamic(() => import("@/components/editor/CanvasEditor"), {
   ssr: false,
@@ -60,8 +72,6 @@ export default function EditorLayout() {
   const pasteFromClipboard = useEditorStore((state) => state.pasteFromClipboard);
   const addImageElement = useEditorStore((state) => state.addImageElement);
   const addTextElement = useEditorStore((state) => state.addTextElement);
-  const skipNextPasteEventRef = useRef(false);
-
   useEffect(() => {
     const sync = () => {
       if (window.innerWidth < 1024) {
@@ -117,25 +127,6 @@ export default function EditorLayout() {
         return;
       }
 
-      if (!typingTarget && ctrlOrMeta && !event.altKey && key === "c") {
-        if (selectedIds.length > 0) {
-          const copied = copySelectedToClipboard();
-          if (copied) {
-            event.preventDefault();
-          }
-        }
-        return;
-      }
-
-      if (!typingTarget && ctrlOrMeta && !event.altKey && key === "v") {
-        const pastedIds = pasteFromClipboard();
-        if (pastedIds.length > 0) {
-          skipNextPasteEventRef.current = true;
-          event.preventDefault();
-        }
-        return;
-      }
-
       if (!typingTarget && ctrlOrMeta && event.shiftKey && !event.altKey && key === "m") {
         event.preventDefault();
         void stageApi?.mergeSelectedLayers?.().then((result) => {
@@ -163,9 +154,7 @@ export default function EditorLayout() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
-    copySelectedToClipboard,
     deleteSelected,
-    pasteFromClipboard,
     redo,
     selectedIds.length,
     stageApi,
@@ -173,28 +162,41 @@ export default function EditorLayout() {
   ]);
 
   useEffect(() => {
+    const onCopy = (event: ClipboardEvent) => {
+      const typingTarget = isTypingTarget(event.target);
+      if (typingTarget) return;
+      if (selectedIds.length === 0) return;
+
+      const copied = copySelectedToClipboard();
+      if (!copied) return;
+
+      const marked = writeInternalEditorClipboardMarker(event);
+      if (marked) {
+        event.preventDefault();
+      }
+    };
+
+    window.addEventListener("copy", onCopy);
+    return () => window.removeEventListener("copy", onCopy);
+  }, [copySelectedToClipboard, selectedIds.length]);
+
+  useEffect(() => {
     const onPaste = (event: ClipboardEvent) => {
       const typingTarget = isTypingTarget(event.target);
       if (typingTarget) return;
 
-      if (skipNextPasteEventRef.current) {
-        skipNextPasteEventRef.current = false;
-        event.preventDefault();
+      if (hasInternalEditorClipboardMarker(event)) {
+        const pastedIds = pasteFromClipboard();
+        if (pastedIds.length > 0) {
+          event.preventDefault();
+        }
         return;
       }
 
-      const clipboard = event.clipboardData;
-      if (!clipboard) return;
-
-      const imageItem = Array.from(clipboard.items || []).find(
-        (item) => item.kind === "file" && item.type.startsWith("image/")
-      );
-
-      if (imageItem) {
-        const file = imageItem.getAsFile();
-        if (!file) return;
+      const imageFile = getClipboardImageFile(event);
+      if (imageFile) {
         event.preventDefault();
-        void readFileAsDataUrl(file)
+        void readFileAsDataUrl(imageFile)
           .then((dataUrl) => {
             if (!dataUrl) return;
             addImageElement(dataUrl, { name: "Image" });
@@ -205,8 +207,66 @@ export default function EditorLayout() {
         return;
       }
 
-      const text = String(clipboard.getData("text/plain") || "").trim();
-      if (!text) return;
+      const svgDataUrl = getClipboardSvgDataUrl(event);
+      if (svgDataUrl) {
+        event.preventDefault();
+        addImageElement(svgDataUrl, { name: "Image" });
+        return;
+      }
+
+      const html = getClipboardHtml(event);
+      const htmlImageSource = extractImageSourceFromClipboardHtml(html);
+      if (htmlImageSource) {
+        event.preventDefault();
+        addImageElement(htmlImageSource, { name: "Image" });
+        return;
+      }
+
+      const text = getClipboardText(event);
+      const htmlText = extractTextFromClipboardHtml(html);
+      if (html) {
+        event.preventDefault();
+        const asyncClipboardImageSourcePromise = readImageSourceFromAsyncClipboard();
+        void renderClipboardHtmlToImageDataUrl(html)
+          .then((renderedImageSource) => {
+            if (renderedImageSource) {
+              addImageElement(renderedImageSource, { name: "Image" });
+              return;
+            }
+
+            return asyncClipboardImageSourcePromise.then((clipboardImageSource) => {
+              if (clipboardImageSource) {
+                addImageElement(clipboardImageSource, { name: "Image" });
+                return;
+              }
+
+              const fallbackText = text || htmlText;
+              if (fallbackText) {
+                addTextElement(fallbackText, { name: "Text" });
+              }
+            });
+          })
+          .catch(() => {
+            const fallbackText = text || htmlText;
+            if (fallbackText) {
+              addTextElement(fallbackText, { name: "Text" });
+            }
+          });
+        return;
+      }
+
+      if (!text) {
+        event.preventDefault();
+        void readImageSourceFromAsyncClipboard()
+          .then((clipboardImageSource) => {
+            if (!clipboardImageSource) return;
+            addImageElement(clipboardImageSource, { name: "Image" });
+          })
+          .catch(() => {
+            // Ignore clipboard read failure and keep editor responsive.
+          });
+        return;
+      }
 
       event.preventDefault();
       if (isLikelyImageUrl(text)) {
@@ -219,7 +279,7 @@ export default function EditorLayout() {
 
     window.addEventListener("paste", onPaste);
     return () => window.removeEventListener("paste", onPaste);
-  }, [addImageElement, addTextElement]);
+  }, [addImageElement, addTextElement, pasteFromClipboard]);
 
   return (
     <div className="flex h-screen min-h-screen flex-col bg-[#d7d7d9] text-[#1f2a39]">

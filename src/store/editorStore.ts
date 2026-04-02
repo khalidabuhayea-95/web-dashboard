@@ -12,6 +12,7 @@ export type SidebarTab =
   | "templates"
   | "text"
   | "videos"
+  | "shapes"
   | "elements"
   | "category"
   | "draw"
@@ -82,16 +83,27 @@ export interface EditorElement {
   importParentId?: string | null;
   importKind?: string;
   importZIndex?: number;
+  sourceAssetId?: string;
+  titleEn?: string;
+  titleAr?: string;
+  tagsEn?: string[];
+  tagsAr?: string[];
+  labelsEn?: string[];
+  labelsAr?: string[];
   fallback?: boolean;
   fallbackReason?: string;
   syntheticTextBackground?: boolean;
 }
 
 export interface PageBackground {
-  type: "color" | "gradient";
+  type: "color" | "gradient" | "image";
   color: string;
   gradientFrom: string;
   gradientTo: string;
+  imageUri?: string;
+  imageThumbnailUri?: string;
+  sourceAssetId?: string;
+  categoryValue?: string;
 }
 
 export interface EditorPage {
@@ -156,6 +168,8 @@ interface EditorStore {
   pages: EditorPage[];
   activePageId: string;
   selectedIds: string[];
+  publishCandidateIds: string[];
+  importedElementsRefreshKey: number;
   clipboard: EditorClipboard | null;
   availableFontFamilies: string[];
   activeTemplateId: string;
@@ -191,6 +205,10 @@ interface EditorStore {
   setResizeUseMagic: (value: boolean) => void;
 
   setSelectedIds: (ids: string[]) => void;
+  setPublishCandidateIds: (ids: string[]) => void;
+  togglePublishCandidate: (id: string) => void;
+  clearPublishCandidates: () => void;
+  bumpImportedElementsRefreshKey: () => void;
   clearSelection: () => void;
   registerFontFamilies: (fontFamilies: string[]) => void;
   setTemplateMeta: (meta: TemplateMetaPatch) => void;
@@ -270,6 +288,10 @@ function createDefaultBackground(): PageBackground {
     color: "#ffffff",
     gradientFrom: "#ffffff",
     gradientTo: "#f3f4f6",
+    imageUri: "",
+    imageThumbnailUri: "",
+    sourceAssetId: "",
+    categoryValue: "",
   };
 }
 
@@ -459,6 +481,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   pages: [initialPage],
   activePageId: initialPage.id,
   selectedIds: [],
+  publishCandidateIds: [],
+  importedElementsRefreshKey: 0,
   clipboard: null,
   availableFontFamilies: [...DEFAULT_EDITOR_FONT_FAMILIES],
   activeTemplateId: "",
@@ -494,6 +518,31 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setResizeUseMagic: (resizeUseMagic) => set({ resizeUseMagic }),
 
   setSelectedIds: (selectedIds) => set({ selectedIds }),
+  setPublishCandidateIds: (publishCandidateIds) =>
+    set({
+      publishCandidateIds: Array.from(
+        new Set(
+          (Array.isArray(publishCandidateIds) ? publishCandidateIds : [])
+            .map((value) => String(value || "").trim())
+            .filter(Boolean)
+        )
+      ),
+    }),
+  togglePublishCandidate: (id) =>
+    set((state) => {
+      const targetId = String(id || "").trim();
+      if (!targetId) return state;
+      const next = new Set(state.publishCandidateIds);
+      if (next.has(targetId)) {
+        next.delete(targetId);
+      } else {
+        next.add(targetId);
+      }
+      return { publishCandidateIds: Array.from(next) };
+    }),
+  clearPublishCandidates: () => set({ publishCandidateIds: [] }),
+  bumpImportedElementsRefreshKey: () =>
+    set((state) => ({ importedElementsRefreshKey: state.importedElementsRefreshKey + 1 })),
   clearSelection: () => set({ selectedIds: [] }),
   registerFontFamilies: (fontFamilies) =>
     set((state) => ({
@@ -780,6 +829,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         elements: activePage.elements.filter((element) => element.id !== id),
       })),
       selectedIds: Array.from(selectedSet),
+      publishCandidateIds: state.publishCandidateIds.filter((item) => item !== id),
     });
 
     get().recordHistory();
@@ -796,6 +846,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         elements: activePage.elements.filter((element) => !selectedSet.has(element.id)),
       })),
       selectedIds: [],
+      publishCandidateIds: state.publishCandidateIds.filter((item) => !selectedSet.has(item)),
     }));
 
     get().recordHistory();
@@ -1206,6 +1257,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages: [...state.pages, nextPage],
       activePageId: nextPage.id,
       selectedIds: [],
+      publishCandidateIds: [],
     });
 
     get().recordHistory();
@@ -1234,6 +1286,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages,
       activePageId: cloned.id,
       selectedIds: [],
+      publishCandidateIds: [],
     });
 
     get().recordHistory();
@@ -1252,6 +1305,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages: nextPages,
       activePageId: nextActive,
       selectedIds: [],
+      publishCandidateIds: [],
     });
 
     get().recordHistory();
@@ -1276,7 +1330,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   },
 
   setActivePageId: (activePageId) => {
-    set({ activePageId, selectedIds: [] });
+    set({ activePageId, selectedIds: [], publishCandidateIds: [] });
     get().recordHistory();
   },
 
@@ -1295,6 +1349,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       pages: mutateActivePage(state, () => page),
       selectedIds: [],
+      publishCandidateIds: [],
     });
 
     get().recordHistory();
@@ -1332,6 +1387,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages: normalizedPages,
       activePageId,
       selectedIds: [],
+      publishCandidateIds: [],
       availableFontFamilies: mergeFontFamilies(state.availableFontFamilies, designFonts),
     }));
 
@@ -1350,6 +1406,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages: snapshot.pages,
       activePageId: snapshot.activePageId,
       selectedIds: [],
+      publishCandidateIds: [],
       historyIndex: nextIndex,
     });
   },
@@ -1366,6 +1423,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       pages: snapshot.pages,
       activePageId: snapshot.activePageId,
       selectedIds: [],
+      publishCandidateIds: [],
       historyIndex: nextIndex,
     });
   },

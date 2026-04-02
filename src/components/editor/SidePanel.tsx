@@ -10,6 +10,7 @@ import {
   Facebook,
   FileText,
   GripVertical,
+  Image as ImageIcon,
   Instagram,
   Layers,
   LayoutTemplate,
@@ -19,6 +20,7 @@ import {
   Palette,
   Search,
   Shapes,
+  Info,
   Tag,
   Twitter,
   Type,
@@ -26,6 +28,7 @@ import {
   Upload,
   Trash2,
   Frame,
+  X,
   Video as VideoIcon,
   Youtube,
 } from "lucide-react";
@@ -37,10 +40,20 @@ import {
   normalizeFontFamilyList,
   normalizeFontFamilyName,
 } from "@/lib/editor/fonts";
+import {
+  computeTrimTransparentPaddingPatch,
+  rasterizeSvgDataUrlToPngDataUrl,
+} from "@/lib/editor/imageCrop";
+import {
+  BUILTIN_SHAPE_ASSETS,
+  BUILTIN_SHAPE_CATEGORIES,
+  type BuiltInShapeAsset,
+} from "@/lib/editor/builtinShapes";
 import { deriveReadableFontLabel } from "@/lib/editor/customFontLabel";
 import { uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 import { TEMPLATE_CATEGORY_SETTINGS } from "@/lib/templates/templateSettings";
+import { DEFAULT_BACKGROUND_CATEGORY } from "@/lib/backgrounds/categorySettings";
 import {
   createElementFromAsset,
   isBackgroundLayerElement,
@@ -54,7 +67,8 @@ const TOOL_TABS: Array<{ key: SidebarTab; label: string; icon: ComponentType<{ s
   { key: "templates", label: "Templates", icon: LayoutTemplate },
   { key: "text", label: "Text", icon: Type },
   { key: "videos", label: "Videos", icon: VideoIcon },
-  { key: "elements", label: "Elements", icon: Shapes },
+  { key: "shapes", label: "Shapes", icon: Shapes },
+  { key: "elements", label: "Elements", icon: ImageIcon },
   { key: "category", label: "Category", icon: Tag },
   { key: "upload", label: "Upload", icon: Upload },
   { key: "backgrounds", label: "Background", icon: PaintBucket },
@@ -213,18 +227,32 @@ interface ImportedElementRecord {
   id: string;
   source: string;
   sourceAssetId?: string;
+  categoryValue?: string;
   kind: "icon" | "vector" | "image";
   title: string;
   titleEn: string;
   titleAr: string;
   tags: string[];
+  tagsEn?: string[];
+  tagsAr?: string[];
   labels: string[];
+  labelsEn?: string[];
+  labelsAr?: string[];
   assetUrl: string;
   thumbnailUrl: string;
   animatedVideoUrl?: string;
   width?: number | null;
   height?: number | null;
   freeSvg?: boolean;
+  sourcePayload?: Record<string, unknown>;
+}
+
+interface BackgroundCategoryRecord {
+  id?: string;
+  value: string;
+  labelEn: string;
+  labelAr: string;
+  published?: boolean;
 }
 
 function buildTemplateLoadSignature(templateId: string, updatedAt = "") {
@@ -235,6 +263,8 @@ function buildTemplateLoadSignature(templateId: string, updatedAt = "") {
 
 const FONT_UPLOAD_ACCEPT =
   ".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2,application/font-woff,application/x-font-ttf,application/x-font-otf";
+const RECENT_BUILTIN_SHAPES_STORAGE_KEY = "editor-pro-recent-built-in-shapes";
+const BACKGROUND_LIBRARY_SOURCES = new Set(["freepik-background", "background-upload"]);
 
 function toNumber(value: unknown, fallback: number) {
   const next = Number(value);
@@ -430,6 +460,32 @@ function createSolidFillDataUrl(fill: string, width: number, height: number, rad
     return canvas.toDataURL("image/png");
   } catch {
     return "";
+  }
+}
+
+async function readImageFileDimensions(file: File) {
+  if (typeof window === "undefined" || !file) {
+    return { width: null, height: null };
+  }
+
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const dimensions = await new Promise<{ width: number | null; height: number | null }>((resolve) => {
+      const image = new window.Image();
+      image.onload = () => {
+        resolve({
+          width: Number.isFinite(Number(image.naturalWidth)) ? Number(image.naturalWidth) : null,
+          height: Number.isFinite(Number(image.naturalHeight)) ? Number(image.naturalHeight) : null,
+        });
+      };
+      image.onerror = () => {
+        resolve({ width: null, height: null });
+      };
+      image.src = objectUrl;
+    });
+    return dimensions;
+  } finally {
+    URL.revokeObjectURL(objectUrl);
   }
 }
 
@@ -700,6 +756,21 @@ function toEditorDesignFromTemplate(
         ...(importNodeId ? { importNodeId } : {}),
         ...(String(item.importParentId || "").trim() ? { importParentId: String(item.importParentId).trim() } : {}),
         ...(String(item.importKind || "").trim() ? { importKind: String(item.importKind).trim() } : {}),
+        ...(String(item.sourceAssetId || "").trim() ? { sourceAssetId: String(item.sourceAssetId).trim() } : {}),
+        ...(String(item.titleEn || "").trim() ? { titleEn: String(item.titleEn).trim() } : {}),
+        ...(String(item.titleAr || "").trim() ? { titleAr: String(item.titleAr).trim() } : {}),
+        ...(Array.isArray(item.tagsEn) && item.tagsEn.length > 0
+          ? { tagsEn: item.tagsEn.map((value) => String(value || "").trim()).filter(Boolean) }
+          : {}),
+        ...(Array.isArray(item.tagsAr) && item.tagsAr.length > 0
+          ? { tagsAr: item.tagsAr.map((value) => String(value || "").trim()).filter(Boolean) }
+          : {}),
+        ...(Array.isArray(item.labelsEn) && item.labelsEn.length > 0
+          ? { labelsEn: item.labelsEn.map((value) => String(value || "").trim()).filter(Boolean) }
+          : {}),
+        ...(Array.isArray(item.labelsAr) && item.labelsAr.length > 0
+          ? { labelsAr: item.labelsAr.map((value) => String(value || "").trim()).filter(Boolean) }
+          : {}),
         importZIndex,
         fallback: Boolean(item.fallback),
         fallbackReason: String(item.fallbackReason || ""),
@@ -1080,6 +1151,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const activeTab = useEditorStore((state) => state.sidebarTab);
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
+  const importedElementsRefreshKey = useEditorStore((state) => state.importedElementsRefreshKey);
   const activeTemplateId = useEditorStore((state) => state.activeTemplateId);
   const activeTemplateName = useEditorStore((state) => state.activeTemplateName);
   const activeTemplateStatus = useEditorStore((state) => state.activeTemplateStatus);
@@ -1110,15 +1182,22 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const recordHistory = useEditorStore((state) => state.recordHistory);
 
   const [templateSearch, setTemplateSearch] = useState("");
+  const [shapeSearch, setShapeSearch] = useState("");
   const [elementSearch, setElementSearch] = useState("");
   const [importedElements, setImportedElements] = useState<ImportedElementRecord[]>([]);
   const [importedElementsLoading, setImportedElementsLoading] = useState(false);
   const [importedElementsError, setImportedElementsError] = useState("");
   const [deletingImportedElementId, setDeletingImportedElementId] = useState("");
+  const [openImportedElementInfoId, setOpenImportedElementInfoId] = useState("");
+  const [copiedImportedTagKey, setCopiedImportedTagKey] = useState("");
   const [importedElementsTotal, setImportedElementsTotal] = useState(0);
   const [importedElementsPage, setImportedElementsPage] = useState(1);
   const [importedElementsHasNextPage, setImportedElementsHasNextPage] = useState(false);
   const [importedElementsKindTab, setImportedElementsKindTab] = useState<"all" | "icon">("all");
+  const [backgroundAssets, setBackgroundAssets] = useState<ImportedElementRecord[]>([]);
+  const [backgroundAssetsLoading, setBackgroundAssetsLoading] = useState(false);
+  const [backgroundAssetsError, setBackgroundAssetsError] = useState("");
+  const [backgroundCategories, setBackgroundCategories] = useState<BackgroundCategoryRecord[]>([]);
   const [sameSizeOnly, setSameSizeOnly] = useState(false);
   const [dragLayerId, setDragLayerId] = useState("");
   const [dragOver, setDragOver] = useState<{ id: string; position: "before" | "after" }>({
@@ -1131,6 +1210,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [storedTemplates, setStoredTemplates] = useState<StoredTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
   const [templatesError, setTemplatesError] = useState("");
+  const [recentBuiltInShapeIds, setRecentBuiltInShapeIds] = useState<string[]>([]);
   const [customFonts, setCustomFonts] = useState<CustomFontRecord[]>([]);
   const [customFontsLoading, setCustomFontsLoading] = useState(false);
   const [fontSearchQuery, setFontSearchQuery] = useState("");
@@ -1178,6 +1258,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const customFontInputRef = useRef<HTMLInputElement | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const importedElementsScrollLockRef = useRef(false);
+  const importedTagFeedbackTimeoutRef = useRef<number | null>(null);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -1195,13 +1276,97 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     setImportedElementsPage(1);
     setImportedElementsHasNextPage(false);
     importedElementsScrollLockRef.current = false;
-  }, [activeTab, elementSearch, importedElementsKindTab]);
+    setOpenImportedElementInfoId("");
+    setCopiedImportedTagKey("");
+  }, [activeTab, elementSearch, importedElementsKindTab, importedElementsRefreshKey]);
+
+  useEffect(() => {
+    return () => {
+      if (importedTagFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(importedTagFeedbackTimeoutRef.current);
+      }
+    };
+  }, []);
 
   const layers = useMemo(() => {
     if (!activePage) return [];
     return [...activePage.elements].reverse();
   }, [activePage]);
   const activeBackgroundColor = String(activePage?.background?.color || "#ffffff").trim();
+  const activeBackgroundImageUri = String(activePage?.background?.imageUri || "").trim();
+  const applyBackgroundColorSelection = useCallback(
+    (nextColor: string) => {
+      const normalizedColor = String(nextColor || "#ffffff").trim() || "#ffffff";
+      if (activePage?.background?.type === "image" && activeBackgroundImageUri) {
+        setBackground({
+          type: "image",
+          color: normalizedColor,
+        });
+        return;
+      }
+
+      setBackground({
+        type: "color",
+        color: normalizedColor,
+        imageUri: "",
+        imageThumbnailUri: "",
+        sourceAssetId: "",
+        categoryValue: "",
+      });
+    },
+    [activeBackgroundImageUri, activePage?.background?.type, setBackground]
+  );
+  const builtInShapeLookup = useMemo(
+    () => new Map(BUILTIN_SHAPE_ASSETS.map((shape) => [shape.id, shape])),
+    []
+  );
+  const shapeSearchQuery = shapeSearch.trim().toLowerCase();
+  const visibleBackgroundCategories = useMemo(() => {
+    const published = backgroundCategories.filter((item) => item?.published !== false && item?.value);
+    return published.length > 0 ? published : backgroundCategories.filter((item) => item?.value);
+  }, [backgroundCategories]);
+  const defaultBackgroundUploadCategoryValue = useMemo(
+    () => visibleBackgroundCategories[0]?.value || DEFAULT_BACKGROUND_CATEGORY,
+    [visibleBackgroundCategories]
+  );
+
+  const categorizedBackgroundAssets = useMemo(() => {
+    const groups = new Map<
+      string,
+      { key: string; label: string; items: ImportedElementRecord[]; order: number }
+    >();
+    const categoryOrder = new Map<string, number>();
+
+    visibleBackgroundCategories.forEach((category, index) => {
+      categoryOrder.set(String(category.value || ""), index);
+    });
+
+    backgroundAssets.forEach((item) => {
+      const rawCategoryValue = String(item.categoryValue || "").trim().toLowerCase();
+      const categoryValue = rawCategoryValue || DEFAULT_BACKGROUND_CATEGORY;
+      const matchedCategory =
+        visibleBackgroundCategories.find((category) => category.value === categoryValue) || null;
+      const groupKey = matchedCategory?.value || categoryValue;
+      const existing = groups.get(groupKey);
+      if (existing) {
+        existing.items.push(item);
+        return;
+      }
+      groups.set(groupKey, {
+        key: groupKey,
+        label:
+          String(matchedCategory?.labelEn || matchedCategory?.labelAr || groupKey || "Backgrounds").trim() ||
+          "Backgrounds",
+        items: [item],
+        order: categoryOrder.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
+      });
+    });
+
+    return Array.from(groups.values()).sort((left, right) => {
+      if (left.order !== right.order) return left.order - right.order;
+      return left.label.localeCompare(right.label);
+    });
+  }, [backgroundAssets, visibleBackgroundCategories]);
 
   const filteredTemplates = useMemo(() => {
     const query = templateSearch.trim().toLowerCase();
@@ -1315,6 +1480,146 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     };
   }, [fontSearchQuery, groupedCustomFonts]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = window.localStorage.getItem(RECENT_BUILTIN_SHAPES_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (!Array.isArray(parsed)) return;
+      setRecentBuiltInShapeIds(
+        parsed
+          .map((value) => String(value || "").trim())
+          .filter((value) => Boolean(value) && builtInShapeLookup.has(value))
+          .slice(0, 12)
+      );
+    } catch {
+      // Ignore corrupted recent-shape storage.
+    }
+  }, [builtInShapeLookup]);
+
+  const rememberBuiltInShape = useCallback((shapeId: string) => {
+    const normalized = String(shapeId || "").trim();
+    if (!normalized) return;
+    setRecentBuiltInShapeIds((current) => {
+      const next = [normalized, ...current.filter((item) => item !== normalized)].slice(0, 12);
+      if (typeof window !== "undefined") {
+        try {
+          window.localStorage.setItem(
+            RECENT_BUILTIN_SHAPES_STORAGE_KEY,
+            JSON.stringify(next)
+          );
+        } catch {
+          // Ignore storage write failures.
+        }
+      }
+      return next;
+    });
+  }, []);
+
+  const createBuiltInShapePayload = useCallback(
+    (shape: BuiltInShapeAsset) => {
+      const aspectRatio = Math.max(0.1, shape.width / Math.max(1, shape.height));
+      const isLineLike = shape.category === "lines";
+      let width = isLineLike
+        ? Math.min(activePage.width * 0.42, 320)
+        : Math.min(activePage.width * 0.24, 220);
+      let height = width / aspectRatio;
+      const maxHeight = isLineLike
+        ? Math.min(activePage.height * 0.12, 96)
+        : Math.min(activePage.height * 0.24, 220);
+      if (height > maxHeight) {
+        height = maxHeight;
+        width = height * aspectRatio;
+      }
+      return {
+        type: "image" as const,
+        src: shape.src,
+        name: shape.name,
+        width: Math.max(48, Math.round(width)),
+        height: Math.max(24, Math.round(height)),
+        sourceWidth: shape.width,
+        sourceHeight: shape.height,
+      };
+    },
+    [activePage.height, activePage.width]
+  );
+
+  const addBuiltInShapeToCanvas = useCallback(
+    async (shape: BuiltInShapeAsset) => {
+      let resolvedSrc = shape.src;
+      try {
+        resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(shape.src);
+      } catch {
+        // Keep the original source if rasterization fails.
+      }
+
+      const payload = {
+        ...createBuiltInShapePayload(shape),
+        src: resolvedSrc,
+        rasterOriginalSrc: resolvedSrc,
+      };
+      const elementId = addImageElement(resolvedSrc, payload);
+      rememberBuiltInShape(shape.id);
+      if (!elementId) return;
+
+      try {
+        const state = useEditorStore.getState();
+        const page =
+          state.pages.find((item) => item.id === state.activePageId) || state.pages[0];
+        const element = page?.elements.find((item) => item.id === elementId);
+        if (!element || element.type !== "image") return;
+        const trimmed = await computeTrimTransparentPaddingPatch(element);
+        if (!trimmed.supported || !trimmed.patch) return;
+        updateElement(elementId, trimmed.patch, { recordHistory: false });
+      } catch {
+        // Built-in shape insertion should still succeed even if trim fails.
+      }
+    },
+    [
+      addImageElement,
+      createBuiltInShapePayload,
+      rememberBuiltInShape,
+      updateElement,
+    ]
+  );
+
+  const builtInShapeSections = useMemo(() => {
+    const matchesQuery = (shape: BuiltInShapeAsset) => {
+      if (!shapeSearchQuery) return true;
+      const haystack = [shape.name, shape.category, ...shape.keywords].join(" ").toLowerCase();
+      return haystack.includes(shapeSearchQuery);
+    };
+
+    const sections: Array<{ id: string; label: string; items: BuiltInShapeAsset[] }> = [];
+    if (!shapeSearchQuery) {
+      const recentItems = recentBuiltInShapeIds
+        .map((shapeId) => builtInShapeLookup.get(shapeId) || null)
+        .filter((item): item is BuiltInShapeAsset => Boolean(item));
+      if (recentItems.length > 0) {
+        sections.push({
+          id: "recent",
+          label: "Recently used",
+          items: recentItems,
+        });
+      }
+    }
+
+    BUILTIN_SHAPE_CATEGORIES.forEach((category) => {
+      const items = BUILTIN_SHAPE_ASSETS.filter(
+        (shape) => shape.category === category.id && matchesQuery(shape)
+      );
+      if (items.length === 0) return;
+      sections.push({
+        id: category.id,
+        label: category.label,
+        items,
+      });
+    });
+
+    return sections;
+  }, [builtInShapeLookup, recentBuiltInShapeIds, shapeSearchQuery]);
+
   const customFontLanguageByFamily = useMemo(() => {
     const map = new Map<string, "arabic" | "english">();
     customFonts.forEach((font) => {
@@ -1385,27 +1690,39 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       if (!file.type.startsWith("image/")) continue;
       try {
         const uploaded = await uploadEditorMediaFile(file, "image");
-        addImageElement(uploaded.url, {
-          name: file.name.replace(/\.[^.]+$/, "") || "upload",
-          width: Math.min(780, activePage.width * 0.65),
-          height: Math.min(780, activePage.height * 0.48),
-          rasterOriginalSrc: uploaded.url,
-        });
+        const imageDimensions = await readImageFileDimensions(file);
+        const baseTitle = file.name.replace(/\.[^.]+$/, "") || "Image Upload";
 
-        const importedResponse = await fetch("/api/editor/elements/imported", {
+        if (activeTab !== "backgrounds") {
+          addImageElement(uploaded.url, {
+            name: baseTitle || "upload",
+            width: Math.min(780, activePage.width * 0.65),
+            height: Math.min(780, activePage.height * 0.48),
+            rasterOriginalSrc: uploaded.url,
+          });
+        }
+
+        const importedResponse = await fetch(
+          activeTab === "backgrounds"
+            ? "/api/editor/backgrounds/imported"
+            : "/api/editor/elements/imported",
+          {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({
-            source: "upload",
+            source: activeTab === "backgrounds" ? "background-upload" : "upload",
             sourceAssetId: uploaded.path || uploaded.url,
             kind: "image",
-            title: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
-            titleEn: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
-            titleAr: file.name.replace(/\.[^.]+$/, "") || "Image Upload",
+            title: baseTitle,
+            titleEn: baseTitle,
+            titleAr: baseTitle,
+            categoryValue: activeTab === "backgrounds" ? defaultBackgroundUploadCategoryValue : "",
             assetUrl: uploaded.url,
             thumbnailUrl: uploaded.url,
+            width: imageDimensions.width,
+            height: imageDimensions.height,
             freeSvg: false,
             sourcePayload: {
               mimeType: uploaded.mimeType || file.type || "image/png",
@@ -1413,14 +1730,16 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               uploadedPath: uploaded.path || "",
             },
           }),
-        }).catch(() => null);
-        if (activeTab === "elements" && importedResponse?.ok) {
+          }
+        ).catch(() => null);
+        if ((activeTab === "elements" || activeTab === "backgrounds") && importedResponse?.ok) {
           const importedPayload = await importedResponse.json().catch(() => null);
           if (importedPayload?.id && importedPayload?.assetUrl) {
             const normalizedItem: ImportedElementRecord = {
               id: String(importedPayload.id || ""),
-              source: String(importedPayload.source || "upload"),
+              source: String(importedPayload.source || (activeTab === "backgrounds" ? "background-upload" : "upload")).trim().toLowerCase(),
               sourceAssetId: String(importedPayload.sourceAssetId || uploaded.path || uploaded.url),
+              categoryValue: String(importedPayload.categoryValue || defaultBackgroundUploadCategoryValue || "").trim().toLowerCase(),
               kind:
                 importedPayload?.kind === "icon" ||
                 importedPayload?.kind === "vector" ||
@@ -1439,25 +1758,58 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               tags: Array.isArray(importedPayload.tags)
                 ? importedPayload.tags.map((value: unknown) => String(value || "")).filter(Boolean)
                 : [],
+              tagsEn: Array.isArray(importedPayload.tagsEn)
+                ? importedPayload.tagsEn.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
+              tagsAr: Array.isArray(importedPayload.tagsAr)
+                ? importedPayload.tagsAr.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
               labels: Array.isArray(importedPayload.labels)
                 ? importedPayload.labels.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
+              labelsEn: Array.isArray(importedPayload.labelsEn)
+                ? importedPayload.labelsEn.map((value: unknown) => String(value || "")).filter(Boolean)
+                : [],
+              labelsAr: Array.isArray(importedPayload.labelsAr)
+                ? importedPayload.labelsAr.map((value: unknown) => String(value || "")).filter(Boolean)
                 : [],
               assetUrl: String(importedPayload.assetUrl || uploaded.url),
               thumbnailUrl: String(importedPayload.thumbnailUrl || importedPayload.assetUrl || uploaded.url),
               animatedVideoUrl: String(importedPayload.animatedVideoUrl || ""),
-              width: Number.isFinite(Number(importedPayload.width)) ? Number(importedPayload.width) : null,
-              height: Number.isFinite(Number(importedPayload.height)) ? Number(importedPayload.height) : null,
+              width: Number.isFinite(Number(importedPayload.width))
+                ? Number(importedPayload.width)
+                : imageDimensions.width,
+              height: Number.isFinite(Number(importedPayload.height))
+                ? Number(importedPayload.height)
+                : imageDimensions.height,
               freeSvg: Boolean(importedPayload.freeSvg ?? false),
+              sourcePayload:
+                importedPayload?.sourcePayload &&
+                typeof importedPayload.sourcePayload === "object" &&
+                !Array.isArray(importedPayload.sourcePayload)
+                  ? importedPayload.sourcePayload
+                  : {},
             };
-            setImportedElements((current) => {
-              const deduped = new Map<string, ImportedElementRecord>();
-              deduped.set(normalizedItem.id, normalizedItem);
-              current.forEach((item) => {
-                if (!deduped.has(item.id)) deduped.set(item.id, item);
+            if (activeTab === "backgrounds") {
+              setBackgroundAssets((current) => {
+                const deduped = new Map<string, ImportedElementRecord>();
+                deduped.set(normalizedItem.id, normalizedItem);
+                current.forEach((item) => {
+                  if (!deduped.has(item.id)) deduped.set(item.id, item);
+                });
+                return Array.from(deduped.values());
               });
-              return Array.from(deduped.values());
-            });
-            setImportedElementsTotal((current) => current + 1);
+            } else {
+              setImportedElements((current) => {
+                const deduped = new Map<string, ImportedElementRecord>();
+                deduped.set(normalizedItem.id, normalizedItem);
+                current.forEach((item) => {
+                  if (!deduped.has(item.id)) deduped.set(item.id, item);
+                });
+                return Array.from(deduped.values());
+              });
+              setImportedElementsTotal((current) => current + 1);
+            }
           }
         }
       } catch (_error) {
@@ -1631,7 +1983,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         const normalizedItems = items
           .map((item) => ({
             id: String(item?.id || ""),
-            source: String(item?.source || "freepik"),
+            source: String(item?.source || "freepik").trim().toLowerCase(),
             sourceAssetId: String(item?.sourceAssetId || ""),
             kind:
               item?.kind === "icon" || item?.kind === "vector" || item?.kind === "image"
@@ -1641,15 +1993,27 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             titleEn: String(item?.titleEn || ""),
             titleAr: String(item?.titleAr || ""),
             tags: Array.isArray(item?.tags) ? item.tags.map((value) => String(value || "")).filter(Boolean) : [],
+            tagsEn: Array.isArray(item?.tagsEn) ? item.tagsEn.map((value) => String(value || "")).filter(Boolean) : [],
+            tagsAr: Array.isArray(item?.tagsAr) ? item.tagsAr.map((value) => String(value || "")).filter(Boolean) : [],
             labels: Array.isArray(item?.labels) ? item.labels.map((value) => String(value || "")).filter(Boolean) : [],
+            labelsEn: Array.isArray(item?.labelsEn)
+              ? item.labelsEn.map((value) => String(value || "")).filter(Boolean)
+              : [],
+            labelsAr: Array.isArray(item?.labelsAr)
+              ? item.labelsAr.map((value) => String(value || "")).filter(Boolean)
+              : [],
             assetUrl: String(item?.assetUrl || ""),
             thumbnailUrl: String(item?.thumbnailUrl || item?.assetUrl || ""),
             animatedVideoUrl: String(item?.animatedVideoUrl || ""),
             width: Number.isFinite(Number(item?.width)) ? Number(item.width) : null,
             height: Number.isFinite(Number(item?.height)) ? Number(item.height) : null,
             freeSvg: Boolean(item?.freeSvg),
+            sourcePayload:
+              item?.sourcePayload && typeof item.sourcePayload === "object" && !Array.isArray(item.sourcePayload)
+                ? item.sourcePayload
+                : {},
           }))
-          .filter((item) => item.id && item.assetUrl);
+          .filter((item) => item.id && item.assetUrl && !BACKGROUND_LIBRARY_SOURCES.has(item.source));
         setImportedElements((current) => {
           if (importedElementsPage <= 1) {
             return normalizedItems;
@@ -1683,7 +2047,114 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [activeTab, elementSearch, importedElementsKindTab, importedElementsPage]);
+  }, [activeTab, elementSearch, importedElementsKindTab, importedElementsPage, importedElementsRefreshKey]);
+
+  useEffect(() => {
+    if (activeTab !== "backgrounds") return;
+
+    let cancelled = false;
+    const controller = new AbortController();
+    const timeoutId = window.setTimeout(async () => {
+      setBackgroundAssetsLoading(true);
+      setBackgroundAssetsError("");
+
+      try {
+        const [categoriesResponse, backgroundsResponse] = await Promise.all([
+          fetch("/api/settings/background-categories", {
+            cache: "no-store",
+            signal: controller.signal,
+          }),
+          fetch(
+            `/api/editor/backgrounds/imported?${new URLSearchParams({
+              source: "all",
+              page: "1",
+              pageSize: "120",
+              lang: "en",
+            }).toString()}`,
+            {
+              cache: "no-store",
+              signal: controller.signal,
+            }
+          ),
+        ]);
+
+        const categoriesPayload = await categoriesResponse.json().catch(() => ({}));
+        if (!categoriesResponse.ok) {
+          throw new Error(categoriesPayload?.error || "Failed to load background categories.");
+        }
+
+        const backgroundsPayload = await backgroundsResponse.json().catch(() => ({}));
+        if (!backgroundsResponse.ok) {
+          throw new Error(backgroundsPayload?.error || "Failed to load imported backgrounds.");
+        }
+
+        if (cancelled) return;
+
+        const nextCategories = Array.isArray(categoriesPayload?.settings)
+          ? (categoriesPayload.settings as BackgroundCategoryRecord[])
+          : [];
+        const items = Array.isArray(backgroundsPayload?.items)
+          ? (backgroundsPayload.items as ImportedElementRecord[])
+          : [];
+        const normalizedItems = items
+          .map((item) => ({
+            id: String(item?.id || ""),
+            source: String(item?.source || "freepik-background"),
+            sourceAssetId: String(item?.sourceAssetId || ""),
+            categoryValue: String(item?.categoryValue || "").trim().toLowerCase(),
+            kind:
+              item?.kind === "icon" || item?.kind === "vector" || item?.kind === "image"
+                ? item.kind
+                : "image",
+            title: String(item?.title || item?.titleEn || item?.titleAr || ""),
+            titleEn: String(item?.titleEn || ""),
+            titleAr: String(item?.titleAr || ""),
+            tags: Array.isArray(item?.tags) ? item.tags.map((value) => String(value || "")).filter(Boolean) : [],
+            tagsEn: Array.isArray(item?.tagsEn) ? item.tagsEn.map((value) => String(value || "")).filter(Boolean) : [],
+            tagsAr: Array.isArray(item?.tagsAr) ? item.tagsAr.map((value) => String(value || "")).filter(Boolean) : [],
+            labels: Array.isArray(item?.labels) ? item.labels.map((value) => String(value || "")).filter(Boolean) : [],
+            labelsEn: Array.isArray(item?.labelsEn)
+              ? item.labelsEn.map((value) => String(value || "")).filter(Boolean)
+              : [],
+            labelsAr: Array.isArray(item?.labelsAr)
+              ? item.labelsAr.map((value) => String(value || "")).filter(Boolean)
+              : [],
+            assetUrl: String(item?.assetUrl || ""),
+            thumbnailUrl: String(item?.thumbnailUrl || item?.assetUrl || ""),
+            animatedVideoUrl: String(item?.animatedVideoUrl || ""),
+            width: Number.isFinite(Number(item?.width)) ? Number(item.width) : null,
+            height: Number.isFinite(Number(item?.height)) ? Number(item.height) : null,
+            freeSvg: Boolean(item?.freeSvg),
+            sourcePayload:
+              item?.sourcePayload && typeof item.sourcePayload === "object" && !Array.isArray(item.sourcePayload)
+                ? item.sourcePayload
+                : {},
+          }))
+          .filter((item) => item.id && item.assetUrl);
+
+        setBackgroundCategories(nextCategories);
+        setBackgroundAssets(normalizedItems);
+      } catch (error: unknown) {
+        if (cancelled) return;
+        if (error instanceof Error && error.name === "AbortError") return;
+        setBackgroundAssets([]);
+        setBackgroundCategories([]);
+        setBackgroundAssetsError(
+          error instanceof Error ? error.message : "Failed to load background assets."
+        );
+      } finally {
+        if (!cancelled) {
+          setBackgroundAssetsLoading(false);
+        }
+      }
+    }, 120);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutId);
+      controller.abort();
+    };
+  }, [activeTab, importedElementsRefreshKey]);
 
   const handleDeleteImportedElement = useCallback(
     async (elementId: string) => {
@@ -1702,18 +2173,75 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           throw new Error(payload?.error || "Failed to delete imported element.");
         }
 
-        setImportedElements((current) => current.filter((item) => item.id !== id));
-        setImportedElementsTotal((current) => Math.max(0, current - 1));
+        let removedFromElements = false;
+        setImportedElements((current) => {
+          removedFromElements = current.some((item) => item.id === id);
+          return current.filter((item) => item.id !== id);
+        });
+        if (removedFromElements) {
+          setImportedElementsTotal((current) => Math.max(0, current - 1));
+        }
+        setBackgroundAssets((current) => current.filter((item) => item.id !== id));
       } catch (error: unknown) {
         const message =
           error instanceof Error ? error.message : "Failed to delete imported element.";
         setImportedElementsError(message);
+        setBackgroundAssetsError(message);
       } finally {
         setDeletingImportedElementId((current) => (current === id ? "" : current));
       }
     },
     [deletingImportedElementId]
   );
+
+  const handleDeleteBackgroundAsset = useCallback(
+    async (backgroundId: string) => {
+      const id = String(backgroundId || "").trim();
+      if (!id || deletingImportedElementId === id) return;
+
+      setDeletingImportedElementId(id);
+      try {
+        const response = await fetch("/api/editor/backgrounds/imported", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ id }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(payload?.error || "Failed to delete imported background.");
+        }
+
+        setBackgroundAssets((current) => current.filter((item) => item.id !== id));
+      } catch (error: unknown) {
+        const message =
+          error instanceof Error ? error.message : "Failed to delete imported background.";
+        setBackgroundAssetsError(message);
+      } finally {
+        setDeletingImportedElementId((current) => (current === id ? "" : current));
+      }
+    },
+    [deletingImportedElementId]
+  );
+
+  const handleCopyImportedTag = useCallback(async (itemId: string, tag: string) => {
+    const safeItemId = String(itemId || "").trim();
+    const safeTag = String(tag || "").trim();
+    if (!safeItemId || !safeTag) return;
+    try {
+      await navigator.clipboard.writeText(safeTag);
+      const feedbackKey = `${safeItemId}:${safeTag}`;
+      setCopiedImportedTagKey(feedbackKey);
+      if (importedTagFeedbackTimeoutRef.current !== null) {
+        window.clearTimeout(importedTagFeedbackTimeoutRef.current);
+      }
+      importedTagFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setCopiedImportedTagKey((current) => (current === feedbackKey ? "" : current));
+        importedTagFeedbackTimeoutRef.current = null;
+      }, 1400);
+    } catch (_error) {
+      window.alert("Unable to copy the tag.");
+    }
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -2349,56 +2877,136 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               </section>
             ) : null}
 
+            {activeTab === "shapes" ? (
+              <section className="flex h-full min-h-0 flex-col gap-3">
+                <div className="relative">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
+                  <Input
+                    className="!h-9 !rounded-full !bg-white !pl-9"
+                    placeholder="Search built-in shapes..."
+                    value={shapeSearch}
+                    onChange={(event) => setShapeSearch(event.target.value)}
+                  />
+                </div>
+
+                <div className="flex min-h-0 flex-1 flex-col rounded-md border border-[#d3d8e1] bg-white p-2">
+                  <div className="min-h-0 flex-1 overflow-y-auto pr-1">
+                    {builtInShapeSections.length > 0 ? (
+                      <div className="space-y-4">
+                        {builtInShapeSections.map((section) => (
+                          <div key={section.id} className="space-y-2">
+                            <div className="flex items-center justify-between gap-2">
+                              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                                {section.label}
+                              </div>
+                              <div className="text-[10px] text-[#94a3b8]">
+                                {section.items.length} shape{section.items.length === 1 ? "" : "s"}
+                              </div>
+                            </div>
+
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                              {section.items.map((shape) => {
+                                const payload = createBuiltInShapePayload(shape);
+                                return (
+                                  <button
+                                    key={shape.id}
+                                    type="button"
+                                    draggable
+                                    onDragStart={(event) => {
+                                      event.dataTransfer.setData(
+                                        "application/x-editor-asset",
+                                        assetPayload({
+                                          payload,
+                                        })
+                                      );
+                                    }}
+                                    onClick={() => void addBuiltInShapeToCanvas(shape)}
+                                    className="flex w-[92px] shrink-0 flex-col gap-2 rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9fb4d6] hover:bg-[#eef3fa]"
+                                    title={shape.name}
+                                  >
+                                    <div className="flex h-16 items-center justify-center rounded-lg bg-white p-2">
+                                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                                      <img
+                                        src={shape.src}
+                                        alt={shape.name}
+                                        className="h-full w-full object-contain"
+                                      />
+                                    </div>
+                                    <div className="line-clamp-2 text-[11px] font-semibold leading-4 text-[#1f2a39]">
+                                      {shape.name}
+                                    </div>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="rounded-md border border-dashed border-[#d3d8e1] bg-[#f8fafc] p-3 text-xs text-[#64748b]">
+                        No built-in shapes match this search.
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </section>
+            ) : null}
+
             {activeTab === "elements" ? (
               <section className="flex h-full min-h-0 flex-col gap-3">
                 <div className="relative">
                   <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
-                  <Input className="!h-9 !rounded-full !bg-white !pl-9" placeholder="Search..." value={elementSearch} onChange={(event) => setElementSearch(event.target.value)} />
+                  <Input
+                    className="!h-9 !rounded-full !bg-white !pl-9"
+                    placeholder="Search imported elements..."
+                    value={elementSearch}
+                    onChange={(event) => setElementSearch(event.target.value)}
+                  />
                 </div>
 
                 <div className="flex min-h-0 flex-1 flex-col rounded-md border border-[#d3d8e1] bg-white p-2">
-                  <div className="mb-2 flex items-center justify-between gap-2">
-                    <div className="text-sm font-semibold text-[#202a38]">
-                      Imported ({importedElementsTotal})
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <button
-                        type="button"
-                        aria-label="Upload image"
-                        title="Upload image"
-                        onClick={() => uploadInputRef.current?.click()}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
-                      >
-                        <Upload size={14} />
-                      </button>
-                      <div className="inline-flex rounded-full border border-[#d3d8e1] bg-[#f2f4f7] p-0.5 text-[11px]">
-                        {[
-                          { key: "all", label: "All" },
-                          { key: "icon", label: "Icons" },
-                        ].map((item) => (
-                          <button
-                            key={item.key}
-                            type="button"
-                            className={`rounded-full px-2 py-0.5 ${
-                              importedElementsKindTab === item.key
-                                ? "bg-white font-semibold text-[#1f2a39]"
-                                : "text-[#637087]"
-                            }`}
-                            onClick={() =>
-                              setImportedElementsKindTab(item.key as "all" | "icon")
-                            }
-                          >
-                            {item.label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-
                   <div
                     className="min-h-0 flex-1 overflow-y-auto pr-1"
                     onScroll={handleImportedElementsScroll}
                   >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <div className="text-sm font-semibold text-[#202a38]">
+                        Imported ({importedElementsTotal})
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          aria-label="Upload image"
+                          title="Upload image"
+                          onClick={() => uploadInputRef.current?.click()}
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                        >
+                          <Upload size={14} />
+                        </button>
+                        <div className="inline-flex rounded-full border border-[#d3d8e1] bg-[#f2f4f7] p-0.5 text-[11px]">
+                          {[
+                            { key: "all", label: "All" },
+                            { key: "icon", label: "Icons" },
+                          ].map((item) => (
+                            <button
+                              key={item.key}
+                              type="button"
+                              className={`rounded-full px-2 py-0.5 ${
+                                importedElementsKindTab === item.key
+                                  ? "bg-white font-semibold text-[#1f2a39]"
+                                  : "text-[#637087]"
+                              }`}
+                              onClick={() =>
+                                setImportedElementsKindTab(item.key as "all" | "icon")
+                              }
+                            >
+                              {item.label}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
                     {importedElements.length > 0 ? (
                       <div className="grid grid-cols-2 gap-2">
                         {importedElements.map((item) => {
@@ -2406,10 +3014,76 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                           const videoSource = deriveFreepikAnimatedVideoUrl(item);
                           const addAsVideo = !isGifAsset && isVideoSource(videoSource);
                           const deletingImported = deletingImportedElementId === item.id;
+                          const showingInfo = openImportedElementInfoId === item.id;
+                          const searchableTagsEn = Array.from(
+                            new Set(
+                              [
+                                ...(Array.isArray(item.tagsEn) ? item.tagsEn : []),
+                                ...(Array.isArray(item.labelsEn) ? item.labelsEn : []),
+                                ...(!Array.isArray(item.tagsEn) || item.tagsEn.length === 0 ? item.tags : []),
+                                ...(!Array.isArray(item.labelsEn) || item.labelsEn.length === 0 ? item.labels : []),
+                              ]
+                                .map((value) => String(value || "").trim())
+                                .filter(Boolean)
+                            )
+                          ).slice(0, 24);
+                          const searchableTagsAr = Array.from(
+                            new Set(
+                              [
+                                ...(Array.isArray(item.tagsAr) ? item.tagsAr : []),
+                                ...(Array.isArray(item.labelsAr) ? item.labelsAr : []),
+                              ]
+                                .map((value) => String(value || "").trim())
+                                .filter(Boolean)
+                            )
+                          ).slice(0, 24);
+                          const importedSourcePayload =
+                            item.sourcePayload && typeof item.sourcePayload === "object"
+                              ? item.sourcePayload
+                              : {};
+                          const importedRasterOriginalSrc = String(
+                            importedSourcePayload.rasterOriginalSrc || item.assetUrl || ""
+                          ).trim();
+                          const importedRasterPalette = Array.isArray(importedSourcePayload.rasterPalette)
+                            ? importedSourcePayload.rasterPalette
+                                .map((value) => String(value || "").trim())
+                                .filter(Boolean)
+                            : [];
+                          const importedRasterPaletteVersion = Number.isFinite(
+                            Number(importedSourcePayload.rasterPaletteVersion)
+                          )
+                            ? Number(importedSourcePayload.rasterPaletteVersion)
+                            : 0;
+                          const importedRasterColorMap =
+                            importedSourcePayload.rasterColorMap &&
+                            typeof importedSourcePayload.rasterColorMap === "object" &&
+                            !Array.isArray(importedSourcePayload.rasterColorMap)
+                              ? importedSourcePayload.rasterColorMap
+                              : {};
+                          const importedImagePayload = {
+                            type: "image",
+                            src: item.assetUrl,
+                            name: item.title || "Imported Icon",
+                            rasterOriginalSrc: importedRasterOriginalSrc || item.assetUrl,
+                            rasterPalette: importedRasterPalette,
+                            rasterPaletteVersion: importedRasterPaletteVersion,
+                            rasterColorMap: importedRasterColorMap as Record<string, string>,
+                          } as const;
+                          const addImportedElementToCanvas = () => {
+                            if (addAsVideo) {
+                              addVideoElement(videoSource, {
+                                name: item.title || "Imported Icon",
+                              });
+                              return;
+                            }
+                            addImageElement(item.assetUrl, importedImagePayload);
+                          };
+
                           return (
-                            <button
+                            <div
                               key={item.id}
-                              type="button"
+                              role="button"
+                              tabIndex={0}
                               draggable
                               onDragStart={(event) => {
                                 const payload = addAsVideo
@@ -2418,31 +3092,46 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       src: videoSource,
                                     })
                                   : assetPayload({
-                                        payload: {
-                                          type: "image",
-                                          src: item.assetUrl,
-                                          name: item.title || "Imported Icon",
-                                          rasterOriginalSrc: item.assetUrl,
-                                        },
+                                        payload: importedImagePayload,
                                       });
                                 event.dataTransfer.setData(
                                   "application/x-editor-asset",
                                   payload
                                 );
                               }}
-                              onClick={() =>
-                                addAsVideo
-                                  ? addVideoElement(videoSource, {
-                                      name: item.title || "Imported Icon",
-                                    })
-                                  : addImageElement(item.assetUrl, {
-                                      name: item.title || "Imported Icon",
-                                      rasterOriginalSrc: item.assetUrl,
-                                    })
-                              }
-                              className="rounded-md border border-[#d3d8e1] bg-white p-2 text-left hover:bg-[#f7f9fc]"
+                              onClick={addImportedElementToCanvas}
+                              onKeyDown={(event) => {
+                                if (event.key !== "Enter" && event.key !== " ") return;
+                                event.preventDefault();
+                                addImportedElementToCanvas();
+                              }}
+                              className="rounded-md border border-[#d3d8e1] bg-[#f3f4f6] p-2 text-left hover:bg-[#eef2f7] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/40"
                             >
-                              <div className="relative">
+                              <div className="relative rounded-md bg-[#eef1f5] p-1">
+                                <span
+                                  title="Show search tags"
+                                  aria-label="Show search tags"
+                                  role="button"
+                                  tabIndex={0}
+                                  onClick={(event) => {
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setOpenImportedElementInfoId((current) =>
+                                      current === item.id ? "" : item.id
+                                    );
+                                  }}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== "Enter" && event.key !== " ") return;
+                                    event.preventDefault();
+                                    event.stopPropagation();
+                                    setOpenImportedElementInfoId((current) =>
+                                      current === item.id ? "" : item.id
+                                    );
+                                  }}
+                                  className="absolute left-1 bottom-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#cbd5e1] bg-white text-[#475569] hover:bg-[#f8fafc]"
+                                >
+                                  <Info size={11} />
+                                </span>
                                 <span
                                   title="Delete imported element"
                                   aria-label="Delete imported element"
@@ -2473,6 +3162,104 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                   alt={item.title || "Imported element"}
                                   className="h-20 w-full rounded object-contain"
                                 />
+                                {showingInfo ? (
+                                  <div className="absolute inset-x-1 top-1 z-20 rounded-md border border-[#dbe3ee] bg-white/98 p-2 shadow-lg">
+                                    <div className="mb-1 flex items-start justify-between gap-2">
+                                      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                                        Search Tags
+                                      </div>
+                                      <button
+                                        type="button"
+                                        onClick={(event) => {
+                                          event.preventDefault();
+                                          event.stopPropagation();
+                                          setOpenImportedElementInfoId("");
+                                        }}
+                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#dbe3ee] bg-white text-[#64748b] hover:bg-[#f8fafc]"
+                                        aria-label="Close search tags"
+                                        title="Close"
+                                      >
+                                        <X size={11} />
+                                      </button>
+                                    </div>
+                                    {searchableTagsEn.length > 0 || searchableTagsAr.length > 0 ? (
+                                      <div className="space-y-2">
+                                        <div>
+                                          <div className="mb-1 text-[10px] font-semibold text-[#475569]">
+                                            English
+                                          </div>
+                                          {searchableTagsEn.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {searchableTagsEn.map((tag) => {
+                                                const tagKey = `${item.id}:${tag}`;
+                                                const isCopied = copiedImportedTagKey === tagKey;
+                                                return (
+                                                  <button
+                                                    key={`${item.id}-en-${tag}`}
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                      event.preventDefault();
+                                                      event.stopPropagation();
+                                                      void handleCopyImportedTag(item.id, tag);
+                                                    }}
+                                                    className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
+                                                      isCopied
+                                                        ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
+                                                        : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
+                                                    }`}
+                                                    title={isCopied ? "Copied" : "Click to copy"}
+                                                  >
+                                                    {tag}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          ) : (
+                                            <div className="text-[10px] text-[#94a3b8]">No English tags.</div>
+                                          )}
+                                        </div>
+                                        <div>
+                                          <div className="mb-1 text-[10px] font-semibold text-[#475569]">
+                                            العربية
+                                          </div>
+                                          {searchableTagsAr.length > 0 ? (
+                                            <div className="flex flex-wrap gap-1">
+                                              {searchableTagsAr.map((tag) => {
+                                                const tagKey = `${item.id}:${tag}`;
+                                                const isCopied = copiedImportedTagKey === tagKey;
+                                                return (
+                                                  <button
+                                                    key={`${item.id}-ar-${tag}`}
+                                                    type="button"
+                                                    onClick={(event) => {
+                                                      event.preventDefault();
+                                                      event.stopPropagation();
+                                                      void handleCopyImportedTag(item.id, tag);
+                                                    }}
+                                                    className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
+                                                      isCopied
+                                                        ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
+                                                        : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
+                                                    }`}
+                                                    title={isCopied ? "Copied" : "Click to copy"}
+                                                  >
+                                                    {tag}
+                                                  </button>
+                                                );
+                                              })}
+                                            </div>
+                                          ) : (
+                                            <div className="text-[10px] text-[#94a3b8]">لا توجد كلمات عربية.</div>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ) : (
+                                      <div className="text-[10px] text-[#64748b]">
+                                        No search tags available.
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
                                 {isGifAsset ? (
                                   <span className="absolute right-1 top-1 rounded-full bg-[#1f2a39] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
                                     GIF
@@ -2485,7 +3272,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               <div className="text-[10px] uppercase text-[#64748b]">
                                 {item.kind}
                               </div>
-                            </button>
+                            </div>
                           );
                         })}
                       </div>
@@ -2629,62 +3416,190 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
             {activeTab === "backgrounds" ? (
               <section className="space-y-3">
-                <div className="overflow-x-auto pb-1">
-                  <div className="flex min-w-max items-center gap-3">
-                    <input
-                      ref={backgroundColorInputRef}
-                      type="color"
-                      className="sr-only"
-                      value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(activeBackgroundColor) ? activeBackgroundColor : "#ffffff"}
-                      onChange={(event) =>
-                        setBackground({
-                          type: "color",
-                          color: event.target.value || "#ffffff",
-                        })
-                      }
-                    />
-                    <button
-                      type="button"
-                      aria-label="Pick custom background color"
-                      title="Pick custom color"
-                      onClick={() => backgroundColorInputRef.current?.click()}
-                      className="flex h-14 w-14 items-center justify-center rounded border border-[#d3d8e1] bg-white shadow-sm hover:bg-[#f8fafc]"
-                    >
-                      <Palette size={24} className="text-[#b8bec9]" />
-                    </button>
+                <div className="space-y-2">
+                  <div className="text-base font-semibold text-[#202a38]">Background color</div>
+                  <div className="overflow-x-auto pb-1">
+                    <div className="flex min-w-max items-center gap-3">
+                      <input
+                        ref={backgroundColorInputRef}
+                        type="color"
+                        className="sr-only"
+                        value={/^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(activeBackgroundColor) ? activeBackgroundColor : "#ffffff"}
+                        onChange={(event) => applyBackgroundColorSelection(event.target.value || "#ffffff")}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Pick custom background color"
+                        title="Pick custom color"
+                        onClick={() => backgroundColorInputRef.current?.click()}
+                        className="flex h-14 w-14 items-center justify-center rounded border border-[#d3d8e1] bg-white shadow-sm hover:bg-[#f8fafc]"
+                      >
+                        <Palette size={24} className="text-[#b8bec9]" />
+                      </button>
 
-                    {COLOR_SWATCHES.map((color) => {
-                      const active = activeBackgroundColor.toLowerCase() === color.toLowerCase();
-                      return (
-                        <button
-                          key={color}
+                      {COLOR_SWATCHES.map((color) => {
+                        const active = activeBackgroundColor.toLowerCase() === color.toLowerCase();
+                        return (
+                          <button
+                            key={color}
+                            type="button"
+                            onClick={() => applyBackgroundColorSelection(color)}
+                            className={`h-14 w-14 rounded border shadow-sm ${active ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]" : "border-[#d3d8e1]"}`}
+                            style={{ backgroundColor: color }}
+                            title={color}
+                          />
+                        );
+                      })}
+
+                      <button
+                        type="button"
+                        aria-label="Reset to default color"
+                        title="Reset to default"
+                        onClick={() => applyBackgroundColorSelection("#ffffff")}
+                        className="h-14 w-14 rounded border border-[#d3d8e1] bg-[conic-gradient(#eceef3_25%,#9ea8ba_0_50%,#eceef3_0_75%,#9ea8ba_0)] [background-size:14px_14px] shadow-sm"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-3 rounded-md border border-[#d3d8e1] bg-white p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-base font-semibold text-[#202a38]">Background images</div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        aria-label="Upload background image"
+                        title="Upload background image"
+                        onClick={() => uploadInputRef.current?.click()}
+                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                      >
+                        <Upload size={14} />
+                      </button>
+                      {activePage?.background?.type === "image" && activeBackgroundImageUri ? (
+                        <Button
                           type="button"
+                          variant="ghost"
+                          className="!h-8 !px-2 text-xs"
                           onClick={() =>
                             setBackground({
                               type: "color",
-                              color,
+                              imageUri: "",
+                              imageThumbnailUri: "",
+                              sourceAssetId: "",
+                              categoryValue: "",
                             })
                           }
-                          className={`h-14 w-14 rounded border shadow-sm ${active ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]" : "border-[#d3d8e1]"}`}
-                          style={{ backgroundColor: color }}
-                          title={color}
-                        />
-                      );
-                    })}
-
-                    <button
-                      type="button"
-                      aria-label="Reset to default color"
-                      title="Reset to default"
-                      onClick={() =>
-                        setBackground({
-                          type: "color",
-                          color: "#ffffff",
-                        })
-                      }
-                      className="h-14 w-14 rounded border border-[#d3d8e1] bg-[conic-gradient(#eceef3_25%,#9ea8ba_0_50%,#eceef3_0_75%,#9ea8ba_0)] [background-size:14px_14px] shadow-sm"
-                    />
+                        >
+                          Remove image
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
+
+                  {backgroundAssetsLoading ? (
+                    <div className="py-2 text-xs text-[#637087]">Loading background images...</div>
+                  ) : null}
+
+                  {backgroundAssetsError ? (
+                    <div className="py-2 text-xs text-[#b45309]">{backgroundAssetsError}</div>
+                  ) : null}
+
+                  {!backgroundAssetsLoading && !backgroundAssetsError && categorizedBackgroundAssets.length === 0 ? (
+                    <div className="py-2 text-xs text-[#64748b]">
+                      No imported backgrounds found. Import backgrounds from Freepik first.
+                    </div>
+                  ) : null}
+
+                  {categorizedBackgroundAssets.length > 0 ? (
+                    <div className="space-y-4">
+                      {categorizedBackgroundAssets.map((group) => (
+                        <div key={group.key} className="space-y-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                              {group.label}
+                            </div>
+                            <div className="text-[10px] text-[#94a3b8]">
+                              {group.items.length} background{group.items.length === 1 ? "" : "s"}
+                            </div>
+                          </div>
+                          <div className="flex gap-2 overflow-x-auto pb-1">
+                            {group.items.map((item) => {
+                              const isActive =
+                                activePage?.background?.type === "image" &&
+                                activeBackgroundImageUri === item.assetUrl;
+                              const previewImageSrc = item.assetUrl || item.thumbnailUrl;
+                              const deletingImported = deletingImportedElementId === item.id;
+                              return (
+                                <button
+                                  key={item.id}
+                                  type="button"
+                                  onClick={() =>
+                                    setBackground({
+                                      type: "image",
+                                      color: activeBackgroundColor || "#ffffff",
+                                      imageUri: item.assetUrl,
+                                      imageThumbnailUri: item.thumbnailUrl || item.assetUrl,
+                                      sourceAssetId: item.sourceAssetId || item.id,
+                                      categoryValue: item.categoryValue || group.key,
+                                    })
+                                  }
+                                  className={`w-[132px] shrink-0 overflow-hidden rounded-xl border bg-[#f8fafc] text-left transition ${
+                                    isActive
+                                      ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]"
+                                      : "border-[#d3d8e1] hover:border-[#9fb4d6] hover:bg-[#eef3fa]"
+                                  }`}
+                                  title={item.title || item.titleEn || item.id}
+                                >
+                                  <div className="relative aspect-[4/3] overflow-hidden rounded-t-xl bg-white">
+                                    <span
+                                      title="Delete background image"
+                                      aria-label="Delete background image"
+                                      role="button"
+                                      tabIndex={deletingImported ? -1 : 0}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        if (deletingImported) return;
+                                        void handleDeleteBackgroundAsset(item.id);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (deletingImported) return;
+                                        if (event.key !== "Enter" && event.key !== " ") return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        void handleDeleteBackgroundAsset(item.id);
+                                      }}
+                                      className={`absolute right-1 top-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fee2e2] ${
+                                        deletingImported ? "cursor-not-allowed opacity-60" : ""
+                                      }`}
+                                    >
+                                      <Trash2 size={11} />
+                                    </span>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={previewImageSrc}
+                                      alt={item.title || "Background image"}
+                                      className="h-full w-full object-cover"
+                                    />
+                                  </div>
+                                  <div className="space-y-1 p-2">
+                                    <div className="line-clamp-2 min-h-[2.5rem] text-xs font-medium leading-5 text-[#202a38]">
+                                      {item.title || item.titleEn || item.id}
+                                    </div>
+                                    {Number.isFinite(Number(item.width)) && Number.isFinite(Number(item.height)) ? (
+                                      <div className="text-[11px] text-[#637087]">
+                                        {Math.round(Number(item.width))} x {Math.round(Number(item.height))}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
                 </div>
               </section>
             ) : null}

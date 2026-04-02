@@ -6,7 +6,7 @@ import {
 import { spawn } from "node:child_process";
 import path from "node:path";
 
-const MAX_CUSTOM_FONT_COUNT = 80;
+const MAX_CUSTOM_FONT_COUNT = 200;
 const MAX_CUSTOM_FONT_BYTES = 5_000_000;
 const MAX_CUSTOM_FONT_TOTAL_BYTES = 40_000_000;
 const DATA_URI_PATTERN = /^data:([^;,]+);base64,(.+)$/i;

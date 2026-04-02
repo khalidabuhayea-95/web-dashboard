@@ -11,7 +11,7 @@ import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.se
 
 export const runtime = "nodejs";
 
-const DATA_URI_PATTERN = /^data:([^;,]+);base64,(.+)$/i;
+const DATA_URI_PATTERN = /^data:([^;,]+)(;base64)?,([\s\S]+)$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 function parseDataUri(value) {
@@ -19,16 +19,25 @@ function parseDataUri(value) {
   const match = source.match(DATA_URI_PATTERN);
   if (!match) return null;
   const mimeType = String(match[1] || "").trim() || "application/octet-stream";
-  const encoded = String(match[2] || "").trim();
+  const isBase64 = String(match[2] || "").toLowerCase() === ";base64";
+  const encoded = String(match[3] || "").trim();
   if (!encoded) return null;
   try {
     return {
       mimeType,
-      bytes: Buffer.from(encoded, "base64"),
+      bytes: isBase64
+        ? Buffer.from(encoded, "base64")
+        : Buffer.from(decodeURIComponent(encoded), "utf8"),
     };
   } catch {
     return null;
   }
+}
+
+async function rasterizeSvgBytes(svgBytes) {
+  const sharpModule = await import("sharp");
+  const sharp = sharpModule.default || sharpModule;
+  return sharp(svgBytes).png().toBuffer();
 }
 
 function findLayerObject(templateData, elementId, index) {
@@ -163,6 +172,17 @@ export async function GET(request, { params }) {
   const parsed = parseDataUri(source);
   if (!parsed) {
     return NextResponse.json({ error: "Unsupported asset source." }, { status: 422 });
+  }
+
+  if (parsed.mimeType.toLowerCase() === "image/svg+xml") {
+    const pngBytes = await rasterizeSvgBytes(parsed.bytes);
+    return new NextResponse(pngBytes, {
+      status: 200,
+      headers: {
+        "Content-Type": "image/png",
+        "Cache-Control": "public, max-age=300",
+      },
+    });
   }
 
   return new NextResponse(parsed.bytes, {

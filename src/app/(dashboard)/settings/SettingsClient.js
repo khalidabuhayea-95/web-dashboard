@@ -22,6 +22,7 @@ import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/form";
 import { TEMPLATE_CATEGORY_SETTINGS } from "@/lib/templates/templateSettings";
+import BackgroundCategoriesSection from "./BackgroundCategoriesSection";
 
 function createEmptySubCategory() {
   return { value: "", labelEn: "", labelAr: "", published: true };
@@ -57,6 +58,7 @@ export default function SettingsClient({ canEdit }) {
     categoryIndex: null,
     subCategoryIndex: null,
   });
+  const [templateSectionCollapsed, setTemplateSectionCollapsed] = useState(false);
   const [dragOverSubCategory, setDragOverSubCategory] = useState({
     categoryIndex: null,
     subCategoryIndex: null,
@@ -440,87 +442,102 @@ export default function SettingsClient({ canEdit }) {
         </div>
       ) : null}
 
-      <section className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-primary/10 via-transparent to-primary/5"
-        />
-        <div className="relative p-5 sm:p-6">
-          <div className="flex justify-end">
-            <Badge variant={canEdit ? "success" : "warning"}>
-              {canEdit ? "Admin: editable" : "Editor: read only"}
-            </Badge>
-          </div>
-
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
-            <div className="rounded-xl border border-border bg-background/70 p-3">
-              <div className="text-xs text-muted-foreground">Categories</div>
-              <div className="mt-1 text-xl font-semibold">{summary.totalCategories}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-background/70 p-3">
-              <div className="text-xs text-muted-foreground">Sub categories</div>
-              <div className="mt-1 text-xl font-semibold">{summary.totalSubCategories}</div>
-            </div>
-            <div className="rounded-xl border border-border bg-background/70 p-3">
-              <div className="text-xs text-muted-foreground">Validation issues</div>
-              <div className="mt-1 text-xl font-semibold">{validationCount}</div>
-            </div>
-          </div>
-
-          <div
-            role="status"
-            aria-live="polite"
-            className="mt-4 min-h-10 rounded-xl border border-border bg-background/80 px-3 py-2 text-sm"
-          >
-            {status ? (
-              <div className="flex items-center gap-2">
-                {statusTone === "success" ? (
-                  <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
-                ) : statusTone === "error" ? (
-                  <AlertCircle className="h-4 w-4 text-red-600" aria-hidden="true" />
-                ) : busy ? (
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
-                ) : (
-                  <Languages className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                )}
-                <span className="text-muted-foreground">{status}</span>
-              </div>
-            ) : (
-              <span className="text-muted-foreground">All changes are local until you save.</span>
-            )}
-          </div>
-
-          {canEdit ? (
-            <div className="mt-4 flex flex-wrap gap-2">
-              <Button type="button" variant="secondary" onClick={addCategory} className="transition-transform hover:-translate-y-px">
-                <Plus className="h-4 w-4" aria-hidden="true" />
-                Add category
-              </Button>
-              <Button type="button" onClick={handleSave} disabled={busy}>
-                <Save className="h-4 w-4" aria-hidden="true" />
-                Save changes
-              </Button>
-              <Button type="button" variant="ghost" onClick={expandAllCategories}>
-                <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                Expand all
-              </Button>
-              <Button type="button" variant="ghost" onClick={collapseAllCategories}>
-                <ChevronUp className="h-4 w-4" aria-hidden="true" />
-                Collapse all
-              </Button>
-            </div>
-          ) : null}
-        </div>
-      </section>
-
       <Card className="overflow-hidden">
-        <CardHeader>
-          <CardTitle>Category Groups</CardTitle>
-          <CardSubtitle>
-            Keep names clear and consistent. English and Arabic values are shown in UI dropdowns.
-          </CardSubtitle>
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Template Categories</CardTitle>
+            <CardSubtitle>
+              Keep template names clear and consistent. English and Arabic values are shown in UI dropdowns.
+            </CardSubtitle>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setTemplateSectionCollapsed((current) => !current)}
+            aria-expanded={!templateSectionCollapsed}
+          >
+            {templateSectionCollapsed ? (
+              <>
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                Expand
+              </>
+            ) : (
+              <>
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                Collapse
+              </>
+            )}
+          </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
+        {!templateSectionCollapsed ? (
+          <CardContent className="space-y-4">
+          <section className="relative overflow-hidden rounded-2xl border border-border bg-card shadow-sm">
+            <div
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-x-0 top-0 h-24 bg-gradient-to-r from-primary/10 via-transparent to-primary/5"
+            />
+            <div className="relative p-5 sm:p-6">
+              <div className="grid gap-3 sm:grid-cols-3">
+                <div className="rounded-xl border border-border bg-background/70 p-3">
+                  <div className="text-xs text-muted-foreground">Categories</div>
+                  <div className="mt-1 text-xl font-semibold">{summary.totalCategories}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/70 p-3">
+                  <div className="text-xs text-muted-foreground">Sub categories</div>
+                  <div className="mt-1 text-xl font-semibold">{summary.totalSubCategories}</div>
+                </div>
+                <div className="rounded-xl border border-border bg-background/70 p-3">
+                  <div className="text-xs text-muted-foreground">Validation issues</div>
+                  <div className="mt-1 text-xl font-semibold">{validationCount}</div>
+                </div>
+              </div>
+
+              <div
+                role="status"
+                aria-live="polite"
+                className="mt-4 min-h-10 rounded-xl border border-border bg-background/80 px-3 py-2 text-sm"
+              >
+                {status ? (
+                  <div className="flex items-center gap-2">
+                    {statusTone === "success" ? (
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600" aria-hidden="true" />
+                    ) : statusTone === "error" ? (
+                      <AlertCircle className="h-4 w-4 text-red-600" aria-hidden="true" />
+                    ) : busy ? (
+                      <Loader2 className="h-4 w-4 animate-spin text-primary" aria-hidden="true" />
+                    ) : (
+                      <Languages className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
+                    )}
+                    <span className="text-muted-foreground">{status}</span>
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground">All changes are local until you save.</span>
+                )}
+              </div>
+
+              {canEdit ? (
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <Button type="button" variant="secondary" onClick={addCategory} className="transition-transform hover:-translate-y-px">
+                    <Plus className="h-4 w-4" aria-hidden="true" />
+                    Add category
+                  </Button>
+                  <Button type="button" onClick={handleSave} disabled={busy}>
+                    <Save className="h-4 w-4" aria-hidden="true" />
+                    Save changes
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={expandAllCategories}>
+                    <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                    Expand all
+                  </Button>
+                  <Button type="button" variant="ghost" onClick={collapseAllCategories}>
+                    <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                    Collapse all
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+          </section>
+
           {loading ? (
             <div className="space-y-3">
               {[0, 1, 2].map((item) => (
@@ -948,8 +965,11 @@ export default function SettingsClient({ canEdit }) {
               })}
             </div>
           )}
-        </CardContent>
+          </CardContent>
+        ) : null}
       </Card>
+
+      <BackgroundCategoriesSection canEdit={canEdit} />
     </div>
   );
 }

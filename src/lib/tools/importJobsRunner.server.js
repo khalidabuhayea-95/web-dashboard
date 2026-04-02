@@ -1,5 +1,3 @@
-import fs from "node:fs/promises";
-
 import {
   claimImportJob,
   getImportJobById,
@@ -10,8 +8,10 @@ import {
   updateImportJobProgress,
 } from "@/lib/tools/importJobsStore.server";
 import { runCanvaImportForOwner } from "@/app/api/tools/canva-import/route.ts";
-import { runVectorRasterImportForOwner } from "@/app/api/tools/vector-import/route.js";
-import { runFreepikImportForOwner } from "@/lib/tools/freepikImport.server";
+import {
+  runFreepikBackgroundImportForOwner,
+  runFreepikImportForOwner,
+} from "@/lib/tools/freepikImport.server";
 
 const activeJobs = new Set();
 
@@ -25,12 +25,6 @@ function buildErrorResult(error) {
   if (!error || typeof error !== "object") return null;
   const payload = error.payload;
   return payload && typeof payload === "object" ? payload : null;
-}
-
-async function cleanupTempFile(filePath) {
-  const safePath = String(filePath || "").trim();
-  if (!safePath) return;
-  await fs.rm(safePath, { force: true }).catch(() => {});
 }
 
 async function runImportJobInternal(jobId) {
@@ -61,28 +55,22 @@ async function runImportJobInternal(jobId) {
         interactiveBrowser: input.interactiveBrowser === true,
       });
       result = output?.payload && typeof output.payload === "object" ? output.payload : output;
-    } else if (claimed.type === "vector-raster") {
-      await updateImportJobProgress(jobId, "Importing file...");
-      const filePath = String(input.filePath || "").trim();
-      const fileBytes = await fs.readFile(filePath);
-      try {
-        result = await runVectorRasterImportForOwner({
-          ownerId: claimed.ownerId,
-          fileBytes,
-          fileName: input.fileName,
-          name: input.name,
-          slug: input.slug,
-          maxDimension: input.maxDimension,
-          format: input.format,
-        });
-      } finally {
-        await cleanupTempFile(filePath);
-      }
     } else if (claimed.type === "freepik-icons") {
       await updateImportJobProgress(jobId, "Importing Freepik icons...");
       result = await runFreepikImportForOwner({
         ownerId: claimed.ownerId,
         selectedItems: Array.isArray(input.selectedItems) ? input.selectedItems : [],
+        onProgress: async (message) => {
+          await updateImportJobProgress(jobId, message);
+        },
+      });
+    } else if (claimed.type === "freepik-backgrounds") {
+      await updateImportJobProgress(jobId, "Importing Freepik backgrounds...");
+      result = await runFreepikBackgroundImportForOwner({
+        ownerId: claimed.ownerId,
+        selectedItems: Array.isArray(input.selectedItems) ? input.selectedItems : [],
+        categoryValue: input.categoryValue,
+        query: input.query && typeof input.query === "object" ? input.query : {},
         onProgress: async (message) => {
           await updateImportJobProgress(jobId, message);
         },

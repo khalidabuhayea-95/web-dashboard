@@ -1,9 +1,5 @@
-import { requireRole, Roles } from "@/lib/auth/roles";
-
-import CanvaImportClient from "./CanvaImportClient";
+import { redirect } from "next/navigation";
 
 export default async function CanvaImportPage() {
-  await requireRole([Roles.ADMIN, Roles.EDITOR]);
-  return <CanvaImportClient />;
+  redirect("/settings");
 }
-

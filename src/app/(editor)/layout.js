@@ -20,11 +20,10 @@ export default async function EditorLayout({ children }) {
   const navItems = [
     { href: "/", label: "Overview", icon: "overview" },
     { href: "/templates", label: "Templates", icon: "templates" },
-    { href: "/canva-import", label: "Canva Import", icon: "canvaImport" },
-    { href: "/vector-import", label: "Vector Import", icon: "vectorImport" },
+    { href: "/settings", label: "Settings", icon: "settings" },
+    { href: "/categories", label: "Categories", icon: "categories" },
     { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
-    { href: "/editor-pro", label: "Editor Pro", icon: "editor" },
-    { href: "/categories", label: "Categories", icon: "settings" },
+    { href: "/editor-pro", label: "Editor", icon: "editor" },
   ];
 
   if (role === Roles.ADMIN) {

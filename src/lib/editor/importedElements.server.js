@@ -31,6 +31,7 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
       family_name TEXT,
       author_id INTEGER,
       author_name TEXT,
+      category_value TEXT,
       asset_url TEXT NOT NULL,
       thumbnail_url TEXT NOT NULL,
       width INTEGER,
@@ -43,6 +44,10 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
       updated_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
       CONSTRAINT editor_element_assets_source_asset_unique UNIQUE (source, source_asset_id)
     )
+  `,
+  `
+    ALTER TABLE editor_element_assets
+    ADD COLUMN IF NOT EXISTS category_value TEXT
   `,
   `
     CREATE INDEX IF NOT EXISTS editor_element_assets_source_kind_updated_idx
@@ -114,6 +119,12 @@ function sanitizeSourceFilter(value) {
   const source = sanitizeText(value).toLowerCase();
   if (!source || source === "all" || source === "*") return "";
   return source;
+}
+
+function sanitizeCategoryFilter(value) {
+  const category = sanitizeText(value).toLowerCase();
+  if (!category || category === "all" || category === "*") return "";
+  return category;
 }
 
 function sanitizeKind(value) {
@@ -281,6 +292,26 @@ function normalizeRow(row, locale = "en") {
   const titleEn = sanitizeText(row.title_en);
   const titleAr = sanitizeText(row.title_ar);
   const title = resolvedLocale === "ar" ? titleAr || titleEn : titleEn || titleAr;
+  const tags =
+    resolvedLocale === "ar"
+      ? tagsAr.length > 0
+        ? tagsAr
+        : tagsEn
+      : tagsEn.length > 0
+        ? tagsEn
+        : tagsAr;
+  const labels =
+    resolvedLocale === "ar"
+      ? labelsAr.length > 0
+        ? labelsAr
+        : labelsEn
+      : labelsEn.length > 0
+        ? labelsEn
+        : labelsAr;
+  const sourcePayload =
+    row.source_payload && typeof row.source_payload === "object" && !Array.isArray(row.source_payload)
+      ? row.source_payload
+      : {};
 
   return {
     id: String(row.id || ""),
@@ -290,10 +321,10 @@ function normalizeRow(row, locale = "en") {
     title,
     titleEn,
     titleAr,
-    tags: resolvedLocale === "ar" ? (tagsAr.length > 0 ? tagsAr : tagsEn) : tagsEn,
+    tags,
     tagsEn,
     tagsAr,
-    labels: resolvedLocale === "ar" ? (labelsAr.length > 0 ? labelsAr : labelsEn) : labelsEn,
+    labels,
     labelsEn,
     labelsAr,
     slug: sanitizeText(row.slug),
@@ -303,12 +334,14 @@ function normalizeRow(row, locale = "en") {
     familyName: sanitizeText(row.family_name),
     authorId: Number.isFinite(Number(row.author_id)) ? Number(row.author_id) : null,
     authorName: sanitizeText(row.author_name),
+    categoryValue: sanitizeText(row.category_value),
     assetUrl: sanitizeText(row.asset_url),
     thumbnailUrl: sanitizeText(row.thumbnail_url),
     animatedVideoUrl: extractAnimatedVideoUrl(row.source_payload),
     width: Number.isFinite(Number(row.width)) ? Number(row.width) : null,
     height: Number.isFinite(Number(row.height)) ? Number(row.height) : null,
     freeSvg: Boolean(row.free_svg),
+    sourcePayload,
     translationStatus: sanitizeText(row.translation_status) || "fallback",
     createdSourceAt: row.created_source_at ? new Date(row.created_source_at).toISOString() : "",
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : "",
@@ -341,6 +374,7 @@ export async function upsertImportedElementAsset(input) {
   const familyName = sanitizeText(input?.familyName);
   const authorId = Number.isFinite(Number(input?.authorId)) ? Number(input.authorId) : null;
   const authorName = sanitizeText(input?.authorName);
+  const categoryValue = sanitizeText(input?.categoryValue || input?.category || input?.category_value).toLowerCase();
   const assetUrl = sanitizeText(input?.assetUrl || input?.asset_url);
   const thumbnailUrl = sanitizeText(input?.thumbnailUrl || input?.thumbnail_url || assetUrl);
   if (!assetUrl || !thumbnailUrl) {
@@ -376,6 +410,7 @@ export async function upsertImportedElementAsset(input) {
       family_name,
       author_id,
       author_name,
+      category_value,
       asset_url,
       thumbnail_url,
       width,
@@ -406,6 +441,7 @@ export async function upsertImportedElementAsset(input) {
       ${familyName || null},
       ${authorId},
       ${authorName || null},
+      ${categoryValue || null},
       ${assetUrl},
       ${thumbnailUrl},
       ${width},
@@ -434,6 +470,7 @@ export async function upsertImportedElementAsset(input) {
       family_name = EXCLUDED.family_name,
       author_id = EXCLUDED.author_id,
       author_name = EXCLUDED.author_name,
+      category_value = EXCLUDED.category_value,
       asset_url = EXCLUDED.asset_url,
       thumbnail_url = EXCLUDED.thumbnail_url,
       width = EXCLUDED.width,
@@ -488,6 +525,7 @@ export async function listImportedElementAssets(options = {}) {
   await ensureImportedElementsSchema();
 
   const source = sanitizeSourceFilter(options.source);
+  const categoryValue = sanitizeCategoryFilter(options.categoryValue || options.category);
   const kindRaw = sanitizeText(options.kind).toLowerCase();
   const kind = kindRaw === "all" || !kindRaw ? "" : sanitizeKind(kindRaw);
   const page = clampInt(options.page, 1, 1, 10_000);
@@ -501,6 +539,7 @@ export async function listImportedElementAssets(options = {}) {
   };
 
   const sourceSql = source ? `source = ${nextParam(source)}` : "1=1";
+  const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
   const kindSql = kind ? `AND kind = ${nextParam(kind)}` : "";
   const searchSql = buildSearchCondition(options.query, nextParam);
 
@@ -508,6 +547,7 @@ export async function listImportedElementAssets(options = {}) {
     SELECT COUNT(*)::int AS total
     FROM editor_element_assets
     WHERE ${sourceSql}
+    ${categorySql}
     ${kindSql}
     ${searchSql}
   `;
@@ -524,6 +564,7 @@ export async function listImportedElementAssets(options = {}) {
     SELECT *
     FROM editor_element_assets
     WHERE ${sourceSql}
+    ${categorySql}
     ${kindSql}
     ${searchSql}
     ORDER BY updated_at DESC

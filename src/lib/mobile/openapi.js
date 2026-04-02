@@ -66,6 +66,39 @@ const localeHeaderParameters = [
   },
 ];
 
+const mobileSigningHeaderParameters = [
+  {
+    name: "x-mobile-key",
+    in: "header",
+    required: false,
+    description: "Mobile request signing key id. Required when mobile signing is enabled for write routes.",
+    schema: {
+      type: "string",
+      example: "mobile-client-1",
+    },
+  },
+  {
+    name: "x-mobile-ts",
+    in: "header",
+    required: false,
+    description: "Unix timestamp used for mobile request signing. Required when mobile signing is enabled.",
+    schema: {
+      type: "string",
+      example: "1742995200000",
+    },
+  },
+  {
+    name: "x-mobile-sign",
+    in: "header",
+    required: false,
+    description: "HMAC request signature. Required when mobile signing is enabled.",
+    schema: {
+      type: "string",
+      example: "8c2d6a2b2ca6c3d3f0a5280c0d0e67f9537a2d8c60b5d54c8ef7088ccf205962",
+    },
+  },
+];
+
 const localeQueryParameters = [
   {
     name: "lang",
@@ -289,7 +322,7 @@ const reusableParameters = {
     name: "query",
     in: "query",
     required: false,
-    description: "Search imported elements by English/Arabic name and tags.",
+    description: "Search imported elements by English/Arabic name, tags, and labels.",
     schema: {
       type: "string",
     },
@@ -356,6 +389,65 @@ const reusableParameters = {
       minimum: 1,
       maximum: 100,
       default: 100,
+    },
+  },
+  shapesQuery: {
+    name: "query",
+    in: "query",
+    required: false,
+    description: "Search built-in shapes by name, id, and keywords.",
+    schema: {
+      type: "string",
+    },
+  },
+  shapesSearch: {
+    name: "search",
+    in: "query",
+    required: false,
+    description: "Alias for query search parameter.",
+    schema: {
+      type: "string",
+    },
+  },
+  shapesQ: {
+    name: "q",
+    in: "query",
+    required: false,
+    description: "Short alias for query search parameter.",
+    schema: {
+      type: "string",
+    },
+  },
+  shapesPage: {
+    name: "page",
+    in: "query",
+    required: false,
+    description: "1-based page index.",
+    schema: {
+      type: "integer",
+      minimum: 1,
+      default: 1,
+    },
+  },
+  shapesPageSize: {
+    name: "pageSize",
+    in: "query",
+    required: false,
+    description: "Results per page (max 100). Aliases: `page_size`, `per_page`, `limit`.",
+    schema: {
+      type: "integer",
+      minimum: 1,
+      maximum: 100,
+      default: 100,
+    },
+  },
+  shapeIdPath: {
+    name: "id",
+    in: "path",
+    required: true,
+    description: "Built-in shape id.",
+    schema: {
+      type: "string",
     },
   },
   fontIdPath: {
@@ -836,6 +928,74 @@ const schemas = {
       hasPrevPage: { type: "boolean" },
     },
   },
+  MobileShape: {
+    type: "object",
+    required: [
+      "id",
+      "name",
+      "nameEn",
+      "tags",
+      "tagsEn",
+      "tagsAr",
+      "assetUrl",
+      "thumbnailUrl",
+      "width",
+      "height",
+    ],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      nameEn: { type: "string" },
+      nameAr: { type: "string" },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+      },
+      tagsEn: {
+        type: "array",
+        items: { type: "string" },
+      },
+      tagsAr: {
+        type: "array",
+        items: { type: "string" },
+      },
+      assetUrl: { type: "string", format: "uri" },
+      thumbnailUrl: { type: "string", format: "uri" },
+      width: { type: "integer", minimum: 1 },
+      height: { type: "integer", minimum: 1 },
+    },
+  },
+  MobileShapesResponse: {
+    type: "object",
+    required: [
+      "locale",
+      "shapes",
+      "page",
+      "pageSize",
+      "total",
+      "totalPages",
+      "hasNextPage",
+      "hasPrevPage",
+    ],
+    properties: {
+      locale: {
+        type: "string",
+        enum: ["en", "ar"],
+      },
+      shapes: {
+        type: "array",
+        items: {
+          $ref: "#/components/schemas/MobileShape",
+        },
+      },
+      page: { type: "integer", minimum: 1 },
+      pageSize: { type: "integer", minimum: 1 },
+      total: { type: "integer", minimum: 0 },
+      totalPages: { type: "integer", minimum: 1 },
+      hasNextPage: { type: "boolean" },
+      hasPrevPage: { type: "boolean" },
+    },
+  },
 };
 
 export function buildMobileOpenApiSpec(serverOrigin) {
@@ -845,13 +1005,15 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       title: "Web Dashboard Mobile Templates API",
       version: "1.0.0",
       description:
-        "Public mobile APIs for published templates, taxonomy, and template detail. No authorization is required for /api/mobile routes.",
+        "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; write-heavy media routes may require signed mobile headers.",
     },
     servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
       { name: "Mobile Templates" },
       { name: "Mobile Fonts" },
       { name: "Mobile Elements" },
+      { name: "Mobile Shapes" },
+      { name: "Mobile Media" },
     ],
     paths: {
       "/api/mobile/templates": {
@@ -1063,7 +1225,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Elements"],
           summary: "List imported editor elements",
           description:
-            "Returns imported elements (for example Freepik icons) with localized name/tags and pagination.",
+            "Returns imported elements (for example Freepik icons) with localized name, tags, and labels. Search matches both English and Arabic fields.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -1082,6 +1244,175 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 "application/json": {
                   schema: {
                     $ref: "#/components/schemas/MobileElementsResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/shapes": {
+        get: {
+          tags: ["Mobile Shapes"],
+          summary: "List built-in editor shapes",
+          description:
+            "Returns the built-in editor shapes as a flat paginated list for mobile clients. Shapes are not grouped by category in this response.",
+          parameters: [
+            ...localeHeaderParameters,
+            ...localeQueryParameters,
+            reusableParameters.shapesQuery,
+            reusableParameters.shapesSearch,
+            reusableParameters.shapesQ,
+            reusableParameters.shapesPage,
+            reusableParameters.shapesPageSize,
+          ],
+          responses: {
+            200: {
+              description: "Built-in shapes response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileShapesResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/shapes/{id}/file": {
+        get: {
+          tags: ["Mobile Shapes"],
+          summary: "Resolve built-in shape image",
+          description:
+            "Renders a built-in editor shape as a PNG image for mobile clients.",
+          parameters: [reusableParameters.shapeIdPath],
+          responses: {
+            200: {
+              description: "Shape PNG image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            404: {
+              description: "Shape not found",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/remove-background": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Remove image background",
+          description:
+            "Accepts a single PNG or JPEG upload and returns a transparent PNG. This route uses the local rembg runtime as the primary remover and automatically falls back to the legacy local remover when rembg cannot safely process the image. This route is currently public and does not require mobile signing headers.",
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["file"],
+                  properties: {
+                    file: {
+                      type: "string",
+                      format: "binary",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Background-removed PNG image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload or missing file",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Background could not be isolated",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            500: {
+              description: "Background removal failed",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Background removal engine unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
               },

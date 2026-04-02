@@ -60,7 +60,7 @@ export default function DashboardClient({ role }) {
             View templates
           </Button>
           <Button as="a" href="/editor-pro">
-            Open Editor Pro
+            Open Editor
           </Button>
         </CardContent>
       </Card>
@@ -117,12 +117,12 @@ export default function DashboardClient({ role }) {
           </Card>
           <Card>
             <CardContent>
-              <div className="text-xs text-muted-foreground">Editor Pro</div>
+              <div className="text-xs text-muted-foreground">Editor</div>
               <div className="mt-2 text-lg font-semibold">
                 Build new templates
               </div>
               <p className="mt-2 text-sm text-muted-foreground">
-                Use Editor Pro to draft new layouts for your teams.
+                Use Editor to draft new layouts for your teams.
               </p>
             </CardContent>
           </Card>

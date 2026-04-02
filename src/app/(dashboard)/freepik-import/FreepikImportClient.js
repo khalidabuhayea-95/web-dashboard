@@ -1,10 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { ChevronDown, ChevronUp } from "lucide-react";
 
 import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/form";
+import FreepikBackgroundImportSection from "./FreepikBackgroundImportSection";
 
 const DEFAULT_QUERY = {
   term: "ramadan",
@@ -210,12 +212,10 @@ async function pollImportJob(jobId, { onUpdate } = {}) {
 export default function FreepikImportClient() {
   const [loadingSettings, setLoadingSettings] = useState(true);
   const [canEdit, setCanEdit] = useState(false);
-  const [apiKeyInput, setApiKeyInput] = useState("");
-  const [apiKeyMasked, setApiKeyMasked] = useState("");
-  const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
-  const [status, setStatus] = useState("Loading Freepik settings...");
+  const [iconSectionCollapsed, setIconSectionCollapsed] = useState(false);
+  const [status, setStatus] = useState("Loading Freepik defaults...");
   const [saving, setSaving] = useState(false);
 
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -242,8 +242,6 @@ export default function FreepikImportClient() {
         if (!mounted) return;
         const settings = payload?.settings || {};
         setCanEdit(Boolean(payload?.canEdit));
-        setApiKeyConfigured(Boolean(settings?.apiKeyConfigured));
-        setApiKeyMasked(String(settings?.apiKeyMasked || ""));
 
         const defaults = settings?.defaults && typeof settings.defaults === "object" ? settings.defaults : {};
         setQuery({
@@ -321,13 +319,9 @@ export default function FreepikImportClient() {
         throw new Error(formatErrorMessage(payload, "Failed to save Freepik settings."));
       }
 
-      const settings = payload?.settings || {};
-      setApiKeyConfigured(Boolean(settings?.apiKeyConfigured));
-      setApiKeyMasked(String(settings?.apiKeyMasked || ""));
-      setApiKeyInput("");
-      setStatus("Freepik settings saved.");
+      setStatus("Freepik defaults saved.");
     } catch (error) {
-      setStatus(error?.message || "Failed to save Freepik settings.");
+      setStatus(error?.message || "Failed to save Freepik defaults.");
     } finally {
       setSaving(false);
     }
@@ -352,7 +346,6 @@ export default function FreepikImportClient() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          apiKeyOverride: String(apiKeyInput || "").trim(),
           query: nextQuery,
         }),
       });
@@ -486,33 +479,48 @@ export default function FreepikImportClient() {
       <div>
         <h1 className="text-2xl font-semibold">Freepik Import</h1>
         <p className="text-sm text-muted-foreground">
-          Configure your Freepik API key, preview icons by query parameters, then select and import them into Elements.
+          Import either icons or backgrounds into Elements from the same page. Manage the Freepik API key in Settings.
         </p>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Freepik Settings</CardTitle>
-          <CardSubtitle>Save API key once and keep reusable query defaults.</CardSubtitle>
+      <Card className="overflow-hidden">
+        <CardHeader className="flex flex-row items-start justify-between gap-3">
+          <div>
+            <CardTitle>Icon Query & Filters</CardTitle>
+            <CardSubtitle>Adjust importer defaults here. API credentials now live in Settings.</CardSubtitle>
+          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            onClick={() => setIconSectionCollapsed((current) => !current)}
+            aria-expanded={!iconSectionCollapsed}
+          >
+            {iconSectionCollapsed ? (
+              <>
+                <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                Expand
+              </>
+            ) : (
+              <>
+                <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                Collapse
+              </>
+            )}
+          </Button>
         </CardHeader>
-        <CardContent className="space-y-4">
+        {!iconSectionCollapsed ? (
+          <CardContent className="space-y-4">
+          <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/25 p-4 text-sm text-muted-foreground">
+            <span>Credentials are managed in Settings.</span>
+            <a
+              href="/settings"
+              className="inline-flex h-9 items-center justify-center rounded-lg border border-border px-3 text-sm font-medium text-foreground transition hover:bg-background"
+            >
+              Open Settings
+            </a>
+          </div>
+
           <div className="grid gap-3 md:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="freepik-api-key">Freepik API key</Label>
-              <Input
-                id="freepik-api-key"
-                type="password"
-                value={apiKeyInput}
-                onChange={(event) => setApiKeyInput(event.target.value)}
-                placeholder={apiKeyConfigured ? "Enter new key to replace existing" : "Enter Freepik API key"}
-                disabled={!canEdit || loadingSettings}
-              />
-              {apiKeyConfigured ? (
-                <p className="text-xs text-muted-foreground">Configured key: {apiKeyMasked || "********"}</p>
-              ) : (
-                <p className="text-xs text-muted-foreground">No API key saved yet.</p>
-              )}
-            </div>
             <div className="space-y-2">
               <Label htmlFor="freepik-accept-language">Accept-Language</Label>
               <Input
@@ -703,7 +711,7 @@ export default function FreepikImportClient() {
 
           <div className="flex flex-wrap gap-2">
             <Button type="button" onClick={handleSaveSettings} disabled={saving || !canEdit || loadingSettings}>
-              {saving ? "Saving..." : "Save settings"}
+              {saving ? "Saving..." : "Save defaults"}
             </Button>
             <Button type="button" variant="secondary" onClick={() => void fetchPreview()} disabled={previewBusy || loadingSettings}>
               {previewBusy ? "Fetching..." : "Fetch preview"}
@@ -725,96 +733,99 @@ export default function FreepikImportClient() {
               Next page
             </Button>
           </div>
-
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Preview & Selection</CardTitle>
-          <CardSubtitle>
-            Select icons from the API response before importing into system Elements.
-          </CardSubtitle>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <span>
-              Total: {previewPagination.total} | Page: {previewPagination.currentPage}/{previewPagination.lastPage} | Per page: {previewPagination.perPage}
-            </span>
-          </div>
-
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="secondary" onClick={selectAllVisible} disabled={previewItems.length === 0}>
-              Select all visible
-            </Button>
-            <Button type="button" variant="secondary" onClick={clearSelection} disabled={selectedCount === 0}>
-              Clear selection
-            </Button>
-            <Button type="button" onClick={handleImportSelected} disabled={importBusy || selectedCount === 0}>
-              {importBusy ? "Importing..." : "Import selected"}
-            </Button>
-          </div>
-
-          {jobProgress ? <div className="text-sm text-muted-foreground">{jobProgress}</div> : null}
-
-          {importResult ? (
-            <div className="rounded-xl border border-border bg-muted/25 p-3 text-sm">
-              Imported: {Number(importResult.imported || 0)} | Failed: {Number(importResult.failed || 0)} | Requested: {Number(importResult.totalRequested || 0)}
+          <div className="space-y-3 border-t border-border pt-4">
+            <div>
+              <div className="text-base font-semibold text-foreground">Icons Preview & Selection</div>
+              <div className="text-sm text-muted-foreground">
+                Select icons from the API response before importing into system Elements.
+              </div>
             </div>
-          ) : null}
 
-          {previewItems.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
-              No preview icons yet.
+            <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+              <span>
+                Total: {previewPagination.total} | Page: {previewPagination.currentPage}/{previewPagination.lastPage} | Per page: {previewPagination.perPage}
+              </span>
             </div>
-          ) : (
-            <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-              {previewItems.map((item) => {
-                const selected = selectedIds.has(item.id);
-                const animated =
-                  isAnimatedAssetUrl(item.videoUrl) ||
-                  isAnimatedAssetUrl(item.assetUrl) ||
-                  isAnimatedAssetUrl(item.thumbnailUrl);
-                return (
-                  <button
-                    key={item.id}
-                    type="button"
-                    onClick={() => toggleSelected(item.id)}
-                    className={`rounded-xl border p-2 text-left transition ${
-                      selected ? "border-primary ring-1 ring-primary/20" : "border-border hover:bg-accent/40"
-                    }`}
-                  >
-                    <div className="relative">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={item.thumbnailUrl}
-                        alt={item.name || "Freepik icon"}
-                        className="h-28 w-full rounded-md object-contain bg-white"
-                      />
-                      {animated ? (
-                        <span className="absolute left-2 top-2 rounded-full bg-[#1f2a39] px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
-                          Animated
-                        </span>
+
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="secondary" onClick={selectAllVisible} disabled={previewItems.length === 0}>
+                Select all visible
+              </Button>
+              <Button type="button" variant="secondary" onClick={clearSelection} disabled={selectedCount === 0}>
+                Clear selection
+              </Button>
+              <Button type="button" onClick={handleImportSelected} disabled={importBusy || selectedCount === 0}>
+                {importBusy ? "Importing..." : "Import selected"}
+              </Button>
+            </div>
+
+            {jobProgress ? <div className="text-sm text-muted-foreground">{jobProgress}</div> : null}
+
+            {importResult ? (
+              <div className="rounded-xl border border-border bg-muted/25 p-3 text-sm">
+                Imported: {Number(importResult.imported || 0)} | Failed: {Number(importResult.failed || 0)} | Requested: {Number(importResult.totalRequested || 0)}
+              </div>
+            ) : null}
+
+            {previewItems.length === 0 ? (
+              <div className="rounded-xl border border-dashed border-border p-6 text-sm text-muted-foreground">
+                No preview icons yet.
+              </div>
+            ) : (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                {previewItems.map((item) => {
+                  const selected = selectedIds.has(item.id);
+                  const animated =
+                    isAnimatedAssetUrl(item.videoUrl) ||
+                    isAnimatedAssetUrl(item.assetUrl) ||
+                    isAnimatedAssetUrl(item.thumbnailUrl);
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => toggleSelected(item.id)}
+                      className={`rounded-xl border p-2 text-left transition ${
+                        selected ? "border-primary ring-1 ring-primary/20" : "border-border hover:bg-accent/40"
+                      }`}
+                    >
+                      <div className="relative">
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.thumbnailUrl}
+                          alt={item.name || "Freepik icon"}
+                          className="h-28 w-full rounded-md object-contain bg-white"
+                        />
+                        {animated ? (
+                          <span className="absolute left-2 top-2 rounded-full bg-[#1f2a39] px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
+                            Animated
+                          </span>
+                        ) : null}
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          readOnly
+                          className="absolute right-2 top-2 h-4 w-4"
+                        />
+                      </div>
+                      <div className="mt-2 truncate text-sm font-semibold">{item.name || item.slug || item.id}</div>
+                      <div className="text-[11px] text-muted-foreground">#{item.id}</div>
+                      {item.tags.length > 0 ? (
+                        <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.tags.join(", ")}</div>
                       ) : null}
-                      <input
-                        type="checkbox"
-                        checked={selected}
-                        readOnly
-                        className="absolute right-2 top-2 h-4 w-4"
-                      />
-                    </div>
-                    <div className="mt-2 truncate text-sm font-semibold">{item.name || item.slug || item.id}</div>
-                    <div className="text-[11px] text-muted-foreground">#{item.id}</div>
-                    {item.tags.length > 0 ? (
-                      <div className="mt-1 line-clamp-2 text-[11px] text-muted-foreground">{item.tags.join(", ")}</div>
-                    ) : null}
-                  </button>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+          </CardContent>
+        ) : null}
       </Card>
+
+      <FreepikBackgroundImportSection
+        defaultAcceptLanguage={query.acceptLanguage}
+        loadingSettings={loadingSettings}
+      />
 
       <div role="status" className="text-sm text-muted-foreground">
         {status}

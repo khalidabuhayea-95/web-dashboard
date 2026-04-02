@@ -3,7 +3,7 @@ import { requireRole, Roles } from "@/lib/auth/roles";
 
 export const metadata = {
   title: "Categories",
-  description: "Template category settings",
+  description: "Template and background category settings",
 };
 
 export default async function CategoriesPage() {

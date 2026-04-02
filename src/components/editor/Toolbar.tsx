@@ -23,8 +23,10 @@ import {
 import Button from "@/components/ui/button";
 import {
   canUseCanvasCropForImage,
+  canTrimTransparentPaddingForImage,
   computeClipToCanvasPatch,
   computeFitToCanvasPatch,
+  computeTrimTransparentPaddingPatch,
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import {
@@ -77,8 +79,10 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [isPublishingTemplate, setIsPublishingTemplate] = useState(false);
   const [isUnpublishingTemplate, setIsUnpublishingTemplate] = useState(false);
+  const [isPublishingElements, setIsPublishingElements] = useState(false);
   const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
   const [isVideoTrimOpen, setIsVideoTrimOpen] = useState(false);
+  const [isTrimmingImagePadding, setIsTrimmingImagePadding] = useState(false);
   const [videoTrimDraft, setVideoTrimDraft] = useState<TrimRange>({ start: 0, end: 1 });
   const [videoTrimDragEdge, setVideoTrimDragEdge] = useState<"start" | "end" | null>(null);
   const [videoTrimPlayhead, setVideoTrimPlayhead] = useState(0);
@@ -97,6 +101,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const activeTemplateSubCategory = useEditorStore((state) => state.activeTemplateSubCategory);
   const activeTemplateTags = useEditorStore((state) => state.activeTemplateTags);
   const selectedIds = useEditorStore((state) => state.selectedIds);
+  const publishCandidateIds = useEditorStore((state) => state.publishCandidateIds);
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const historyLength = useEditorStore((state) => state.history.length);
   const stageApi = useEditorStore((state) => state.stageApi);
@@ -109,6 +114,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const setTemplateMeta = useEditorStore((state) => state.setTemplateMeta);
   const clearTemplateMeta = useEditorStore((state) => state.clearTemplateMeta);
+  const bumpImportedElementsRefreshKey = useEditorStore((state) => state.bumpImportedElementsRefreshKey);
+  const clearPublishCandidates = useEditorStore((state) => state.clearPublishCandidates);
 
   const hasSelection = selectedIds.length > 0;
   const canUndo = historyIndex > 0;
@@ -243,11 +250,24 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     }
     return canUseCanvasCropForImage(activeImageElement);
   }, [activeImageElement]);
+  const imageTrimSupport = useMemo(() => {
+    if (!activeImageElement) {
+      return { supported: false, reason: "Select exactly one image layer." };
+    }
+    return canTrimTransparentPaddingForImage(activeImageElement);
+  }, [activeImageElement]);
   const canUseImageCanvasTools =
     hasSingleImageSelection && Boolean(activePage) && imageCanvasSupport.supported;
   const imageCanvasToolTitle = imageCanvasSupport.supported
     ? "This action keeps image bounds inside canvas area"
     : imageCanvasSupport.reason || "Select exactly one image layer";
+  const canTrimImagePadding =
+    hasSingleImageSelection && imageTrimSupport.supported && !isTrimmingImagePadding;
+  const imageTrimToolTitle = isTrimmingImagePadding
+    ? "Removing transparent padding..."
+    : imageTrimSupport.supported
+      ? "Trim transparent padding around the selected image"
+      : imageTrimSupport.reason || "Select exactly one image layer";
 
   const fitSelectedImageToPage = useCallback(() => {
     if (!activeImageElement || !activePage) return;
@@ -309,6 +329,33 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     }
     updateElement(activeImageElement.id, result.patch);
   }, [activeImageElement, activePage, updateElement]);
+
+  const trimSelectedImagePadding = useCallback(async () => {
+    if (!activeImageElement) return;
+    const support = canTrimTransparentPaddingForImage(activeImageElement);
+    if (!support.supported) {
+      if (support.reason) window.alert(support.reason);
+      return;
+    }
+
+    setIsTrimmingImagePadding(true);
+    try {
+      const result = await computeTrimTransparentPaddingPatch(activeImageElement);
+      if (!result.supported) {
+        if (result.reason) window.alert(result.reason);
+        return;
+      }
+      if (!result.patch) {
+        if (result.reason) window.alert(result.reason);
+        return;
+      }
+      updateElement(activeImageElement.id, result.patch);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Failed to trim image padding.");
+    } finally {
+      setIsTrimmingImagePadding(false);
+    }
+  }, [activeImageElement, updateElement]);
 
   useEffect(() => {
     if (!activeImageId || !activeRasterSource) return;
@@ -839,6 +886,60 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     setTemplateMeta,
   ]);
 
+  const publishSelectedElements = useCallback(async () => {
+    if (isPublishingElements) return;
+    if (!activePage || publishCandidateIds.length === 0) return;
+
+    setIsPublishingElements(true);
+    try {
+      const parsedDesign = JSON.parse(exportDesign()) as EditorDesign;
+      const response = await fetch("/api/editor/elements/publish-from-canvas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          templateId: activeTemplateId || "",
+          pageId: activePage.id,
+          elementIds: publishCandidateIds,
+          design: parsedDesign,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to publish selected elements.");
+      }
+
+      const publishedCount = Array.isArray(payload?.published) ? payload.published.length : 0;
+      const skippedCount = Array.isArray(payload?.skipped) ? payload.skipped.length : 0;
+      bumpImportedElementsRefreshKey();
+      clearPublishCandidates();
+
+      if (publishedCount === 0 && skippedCount > 0) {
+        window.alert("No selected elements were publishable. Background and full-page images are skipped.");
+        return;
+      }
+
+      window.alert(
+        skippedCount > 0
+          ? `Published ${publishedCount} element${publishedCount === 1 ? "" : "s"}. Skipped ${skippedCount} background-like item${skippedCount === 1 ? "" : "s"}.`
+          : `Published ${publishedCount} element${publishedCount === 1 ? "" : "s"} to the Elements library.`
+      );
+    } catch (error: unknown) {
+      const message =
+        error instanceof Error ? error.message : "Failed to publish selected elements.";
+      window.alert(message);
+    } finally {
+      setIsPublishingElements(false);
+    }
+  }, [
+    activePage,
+    activeTemplateId,
+    bumpImportedElementsRefreshKey,
+    clearPublishCandidates,
+    exportDesign,
+    isPublishingElements,
+    publishCandidateIds,
+  ]);
+
   const deleteTemplate = useCallback(async () => {
     if (isDeletingTemplate) return;
     if (!activeTemplateId) {
@@ -1117,6 +1218,17 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
               >
                 Fit to page
               </button>
+              {hasSingleImageSelection ? (
+                <button
+                  type="button"
+                  className={topActionClass}
+                  onClick={() => void trimSelectedImagePadding()}
+                  disabled={!canTrimImagePadding}
+                  title={imageTrimToolTitle}
+                >
+                  <Scissors size={14} /> Trim padding
+                </button>
+              ) : null}
               <button
                 type="button"
                 className={topActionClass}
@@ -1205,6 +1317,20 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
             disabled={isSavingTemplate || isDeletingTemplate}
           >
             {isSavingTemplate ? "Saving..." : "Save"}
+          </Button>
+          <Button
+            type="button"
+            variant="ghost"
+            className="!h-8 !rounded !px-3 !text-sm !font-medium !text-[#1b2738]"
+            onClick={() => void publishSelectedElements()}
+            disabled={
+              isPublishingElements ||
+              isDeletingTemplate ||
+              publishCandidateIds.length === 0 ||
+              !activePage
+            }
+          >
+            {isPublishingElements ? "Publishing Elements..." : "Publish Elements"}
           </Button>
           <Button
             type="button"

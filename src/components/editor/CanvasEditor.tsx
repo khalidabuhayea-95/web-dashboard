@@ -29,6 +29,7 @@ import {
   recolorRasterSourceToDataUrl,
   serializeRasterColorMap,
 } from "@/lib/editor/imagePalette";
+import { rasterizeSvgDataUrlToPngDataUrl } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 
@@ -87,6 +88,77 @@ function resolveKonvaImageCrop(
         height: cropHeight,
       }
     : undefined;
+}
+
+function resolveBackgroundCoverCrop(
+  sourceImage: HTMLImageElement | null | undefined,
+  targetWidth: number,
+  targetHeight: number
+) {
+  const sourceWidth = Number(sourceImage?.naturalWidth || sourceImage?.width || 0);
+  const sourceHeight = Number(sourceImage?.naturalHeight || sourceImage?.height || 0);
+  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return undefined;
+
+  const sourceAspect = sourceWidth / sourceHeight;
+  const targetAspect = targetWidth / targetHeight;
+
+  if (Math.abs(sourceAspect - targetAspect) < 0.0001) {
+    return {
+      x: 0,
+      y: 0,
+      width: sourceWidth,
+      height: sourceHeight,
+    };
+  }
+
+  if (sourceAspect > targetAspect) {
+    const cropWidth = sourceHeight * targetAspect;
+    return {
+      x: Math.max(0, (sourceWidth - cropWidth) / 2),
+      y: 0,
+      width: cropWidth,
+      height: sourceHeight,
+    };
+  }
+
+  const cropHeight = sourceWidth / targetAspect;
+  return {
+    x: 0,
+    y: Math.max(0, (sourceHeight - cropHeight) / 2),
+    width: sourceWidth,
+    height: cropHeight,
+  };
+}
+
+function CanvasBackgroundImage({
+  src,
+  pageWidth,
+  pageHeight,
+}: {
+  src: string;
+  pageWidth: number;
+  pageHeight: number;
+}) {
+  const [image] = useImage(src, "anonymous");
+  const crop = useMemo(
+    () => resolveBackgroundCoverCrop(image, pageWidth, pageHeight),
+    [image, pageHeight, pageWidth]
+  );
+
+  if (!image) return null;
+
+  return (
+    <KonvaImage
+      image={image}
+      x={0}
+      y={0}
+      width={pageWidth}
+      height={pageHeight}
+      crop={crop}
+      listening={false}
+      perfectDrawEnabled={false}
+    />
+  );
 }
 
 function CanvasImageNode({
@@ -1193,7 +1265,7 @@ export default function CanvasEditor() {
   ]);
 
   const onDropAsset = useCallback(
-    (event: React.DragEvent<HTMLDivElement>) => {
+    async (event: React.DragEvent<HTMLDivElement>) => {
       event.preventDefault();
       const raw =
         event.dataTransfer.getData("application/x-editor-asset") ||
@@ -1268,7 +1340,17 @@ export default function CanvasEditor() {
           if (next.type === "text") {
             addTextElement(next.text || "Text", next);
           } else if (next.type === "image") {
-            addImageElement(next.src, next);
+            let resolvedSrc = next.src;
+            try {
+              resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(next.src);
+            } catch {
+              // Keep the original image source if rasterization fails.
+            }
+            addImageElement(resolvedSrc, {
+              ...next,
+              src: resolvedSrc,
+              rasterOriginalSrc: next.rasterOriginalSrc || resolvedSrc,
+            });
           } else if (next.type === "video") {
             addVideoElement(next.src, next);
           } else {
@@ -1344,6 +1426,13 @@ export default function CanvasEditor() {
             strokeWidth={1}
             listening={false}
           />
+          {activePage.background.type === "image" && String(activePage.background.imageUri || "").trim() ? (
+            <CanvasBackgroundImage
+              src={String(activePage.background.imageUri || "").trim()}
+              pageWidth={activePage.width}
+              pageHeight={activePage.height}
+            />
+          ) : null}
 
           <Group
             clipX={0}

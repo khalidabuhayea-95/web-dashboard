@@ -6,6 +6,7 @@ import clsx from "clsx";
 import {
   Download,
   Bell,
+  FolderTree,
   Gauge,
   LayoutDashboard,
   Palette,
@@ -23,9 +24,8 @@ const ICONS = {
   analytics: Gauge,
   push: Bell,
   designSystem: Palette,
-  canvaImport: Download,
-  vectorImport: Download,
   freepikImport: Download,
+  categories: FolderTree,
 };
 
 function isActivePath(pathname, href) {
