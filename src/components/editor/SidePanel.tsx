@@ -1257,6 +1257,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const videoUploadInputRef = useRef<HTMLInputElement | null>(null);
   const customFontInputRef = useRef<HTMLInputElement | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
+  const pendingBackgroundUploadCategoryValueRef = useRef("");
   const importedElementsScrollLockRef = useRef(false);
   const importedTagFeedbackTimeoutRef = useRef<number | null>(null);
 
@@ -1335,10 +1336,17 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       string,
       { key: string; label: string; items: ImportedElementRecord[]; order: number }
     >();
-    const categoryOrder = new Map<string, number>();
-
     visibleBackgroundCategories.forEach((category, index) => {
-      categoryOrder.set(String(category.value || ""), index);
+      const categoryValue = String(category.value || "").trim().toLowerCase();
+      if (!categoryValue) return;
+      groups.set(categoryValue, {
+        key: categoryValue,
+        label:
+          String(category.labelEn || category.labelAr || categoryValue || "Backgrounds").trim() ||
+          "Backgrounds",
+        items: [],
+        order: index,
+      });
     });
 
     backgroundAssets.forEach((item) => {
@@ -1358,7 +1366,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           String(matchedCategory?.labelEn || matchedCategory?.labelAr || groupKey || "Backgrounds").trim() ||
           "Backgrounds",
         items: [item],
-        order: categoryOrder.get(groupKey) ?? Number.MAX_SAFE_INTEGER,
+        order: Number.MAX_SAFE_INTEGER,
       });
     });
 
@@ -1367,6 +1375,19 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       return left.label.localeCompare(right.label);
     });
   }, [backgroundAssets, visibleBackgroundCategories]);
+
+  const openImageUploadPicker = useCallback(
+    (backgroundCategoryValue = "") => {
+      pendingBackgroundUploadCategoryValueRef.current =
+        activeTab === "backgrounds"
+          ? String(backgroundCategoryValue || defaultBackgroundUploadCategoryValue || DEFAULT_BACKGROUND_CATEGORY)
+              .trim()
+              .toLowerCase()
+          : "";
+      uploadInputRef.current?.click();
+    },
+    [activeTab, defaultBackgroundUploadCategoryValue]
+  );
 
   const filteredTemplates = useMemo(() => {
     const query = templateSearch.trim().toLowerCase();
@@ -1684,7 +1705,21 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   ]);
 
   const onUploadFiles = async (files: FileList | null) => {
-    if (!files || files.length === 0) return;
+    if (!files || files.length === 0) {
+      pendingBackgroundUploadCategoryValueRef.current = "";
+      return;
+    }
+
+    const targetBackgroundCategoryValue =
+      activeTab === "backgrounds"
+        ? String(
+            pendingBackgroundUploadCategoryValueRef.current ||
+              defaultBackgroundUploadCategoryValue ||
+              DEFAULT_BACKGROUND_CATEGORY
+          )
+            .trim()
+            .toLowerCase()
+        : "";
 
     for (const file of Array.from(files)) {
       if (!file.type.startsWith("image/")) continue;
@@ -1718,7 +1753,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             title: baseTitle,
             titleEn: baseTitle,
             titleAr: baseTitle,
-            categoryValue: activeTab === "backgrounds" ? defaultBackgroundUploadCategoryValue : "",
+            categoryValue: activeTab === "backgrounds" ? targetBackgroundCategoryValue : "",
             assetUrl: uploaded.url,
             thumbnailUrl: uploaded.url,
             width: imageDimensions.width,
@@ -1739,7 +1774,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               id: String(importedPayload.id || ""),
               source: String(importedPayload.source || (activeTab === "backgrounds" ? "background-upload" : "upload")).trim().toLowerCase(),
               sourceAssetId: String(importedPayload.sourceAssetId || uploaded.path || uploaded.url),
-              categoryValue: String(importedPayload.categoryValue || defaultBackgroundUploadCategoryValue || "").trim().toLowerCase(),
+              categoryValue: String(importedPayload.categoryValue || targetBackgroundCategoryValue || "").trim().toLowerCase(),
               kind:
                 importedPayload?.kind === "icon" ||
                 importedPayload?.kind === "vector" ||
@@ -1815,6 +1850,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       } catch (_error) {
       }
     }
+
+    pendingBackgroundUploadCategoryValueRef.current = "";
   };
 
   const onUploadVideos = async (files: FileList | null) => {
@@ -2637,7 +2674,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             accept="image/*"
             multiple
             className="hidden"
-            onChange={(event) => void onUploadFiles(event.target.files)}
+            onChange={(event) => {
+              void onUploadFiles(event.target.files);
+              event.currentTarget.value = "";
+            }}
           />
 
           {activeTab === "templates" ? (
@@ -2978,7 +3018,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                           type="button"
                           aria-label="Upload image"
                           title="Upload image"
-                          onClick={() => uploadInputRef.current?.click()}
+                          onClick={() => openImageUploadPicker()}
                           className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
                         >
                           <Upload size={14} />
@@ -3407,7 +3447,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   type="button"
                   variant="secondary"
                   className="!h-9 !w-full !justify-center !rounded-md"
-                  onClick={() => uploadInputRef.current?.click()}
+                  onClick={() => openImageUploadPicker()}
                 >
                   + Add file
                 </Button>
@@ -3465,35 +3505,24 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                 <div className="space-y-3 rounded-md border border-[#d3d8e1] bg-white p-3">
                   <div className="flex items-start justify-between gap-3">
                     <div className="text-base font-semibold text-[#202a38]">Background images</div>
-                    <div className="flex items-center gap-2">
-                      <button
+                    {activePage?.background?.type === "image" && activeBackgroundImageUri ? (
+                      <Button
                         type="button"
-                        aria-label="Upload background image"
-                        title="Upload background image"
-                        onClick={() => uploadInputRef.current?.click()}
-                        className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                        variant="ghost"
+                        className="!h-8 !px-2 text-xs"
+                        onClick={() =>
+                          setBackground({
+                            type: "color",
+                            imageUri: "",
+                            imageThumbnailUri: "",
+                            sourceAssetId: "",
+                            categoryValue: "",
+                          })
+                        }
                       >
-                        <Upload size={14} />
-                      </button>
-                      {activePage?.background?.type === "image" && activeBackgroundImageUri ? (
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          className="!h-8 !px-2 text-xs"
-                          onClick={() =>
-                            setBackground({
-                              type: "color",
-                              imageUri: "",
-                              imageThumbnailUri: "",
-                              sourceAssetId: "",
-                              categoryValue: "",
-                            })
-                          }
-                        >
-                          Remove image
-                        </Button>
-                      ) : null}
-                    </div>
+                        Remove image
+                      </Button>
+                    ) : null}
                   </div>
 
                   {backgroundAssetsLoading ? (
@@ -3518,12 +3547,28 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
                               {group.label}
                             </div>
-                            <div className="text-[10px] text-[#94a3b8]">
-                              {group.items.length} background{group.items.length === 1 ? "" : "s"}
+                            <div className="flex items-center gap-2">
+                              <div className="text-[10px] text-[#94a3b8]">
+                                {group.items.length} background{group.items.length === 1 ? "" : "s"}
+                              </div>
+                              <button
+                                type="button"
+                                aria-label={`Upload background image to ${group.label}`}
+                                title={`Upload background image to ${group.label}`}
+                                onClick={() => openImageUploadPicker(group.key)}
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                              >
+                                <Upload size={13} />
+                              </button>
                             </div>
                           </div>
-                          <div className="flex gap-2 overflow-x-auto pb-1">
-                            {group.items.map((item) => {
+                          {group.items.length === 0 ? (
+                            <div className="rounded-lg border border-dashed border-[#d3d8e1] bg-[#f8fafc] px-3 py-4 text-xs text-[#64748b]">
+                              No backgrounds in this category yet.
+                            </div>
+                          ) : (
+                            <div className="flex gap-2 overflow-x-auto pb-1">
+                              {group.items.map((item) => {
                               const isActive =
                                 activePage?.background?.type === "image" &&
                                 activeBackgroundImageUri === item.assetUrl;
@@ -3548,9 +3593,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]"
                                       : "border-[#d3d8e1] hover:border-[#9fb4d6] hover:bg-[#eef3fa]"
                                   }`}
-                                  title={item.title || item.titleEn || item.id}
                                 >
-                                  <div className="relative aspect-[4/3] overflow-hidden rounded-t-xl bg-white">
+                                  <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-white">
                                     <span
                                       title="Delete background image"
                                       aria-label="Delete background image"
@@ -3582,20 +3626,11 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       className="h-full w-full object-cover"
                                     />
                                   </div>
-                                  <div className="space-y-1 p-2">
-                                    <div className="line-clamp-2 min-h-[2.5rem] text-xs font-medium leading-5 text-[#202a38]">
-                                      {item.title || item.titleEn || item.id}
-                                    </div>
-                                    {Number.isFinite(Number(item.width)) && Number.isFinite(Number(item.height)) ? (
-                                      <div className="text-[11px] text-[#637087]">
-                                        {Math.round(Number(item.width))} x {Math.round(Number(item.height))}
-                                      </div>
-                                    ) : null}
-                                  </div>
                                 </button>
                               );
-                            })}
-                          </div>
+                              })}
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
