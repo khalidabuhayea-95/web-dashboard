@@ -20,7 +20,7 @@ function normalizePathKey(value) {
 
 function toOpenApiPathFromRouteFile(filePath) {
   const relative = path.relative(MOBILE_API_DIR, filePath).replace(/\\/g, "/");
-  const withoutRouteFile = relative.replace(/\/route\.js$/, "");
+  const withoutRouteFile = relative.replace(/\/route\.(js|ts)$/, "");
   const segments = withoutRouteFile
     .split("/")
     .filter(Boolean)
@@ -51,7 +51,7 @@ async function walk(dirPath, files = []) {
       await walk(fullPath, files);
       continue;
     }
-    if (entry.isFile() && entry.name === "route.js") {
+    if (entry.isFile() && /^route\.(js|ts)$/.test(entry.name)) {
       files.push(fullPath);
     }
   }

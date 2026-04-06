@@ -11,7 +11,7 @@ This backend exposes mobile endpoints for published templates, editor elements, 
 
 Authorization headers are not required for the read-oriented `/api/mobile/**` routes in this phase.
 
-The background-removal upload route may require mobile signing headers when `MOBILE_API_KEY_ID` and `MOBILE_API_SIGNING_SECRET` are configured:
+The write-heavy media routes may require mobile signing headers when `MOBILE_API_KEY_ID` and `MOBILE_API_SIGNING_SECRET` are configured:
 
 - `x-mobile-key`
 - `x-mobile-ts`
@@ -175,8 +175,37 @@ Status codes:
 - `422` background could not be isolated safely
 - `429` rate limit exceeded
 
+### `POST /api/mobile/media/object-remove`
+
+Accepts one image plus one same-size mask and returns the object-removed image directly.
+
+Request:
+- `Content-Type: multipart/form-data`
+- `image` (required): `png` or `jpg`/`jpeg`
+- `mask` (required): `png`, same dimensions as the image
+
+Behavior:
+- Requires mobile signing headers when mobile signing is enabled
+- Normalizes JPEG orientation before validating the mask dimensions
+- Rejects unsupported image types, mismatched dimensions, empty masks, and oversized uploads
+- Resizes image and mask together so the long edge is at most `2048`
+- Stores staged inputs privately, calls Replicate `allenhooo/lama`, and returns the processed image body
+- Returns `Cache-Control: no-store`
+- Returns `X-Output-Width`, `X-Output-Height`, `X-Object-Removal-Provider`, and `X-Object-Removal-Model` headers
+
+Status codes:
+- `200` object removed successfully
+- `400` invalid multipart payload, empty uploads, or mismatched dimensions
+- `401` invalid or missing mobile signing headers when signing is enabled
+- `413` uploaded image or mask is too large
+- `415` unsupported image or mask type
+- `422` image or mask could not be processed safely
+- `429` rate limit exceeded
+- `503` Replicate object removal is not configured or unavailable
+
 ## Notes
 
 - Mobile app logic should use IDs (`template id`, `categoryId`, `subCategoryId`) and treat labels as display-only.
 - Slug support on `:id` routes is compatibility-only and should not be used for new client logic.
 - Mobile request-signing helpers still exist in code, but the background-removal route is public for now.
+- Object removal now uses a single synchronous mobile endpoint instead of a create-and-poll job flow.

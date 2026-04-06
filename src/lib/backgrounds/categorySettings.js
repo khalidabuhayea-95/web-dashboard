@@ -37,6 +37,7 @@ export const BACKGROUND_CATEGORY_SETTINGS = [
     value: DEFAULT_BACKGROUND_CATEGORY,
     labelEn: "General",
     labelAr: "عام",
+    thumbnailUrl: "",
     published: true,
   },
 ];
@@ -54,6 +55,10 @@ function toText(value, fallback = "General") {
   const raw = String(value || "").trim();
   if (raw.length > 0) return raw.slice(0, 60);
   return fallback;
+}
+
+function toUrl(value) {
+  return String(value || "").trim().slice(0, 2048);
 }
 
 function resolveGuid(value, seed) {
@@ -93,6 +98,7 @@ export function sanitizeBackgroundCategorySettings(input) {
       value,
       labelEn: toText(rawLabelEn, value),
       labelAr: toText(rawLabelAr, rawLabelEn || value),
+      thumbnailUrl: toUrl(category?.thumbnailUrl || category?.thumbnail || ""),
       published: typeof category?.published === "boolean" ? category.published : true,
     });
     usedValues.add(value);
@@ -109,6 +115,7 @@ export function sanitizeBackgroundCategorySettings(input) {
       value: DEFAULT_BACKGROUND_CATEGORY,
       labelEn: "General",
       labelAr: "عام",
+      thumbnailUrl: "",
       published: true,
     });
   }
@@ -146,6 +153,7 @@ export function getBackgroundCategoryOptions(settings = BACKGROUND_CATEGORY_SETT
         : toText(item.labelEn, item.labelAr || item.value),
     labelEn: item.labelEn,
     labelAr: item.labelAr,
+    thumbnailUrl: item.thumbnailUrl || "",
     published: item.published !== false,
   }));
 }

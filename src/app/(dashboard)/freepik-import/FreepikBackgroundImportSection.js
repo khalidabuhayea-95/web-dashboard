@@ -87,67 +87,6 @@ function buildBackgroundFiltersPayload(filters) {
   return payload;
 }
 
-function buildBackgroundPreviewDebugCurl({ query, filters, maskedApiKey = "YOUR_API_KEY" }) {
-  const safeQuery = query && typeof query === "object" ? query : {};
-  const params = new URLSearchParams();
-  const term = String(safeQuery.term || "").trim();
-  const slug = String(safeQuery.slug || "").trim();
-  const page = Number(safeQuery.page) || 1;
-  const limit = Number(safeQuery.limit) || 40;
-  const order = String(safeQuery.order || "").trim() || "relevance";
-  const acceptLanguage = String(safeQuery.acceptLanguage || "").trim();
-
-  if (term) params.set("term", term);
-  if (slug) params.set("slug", slug);
-  params.set("page", String(page));
-  params.set("limit", String(limit));
-  params.set("order", order);
-
-  const filtersPayload = buildBackgroundFiltersPayload(filters);
-  Object.entries(filtersPayload).forEach(([key, value]) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) return;
-    Object.entries(value).forEach(([nestedKey, nestedValue]) => {
-      const safeValue = String(nestedValue || "").trim();
-      if (!safeValue) return;
-      params.append(`filters[${key}][${nestedKey}]`, safeValue);
-    });
-  });
-  params.append("filters[license][freemium]", "1");
-
-  const url = `https://api.freepik.com/v1/resources?${params.toString()}`;
-  const curlLines = [
-    "curl --request GET \\",
-    `  --url '${url}' \\`,
-  ];
-  if (acceptLanguage) {
-    curlLines.push(`  --header 'Accept-Language: ${acceptLanguage}' \\`);
-  }
-  curlLines.push(`  --header 'x-freepik-api-key: ${maskedApiKey}'`);
-  return curlLines.join("\n");
-}
-
-function extractMaskedApiKeyFromCurl(curlCommand) {
-  const source = String(curlCommand || "");
-  const match = source.match(/x-freepik-api-key:\s*([^'\n\r]+)/i);
-  return match ? String(match[1] || "").trim() : "";
-}
-
-function buildBackgroundDownloadDebugCurl({ item, maskedApiKey = "", acceptLanguage = "" }) {
-  const resourceId = Number.parseInt(String(item?.id || ""), 10);
-  if (!Number.isFinite(resourceId) || resourceId < 1 || !maskedApiKey) return "";
-
-  const url = `https://api.freepik.com/v1/resources/${resourceId}/download`;
-  const curlLines = [
-    "curl --request GET \\",
-    `  --url '${url}' \\`,
-  ];
-  if (String(acceptLanguage || "").trim()) {
-    curlLines.push(`  --header 'Accept-Language: ${String(acceptLanguage).trim()}' \\`);
-  }
-  curlLines.push(`  --header 'x-freepik-api-key: ${maskedApiKey}'`);
-  return curlLines.join("\n");
-}
-
 function formatBackgroundSizeLabel(width, height) {
   const safeWidth = Number.isFinite(Number(width)) ? Number(width) : null;
   const safeHeight = Number.isFinite(Number(height)) ? Number(height) : null;
@@ -228,7 +167,6 @@ export default function FreepikBackgroundImportSection({
   const [previewBusy, setPreviewBusy] = useState(false);
   const [previewItems, setPreviewItems] = useState([]);
   const [previewPagination, setPreviewPagination] = useState({ total: 0, lastPage: 1, perPage: 40, currentPage: 1 });
-  const [previewDebugCurl, setPreviewDebugCurl] = useState("");
   const [selectedIds, setSelectedIds] = useState(() => new Set());
 
   const [importBusy, setImportBusy] = useState(false);
@@ -307,23 +245,6 @@ export default function FreepikBackgroundImportSection({
     if (selectedIds.size === 0) return [];
     return previewItems.filter((item) => selectedIds.has(item.id));
   }, [previewItems, selectedIds]);
-  const downloadDebugItem = useMemo(
-    () => selectedItems[0] || previewItems[0] || null,
-    [previewItems, selectedItems]
-  );
-  const previewMaskedApiKey = useMemo(
-    () => extractMaskedApiKeyFromCurl(previewDebugCurl),
-    [previewDebugCurl]
-  );
-  const previewDownloadCurl = useMemo(
-    () =>
-      buildBackgroundDownloadDebugCurl({
-        item: downloadDebugItem,
-        maskedApiKey: previewMaskedApiKey,
-        acceptLanguage: backgroundQuery.acceptLanguage,
-      }),
-    [backgroundQuery.acceptLanguage, downloadDebugItem, previewMaskedApiKey]
-  );
 
   const selectedCount = selectedItems.length;
 
@@ -358,12 +279,6 @@ export default function FreepikBackgroundImportSection({
         limit: Number(override.limit ?? backgroundQuery.limit) || 40,
         filters: filtersPayload,
       };
-      const fallbackPreviewCurl = buildBackgroundPreviewDebugCurl({
-        query: nextQuery,
-        filters,
-        maskedApiKey: extractMaskedApiKeyFromCurl(previewDebugCurl) || "YOUR_API_KEY",
-      });
-      setPreviewDebugCurl(fallbackPreviewCurl);
 
       const response = await fetch("/api/settings/freepik/backgrounds/preview", {
         method: "POST",
@@ -373,10 +288,6 @@ export default function FreepikBackgroundImportSection({
         }),
       });
       const payload = await response.json().catch(() => ({}));
-      const debugCurl = String(payload?.debug?.curl || "").trim();
-      if (debugCurl) {
-        setPreviewDebugCurl(debugCurl);
-      }
       if (!response.ok) {
         throw new Error(formatErrorMessage(payload, "Failed to preview backgrounds."));
       }
@@ -695,35 +606,6 @@ export default function FreepikBackgroundImportSection({
             <span> | API filters active</span>
           ) : null}
         </div>
-
-        {previewDebugCurl ? (
-          <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
-            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              Preview curl
-            </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-background p-3 text-[11px] leading-5 text-foreground">
-              {previewDebugCurl}
-            </pre>
-          </div>
-        ) : null}
-
-        {previewDownloadCurl ? (
-          <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                Download curl
-              </div>
-              {downloadDebugItem?.id ? (
-                <div className="text-[11px] text-muted-foreground">
-                  Resource #{downloadDebugItem.id}
-                </div>
-              ) : null}
-            </div>
-            <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-lg bg-background p-3 text-[11px] leading-5 text-foreground">
-              {previewDownloadCurl}
-            </pre>
-          </div>
-        ) : null}
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={selectAllVisible} disabled={previewItems.length === 0}>

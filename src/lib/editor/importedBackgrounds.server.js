@@ -428,6 +428,73 @@ export async function listImportedBackgroundAssets(options = {}) {
   };
 }
 
+export async function listAllImportedBackgroundAssets(options = {}) {
+  await ensureImportedBackgroundsSchema();
+
+  const source = sanitizeSourceFilter(options.source);
+  const categoryValue = sanitizeCategoryFilter(options.categoryValue || options.category);
+  const locale = String(options.locale || options.lang || "en").toLowerCase() === "ar" ? "ar" : "en";
+
+  const params = [];
+  const nextParam = (value) => {
+    params.push(value);
+    return `$${params.length}`;
+  };
+
+  const sourceSql = source ? `source = ${nextParam(source)}` : "1=1";
+  const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
+  const listSql = `
+    SELECT *
+    FROM editor_background_assets
+    WHERE ${sourceSql}
+    ${categorySql}
+    ORDER BY updated_at DESC
+  `;
+
+  const rows = await prisma.$queryRawUnsafe(listSql, ...params);
+  const items = Array.isArray(rows)
+    ? rows.map((row) => normalizeRow(row, locale)).filter(Boolean)
+    : [];
+
+  return {
+    items,
+    total: items.length,
+  };
+}
+
+export async function countImportedBackgroundAssetsByCategory(options = {}) {
+  await ensureImportedBackgroundsSchema();
+
+  const source = sanitizeSourceFilter(options.source);
+  const params = [];
+  const sourceSql = source
+    ? (() => {
+        params.push(source);
+        return `WHERE source = $${params.length}`;
+      })()
+    : "";
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT COALESCE(NULLIF(TRIM(category_value), ''), '') AS category_value, COUNT(*)::int AS total
+      FROM editor_background_assets
+      ${sourceSql}
+      GROUP BY 1
+    `,
+    ...params
+  );
+
+  const counts = {};
+  if (Array.isArray(rows)) {
+    rows.forEach((row) => {
+      const key = sanitizeCategoryFilter(row?.category_value);
+      counts[key] = Number(row?.total || 0);
+    });
+  }
+
+  return counts;
+}
+
 export async function deleteImportedBackgroundAsset(options = {}) {
   await ensureImportedBackgroundsSchema();
 

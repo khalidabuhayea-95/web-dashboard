@@ -11,6 +11,11 @@ import {
   listImportedBackgroundAssets,
   upsertImportedBackgroundAsset,
 } from "@/lib/editor/importedBackgrounds.server";
+import {
+  createBackgroundPreview,
+  downloadRemoteAsset,
+  uploadBackgroundPreviewToStorage,
+} from "@/lib/editor/backgroundPreview.server";
 import { handleApiError, handleBadRequest, handleNotFound } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 
@@ -160,7 +165,7 @@ export async function POST(request: NextRequest) {
     const source = String(body?.source || "").trim().toLowerCase() || "background-upload";
     const sourceAssetId = String(body?.sourceAssetId || body?.source_asset_id || "").trim();
     const assetUrl = String(body?.assetUrl || body?.asset_url || "").trim();
-    const thumbnailUrl = String(body?.thumbnailUrl || body?.thumbnail_url || assetUrl).trim();
+    let thumbnailUrl = String(body?.thumbnailUrl || body?.thumbnail_url || assetUrl).trim();
     const title = String(body?.title || body?.titleEn || body?.title_en || "").trim();
 
     if (!sourceAssetId) {
@@ -175,6 +180,34 @@ export async function POST(request: NextRequest) {
       source,
       sourceAssetId,
     });
+
+    if (!thumbnailUrl || thumbnailUrl === assetUrl) {
+      try {
+        const downloaded = await downloadRemoteAsset(assetUrl);
+        const preview = await createBackgroundPreview({
+          bytes: downloaded.bytes,
+          mimeType: downloaded.mimeType,
+        });
+        if (preview.generated) {
+          thumbnailUrl = await uploadBackgroundPreviewToStorage({
+            ownerId: session.userId,
+            sourceAssetId,
+            bytes: preview.bytes,
+            mimeType: preview.mimeType,
+          });
+        } else {
+          thumbnailUrl = assetUrl;
+        }
+      } catch (previewError) {
+        logger.warn("Background preview generation failed", {
+          userId: session.userId,
+          source,
+          sourceAssetId,
+          error: previewError instanceof Error ? previewError.message : "unknown error",
+        });
+        thumbnailUrl = assetUrl;
+      }
+    }
 
     const result = await upsertImportedBackgroundAsset({
       source,

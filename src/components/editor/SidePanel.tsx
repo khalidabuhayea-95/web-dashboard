@@ -252,6 +252,7 @@ interface BackgroundCategoryRecord {
   value: string;
   labelEn: string;
   labelAr: string;
+  thumbnailUrl?: string;
   published?: boolean;
 }
 
@@ -1334,7 +1335,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const categorizedBackgroundAssets = useMemo(() => {
     const groups = new Map<
       string,
-      { key: string; label: string; items: ImportedElementRecord[]; order: number }
+      { key: string; label: string; thumbnailUrl: string; items: ImportedElementRecord[]; order: number }
     >();
     visibleBackgroundCategories.forEach((category, index) => {
       const categoryValue = String(category.value || "").trim().toLowerCase();
@@ -1344,6 +1345,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         label:
           String(category.labelEn || category.labelAr || categoryValue || "Backgrounds").trim() ||
           "Backgrounds",
+        thumbnailUrl: String(category.thumbnailUrl || "").trim(),
         items: [],
         order: index,
       });
@@ -1365,6 +1367,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         label:
           String(matchedCategory?.labelEn || matchedCategory?.labelAr || groupKey || "Backgrounds").trim() ||
           "Backgrounds",
+        thumbnailUrl: String(matchedCategory?.thumbnailUrl || "").trim(),
         items: [item],
         order: Number.MAX_SAFE_INTEGER,
       });
@@ -3543,9 +3546,26 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                     <div className="space-y-4">
                       {categorizedBackgroundAssets.map((group) => (
                         <div key={group.key} className="space-y-2">
-                          <div className="flex items-center justify-between gap-2">
-                            <div className="text-xs font-semibold uppercase tracking-[0.12em] text-[#64748b]">
-                              {group.label}
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="relative aspect-square w-[88px] shrink-0 overflow-hidden rounded-xl border border-[#d3d8e1] bg-[#eef2f7]">
+                              {group.thumbnailUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={group.thumbnailUrl}
+                                  alt={`${group.label} category thumbnail`}
+                                  className="h-full w-full object-cover"
+                                />
+                              ) : (
+                                <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#eef2ff_0%,#f8fafc_55%,#e2e8f0_100%)]">
+                                  <ImageIcon size={20} className="text-[#94a3b8]" />
+                                </div>
+                              )}
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/15 to-transparent" />
+                              <div className="absolute inset-x-0 bottom-0 p-2">
+                                <div className="line-clamp-2 text-[10px] font-semibold uppercase tracking-[0.12em] text-white">
+                                  {group.label}
+                                </div>
+                              </div>
                             </div>
                             <div className="flex items-center gap-2">
                               <div className="text-[10px] text-[#94a3b8]">
@@ -3572,7 +3592,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               const isActive =
                                 activePage?.background?.type === "image" &&
                                 activeBackgroundImageUri === item.assetUrl;
-                              const previewImageSrc = item.assetUrl || item.thumbnailUrl;
+                              const previewImageSrc = item.thumbnailUrl || item.assetUrl;
                               const deletingImported = deletingImportedElementId === item.id;
                               return (
                                 <button

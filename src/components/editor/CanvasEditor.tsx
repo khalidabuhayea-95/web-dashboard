@@ -90,43 +90,24 @@ function resolveKonvaImageCrop(
     : undefined;
 }
 
-function resolveBackgroundCoverCrop(
+function resolveBackgroundCoverLayout(
   sourceImage: HTMLImageElement | null | undefined,
   targetWidth: number,
   targetHeight: number
 ) {
   const sourceWidth = Number(sourceImage?.naturalWidth || sourceImage?.width || 0);
   const sourceHeight = Number(sourceImage?.naturalHeight || sourceImage?.height || 0);
-  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return undefined;
+  if (!sourceWidth || !sourceHeight || !targetWidth || !targetHeight) return null;
 
-  const sourceAspect = sourceWidth / sourceHeight;
-  const targetAspect = targetWidth / targetHeight;
+  const scale = Math.max(targetWidth / sourceWidth, targetHeight / sourceHeight);
+  const width = sourceWidth * scale;
+  const height = sourceHeight * scale;
 
-  if (Math.abs(sourceAspect - targetAspect) < 0.0001) {
-    return {
-      x: 0,
-      y: 0,
-      width: sourceWidth,
-      height: sourceHeight,
-    };
-  }
-
-  if (sourceAspect > targetAspect) {
-    const cropWidth = sourceHeight * targetAspect;
-    return {
-      x: Math.max(0, (sourceWidth - cropWidth) / 2),
-      y: 0,
-      width: cropWidth,
-      height: sourceHeight,
-    };
-  }
-
-  const cropHeight = sourceWidth / targetAspect;
   return {
-    x: 0,
-    y: Math.max(0, (sourceHeight - cropHeight) / 2),
-    width: sourceWidth,
-    height: cropHeight,
+    x: (targetWidth - width) / 2,
+    y: (targetHeight - height) / 2,
+    width,
+    height,
   };
 }
 
@@ -140,21 +121,20 @@ function CanvasBackgroundImage({
   pageHeight: number;
 }) {
   const [image] = useImage(src, "anonymous");
-  const crop = useMemo(
-    () => resolveBackgroundCoverCrop(image, pageWidth, pageHeight),
+  const layout = useMemo(
+    () => resolveBackgroundCoverLayout(image, pageWidth, pageHeight),
     [image, pageHeight, pageWidth]
   );
 
-  if (!image) return null;
+  if (!image || !layout) return null;
 
   return (
     <KonvaImage
       image={image}
-      x={0}
-      y={0}
-      width={pageWidth}
-      height={pageHeight}
-      crop={crop}
+      x={layout.x}
+      y={layout.y}
+      width={layout.width}
+      height={layout.height}
       listening={false}
       perfectDrawEnabled={false}
     />
@@ -1399,40 +1379,56 @@ export default function CanvasEditor() {
         onTouchEnd={handleStageMouseUp}
       >
         <Layer>
+          <Group
+            clipX={0}
+            clipY={0}
+            clipWidth={activePage.width}
+            clipHeight={activePage.height}
+            listening={false}
+          >
+            <Rect
+              x={0}
+              y={0}
+              width={activePage.width}
+              height={activePage.height}
+              fill={
+                activePage.background.type === "gradient"
+                  ? undefined
+                  : activePage.background.color
+              }
+              fillLinearGradientStartPoint={
+                activePage.background.type === "gradient" ? { x: 0, y: 0 } : undefined
+              }
+              fillLinearGradientEndPoint={
+                activePage.background.type === "gradient"
+                  ? { x: activePage.width, y: activePage.height }
+                  : undefined
+              }
+              fillLinearGradientColorStops={
+                activePage.background.type === "gradient"
+                  ? [0, activePage.background.gradientFrom, 1, activePage.background.gradientTo]
+                  : undefined
+              }
+              listening={false}
+            />
+            {activePage.background.type === "image" && String(activePage.background.imageUri || "").trim() ? (
+              <CanvasBackgroundImage
+                src={String(activePage.background.imageUri || "").trim()}
+                pageWidth={activePage.width}
+                pageHeight={activePage.height}
+              />
+            ) : null}
+          </Group>
           <Rect
             x={0}
             y={0}
             width={activePage.width}
             height={activePage.height}
-            fill={
-              activePage.background.type === "gradient"
-                ? undefined
-                : activePage.background.color
-            }
-            fillLinearGradientStartPoint={
-              activePage.background.type === "gradient" ? { x: 0, y: 0 } : undefined
-            }
-            fillLinearGradientEndPoint={
-              activePage.background.type === "gradient"
-                ? { x: activePage.width, y: activePage.height }
-                : undefined
-            }
-            fillLinearGradientColorStops={
-              activePage.background.type === "gradient"
-                ? [0, activePage.background.gradientFrom, 1, activePage.background.gradientTo]
-                : undefined
-            }
             stroke="#d8dde5"
             strokeWidth={1}
+            fillEnabled={false}
             listening={false}
           />
-          {activePage.background.type === "image" && String(activePage.background.imageUri || "").trim() ? (
-            <CanvasBackgroundImage
-              src={String(activePage.background.imageUri || "").trim()}
-              pageWidth={activePage.width}
-              pageHeight={activePage.height}
-            />
-          ) : null}
 
           <Group
             clipX={0}

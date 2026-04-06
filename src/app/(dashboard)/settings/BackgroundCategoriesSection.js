@@ -14,12 +14,14 @@ import {
   Plus,
   Save,
   Trash2,
+  Upload,
 } from "lucide-react";
 
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Input, Label } from "@/components/ui/form";
+import { uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { BACKGROUND_CATEGORY_SETTINGS } from "@/lib/backgrounds/categorySettings";
 
 function createEmptyBackgroundCategory() {
@@ -27,6 +29,7 @@ function createEmptyBackgroundCategory() {
     value: "",
     labelEn: "",
     labelAr: "",
+    thumbnailUrl: "",
     published: true,
   };
 }
@@ -42,12 +45,14 @@ export default function BackgroundCategoriesSection({ canEdit }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Loading background categories...");
   const [sectionCollapsed, setSectionCollapsed] = useState(false);
+  const [uploadingThumbnailIndex, setUploadingThumbnailIndex] = useState(null);
   const [draggingCategoryIndex, setDraggingCategoryIndex] = useState(null);
   const [dragOverCategory, setDragOverCategory] = useState({
     index: null,
     position: "before",
   });
   const draggingCategoryIndexRef = useRef(null);
+  const thumbnailInputRefs = useRef({});
 
   useEffect(() => {
     setExpandedCategories((previous) =>
@@ -175,6 +180,37 @@ export default function BackgroundCategoriesSection({ canEdit }) {
       setBusy(false);
     }
   };
+
+  const triggerThumbnailPicker = useCallback((index) => {
+    const input = thumbnailInputRefs.current[index];
+    if (input) {
+      input.click();
+    }
+  }, []);
+
+  const handleThumbnailUpload = useCallback(
+    async (index, files) => {
+      const file = Array.from(files || []).find((item) => item?.type?.startsWith("image/"));
+      if (!file) return;
+
+      const displayName = String(
+        settings[index]?.labelEn || settings[index]?.labelAr || settings[index]?.value || `category ${index + 1}`
+      ).trim();
+
+      setUploadingThumbnailIndex(index);
+      setStatus(`Uploading thumbnail for ${displayName}...`);
+      try {
+        const uploaded = await uploadEditorMediaFile(file, "image");
+        updateCategory(index, "thumbnailUrl", String(uploaded.url || "").trim());
+        setStatus("Thumbnail uploaded. Save background categories to persist the change.");
+      } catch (error) {
+        setStatus(error?.message || "Failed to upload category thumbnail.");
+      } finally {
+        setUploadingThumbnailIndex((current) => (current === index ? null : current));
+      }
+    },
+    [settings, updateCategory]
+  );
 
   const statusTone = status.toLowerCase().includes("fail")
     ? "error"
@@ -416,75 +452,128 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                       resetCategoryDragState();
                     }}
                   >
-                    <header className="flex flex-wrap items-center justify-between gap-2 border-b border-border pb-3">
-                      <div className="flex items-center gap-2">
+                    <header className="flex flex-wrap items-start justify-between gap-3 border-b border-border pb-3">
+                      <div className="flex min-w-0 flex-1 items-start gap-3">
                         {canEdit ? (
                           <span
-                            className="inline-flex cursor-grab items-center text-muted-foreground"
+                            className="mt-1 inline-flex cursor-grab items-center text-muted-foreground"
                             title="Drag to reorder background category"
                             aria-hidden="true"
                           >
                             <GripVertical className="h-4 w-4" />
                           </span>
                         ) : null}
-                        <ImageIcon className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
-                        <h2 className="text-sm font-semibold">
-                          {displayName}({categoryIndex + 1})
-                        </h2>
-                        <Badge variant={isPublished ? "success" : "warning"}>
-                          {isPublished ? "Published" : "Unpublished"}
-                        </Badge>
-                      </div>
-                      {canEdit ? (
-                        <div className="flex flex-wrap gap-2">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            onClick={() => toggleCategoryPublished(categoryIndex)}
-                            aria-label={`${isPublished ? "Unpublish" : "Publish"} background category ${categoryIndex + 1}`}
-                          >
-                            {isPublished ? (
-                              <>
-                                <EyeOff className="h-4 w-4" aria-hidden="true" />
-                                Unpublish
-                              </>
-                            ) : (
-                              <>
-                                <Eye className="h-4 w-4" aria-hidden="true" />
-                                Publish
-                              </>
-                            )}
-                          </Button>
-                          <Button
-                            type="button"
-                            variant="destructive"
-                            onClick={() => removeCategory(categoryIndex)}
-                            aria-label={`Remove background category ${categoryIndex + 1}`}
-                          >
-                            <Trash2 className="h-4 w-4" aria-hidden="true" />
-                            Remove
-                          </Button>
+                        <div className="relative aspect-square w-[72px] shrink-0 overflow-hidden rounded-2xl border border-border bg-muted/30">
+                          <input
+                            ref={(node) => {
+                              if (node) {
+                                thumbnailInputRefs.current[categoryIndex] = node;
+                              } else {
+                                delete thumbnailInputRefs.current[categoryIndex];
+                              }
+                            }}
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(event) => {
+                              void handleThumbnailUpload(categoryIndex, event.target.files);
+                              event.currentTarget.value = "";
+                            }}
+                          />
+                          {String(category?.thumbnailUrl || "").trim() ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={String(category?.thumbnailUrl || "").trim()}
+                              alt={`${displayName} thumbnail`}
+                              className="h-full w-full object-cover"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full items-center justify-center bg-[linear-gradient(135deg,#eef2ff_0%,#f8fafc_55%,#e2e8f0_100%)]">
+                              <ImageIcon className="h-7 w-7 text-muted-foreground/70" aria-hidden="true" />
+                            </div>
+                          )}
+                          {canEdit ? (
+                            <button
+                              type="button"
+                              onClick={() => triggerThumbnailPicker(categoryIndex)}
+                              className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/60 bg-white/90 text-foreground shadow-sm transition hover:bg-white"
+                              aria-label={
+                                String(category?.thumbnailUrl || "").trim()
+                                  ? `Replace thumbnail for ${displayName}`
+                                  : `Upload thumbnail for ${displayName}`
+                              }
+                              title={String(category?.thumbnailUrl || "").trim() ? "Replace thumbnail" : "Upload thumbnail"}
+                              disabled={uploadingThumbnailIndex === categoryIndex}
+                            >
+                              {uploadingThumbnailIndex === categoryIndex ? (
+                                <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" />
+                              ) : (
+                                <Upload className="h-4 w-4" aria-hidden="true" />
+                              )}
+                            </button>
+                          ) : null}
                         </div>
-                      ) : null}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        onClick={() => toggleCategoryExpanded(categoryIndex)}
-                        aria-expanded={isExpanded}
-                        aria-controls={`background-category-panel-${categoryIndex}`}
-                      >
-                        {isExpanded ? (
+                        <div className="min-w-0 flex-1 space-y-2 pt-1">
+                          <h2 className="line-clamp-2 text-base font-semibold leading-tight text-foreground">
+                            {displayName}({categoryIndex + 1})
+                          </h2>
+                          <Badge variant={isPublished ? "success" : "warning"}>
+                            {isPublished ? "Published" : "Unpublished"}
+                          </Badge>
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-start justify-end gap-2">
+                        {canEdit ? (
                           <>
-                            <ChevronUp className="h-4 w-4" aria-hidden="true" />
-                            Collapse
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              onClick={() => toggleCategoryPublished(categoryIndex)}
+                              aria-label={`${isPublished ? "Unpublish" : "Publish"} background category ${categoryIndex + 1}`}
+                            >
+                              {isPublished ? (
+                                <>
+                                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                                  Unpublish
+                                </>
+                              ) : (
+                                <>
+                                  <Eye className="h-4 w-4" aria-hidden="true" />
+                                  Publish
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="destructive"
+                              onClick={() => removeCategory(categoryIndex)}
+                              aria-label={`Remove background category ${categoryIndex + 1}`}
+                            >
+                              <Trash2 className="h-4 w-4" aria-hidden="true" />
+                              Remove
+                            </Button>
                           </>
-                        ) : (
-                          <>
-                            <ChevronDown className="h-4 w-4" aria-hidden="true" />
-                            Expand
-                          </>
-                        )}
-                      </Button>
+                        ) : null}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          onClick={() => toggleCategoryExpanded(categoryIndex)}
+                          aria-expanded={isExpanded}
+                          aria-controls={`background-category-panel-${categoryIndex}`}
+                        >
+                          {isExpanded ? (
+                            <>
+                              <ChevronUp className="h-4 w-4" aria-hidden="true" />
+                              Collapse
+                            </>
+                          ) : (
+                            <>
+                              <ChevronDown className="h-4 w-4" aria-hidden="true" />
+                              Expand
+                            </>
+                          )}
+                        </Button>
+                      </div>
                     </header>
 
                     {isExpanded ? (
@@ -518,6 +607,20 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                           {isBlank(category.labelAr) ? (
                             <p className="field-help text-red-600 dark:text-red-400">Required field.</p>
                           ) : null}
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-2">
+                          <Label htmlFor={`background-category-thumbnail-${categoryIndex}`}>Category thumbnail URL</Label>
+                          <Input
+                            id={`background-category-thumbnail-${categoryIndex}`}
+                            value={String(category?.thumbnailUrl || "")}
+                            onChange={(event) => updateCategory(categoryIndex, "thumbnailUrl", event.target.value)}
+                            placeholder="Upload or paste a thumbnail URL"
+                            disabled={!canEdit || uploadingThumbnailIndex === categoryIndex}
+                          />
+                          <p className="field-help text-muted-foreground">
+                            Upload manually from the thumbnail card above, or paste an image URL if you already have one.
+                          </p>
                         </div>
                       </div>
                     ) : null}

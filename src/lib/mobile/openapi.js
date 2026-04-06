@@ -459,6 +459,16 @@ const reusableParameters = {
       type: "string",
     },
   },
+  backgroundCategoryIdPath: {
+    name: "id",
+    in: "path",
+    required: true,
+    description: "Background category id.",
+    schema: {
+      type: "string",
+      format: "uuid",
+    },
+  },
 };
 
 const schemas = {
@@ -628,6 +638,34 @@ const schemas = {
         type: "array",
         items: {
           $ref: "#/components/schemas/CategoryOption",
+        },
+      },
+    },
+  },
+  BackgroundCategoryOption: {
+    type: "object",
+    required: ["id", "value", "label", "thumbnailUrl", "published", "backgroundCount"],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      value: { type: "string" },
+      label: { type: "string" },
+      thumbnailUrl: { type: "string", format: "uri", nullable: true },
+      published: { type: "boolean" },
+      backgroundCount: { type: "integer", minimum: 0 },
+    },
+  },
+  MobileBackgroundCategoriesResponse: {
+    type: "object",
+    required: ["locale", "categories"],
+    properties: {
+      locale: {
+        type: "string",
+        enum: ["en", "ar"],
+      },
+      categories: {
+        type: "array",
+        items: {
+          $ref: "#/components/schemas/BackgroundCategoryOption",
         },
       },
     },
@@ -926,6 +964,73 @@ const schemas = {
       totalPages: { type: "integer", minimum: 1 },
       hasNextPage: { type: "boolean" },
       hasPrevPage: { type: "boolean" },
+    },
+  },
+  MobileBackgroundImage: {
+    type: "object",
+    required: [
+      "id",
+      "source",
+      "sourceAssetId",
+      "category",
+      "name",
+      "nameEn",
+      "nameAr",
+      "tags",
+      "tagsEn",
+      "tagsAr",
+      "assetUrl",
+      "thumbnailUrl",
+      "createdAt",
+      "updatedAt",
+    ],
+    properties: {
+      id: { type: "string" },
+      source: { type: "string", example: "freepik-background" },
+      sourceAssetId: { type: "string", example: "425309375" },
+      category: { type: "string" },
+      name: { type: "string" },
+      nameEn: { type: "string" },
+      nameAr: { type: "string" },
+      tags: {
+        type: "array",
+        items: { type: "string" },
+      },
+      tagsEn: {
+        type: "array",
+        items: { type: "string" },
+      },
+      tagsAr: {
+        type: "array",
+        items: { type: "string" },
+      },
+      labels: {
+        type: "array",
+        items: { type: "string" },
+      },
+      labelsEn: {
+        type: "array",
+        items: { type: "string" },
+      },
+      labelsAr: {
+        type: "array",
+        items: { type: "string" },
+      },
+      slug: { type: "string", nullable: true },
+      assetUrl: { type: "string", format: "uri" },
+      thumbnailUrl: { type: "string", format: "uri" },
+      width: { type: "integer", nullable: true },
+      height: { type: "integer", nullable: true },
+      createdAt: { type: "string", format: "date-time" },
+      updatedAt: { type: "string", format: "date-time" },
+    },
+  },
+  MobileBackgroundImageUrl: {
+    type: "object",
+    required: ["previewUrl", "url"],
+    properties: {
+      previewUrl: { type: "string", format: "uri" },
+      url: { type: "string", format: "uri" },
     },
   },
   MobileShape: {
@@ -1251,6 +1356,88 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           },
         },
       },
+      "/api/mobile/background-categories": {
+        get: {
+          tags: ["Mobile Backgrounds"],
+          summary: "List localized background categories",
+          description:
+            "Returns every published background category with its localized label, optional thumbnail, and imported image count.",
+          parameters: [
+            ...localeHeaderParameters,
+            ...localeQueryParameters,
+            {
+              name: "source",
+              in: "query",
+              required: false,
+              description: "Background source filter. Defaults to `all`.",
+              schema: {
+                type: "string",
+                example: "all",
+              },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Background categories response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileBackgroundCategoriesResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/background-categories/{id}/images": {
+        get: {
+          tags: ["Mobile Backgrounds"],
+          summary: "List all background images for one category",
+          description:
+            "Returns every imported background image for a single category id without pagination.",
+          parameters: [
+            ...localeHeaderParameters,
+            ...localeQueryParameters,
+            reusableParameters.backgroundCategoryIdPath,
+            {
+              name: "source",
+              in: "query",
+              required: false,
+              description: "Background source filter. Defaults to `all`.",
+              schema: {
+                type: "string",
+                example: "all",
+              },
+            },
+          ],
+          responses: {
+            200: {
+              description: "Background image URL list",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      $ref: "#/components/schemas/MobileBackgroundImageUrl",
+                    },
+                  },
+                },
+              },
+            },
+            404: {
+              description: "Background category not found",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/mobile/shapes": {
         get: {
           tags: ["Mobile Shapes"],
@@ -1409,6 +1596,131 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             503: {
               description: "Background removal engine unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/object-remove": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Remove object from image",
+          description:
+            "Accepts an image plus a same-size binary mask, stages both inputs privately for Replicate, waits for the object-removal model to finish, and returns the edited image directly in the response.",
+          parameters: [...mobileSigningHeaderParameters],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["image", "mask"],
+                  properties: {
+                    image: {
+                      type: "string",
+                      format: "binary",
+                    },
+                    mask: {
+                      type: "string",
+                      format: "binary",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Object-removed image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/jpeg": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/webp": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload, empty uploads, or mismatched image and mask dimensions",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid mobile signature",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image or mask file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image or mask type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Image or mask could not be processed safely",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Replicate object removal is unavailable",
               content: {
                 "application/json": {
                   schema: {

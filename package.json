@@ -9,7 +9,9 @@
     "lint": "eslint && npm run check:mobile-openapi",
     "check:mobile-openapi": "node scripts/check-mobile-openapi-coverage.mjs",
     "import:canva": "node scripts/import-canva-template.mjs",
-    "sign:mobile": "node scripts/sign-mobile-request.mjs"
+    "backfill:background-previews": "node scripts/backfill-background-previews.mjs",
+    "sign:mobile": "node scripts/sign-mobile-request.mjs",
+    "smoke:object-remove": "node scripts/smoke-object-remove.mjs"
   },
   "dependencies": {
     "@neplex/vectorizer": "^0.0.5",

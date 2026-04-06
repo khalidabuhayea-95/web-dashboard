@@ -9,6 +9,10 @@ import prisma from "@/lib/prisma";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
 import { upsertImportedBackgroundAsset } from "@/lib/editor/importedBackgrounds.server";
+import {
+  createBackgroundPreview,
+  uploadBackgroundPreviewToStorage,
+} from "@/lib/editor/backgroundPreview.server";
 import { translateBatchToArabic } from "@/lib/tools/arabicTranslate.server";
 import { removeBackground } from "@/lib/media/backgroundRemoval/index.server";
 import {
@@ -25,6 +29,7 @@ const PREVIEW_PAGE_SIZE_MAX = 100;
 const IMPORT_BATCH_LIMIT = 300;
 const MAX_ZIP_LIST_BUFFER = 10 * 1024 * 1024;
 const MAX_ZIP_EXTRACT_BUFFER = 100 * 1024 * 1024;
+const MAX_IMPORTED_BACKGROUND_DIMENSION = 2048;
 const execFileAsync = promisify(execFile);
 
 function sanitizeText(value) {
@@ -832,6 +837,116 @@ async function probeImageDimensions(bytes) {
   }
 }
 
+function mimeTypeFromSharpFormat(format, fallbackMimeType = "") {
+  const normalized = sanitizeText(format).toLowerCase();
+  if (normalized === "jpeg" || normalized === "jpg") return "image/jpeg";
+  if (normalized === "png") return "image/png";
+  if (normalized === "webp") return "image/webp";
+  if (normalized === "gif") return "image/gif";
+  if (normalized === "svg" || normalized === "svg+xml") return "image/svg+xml";
+  return sanitizeText(fallbackMimeType) || "application/octet-stream";
+}
+
+async function resizeImportedBackgroundImage({ bytes, mimeType }) {
+  if (!bytes?.length) {
+    return {
+      bytes,
+      mimeType: sanitizeText(mimeType) || "application/octet-stream",
+      width: null,
+      height: null,
+      resized: false,
+    };
+  }
+
+  const normalizedMimeType = sanitizeText(mimeType).toLowerCase();
+  if (normalizedMimeType.includes("svg") || normalizedMimeType.includes("gif")) {
+    const dimensions = await probeImageDimensions(bytes);
+    return {
+      bytes,
+      mimeType: mimeType || (normalizedMimeType.includes("svg") ? "image/svg+xml" : "image/gif"),
+      width: dimensions.width,
+      height: dimensions.height,
+      resized: false,
+    };
+  }
+
+  try {
+    const sharp = await loadSharpProbe();
+    const image = sharp(bytes, {
+      animated: false,
+      pages: 1,
+      limitInputPixels: false,
+    });
+    const metadata = await image.metadata();
+    const width = Number.isFinite(Number(metadata?.width)) ? Number(metadata.width) : null;
+    const height = Number.isFinite(Number(metadata?.height)) ? Number(metadata.height) : null;
+    const formatMimeType = mimeTypeFromSharpFormat(metadata?.format, mimeType);
+
+    if (String(metadata?.format || "").toLowerCase() === "gif" || Number(metadata?.pages || 1) > 1) {
+      return {
+        bytes,
+        mimeType: formatMimeType,
+        width,
+        height,
+        resized: false,
+      };
+    }
+
+    if (!width || !height) {
+      return {
+        bytes,
+        mimeType: formatMimeType,
+        width,
+        height,
+        resized: false,
+      };
+    }
+
+    const maxDimension = Math.max(width, height);
+    if (maxDimension <= MAX_IMPORTED_BACKGROUND_DIMENSION) {
+      return {
+        bytes,
+        mimeType: formatMimeType,
+        width,
+        height,
+        resized: false,
+      };
+    }
+
+    const resizedBytes = await image
+      .resize({
+        width: MAX_IMPORTED_BACKGROUND_DIMENSION,
+        height: MAX_IMPORTED_BACKGROUND_DIMENSION,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .toBuffer();
+
+    const resizedMetadata = await sharp(resizedBytes, {
+      animated: false,
+      pages: 1,
+      limitInputPixels: false,
+    }).metadata();
+
+    return {
+      bytes: resizedBytes,
+      mimeType: mimeTypeFromSharpFormat(resizedMetadata?.format, formatMimeType),
+      width: Number.isFinite(Number(resizedMetadata?.width)) ? Number(resizedMetadata.width) : width,
+      height: Number.isFinite(Number(resizedMetadata?.height)) ? Number(resizedMetadata.height) : height,
+      resized: true,
+    };
+  } catch {
+    const dimensions = await probeImageDimensions(bytes);
+    return {
+      bytes,
+      mimeType: mimeType || "application/octet-stream",
+      width: dimensions.width,
+      height: dimensions.height,
+      resized: false,
+    };
+  }
+}
+
 function extensionFromMimeType(mimeType) {
   const source = sanitizeText(mimeType).toLowerCase();
   if (source.includes("png")) return "png";
@@ -1165,13 +1280,28 @@ export async function runFreepikBackgroundImportForOwner({
         downloaded = await extractPrimaryImageFromZip(downloaded.bytes);
       }
 
-      const downloadedDimensions = await probeImageDimensions(downloaded.bytes);
-      const storedUrl = await uploadAssetToStorage({
-        ownerId: safeOwnerId,
-        sourceAssetId: item.id,
+      const processedDownload = await resizeImportedBackgroundImage({
         bytes: downloaded.bytes,
         mimeType: downloaded.mimeType,
       });
+      const storedUrl = await uploadAssetToStorage({
+        ownerId: safeOwnerId,
+        sourceAssetId: item.id,
+        bytes: processedDownload.bytes,
+        mimeType: processedDownload.mimeType,
+      });
+      const previewAsset = await createBackgroundPreview({
+        bytes: processedDownload.bytes,
+        mimeType: processedDownload.mimeType,
+      });
+      const previewUrl = previewAsset.generated
+        ? await uploadBackgroundPreviewToStorage({
+            ownerId: safeOwnerId,
+            sourceAssetId: item.id,
+            bytes: previewAsset.bytes,
+            mimeType: previewAsset.mimeType,
+          })
+        : storedUrl;
 
       const titleEn = item.title || item.slug || `Freepik background ${item.id}`;
       const titleAr = translationMap.get(titleEn) || titleEn;
@@ -1197,9 +1327,9 @@ export async function runFreepikBackgroundImportForOwner({
         authorId: item.author.id,
         authorName: item.author.name,
         assetUrl: storedUrl,
-        thumbnailUrl: storedUrl,
-        width: downloadedDimensions.width ?? item.width,
-        height: downloadedDimensions.height ?? item.height,
+        thumbnailUrl: previewUrl,
+        width: processedDownload.width ?? item.width,
+        height: processedDownload.height ?? item.height,
         freeSvg: false,
         sourcePayload: {
           ...(item.sourcePayload && typeof item.sourcePayload === "object" ? item.sourcePayload : {}),
