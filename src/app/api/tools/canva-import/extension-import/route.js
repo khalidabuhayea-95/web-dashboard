@@ -950,6 +950,28 @@ function parseFailedFabricObjectIndexesFromError(errorMessage) {
   return indexes;
 }
 
+async function fetchExternalImageSourceAsDataUrl(sourceUrl, maxBytes = 10_000_000) {
+  const normalizedUrl = String(sourceUrl || "").trim();
+  if (!/^https?:\/\//i.test(normalizedUrl)) return "";
+  try {
+    const response = await fetch(normalizedUrl, {
+      method: "GET",
+      redirect: "follow",
+      cache: "force-cache",
+    });
+    if (!response.ok) return "";
+    const contentType = String(response.headers.get("content-type") || "").trim().toLowerCase();
+    if (contentType && !contentType.startsWith("image/")) return "";
+    const arrayBuffer = await response.arrayBuffer();
+    if (!arrayBuffer || arrayBuffer.byteLength <= 0 || arrayBuffer.byteLength > maxBytes) return "";
+    const mimeType = contentType || "image/png";
+    const base64 = Buffer.from(arrayBuffer).toString("base64");
+    return base64 ? `data:${mimeType};base64,${base64}` : "";
+  } catch (_error) {
+    return "";
+  }
+}
+
 async function replaceExternalImageSourcesWithSnapshotCrops({
   fabricData,
   snapshotDataUrl,
@@ -1200,6 +1222,13 @@ async function replaceExternalImageSourcesWithSnapshotCrops({
     const type = String(object?.type || "").toLowerCase();
     const src = String(object?.src || "").trim();
     if (type !== "image" || !/^https?:\/\//i.test(src)) continue;
+
+    const fetchedImageDataUrl = await fetchExternalImageSourceAsDataUrl(src);
+    if (fetchedImageDataUrl.startsWith("data:image/")) {
+      object.src = fetchedImageDataUrl;
+      object.crossOrigin = undefined;
+      continue;
+    }
 
     const bounds = normalizeBoundsToCanvas(getRenderedBounds(object));
     const backdropCandidate = findNearestFullPageBackdropLayer(index);

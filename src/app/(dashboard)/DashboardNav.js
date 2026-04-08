@@ -5,27 +5,27 @@ import { usePathname } from "next/navigation";
 import clsx from "clsx";
 import {
   Download,
-  Bell,
-  FolderTree,
-  Gauge,
-  LayoutDashboard,
-  Palette,
-  PenTool,
-  Settings2,
+  BellRing,
+  BarChart3,
+  Files,
+  Home,
+  Pencil,
+  SlidersHorizontal,
+  Tags,
   Users,
 } from "lucide-react";
 
 const ICONS = {
-  overview: LayoutDashboard,
-  templates: Gauge,
-  editor: PenTool,
-  settings: Settings2,
+  overview: Home,
+  templates: Files,
+  editor: Pencil,
+  settings: SlidersHorizontal,
   users: Users,
-  analytics: Gauge,
-  push: Bell,
-  designSystem: Palette,
+  analytics: BarChart3,
+  push: BellRing,
+  designSystem: Files,
   freepikImport: Download,
-  categories: FolderTree,
+  categories: Tags,
 };
 
 function isActivePath(pathname, href) {
@@ -41,7 +41,7 @@ export default function DashboardNav({ navItems }) {
       <ul className="space-y-1.5">
         {navItems.map((item) => {
           const active = isActivePath(pathname, item.href);
-          const Icon = ICONS[item.icon] || LayoutDashboard;
+          const Icon = ICONS[item.icon] || Home;
 
           return (
             <li key={item.href}>

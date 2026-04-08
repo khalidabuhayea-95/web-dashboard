@@ -62,6 +62,16 @@ function findLayerObject(templateData, elementId, index) {
 function resolveLayerSource(object, field) {
   if (!object || typeof object !== "object") return "";
 
+  const frameContent = object.frameContent && typeof object.frameContent === "object"
+    ? object.frameContent
+    : null;
+  if (field === "frameContent.src" || field === "frameContentSrc") {
+    return typeof frameContent?.src === "string" ? frameContent.src.trim() : "";
+  }
+  if (field === "frameContent.posterSrc" || field === "frameContentPosterSrc") {
+    return typeof frameContent?.posterSrc === "string" ? frameContent.posterSrc.trim() : "";
+  }
+
   const candidateFields = field
     ? [String(field)]
     : ["src", "imageUri", "thumbnailUri", "videoUri"];

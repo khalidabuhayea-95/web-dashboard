@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Konva from "konva";
 import useImage from "use-image";
-import { Copy, Layers, Trash2 } from "lucide-react";
+import { Copy, SlidersHorizontal, Trash2 } from "lucide-react";
 import {
   Arrow,
   Circle,
@@ -12,6 +12,7 @@ import {
   Layer,
   Line,
   Rect,
+  Shape,
   Stage,
   Star,
   Text,
@@ -25,6 +26,14 @@ import {
   type ShapeType,
 } from "@/store/editorStore";
 import {
+  DEFAULT_FRAME_CONTENT_TRANSFORM,
+  pointIntersectsFrameBounds,
+  resolveFrameContentLayout,
+  resolveFramePreset,
+  type FrameContent,
+  type FramePreset,
+} from "@/lib/editor/frames";
+import {
   normalizeRasterColorMap,
   recolorRasterSourceToDataUrl,
   serializeRasterColorMap,
@@ -32,9 +41,38 @@ import {
 import { rasterizeSvgDataUrlToPngDataUrl } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
+import {
+  getAnimationPreset,
+  getPageDurationMs,
+  getTimelinePageEntries,
+  isElementVisibleAtPlayhead,
+  normalizeAnimationDelayMs,
+  normalizeAnimationDirection,
+  normalizeAnimationDurationMs,
+  normalizeAnimationEasing,
+  normalizeAnimationInfinite,
+  normalizeAnimationIntensity,
+  normalizeAnimationMode,
+  normalizeAnimationType,
+  resolveTimelineWindow,
+  type EditorAnimationDirection,
+  type EditorAnimationEasing,
+  type EditorAnimationPreset,
+} from "@/lib/editor/animationTimeline";
+
+interface ElementRenderPose {
+  x: number;
+  y: number;
+  rotation: number;
+  scaleX: number;
+  scaleY: number;
+  opacity: number;
+}
 
 interface ImageNodeProps {
   element: EditorElement;
+  pose: ElementRenderPose;
+  canTransform: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
   onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
@@ -143,6 +181,8 @@ function CanvasBackgroundImage({
 
 function CanvasImageNode({
   element,
+  pose,
+  canTransform,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -270,17 +310,17 @@ function CanvasImageNode({
       }}
       id={element.id}
       image={image || undefined}
-      x={element.x}
-      y={element.y}
+      x={pose.x}
+      y={pose.y}
       width={element.width}
       height={element.height}
-      rotation={element.rotation}
-      scaleX={element.scaleX}
-      scaleY={element.scaleY}
-      opacity={element.opacity}
+      rotation={pose.rotation}
+      scaleX={pose.scaleX}
+      scaleY={pose.scaleY}
+      opacity={pose.opacity}
       visible={element.visible}
-      draggable={!element.locked}
-      listening={!element.locked}
+      draggable={canTransform}
+      listening={canTransform}
       globalCompositeOperation={element.blendMode}
       cornerRadius={element.cornerRadius || 0}
       shadowColor={element.shadowColor}
@@ -300,6 +340,8 @@ function CanvasImageNode({
 
 function CanvasVideoNode({
   element,
+  pose,
+  canTransform,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -400,17 +442,17 @@ function CanvasVideoNode({
       }}
       id={element.id}
       image={video || undefined}
-      x={element.x}
-      y={element.y}
+      x={pose.x}
+      y={pose.y}
       width={element.width}
       height={element.height}
-      rotation={element.rotation}
-      scaleX={element.scaleX}
-      scaleY={element.scaleY}
-      opacity={element.opacity}
+      rotation={pose.rotation}
+      scaleX={pose.scaleX}
+      scaleY={pose.scaleY}
+      opacity={pose.opacity}
       visible={element.visible}
-      draggable={!element.locked}
-      listening={!element.locked}
+      draggable={canTransform}
+      listening={canTransform}
       globalCompositeOperation={element.blendMode}
       cornerRadius={element.cornerRadius || 0}
       shadowColor={element.shadowColor}
@@ -427,8 +469,442 @@ function CanvasVideoNode({
   );
 }
 
+interface FrameNodeProps {
+  element: EditorElement;
+  pose: ElementRenderPose;
+  canTransform: boolean;
+  isDropTarget: boolean;
+  isContentEditing: boolean;
+  onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
+  onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
+  onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => void;
+  onTransformEnd: (event: Konva.KonvaEventObject<Event>) => void;
+  onEnterContentEdit: () => void;
+  onContentTransform: (patch: { scale?: number; offsetX?: number; offsetY?: number }) => void;
+  onContentMetadata: (patch: Partial<FrameContent>) => void;
+  registerRef: (id: string, node: Konva.Node | null) => void;
+}
+
+function drawFramePath(
+  context: CanvasRenderingContext2D | Konva.Context,
+  preset: FramePreset,
+  width: number,
+  height: number
+) {
+  const canvasContext =
+    "_context" in context && context._context
+      ? (context._context as CanvasRenderingContext2D)
+      : (context as CanvasRenderingContext2D);
+  const w = Math.max(1, width);
+  const h = Math.max(1, height);
+  canvasContext.beginPath();
+
+  if (preset.kind === "circle") {
+    canvasContext.ellipse(w / 2, h / 2, w / 2, h / 2, 0, 0, Math.PI * 2);
+    canvasContext.closePath();
+    return;
+  }
+
+  if (preset.kind === "rect") {
+    const radius = Math.min(w / 2, h / 2, Math.max(0, Number(preset.cornerRadius || 0)));
+    if (radius <= 0) {
+      canvasContext.rect(0, 0, w, h);
+      canvasContext.closePath();
+      return;
+    }
+    canvasContext.moveTo(radius, 0);
+    canvasContext.lineTo(w - radius, 0);
+    canvasContext.quadraticCurveTo(w, 0, w, radius);
+    canvasContext.lineTo(w, h - radius);
+    canvasContext.quadraticCurveTo(w, h, w - radius, h);
+    canvasContext.lineTo(radius, h);
+    canvasContext.quadraticCurveTo(0, h, 0, h - radius);
+    canvasContext.lineTo(0, radius);
+    canvasContext.quadraticCurveTo(0, 0, radius, 0);
+    canvasContext.closePath();
+    return;
+  }
+
+  const points = Array.isArray(preset.points) && preset.points.length >= 6 ? preset.points : [0, 0, 100, 0, 100, 100, 0, 100];
+  points.forEach((value, index) => {
+    if (index % 2 !== 0) return;
+    const x = (Number(value || 0) / 100) * w;
+    const y = (Number(points[index + 1] || 0) / 100) * h;
+    if (index === 0) {
+      canvasContext.moveTo(x, y);
+    } else {
+      canvasContext.lineTo(x, y);
+    }
+  });
+  canvasContext.closePath();
+}
+
+function getFrameBoundsClientRect(
+  node: Konva.Node,
+  width: number,
+  height: number,
+  config?: Parameters<Konva.Node["getClientRect"]>[0]
+) {
+  // Konva's transformer sometimes asks for the untransformed local bounds.
+  // Returning absolute bounds in that case makes the overlay apply transforms twice.
+  if (config?.skipTransform) {
+    return { x: 0, y: 0, width, height };
+  }
+
+  let transform = node.getAbsoluteTransform().copy();
+  if (config?.relativeTo) {
+    const relativeTransform = config.relativeTo.getAbsoluteTransform().copy().invert();
+    relativeTransform.multiply(transform);
+    transform = relativeTransform;
+  }
+
+  const points = [
+    transform.point({ x: 0, y: 0 }),
+    transform.point({ x: width, y: 0 }),
+    transform.point({ x: width, y: height }),
+    transform.point({ x: 0, y: height }),
+  ];
+  const xs = points.map((point) => point.x);
+  const ys = points.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const minY = Math.min(...ys);
+  const maxX = Math.max(...xs);
+  const maxY = Math.max(...ys);
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX,
+    height: maxY - minY,
+  };
+}
+
+function CanvasFrameNode({
+  element,
+  pose,
+  canTransform,
+  isDropTarget,
+  isContentEditing,
+  onSelect,
+  onContextMenu,
+  onDragMove,
+  onDragEnd,
+  onTransformEnd,
+  onEnterContentEdit,
+  onContentTransform,
+  onContentMetadata,
+  registerRef,
+}: FrameNodeProps) {
+  const frameContent = element.frameContent || null;
+  const preset = useMemo(
+    () => resolveFramePreset(element.frameShape?.presetId),
+    [element.frameShape?.presetId]
+  );
+  const transform = element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM;
+  const [image] = useImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
+  const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const frameGroupRef = useRef<Konva.Group | null>(null);
+  const mediaRef = useRef<Konva.Image | null>(null);
+  const dropFeedbackRef = useRef<Konva.Group | null>(null);
+  const metadataRef = useRef(onContentMetadata);
+
+  useEffect(() => {
+    metadataRef.current = onContentMetadata;
+  }, [onContentMetadata]);
+
+  useEffect(() => {
+    const node = frameGroupRef.current;
+    if (!node) return;
+    node.getClientRect = (config) =>
+      getFrameBoundsClientRect(node, element.width, element.height, config);
+    node.getLayer()?.batchDraw();
+  }, [element.height, element.width]);
+
+  useEffect(() => {
+    if (transform.fit === "manual") return;
+    if (!image || frameContent?.kind !== "image") return;
+    const width = Number(image.naturalWidth || image.width || 0);
+    const height = Number(image.naturalHeight || image.height || 0);
+    if (width <= 0 || height <= 0) return;
+    metadataRef.current?.({ sourceWidth: width, sourceHeight: height });
+  }, [frameContent?.kind, image, transform.fit]);
+
+  useEffect(() => {
+    if (frameContent?.kind !== "video" || !frameContent.src) {
+      return;
+    }
+
+    let mounted = true;
+    const htmlVideo = document.createElement("video");
+    htmlVideo.src = frameContent.src;
+    htmlVideo.crossOrigin = "anonymous";
+    htmlVideo.muted = true;
+    htmlVideo.loop = true;
+    htmlVideo.preload = "auto";
+    htmlVideo.playsInline = true;
+    htmlVideo.setAttribute("playsinline", "true");
+
+    const handleLoadedMetadata = () => {
+      if (!mounted) return;
+      if (transform.fit === "manual") return;
+      const width = Number(htmlVideo.videoWidth || 0);
+      const height = Number(htmlVideo.videoHeight || 0);
+      const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
+      metadataRef.current?.({
+        sourceWidth: width > 0 ? width : undefined,
+        sourceHeight: height > 0 ? height : undefined,
+        videoDuration: duration,
+        videoEnd: frameContent.videoEnd && frameContent.videoEnd > 0 ? frameContent.videoEnd : duration,
+      });
+    };
+
+    const handleCanPlay = () => {
+      if (!mounted) return;
+      setVideo(htmlVideo);
+      void htmlVideo.play().catch(() => undefined);
+    };
+
+    htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
+    htmlVideo.addEventListener("canplay", handleCanPlay);
+    htmlVideo.load();
+
+    return () => {
+      mounted = false;
+      htmlVideo.pause();
+      htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      htmlVideo.removeEventListener("canplay", handleCanPlay);
+      setVideo((current) => (current === htmlVideo ? null : current));
+    };
+  }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, transform.fit]);
+
+  useEffect(() => {
+    let frame = 0;
+    const redraw = () => {
+      mediaRef.current?.getLayer()?.batchDraw();
+      frame = requestAnimationFrame(redraw);
+    };
+    if (video) {
+      frame = requestAnimationFrame(redraw);
+    }
+    return () => cancelAnimationFrame(frame);
+  }, [video]);
+
+  useEffect(() => {
+    const node = dropFeedbackRef.current;
+    if (!node || !isDropTarget) {
+      if (node) {
+        node.opacity(0);
+        node.scale({ x: 1, y: 1 });
+        node.rotation(0);
+        node.getLayer()?.batchDraw();
+      }
+      return;
+    }
+
+    const layer = node.getLayer();
+    const animation = new Konva.Animation((frame) => {
+      const time = frame?.time || 0;
+      const pulse = 1 + Math.sin(time / 115) * 0.018;
+      const wobble = Math.sin(time / 42) * 1.1;
+      const glow = 0.58 + Math.sin(time / 95) * 0.22;
+      node.opacity(glow);
+      node.scale({ x: pulse, y: pulse });
+      node.rotation(wobble);
+    }, layer);
+
+    animation.start();
+    return () => {
+      animation.stop();
+      node.opacity(0);
+      node.scale({ x: 1, y: 1 });
+      node.rotation(0);
+      node.getLayer()?.batchDraw();
+    };
+  }, [isDropTarget]);
+
+  const mediaSource = frameContent?.kind === "video" ? video : image;
+  const mediaLayout = useMemo(
+    () =>
+      resolveFrameContentLayout(
+        element.width,
+        element.height,
+        frameContent?.sourceWidth,
+        frameContent?.sourceHeight,
+        transform
+      ),
+    [
+      element.height,
+      element.width,
+      frameContent?.sourceHeight,
+      frameContent?.sourceWidth,
+      transform,
+    ]
+  );
+  const baseLayout = useMemo(
+    () =>
+      resolveFrameContentLayout(
+        element.width,
+        element.height,
+        frameContent?.sourceWidth,
+        frameContent?.sourceHeight,
+        { ...transform, offsetX: 0, offsetY: 0 }
+      ),
+    [
+      element.height,
+      element.width,
+      frameContent?.sourceHeight,
+      frameContent?.sourceWidth,
+      transform,
+    ]
+  );
+
+  return (
+    <Group
+      ref={(node) => {
+        frameGroupRef.current = node;
+        registerRef(element.id, node);
+      }}
+      id={element.id}
+      x={pose.x}
+      y={pose.y}
+      rotation={pose.rotation}
+      scaleX={pose.scaleX}
+      scaleY={pose.scaleY}
+      opacity={pose.opacity}
+      draggable={canTransform && !isContentEditing}
+      listening={canTransform || isContentEditing}
+      globalCompositeOperation={element.blendMode}
+      shadowColor={element.shadowColor}
+      shadowBlur={element.shadowBlur}
+      shadowOffsetX={element.shadowOffsetX}
+      shadowOffsetY={element.shadowOffsetY}
+      clipFunc={(context) => drawFramePath(context, preset, element.width, element.height)}
+      onClick={onSelect}
+      onTap={onSelect}
+      onContextMenu={onContextMenu}
+      onDragMove={onDragMove}
+      onDragEnd={onDragEnd}
+      onTransformEnd={onTransformEnd}
+      onDblClick={(event) => {
+        event.cancelBubble = true;
+        onEnterContentEdit();
+      }}
+      onDblTap={(event) => {
+        event.cancelBubble = true;
+        onEnterContentEdit();
+      }}
+      onWheel={(event) => {
+        if (!isContentEditing || !frameContent) return;
+        event.cancelBubble = true;
+        event.evt.preventDefault();
+        const direction = event.evt.deltaY > 0 ? -1 : 1;
+        const nextScale = clamp(Number(transform.scale || 1) * (direction > 0 ? 1.06 : 1 / 1.06), 0.1, 8);
+        onContentTransform({ scale: nextScale });
+      }}
+    >
+      <Shape
+        width={element.width}
+        height={element.height}
+        fill={frameContent ? "#f8fafc" : "#eaf6ff"}
+        sceneFunc={(context, shape) => {
+          drawFramePath(context, preset, element.width, element.height);
+          context.fillStrokeShape(shape);
+        }}
+        // The frame group itself has no hit area, so this masked fill is the click/drag target.
+        listening={canTransform || isContentEditing}
+      />
+      {mediaSource ? (
+        <KonvaImage
+          ref={mediaRef}
+          image={mediaSource}
+          x={mediaLayout.x}
+          y={mediaLayout.y}
+          width={mediaLayout.width}
+          height={mediaLayout.height}
+          draggable={isContentEditing}
+          listening={isContentEditing}
+          perfectDrawEnabled={false}
+          onDragEnd={(event) => {
+            event.cancelBubble = true;
+            onContentTransform({
+              offsetX: event.target.x() - baseLayout.x,
+              offsetY: event.target.y() - baseLayout.y,
+            });
+          }}
+        />
+      ) : (
+        <Group listening={false}>
+          <Rect x={0} y={0} width={element.width} height={element.height} fill="#e6f5ff" />
+          <Circle x={element.width * 0.44} y={element.height * 0.42} radius={Math.min(element.width, element.height) * 0.14} fill="#ffffff" opacity={0.9} />
+          <Line
+            points={[
+              element.width * 0.04,
+              element.height * 0.88,
+              element.width * 0.38,
+              element.height * 0.54,
+              element.width * 0.62,
+              element.height * 0.76,
+              element.width * 0.96,
+              element.height * 0.48,
+              element.width * 0.96,
+              element.height * 0.96,
+              element.width * 0.04,
+              element.height * 0.96,
+            ]}
+            closed
+            fill="#9abf44"
+            opacity={0.75}
+          />
+        </Group>
+      )}
+      <Shape
+        width={element.width}
+        height={element.height}
+        stroke={isContentEditing ? "#ff5c7a" : isDropTarget ? "#2c68be" : element.stroke || "#94a3b8"}
+        strokeWidth={isContentEditing || isDropTarget ? Math.max(3, element.strokeWidth || 2) : element.strokeWidth || 2}
+        dash={isContentEditing ? [8, 6] : undefined}
+        fillEnabled={false}
+        sceneFunc={(context, shape) => {
+          drawFramePath(context, preset, element.width, element.height);
+          context.fillStrokeShape(shape);
+        }}
+        listening={false}
+      />
+      <Group
+        ref={dropFeedbackRef}
+        x={element.width / 2}
+        y={element.height / 2}
+        offsetX={element.width / 2}
+        offsetY={element.height / 2}
+        opacity={0}
+        listening={false}
+      >
+        <Shape
+          width={element.width}
+          height={element.height}
+          stroke="#ff5c7a"
+          strokeWidth={Math.max(5, (element.strokeWidth || 2) + 3)}
+          shadowColor="#ff5c7a"
+          shadowBlur={14}
+          shadowOpacity={0.55}
+          fillEnabled={false}
+          sceneFunc={(context, shape) => {
+            drawFramePath(context, preset, element.width, element.height);
+            context.fillStrokeShape(shape);
+          }}
+          listening={false}
+        />
+      </Group>
+    </Group>
+  );
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
+}
+
+function resolveTextDirection(text: string) {
+  return /[\u0590-\u08FF]/.test(String(text || "")) ? "rtl" : "ltr";
 }
 
 function toKonvaFontStyle(fontStyle: EditorElement["fontStyle"], fontWeight: EditorElement["fontWeight"]) {
@@ -439,6 +915,312 @@ function toKonvaFontStyle(fontStyle: EditorElement["fontStyle"], fontWeight: Edi
   if (isBold) return "bold";
   if (isItalic) return "italic";
   return "normal";
+}
+
+function resolveEffectiveAnimationType(element: EditorElement) {
+  const normalizedType = normalizeAnimationType(element.mediaAnimationType);
+  return normalizedType === "RANDOM"
+    ? (["FADE", "PAN", "POP", "BASELINE", "WIGGLE", "PULSE"][
+        Array.from(String(element.id || "random")).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6
+      ] as ReturnType<typeof normalizeAnimationType>)
+    : normalizedType;
+}
+
+function applyAnimationEasing(progress: number, easing: EditorAnimationEasing) {
+  const value = clamp(progress, 0, 1);
+  switch (easing) {
+    case "LINEAR":
+      return value;
+    case "EASE_OUT":
+      return 1 - Math.pow(1 - value, 3);
+    case "EASE_IN_OUT":
+      return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
+    case "SOFT_OUT":
+      return 1 - Math.pow(1 - value, 4);
+    case "SOFT_IN_OUT":
+      return 0.5 - Math.cos(Math.PI * value) / 2;
+    default:
+      return value;
+  }
+}
+
+function getDirectionalVector(direction: EditorAnimationDirection) {
+  switch (direction) {
+    case "LEFT":
+      return { x: -1, y: 0, spin: -1 };
+    case "RIGHT":
+      return { x: 1, y: 0, spin: 1 };
+    case "UP":
+      return { x: 0, y: -1, spin: -1 };
+    case "DOWN":
+      return { x: 0, y: 1, spin: 1 };
+    case "COUNTERCLOCKWISE":
+      return { x: 0, y: 0, spin: -1 };
+    case "CLOCKWISE":
+      return { x: 0, y: 0, spin: 1 };
+    default:
+      return { x: 0, y: 0, spin: 1 };
+  }
+}
+
+function pingPong(progress: number) {
+  const normalized = ((progress % 1) + 1) % 1;
+  return 0.5 - Math.cos(normalized * Math.PI * 2) / 2;
+}
+
+interface AnimationState {
+  preset: EditorAnimationPreset;
+  progress: number;
+  cycleProgress: number;
+  cycleWave: number;
+  direction: EditorAnimationDirection;
+  intensity: number;
+  isInfinite: boolean;
+}
+
+function resolveAnimationState(
+  element: EditorElement,
+  playheadMs: number,
+  pageDurationMs: number
+): AnimationState | null {
+  const type = resolveEffectiveAnimationType(element);
+  const preset = getAnimationPreset(type);
+  if (type === "NONE") return null;
+
+  const legacyMode = normalizeAnimationMode(element.mediaAnimationMode);
+  const direction = normalizeAnimationDirection(element.mediaAnimationDirection, type);
+  const easing = normalizeAnimationEasing(element.mediaAnimationEasing, type);
+  const intensity = normalizeAnimationIntensity(element.mediaAnimationIntensity);
+  const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
+  const layerDurationMs = Math.max(1, timelineWindow.endMs - timelineWindow.startMs);
+  const delayMs = Math.min(layerDurationMs - 1, normalizeAnimationDelayMs(element.mediaAnimationDelayMs));
+  const durationMs = Math.max(
+    1,
+    Math.min(
+      layerDurationMs,
+      normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode) && preset.supportsInfinite
+        ? preset.defaultDurationMs
+        : normalizeAnimationDurationMs(element.mediaAnimationDurationMs || preset.defaultDurationMs)
+    )
+  );
+  const localMs = playheadMs - timelineWindow.startMs;
+  const activeMs = Math.max(0, localMs - delayMs);
+  const isInfinite =
+    normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode) &&
+    preset.supportsInfinite;
+  const cycleProgress =
+    activeMs <= 0
+      ? 0
+      : isInfinite
+        ? (activeMs % durationMs) / durationMs
+        : clamp(activeMs / durationMs, 0, 1);
+  const cycleWave = applyAnimationEasing(pingPong(cycleProgress), easing);
+
+  if (preset.category === "loop") {
+    const oneShot = applyAnimationEasing(clamp(activeMs / durationMs, 0, 1), easing);
+    return {
+      preset,
+      progress: isInfinite ? cycleWave : oneShot,
+      cycleProgress,
+      cycleWave,
+      direction,
+      intensity,
+      isInfinite,
+    };
+  }
+
+  if (isInfinite || legacyMode === "LOOP") {
+    return {
+      preset,
+      progress: cycleWave,
+      cycleProgress,
+      cycleWave,
+      direction,
+      intensity,
+      isInfinite: true,
+    };
+  }
+
+  const introProgress = applyAnimationEasing(clamp(activeMs / durationMs, 0, 1), easing);
+  const outroStartMs = Math.max(0, layerDurationMs - durationMs - delayMs);
+  const outroProgress = applyAnimationEasing(
+    clamp((timelineWindow.endMs - playheadMs - delayMs) / durationMs, 0, 1),
+    easing
+  );
+  const progress =
+    legacyMode === "OUT"
+      ? outroProgress
+      : localMs >= outroStartMs + delayMs
+        ? outroProgress
+        : introProgress;
+
+  return {
+    preset,
+    progress,
+    cycleProgress,
+    cycleWave,
+    direction,
+    intensity,
+    isInfinite: false,
+  };
+}
+
+function resolveAnimatedElementPose(
+  element: EditorElement,
+  playheadMs: number,
+  pageDurationMs: number
+): ElementRenderPose {
+  const base: ElementRenderPose = {
+    x: element.x,
+    y: element.y,
+    rotation: element.rotation,
+    scaleX: element.scaleX,
+    scaleY: element.scaleY,
+    opacity: element.opacity,
+  };
+
+  const state = resolveAnimationState(element, playheadMs, pageDurationMs);
+  const type = resolveEffectiveAnimationType(element);
+  if (!state) return base;
+
+  const vector = getDirectionalVector(state.direction);
+  const progress = clamp(state.progress, 0, 1);
+  const intensity = state.intensity;
+  const amplitudeX = Math.max(12, element.width * 0.18) * intensity;
+  const amplitudeY = Math.max(12, element.height * 0.18) * intensity;
+
+  let opacityFactor = 1;
+  let scaleXFactor = 1;
+  let scaleYFactor = 1;
+  let offsetX = 0;
+  let offsetY = 0;
+  let rotationOffset = 0;
+
+  switch (type) {
+    case "FADE":
+      opacityFactor = 0.04 + progress * 0.96;
+      break;
+    case "BLUR":
+      opacityFactor = 0.05 + progress * 0.95;
+      scaleXFactor = 0.92 + progress * 0.08;
+      scaleYFactor = 0.92 + progress * 0.08;
+      break;
+    case "RISE":
+      offsetY = Math.max(16, element.height * 0.22) * (1 - progress) * intensity;
+      opacityFactor = 0.12 + progress * 0.88;
+      break;
+    case "PAN":
+      offsetX = vector.x * (1 - progress) * Math.max(22, element.width * 0.28) * intensity;
+      opacityFactor = 0.16 + progress * 0.84;
+      break;
+    case "DRIFT":
+      offsetX = vector.x * (1 - progress) * Math.max(14, element.width * 0.18) * intensity;
+      offsetY = vector.y * (1 - progress) * Math.max(8, element.height * 0.12) * intensity;
+      opacityFactor = 0.1 + progress * 0.9;
+      break;
+    case "TECTONIC":
+      offsetX = vector.x * (1 - progress) * Math.max(28, element.width * 0.34) * intensity;
+      scaleXFactor = 0.9 + progress * 0.1;
+      opacityFactor = 0.08 + progress * 0.92;
+      break;
+    case "WIPE":
+      if (Math.abs(vector.x) > 0) {
+        scaleXFactor = Math.max(0.001, progress);
+        offsetX = vector.x < 0 ? element.width * (1 - progress) : 0;
+      } else {
+        scaleYFactor = Math.max(0.001, progress);
+        offsetY = vector.y < 0 ? element.height * (1 - progress) : 0;
+      }
+      break;
+    case "POP":
+      scaleXFactor = 0.7 + progress * 0.3;
+      scaleYFactor = 0.7 + progress * 0.3;
+      opacityFactor = 0.12 + progress * 0.88;
+      break;
+    case "SUCCESSION":
+      scaleXFactor = 0.82 + progress * 0.18;
+      scaleYFactor = 0.82 + progress * 0.18;
+      opacityFactor = 0.06 + progress * 0.94;
+      break;
+    case "STOMP":
+      scaleXFactor = 0.78 + progress * 0.22;
+      scaleYFactor = 0.78 + progress * 0.22;
+      rotationOffset = (1 - progress) * 18 * vector.spin * intensity;
+      opacityFactor = 0.1 + progress * 0.9;
+      break;
+    case "BREATHE": {
+      const breathWave = pingPong(state.cycleProgress);
+      scaleXFactor = 1 + breathWave * 0.06 * intensity;
+      scaleYFactor = 1 + breathWave * 0.06 * intensity;
+      opacityFactor = 0.86 + breathWave * 0.14;
+      break;
+    }
+    case "BASELINE": {
+      const bounceWave = Math.abs(Math.sin(state.cycleProgress * Math.PI * 2));
+      offsetY = -bounceWave * Math.max(10, element.height * 0.1) * intensity;
+      scaleYFactor = 1 - bounceWave * 0.06 * intensity;
+      scaleXFactor = 1 + bounceWave * 0.04 * intensity;
+      break;
+    }
+    case "TUMBLE":
+      rotationOffset = (1 - progress) * 26 * vector.spin * intensity;
+      offsetX = vector.spin * (1 - progress) * Math.max(18, element.width * 0.18) * intensity;
+      offsetY = -(1 - progress) * Math.max(18, element.height * 0.22) * intensity;
+      opacityFactor = 0.08 + progress * 0.92;
+      break;
+    case "NEON": {
+      const pulseWave = pingPong(state.cycleProgress);
+      scaleXFactor = 1 + pulseWave * 0.05 * intensity;
+      scaleYFactor = 1 + pulseWave * 0.05 * intensity;
+      opacityFactor = clamp(0.8 + pulseWave * 0.2 + Math.sin(state.cycleProgress * Math.PI * 6) * 0.04, 0.72, 1);
+      break;
+    }
+    case "SCRAPBOOK": {
+      const scrapbookWave = Math.sin(state.cycleProgress * Math.PI * 2);
+      rotationOffset = scrapbookWave * 6.5 * intensity;
+      offsetX = scrapbookWave * Math.max(5, element.width * 0.024) * intensity;
+      offsetY = Math.cos(state.cycleProgress * Math.PI * 2) * Math.max(3, element.height * 0.018) * intensity;
+      break;
+    }
+    case "ROTATE":
+      rotationOffset = state.cycleProgress * 360 * vector.spin * intensity;
+      break;
+    case "FLICKER": {
+      const irregular =
+        0.4 +
+        0.34 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 9.2)) +
+        0.22 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 23.6));
+      opacityFactor = clamp(
+        state.isInfinite ? irregular : 1 - state.progress + irregular * state.progress,
+        0.16,
+        1
+      );
+      break;
+    }
+    case "PULSE": {
+      const pulseWave = pingPong(state.cycleProgress);
+      scaleXFactor = 1 + pulseWave * 0.12 * intensity;
+      scaleYFactor = 1 + pulseWave * 0.12 * intensity;
+      break;
+    }
+    case "WIGGLE": {
+      const wiggleWave = Math.sin(state.cycleProgress * Math.PI * 2);
+      rotationOffset = wiggleWave * 4.5 * intensity;
+      offsetX = wiggleWave * Math.max(3, element.width * 0.018) * intensity;
+      break;
+    }
+    default:
+      break;
+  }
+
+  return {
+    x: base.x + offsetX,
+    y: base.y + offsetY,
+    rotation: base.rotation + rotationOffset,
+    scaleX: base.scaleX * scaleXFactor,
+    scaleY: base.scaleY * scaleYFactor,
+    opacity: clamp(base.opacity * opacityFactor, 0, 1),
+  };
 }
 
 function rectsIntersect(
@@ -480,6 +1262,7 @@ export default function CanvasEditor() {
   const drawColor = useEditorStore((state) => state.drawColor);
   const drawOpacity = useEditorStore((state) => state.drawOpacity);
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
+  const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
 
   const setStageApi = useEditorStore((state) => state.setStageApi);
   const setZoomPercent = useEditorStore((state) => state.setZoomPercent);
@@ -490,8 +1273,12 @@ export default function CanvasEditor() {
   const addShapeElement = useEditorStore((state) => state.addShapeElement);
   const addImageElement = useEditorStore((state) => state.addImageElement);
   const addVideoElement = useEditorStore((state) => state.addVideoElement);
+  const addFrameElement = useEditorStore((state) => state.addFrameElement);
   const addFreehandLine = useEditorStore((state) => state.addFreehandLine);
   const updateElement = useEditorStore((state) => state.updateElement);
+  const setFrameContent = useEditorStore((state) => state.setFrameContent);
+  const updateFrameContentTransform = useEditorStore((state) => state.updateFrameContentTransform);
+  const deleteElement = useEditorStore((state) => state.deleteElement);
   const deleteSelected = useEditorStore((state) => state.deleteSelected);
   const duplicateSelected = useEditorStore((state) => state.duplicateSelected);
   const moveLayer = useEditorStore((state) => state.moveLayer);
@@ -508,8 +1295,12 @@ export default function CanvasEditor() {
     y: null,
   });
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string } | null>(null);
+  const [frameDropTargetId, setFrameDropTargetId] = useState("");
+  const [frameContentEditId, setFrameContentEditId] = useState("");
 
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
+  const frameDropTargetTimeoutRef = useRef<number | null>(null);
+  const expiredFrameDropTargetRef = useRef("");
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -517,6 +1308,21 @@ export default function CanvasEditor() {
   );
 
   const elements = useMemo(() => activePage?.elements ?? [], [activePage]);
+  const activePageDurationMs = useMemo(() => getPageDurationMs(activePage), [activePage]);
+  const activePageTimelineStartMs = useMemo(() => {
+    const entry = getTimelinePageEntries(pages).find((item) => item.page.id === activePage?.id);
+    return entry?.startMs || 0;
+  }, [activePage?.id, pages]);
+  const activePagePlayheadMs = useMemo(
+    () => Math.max(0, Math.min(activePageDurationMs, timelinePlayheadMs - activePageTimelineStartMs)),
+    [activePageDurationMs, activePageTimelineStartMs, timelinePlayheadMs]
+  );
+
+  useEffect(() => {
+    if (!frameContentEditId) return;
+    if (selectedIds.includes(frameContentEditId)) return;
+    setFrameContentEditId("");
+  }, [frameContentEditId, selectedIds]);
 
   const updateViewport = useCallback(
     (next: { x: number; y: number; scale: number }) => {
@@ -795,12 +1601,13 @@ export default function CanvasEditor() {
     if (!transformer) return;
 
     const nodes = selectedIds
+      .filter((id) => id !== frameContentEditId)
       .map((id) => nodeRefs.current[id])
       .filter((node): node is Konva.Node => Boolean(node));
 
     transformer.nodes(nodes);
     transformer.getLayer()?.batchDraw();
-  }, [selectedIds, elements]);
+  }, [selectedIds, elements, frameContentEditId]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -848,12 +1655,13 @@ export default function CanvasEditor() {
 
     const active = elements.find((element) => element.id === selectedIds[0]);
     if (!active) return null;
+    if (!isElementVisibleAtPlayhead(active, activePagePlayheadMs, activePageDurationMs)) return null;
 
     return {
       x: viewport.x + (active.x + active.width * 0.5) * viewport.scale,
       y: viewport.y + active.y * viewport.scale - 40,
     };
-  }, [elements, selectedIds, viewport.scale, viewport.x, viewport.y]);
+  }, [activePageDurationMs, activePagePlayheadMs, elements, selectedIds, viewport.scale, viewport.x, viewport.y]);
 
   useEffect(() => {
     setStageApi({
@@ -874,6 +1682,86 @@ export default function CanvasEditor() {
       y: (point.y - viewport.y) / viewport.scale,
     }),
     [viewport.scale, viewport.x, viewport.y]
+  );
+
+  const findFrameDropTarget = useCallback(
+    (point: { x: number; y: number }) => {
+      for (let index = elements.length - 1; index >= 0; index -= 1) {
+        const element = elements[index];
+        if (element.type !== "frame" || element.locked || !element.visible) continue;
+        if (pointIntersectsFrameBounds(element, point)) return element.id;
+      }
+      return "";
+    },
+    [elements]
+  );
+
+  const selectedFrameTargetId = useMemo(() => {
+    const selectedSet = new Set(selectedIds);
+    return elements.find((element) => selectedSet.has(element.id) && element.type === "frame")?.id || "";
+  }, [elements, selectedIds]);
+
+  const clearFrameDropTargetTimeout = useCallback(() => {
+    if (frameDropTargetTimeoutRef.current === null) return;
+    window.clearTimeout(frameDropTargetTimeoutRef.current);
+    frameDropTargetTimeoutRef.current = null;
+  }, []);
+
+  const clearFrameDropTarget = useCallback(
+    (resetExpired = true) => {
+      clearFrameDropTargetTimeout();
+      if (resetExpired) {
+        expiredFrameDropTargetRef.current = "";
+      }
+      setFrameDropTargetId("");
+    },
+    [clearFrameDropTargetTimeout]
+  );
+
+  const activateFrameDropTarget = useCallback(
+    (candidateId: string) => {
+      const nextId = String(candidateId || "").trim();
+      if (!nextId) {
+        clearFrameDropTarget(true);
+        return "";
+      }
+      if (expiredFrameDropTargetRef.current === nextId) {
+        return "";
+      }
+
+      setFrameDropTargetId((currentId) => {
+        if (currentId === nextId) return currentId;
+        clearFrameDropTargetTimeout();
+        frameDropTargetTimeoutRef.current = window.setTimeout(() => {
+          expiredFrameDropTargetRef.current = nextId;
+          setFrameDropTargetId((latestId) => (latestId === nextId ? "" : latestId));
+          frameDropTargetTimeoutRef.current = null;
+        }, 3000);
+        return nextId;
+      });
+      return nextId;
+    },
+    [clearFrameDropTarget, clearFrameDropTargetTimeout]
+  );
+
+  useEffect(() => () => clearFrameDropTargetTimeout(), [clearFrameDropTargetTimeout]);
+
+  const findFrameDropTargetForNode = useCallback(
+    (element: EditorElement, node: Konva.Node) => {
+      const width = Math.max(1, element.width * Math.abs(node.scaleX()));
+      const height = Math.max(1, element.height * Math.abs(node.scaleY()));
+      const x = node.x();
+      const y = node.y();
+      const testPoints = [
+        { x: x + width / 2, y: y + height / 2 },
+        { x, y },
+        { x: x + width, y },
+        { x, y: y + height },
+        { x: x + width, y: y + height },
+      ];
+      return testPoints.map((point) => findFrameDropTarget(point)).find(Boolean) || "";
+    },
+    [findFrameDropTarget]
   );
 
   const startSelection = useCallback(
@@ -993,19 +1881,83 @@ export default function CanvasEditor() {
   const updateNodeDrag = useCallback(
     (event: Konva.KonvaEventObject<DragEvent>, element: EditorElement) => {
       applySnapping(event, element);
+      if (element.type === "image" || element.type === "video") {
+        activateFrameDropTarget(findFrameDropTargetForNode(element, event.target));
+      }
     },
-    [applySnapping]
+    [activateFrameDropTarget, applySnapping, findFrameDropTargetForNode]
   );
 
   const finishNodeDrag = useCallback(
     (event: Konva.KonvaEventObject<DragEvent>, element: EditorElement) => {
+      if (element.type === "image" || element.type === "video") {
+        const candidateFrameTargetId = findFrameDropTargetForNode(element, event.target);
+        const frameTargetId =
+          candidateFrameTargetId && expiredFrameDropTargetRef.current !== candidateFrameTargetId
+            ? candidateFrameTargetId
+            : "";
+        clearFrameDropTarget(true);
+        if (frameTargetId) {
+          const frameElement = elements.find((item) => item.id === frameTargetId && item.type === "frame");
+          const renderedWidth = Math.max(1, element.width * Math.abs(event.target.scaleX()));
+          const renderedHeight = Math.max(1, element.height * Math.abs(event.target.scaleY()));
+          const localX = event.target.x() - (frameElement?.x || 0);
+          const localY = event.target.y() - (frameElement?.y || 0);
+          const offsetX = localX - (Math.max(1, frameElement?.width || 1) - renderedWidth) / 2;
+          const offsetY = localY - (Math.max(1, frameElement?.height || 1) - renderedHeight) / 2;
+          setFrameContent(
+            frameTargetId,
+            element.type === "video"
+              ? {
+                  kind: "video",
+                  src: element.src,
+                  sourceWidth: renderedWidth,
+                  sourceHeight: renderedHeight,
+                  videoStart: element.videoStart,
+                  videoEnd: element.videoEnd,
+                  videoDuration: element.videoDuration,
+                }
+              : {
+                  kind: "image",
+                  src: element.src,
+                  sourceWidth: renderedWidth,
+                  sourceHeight: renderedHeight,
+                },
+            { recordHistory: false }
+          );
+          updateFrameContentTransform(
+            frameTargetId,
+            {
+              fit: "manual",
+              scale: 1,
+              offsetX,
+              offsetY,
+            },
+            { recordHistory: false }
+          );
+          deleteElement(element.id);
+          setSelectedIds([frameTargetId]);
+          setSnapGuides({ x: null, y: null });
+          return;
+        }
+      }
       updateElement(element.id, {
         x: event.target.x(),
         y: event.target.y(),
       });
+      clearFrameDropTarget(true);
       setSnapGuides({ x: null, y: null });
     },
-    [updateElement]
+    [
+      clearFrameDropTarget,
+      deleteElement,
+      elements,
+      findFrameDropTargetForNode,
+      setFrameContent,
+      setSelectedIds,
+      updateElement,
+      updateFrameContentTransform,
+    ]
   );
 
   const selectNode = useCallback(
@@ -1082,6 +2034,8 @@ export default function CanvasEditor() {
       textarea.style.transformOrigin = "left top";
       textarea.style.transform = `rotate(${element.rotation}deg)`;
       textarea.style.textAlign = element.align;
+      textarea.style.direction = resolveTextDirection(element.text);
+      textarea.dir = resolveTextDirection(element.text);
 
       textarea.focus();
 
@@ -1159,6 +2113,7 @@ export default function CanvasEditor() {
       );
       if (!additiveSelectionPressed) {
         clearSelection();
+        setFrameContentEditId("");
       }
     },
     [clearSelection, drawTool, screenToPage, startSelection, toolMode]
@@ -1244,33 +2199,51 @@ export default function CanvasEditor() {
     toolMode,
   ]);
 
-  const onDropAsset = useCallback(
-    async (event: React.DragEvent<HTMLDivElement>) => {
-      event.preventDefault();
-      const raw =
-        event.dataTransfer.getData("application/x-editor-asset") ||
-        event.dataTransfer.getData("text/plain");
-
-      if (!raw) return;
-
+  const handleDroppedAssetPayload = useCallback(
+    async (raw: string, clientX: number, clientY: number) => {
+      const payload = String(raw || "").trim();
+      if (!payload) return;
       const stage = stageRef.current;
       if (!stage || !activePage) return;
 
       const rect = stage.container().getBoundingClientRect();
       const pointer = {
-        x: event.clientX - rect.left,
-        y: event.clientY - rect.top,
+        x: clientX - rect.left,
+        y: clientY - rect.top,
       };
       const pagePoint = screenToPage(pointer);
+      const candidateFrameTargetId = findFrameDropTarget(pagePoint) || selectedFrameTargetId;
+      const frameTargetId =
+        candidateFrameTargetId && expiredFrameDropTargetRef.current !== candidateFrameTargetId
+          ? candidateFrameTargetId
+          : "";
+
+      const dropIntoFrame = (kind: "image" | "video", src: string, patch: Partial<FrameContent> = {}) => {
+        const resolvedSrc = String(src || "").trim();
+        if (!frameTargetId || !resolvedSrc) return false;
+        setFrameContent(
+          frameTargetId,
+          {
+            kind,
+            src: resolvedSrc,
+            ...patch,
+          },
+          { recordHistory: true }
+        );
+        setSelectedIds([frameTargetId]);
+        return true;
+      };
 
       try {
-        const parsed = JSON.parse(raw) as {
+        const parsed = JSON.parse(payload) as {
           kind?: string;
           src?: string;
+          framePresetId?: string;
           payload?: Partial<EditorElement>;
         };
 
         if (parsed.kind === "photo" && parsed.src) {
+          if (dropIntoFrame("image", parsed.src)) return;
           addImageElement(parsed.src, {
             x: pagePoint.x - 170,
             y: pagePoint.y - 110,
@@ -1281,11 +2254,20 @@ export default function CanvasEditor() {
         }
 
         if (parsed.kind === "video" && parsed.src) {
+          if (dropIntoFrame("video", parsed.src)) return;
           addVideoElement(parsed.src, {
             x: pagePoint.x - 170,
             y: pagePoint.y - 110,
             width: Math.min(activePage.width * 0.7, 960),
             height: Math.min(activePage.height * 0.5, 540),
+          });
+          return;
+        }
+
+        if (parsed.kind === "frame") {
+          addFrameElement(parsed.framePresetId || "frame-circle", {
+            x: pagePoint.x - 90,
+            y: pagePoint.y - 90,
           });
           return;
         }
@@ -1326,13 +2308,30 @@ export default function CanvasEditor() {
             } catch {
               // Keep the original image source if rasterization fails.
             }
+            if (dropIntoFrame("image", resolvedSrc, {
+              sourceWidth: next.sourceWidth,
+              sourceHeight: next.sourceHeight,
+            })) {
+              return;
+            }
             addImageElement(resolvedSrc, {
               ...next,
               src: resolvedSrc,
               rasterOriginalSrc: next.rasterOriginalSrc || resolvedSrc,
             });
           } else if (next.type === "video") {
+            if (dropIntoFrame("video", next.src, {
+              videoStart: next.videoStart,
+              videoEnd: next.videoEnd,
+              videoDuration: next.videoDuration,
+              sourceWidth: next.sourceWidth,
+              sourceHeight: next.sourceHeight,
+            })) {
+              return;
+            }
             addVideoElement(next.src, next);
+          } else if (next.type === "frame") {
+            addFrameElement(next.frameShape?.presetId || parsed.framePresetId || "frame-circle", next);
           } else {
             addShapeElement(next.type as ShapeType, next);
           }
@@ -1341,8 +2340,91 @@ export default function CanvasEditor() {
         // Ignore invalid drag payloads.
       }
     },
-    [activePage, addImageElement, addShapeElement, addTextElement, addVideoElement, screenToPage]
+    [
+      activePage,
+      addFrameElement,
+      addImageElement,
+      addShapeElement,
+      addTextElement,
+      addVideoElement,
+      findFrameDropTarget,
+      screenToPage,
+      selectedFrameTargetId,
+      setFrameContent,
+      setSelectedIds,
+    ]
   );
+
+  const onDropAsset = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const raw =
+        event.dataTransfer.getData("application/x-editor-asset") ||
+        event.dataTransfer.getData("text/plain");
+      void handleDroppedAssetPayload(raw, event.clientX, event.clientY).finally(() =>
+        clearFrameDropTarget(true)
+      );
+    },
+    [clearFrameDropTarget, handleDroppedAssetPayload]
+  );
+
+  const handleCanvasDragOver = useCallback(
+    (event: React.DragEvent<HTMLDivElement>) => {
+      event.preventDefault();
+      const stage = stageRef.current;
+      if (!stage) return;
+      const rect = stage.container().getBoundingClientRect();
+      const pagePoint = screenToPage({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      activateFrameDropTarget(findFrameDropTarget(pagePoint) || selectedFrameTargetId);
+    },
+    [activateFrameDropTarget, findFrameDropTarget, screenToPage, selectedFrameTargetId]
+  );
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    const container = stage?.container();
+    if (!container) return;
+
+    const handleNativeDragOver = (event: DragEvent) => {
+      event.preventDefault();
+      const rect = container.getBoundingClientRect();
+      const pagePoint = screenToPage({
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top,
+      });
+      activateFrameDropTarget(findFrameDropTarget(pagePoint) || selectedFrameTargetId);
+    };
+
+    const handleNativeDrop = (event: DragEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const raw =
+        event.dataTransfer?.getData("application/x-editor-asset") ||
+        event.dataTransfer?.getData("text/plain") ||
+        "";
+      void handleDroppedAssetPayload(raw, event.clientX, event.clientY).finally(() =>
+        clearFrameDropTarget(true)
+      );
+    };
+
+    container.addEventListener("dragover", handleNativeDragOver);
+    container.addEventListener("drop", handleNativeDrop);
+    return () => {
+      container.removeEventListener("dragover", handleNativeDragOver);
+      container.removeEventListener("drop", handleNativeDrop);
+    };
+  }, [
+    activateFrameDropTarget,
+    clearFrameDropTarget,
+    findFrameDropTarget,
+    handleDroppedAssetPayload,
+    screenToPage,
+    selectedFrameTargetId,
+  ]);
 
   const setNodeRef = (id: string, node: Konva.Node | null) => {
     nodeRefs.current[id] = node;
@@ -1352,7 +2434,8 @@ export default function CanvasEditor() {
     <div
       ref={containerRef}
       className="relative h-full w-full overflow-hidden bg-[#d7d7d9]"
-      onDragOver={(event) => event.preventDefault()}
+      onDragOver={handleCanvasDragOver}
+      onDragLeave={() => clearFrameDropTarget(true)}
       onDrop={onDropAsset}
     >
       <Stage
@@ -1437,19 +2520,24 @@ export default function CanvasEditor() {
             clipHeight={activePage.height}
           >
             {elements.map((element) => {
-              if (!element.visible) return null;
+              if (!isElementVisibleAtPlayhead(element, activePagePlayheadMs, activePageDurationMs)) {
+                return null;
+              }
+              const pose = resolveAnimatedElementPose(element, activePagePlayheadMs, activePageDurationMs);
+              const isEditingFrameContent = frameContentEditId === element.id;
+              const canTransform = !element.locked && toolMode !== "draw" && !isEditingFrameContent;
 
               const commonProps = {
                 ref: (node: Konva.Node | null) => setNodeRef(element.id, node),
                 id: element.id,
-                x: element.x,
-                y: element.y,
-                rotation: element.rotation,
-                scaleX: element.scaleX,
-                scaleY: element.scaleY,
-                opacity: element.opacity,
-                draggable: !element.locked && toolMode !== "draw",
-                listening: !element.locked,
+                x: pose.x,
+                y: pose.y,
+                rotation: pose.rotation,
+                scaleX: pose.scaleX,
+                scaleY: pose.scaleY,
+                opacity: pose.opacity,
+                draggable: canTransform,
+                listening: canTransform,
                 globalCompositeOperation: element.blendMode,
                 shadowColor: element.shadowColor,
                 shadowBlur: element.shadowBlur,
@@ -1463,11 +2551,57 @@ export default function CanvasEditor() {
                 onTransformEnd: (event: Konva.KonvaEventObject<Event>) => updateNodeTransform(event, element),
               };
 
+              if (element.type === "frame") {
+                return (
+                  <CanvasFrameNode
+                    key={element.id}
+                    element={element}
+                    pose={pose}
+                    canTransform={canTransform}
+                    isDropTarget={frameDropTargetId === element.id}
+                    isContentEditing={isEditingFrameContent}
+                    registerRef={setNodeRef}
+                    onSelect={(event) => selectNode(event, element.id)}
+                    onContextMenu={(event) => openContextMenu(event, element.id)}
+                    onDragMove={(event) => updateNodeDrag(event, element)}
+                    onDragEnd={(event) => finishNodeDrag(event, element)}
+                    onTransformEnd={(event) => updateNodeTransform(event, element)}
+                    onEnterContentEdit={() => {
+                      if (!element.frameContent) return;
+                      setSelectedIds([element.id]);
+                      setFrameContentEditId(element.id);
+                    }}
+                    onContentTransform={(patch) =>
+                      updateFrameContentTransform(element.id, patch, { recordHistory: true })
+                    }
+                    onContentMetadata={(patch) => {
+                      if (!element.frameContent) return;
+                      const nextContent = {
+                        ...element.frameContent,
+                        ...patch,
+                      };
+                      const sameSourceSize =
+                        Math.round(Number(element.frameContent.sourceWidth || 0)) ===
+                          Math.round(Number(nextContent.sourceWidth || 0)) &&
+                        Math.round(Number(element.frameContent.sourceHeight || 0)) ===
+                          Math.round(Number(nextContent.sourceHeight || 0));
+                      const sameVideoDuration =
+                        Math.round(Number(element.frameContent.videoDuration || 0) * 1000) ===
+                        Math.round(Number(nextContent.videoDuration || 0) * 1000);
+                      if (sameSourceSize && sameVideoDuration) return;
+                      setFrameContent(element.id, nextContent, { recordHistory: false });
+                    }}
+                  />
+                );
+              }
+
               if (element.type === "image") {
                 return (
                   <CanvasImageNode
                     key={element.id}
                     element={element}
+                    pose={pose}
+                    canTransform={canTransform}
                     registerRef={setNodeRef}
                     onSelect={(event) => selectNode(event, element.id)}
                     onContextMenu={(event) => openContextMenu(event, element.id)}
@@ -1509,6 +2643,8 @@ export default function CanvasEditor() {
                   <CanvasVideoNode
                     key={element.id}
                     element={element}
+                    pose={pose}
+                    canTransform={canTransform}
                     registerRef={setNodeRef}
                     onSelect={(event) => selectNode(event, element.id)}
                     onContextMenu={(event) => openContextMenu(event, element.id)}
@@ -1539,6 +2675,7 @@ export default function CanvasEditor() {
 
               if (element.type === "text") {
                 const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
+                const direction = resolveTextDirection(element.text);
                 return (
                   <Text
                     key={element.id}
@@ -1553,6 +2690,7 @@ export default function CanvasEditor() {
                     fontVariant="normal"
                     lineHeight={element.lineHeight}
                     align={element.align}
+                    direction={direction}
                     letterSpacing={element.letterSpacing}
                     textDecoration={element.textDecoration}
                     onDblClick={(event) => beginInlineTextEdit(event.target as Konva.Text, element)}
@@ -1775,7 +2913,7 @@ export default function CanvasEditor() {
             className="flex items-center gap-1 rounded px-2 py-1 text-[13px] hover:bg-[#eef3f8]"
             onClick={() => setShowRightSidebar(true)}
           >
-            <Layers size={14} /> Position
+            <SlidersHorizontal size={14} /> Properties
           </button>
         </div>
       ) : null}

@@ -434,6 +434,84 @@ async function cropScreenshotToCanvas(screenshotDataUrl, canvasMeta) {
   };
 }
 
+async function isolateLayerSnapshotFromBitmaps(visibleBitmap, hiddenBitmap, rect, options = {}) {
+  if (!visibleBitmap || !hiddenBitmap || !rect) return "";
+  const dpr = Number(options?.dpr || 1);
+  const visibleCrop = cleanCropRect(rect, dpr, visibleBitmap.width, visibleBitmap.height);
+  const hiddenCrop = cleanCropRect(rect, dpr, hiddenBitmap.width, hiddenBitmap.height);
+  const targetWidth = Math.max(1, Math.round(numberOr(options?.targetWidth, visibleCrop.width)));
+  const targetHeight = Math.max(1, Math.round(numberOr(options?.targetHeight, visibleCrop.height)));
+
+  const drawCropToCanvas = (bitmap, cropRect) => {
+    const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+    const context = canvas.getContext("2d", { willReadFrequently: true });
+    if (!context) {
+      throw new Error("Failed to create isolation canvas context.");
+    }
+    context.drawImage(
+      bitmap,
+      cropRect.x,
+      cropRect.y,
+      cropRect.width,
+      cropRect.height,
+      0,
+      0,
+      targetWidth,
+      targetHeight
+    );
+    return { canvas, context };
+  };
+
+  const visibleLayer = drawCropToCanvas(visibleBitmap, visibleCrop);
+  const hiddenLayer = drawCropToCanvas(hiddenBitmap, hiddenCrop);
+  const outputCanvas = new OffscreenCanvas(targetWidth, targetHeight);
+  const outputContext = outputCanvas.getContext("2d", { willReadFrequently: true });
+  if (!outputContext) {
+    throw new Error("Failed to create isolation output context.");
+  }
+
+  const visiblePixels = visibleLayer.context.getImageData(0, 0, targetWidth, targetHeight);
+  const hiddenPixels = hiddenLayer.context.getImageData(0, 0, targetWidth, targetHeight);
+  const outputPixels = outputContext.createImageData(targetWidth, targetHeight);
+  const source = visiblePixels.data;
+  const backdrop = hiddenPixels.data;
+  const output = outputPixels.data;
+  let nonTransparentPixelCount = 0;
+
+  for (let index = 0; index < output.length; index += 4) {
+    const deltaR = Math.abs(source[index] - backdrop[index]);
+    const deltaG = Math.abs(source[index + 1] - backdrop[index + 1]);
+    const deltaB = Math.abs(source[index + 2] - backdrop[index + 2]);
+    const deltaA = Math.abs(source[index + 3] - backdrop[index + 3]);
+    const alphaByte = Math.min(255, Math.round(Math.max(deltaR, deltaG, deltaB, deltaA) * 1.18));
+    if (alphaByte < 10) continue;
+
+    const alpha = alphaByte / 255;
+    output[index + 3] = alphaByte;
+    output[index] = Math.max(
+      0,
+      Math.min(255, Math.round((source[index] - backdrop[index] * (1 - alpha)) / Math.max(alpha, 0.001)))
+    );
+    output[index + 1] = Math.max(
+      0,
+      Math.min(255, Math.round((source[index + 1] - backdrop[index + 1] * (1 - alpha)) / Math.max(alpha, 0.001)))
+    );
+    output[index + 2] = Math.max(
+      0,
+      Math.min(255, Math.round((source[index + 2] - backdrop[index + 2] * (1 - alpha)) / Math.max(alpha, 0.001)))
+    );
+    nonTransparentPixelCount += 1;
+  }
+
+  const coverage = nonTransparentPixelCount / Math.max(1, targetWidth * targetHeight);
+  if (coverage <= 0.0015) return "";
+
+  outputContext.putImageData(outputPixels, 0, 0);
+  const isolatedBlob = await outputCanvas.convertToBlob({ type: "image/png" });
+  const isolatedDataUrl = await blobToDataUrl(isolatedBlob);
+  return isolatedDataUrl.startsWith("data:image/") ? isolatedDataUrl : "";
+}
+
 function buildSingleImageFabricObject(imageDataUrl, width, height, options = {}) {
   return {
     type: "Image",
@@ -1049,10 +1127,18 @@ async function buildHybridFabricObjects(
       .join(" ");
     return /\b(frame|border)\b/.test(metadata);
   };
+  const hasUsableDirectImageSource = (layer) => {
+    const data = String(layer?.imageDataUrl || "").trim();
+    if (data.startsWith("data:image/")) return true;
+    const src = String(layer?.imageSrc || "").trim();
+    return /^https?:\/\//i.test(src) || /^file:\/\//i.test(src) || src.startsWith("data:image/");
+  };
 
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
     const layerKind = String(layer?.kind || "").toLowerCase();
+    const shouldForceSnapshotForLayer =
+      layerKind === "image" && Boolean(layer?.preferSnapshot);
     const layerFontFamily = normalizeFontFamilyName(layer?.fontFamily).toLowerCase();
     const shouldRasterizeUnsupportedText =
       layerKind === "text" &&
@@ -1100,10 +1186,12 @@ async function buildHybridFabricObjects(
       }
     }
 
-    const directObject = await layerToFabricObject(layer, result.length);
-    if (directObject) {
-      result.push(directObject);
-      continue;
+    if (!shouldForceSnapshotForLayer) {
+      const directObject = await layerToFabricObject(layer, result.length);
+      if (directObject) {
+        result.push(directObject);
+        continue;
+      }
     }
     if (layerKind !== "image") {
       continue;
@@ -1118,6 +1206,41 @@ async function buildHybridFabricObjects(
       !looksLikeDecorativeFrameLayer(layer)
     ) {
       continue;
+    }
+    const isolatedSnapshotDataUrl = String(layer?.isolatedImageDataUrl || "");
+    if (isolatedSnapshotDataUrl.startsWith("data:image/")) {
+      const snapshotLayer = {
+        ...layer,
+        imageSrc: isolatedSnapshotDataUrl,
+        imageDataUrl: isolatedSnapshotDataUrl,
+        angle: 0,
+        flipX: false,
+        flipY: false,
+        sourceWidth: layerWidth,
+        sourceHeight: layerHeight,
+        fallback: true,
+        fallbackReason: String(layer?.fallbackReason || "isolated-snapshot"),
+      };
+      const snapshotObject = await layerToFabricObject(snapshotLayer, result.length);
+      if (snapshotObject) {
+        result.push(snapshotObject);
+        continue;
+      }
+    }
+    if (shouldForceSnapshotForLayer && hasUsableDirectImageSource(layer)) {
+      const directFallbackObject = await layerToFabricObject(
+        {
+          ...layer,
+          preferSnapshot: false,
+          fallback: true,
+          fallbackReason: String(layer?.fallbackReason || "direct-source-fallback"),
+        },
+        result.length
+      );
+      if (directFallbackObject) {
+        result.push(directFallbackObject);
+        continue;
+      }
     }
     const viewportRect = layer?.viewportRect;
     if (!viewportRect) {
@@ -1932,6 +2055,190 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
           )
         );
 
+      const parseCssTimeToMs = (value) => {
+        const firstToken = String(value || "")
+          .split(",")
+          .map((token) => token.trim())
+          .find(Boolean);
+        if (!firstToken) return 0;
+        if (/ms$/i.test(firstToken)) {
+          const numeric = Number.parseFloat(firstToken);
+          return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+        }
+        if (/s$/i.test(firstToken)) {
+          const numeric = Number.parseFloat(firstToken);
+          return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric * 1000)) : 0;
+        }
+        const numeric = Number.parseFloat(firstToken);
+        return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+      };
+
+      const normalizeAnimationLabel = (value) =>
+        sanitizeMetadataText(String(value || "").replace(/[_-]+/g, " "));
+
+      const mapAnimationHintToType = (rawValue) => {
+        const value = normalizeAnimationLabel(rawValue).toLowerCase();
+        if (!value) return null;
+        const matchers = [
+          { type: "NONE", label: "None", regex: /\b(none|no animation|instant|instant show|instant hide|hard cut|show hide)\b|بدون|بدون حركة/ },
+          { type: "FADE", label: "Fade", regex: /\b(static|fade|fade in|fade out|dissolve|soft dissolve)\b|ثابت|تلاشي/ },
+          { type: "RISE", label: "Rise", regex: /\b(rise)\b|ارتفاع/ },
+          { type: "PAN", label: "Pan", regex: /\b(pan)\b|تأرجح|ترنح/ },
+          { type: "POP", label: "Pop", regex: /\b(pop|zoom|zoom in|zoom out)\b|انبثاق/ },
+          { type: "WIPE", label: "Wipe", regex: /\b(directional wipe|wipe)\b|المسح/ },
+          { type: "BLUR", label: "Blur", regex: /\b(blur|soft blur)\b|تمويه/ },
+          { type: "SUCCESSION", label: "Succession", regex: /\b(succession|zoom fade)\b|التتابع/ },
+          { type: "BREATHE", label: "Breathe", regex: /\b(breathe|slow reveal)\b|ظهور بطيء/ },
+          { type: "BASELINE", label: "Baseline", regex: /\b(baseline|bounce)\b|baseline|خط الأساس/ },
+          { type: "DRIFT", label: "Drift", regex: /\b(drift|slide|slide in|slide out)\b|انجراف/ },
+          { type: "TECTONIC", label: "Tectonic", regex: /\b(soft gradient wipe|wipe gradient|gradient wipe|tectonic)\b|حركة تكتونية/ },
+          { type: "TUMBLE", label: "Tumble", regex: /\b(tumble|turn|radial sweep reveal|radial sweep|radial)\b|دوران/ },
+          { type: "NEON", label: "Neon", regex: /\b(neon|soft circular reveal|circular fade)\b|نيون/ },
+          { type: "SCRAPBOOK", label: "Scrapbook", regex: /\b(scrapbook)\b|سجل قصاصات/ },
+          { type: "STOMP", label: "Stomp", regex: /\b(stomp|circular reveal|circular|aerial)\b|سقوط هوائي/ },
+          { type: "ROTATE", label: "Rotate", regex: /\b(continuous rotation|rotation|spin|rotate)\b|تدوير/ },
+          { type: "FLICKER", label: "Flicker", regex: /\bflicker\b|ومض/ },
+          { type: "PULSE", label: "Pulse", regex: /\b(pulse|pulse zoom|squash and stretch|heart beat|heartbeat)\b|تقلص العنصر وتمدد|نبض/ },
+          { type: "WIGGLE", label: "Wiggle", regex: /\b(wiggle|directional shake|shake)\b|اهتزاز سريع|اهتزاز سريع بالاتجاه/ },
+        ];
+        return matchers.find((entry) => entry.regex.test(value)) || null;
+      };
+
+      const inferAnimationDirection = (values) => {
+        const text = uniqueMetadataStrings(values).join(" ").toLowerCase();
+        if (!text) return "";
+        if (/\b(left|leftward)\b|يسار/.test(text)) return "LEFT";
+        if (/\b(right|rightward)\b|يمين/.test(text)) return "RIGHT";
+        if (/\b(top|up|upward)\b|أعلى|فوق/.test(text)) return "UP";
+        if (/\b(bottom|down|downward)\b|أسفل|تحت/.test(text)) return "DOWN";
+        if (/\b(counterclockwise|anti clockwise|anticlockwise)\b/.test(text)) return "COUNTERCLOCKWISE";
+        if (/\b(clockwise)\b/.test(text)) return "CLOCKWISE";
+        return "";
+      };
+
+      const inferAnimationMode = (values, isInfinite) => {
+        if (isInfinite) return "LOOP";
+        const text = uniqueMetadataStrings(values).join(" ").toLowerCase();
+        if (/\b(out|exit|leave|disappear|hide|closing|close)\b/.test(text)) return "OUT";
+        return "IN";
+      };
+
+      const collectAnimationHintStrings = (node, supplementalNodes = []) => {
+        const results = [];
+        const push = (value) => {
+          const normalized = normalizeAnimationLabel(value);
+          if (!normalized || normalized.length > 400) return;
+          results.push(normalized);
+        };
+        const addNodeSignals = (candidate) => {
+          if (!candidate) return;
+          push(candidate.getAttribute?.("aria-label"));
+          push(candidate.getAttribute?.("title"));
+          push(candidate.getAttribute?.("data-element-name"));
+          push(candidate.className);
+          push(candidate.getAttribute?.("style"));
+          if (candidate.attributes) {
+            Array.from(candidate.attributes).forEach((attribute) => {
+              const name = String(attribute?.name || "");
+              if (!/(anim|motion|transition|enter|exit)/i.test(name)) return;
+              push(`${name}:${attribute?.value || ""}`);
+            });
+          }
+          if (candidate.dataset) {
+            Object.entries(candidate.dataset).forEach(([key, value]) => {
+              if (!/(anim|motion|transition|enter|exit)/i.test(key)) return;
+              push(`${key}:${value || ""}`);
+            });
+          }
+          try {
+            const style = window.getComputedStyle(candidate);
+            push(style.animationName);
+            push(style.animationTimingFunction);
+            push(style.transitionProperty);
+          } catch (_error) {
+            // Ignore style inspection failures on detached nodes.
+          }
+        };
+
+        addNodeSignals(node);
+        (Array.isArray(supplementalNodes) ? supplementalNodes : []).forEach((candidate) =>
+          addNodeSignals(candidate)
+        );
+        let ancestor = node?.parentElement || null;
+        let depth = 0;
+        while (ancestor && depth < 2) {
+          addNodeSignals(ancestor);
+          ancestor = ancestor.parentElement;
+          depth += 1;
+        }
+        return uniqueMetadataStrings(results);
+      };
+
+      const extractLayerAnimationMeta = (node, supplementalNodes = []) => {
+        const inspectionNodes = [node, ...(Array.isArray(supplementalNodes) ? supplementalNodes : [])].filter(Boolean);
+        const hintStrings = collectAnimationHintStrings(node, inspectionNodes);
+        let matched = null;
+        for (let index = 0; index < hintStrings.length; index += 1) {
+          matched = mapAnimationHintToType(hintStrings[index]);
+          if (matched) break;
+        }
+
+        let computedDurationMs = 0;
+        let computedDelayMs = 0;
+        let computedInfinite = false;
+        let computedRawName = "";
+        for (let index = 0; index < inspectionNodes.length; index += 1) {
+          const candidate = inspectionNodes[index];
+          try {
+            const style = window.getComputedStyle(candidate);
+            const animationName = String(style.animationName || "")
+              .split(",")
+              .map((token) => normalizeAnimationLabel(token))
+              .find((token) => token && token.toLowerCase() !== "none");
+            if (!computedRawName && animationName) {
+              computedRawName = animationName;
+            }
+            if (!computedDurationMs) {
+              computedDurationMs = parseCssTimeToMs(style.animationDuration);
+            }
+            if (!computedDelayMs) {
+              computedDelayMs = parseCssTimeToMs(style.animationDelay);
+            }
+            if (!computedInfinite) {
+              const iterationCount = String(style.animationIterationCount || "")
+                .split(",")
+                .map((token) => token.trim().toLowerCase())
+                .find(Boolean);
+              computedInfinite =
+                iterationCount === "infinite" ||
+                (Number.isFinite(Number(iterationCount)) && Number(iterationCount) > 1);
+            }
+            if (!matched && animationName) {
+              matched = mapAnimationHintToType(animationName);
+            }
+          } catch (_error) {
+            // Ignore computed-style failures.
+          }
+        }
+
+        if (!matched && !computedRawName) {
+          return null;
+        }
+
+        const rawAnimationName = computedRawName || hintStrings.find(Boolean) || "";
+        const animationDirection = inferAnimationDirection([rawAnimationName, ...hintStrings]);
+        return {
+          animationType: matched?.type || "",
+          animationLabel: matched?.label || normalizeAnimationLabel(rawAnimationName),
+          rawAnimationName: normalizeAnimationLabel(rawAnimationName),
+          animationMode: inferAnimationMode([rawAnimationName, ...hintStrings], computedInfinite),
+          animationInfinite: computedInfinite,
+          animationDurationMs: computedDurationMs > 0 ? computedDurationMs : undefined,
+          animationDelayMs: computedDelayMs > 0 ? computedDelayMs : undefined,
+          animationDirection: animationDirection || undefined,
+        };
+      };
+
       const normalizeMetadataKey = (value) =>
         sanitizeMetadataText(value)
           .toLowerCase()
@@ -2431,6 +2738,35 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         };
       };
 
+      const hasMeaningfulTransformBetween = (element, stopAtNode) => {
+        let node = element?.parentElement || null;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 12) {
+          const styleText = node.getAttribute?.("style") || "";
+          const computedStyle = window.getComputedStyle(node);
+          const computedTransform = parseComputedTransform(computedStyle.transform || styleText);
+          const inlineTransform = parseStyleTransform(styleText);
+          const hasMeaningfulScale =
+            Math.abs(Number(computedTransform.scaleX || 1) - 1) > 0.02 ||
+            Math.abs(Number(computedTransform.scaleY || 1) - 1) > 0.02;
+          const hasMeaningfulAngle =
+            Math.abs(Number(computedTransform.angle || 0)) > 0.2 ||
+            inlineTransform.hasAngle;
+          if (
+            hasMeaningfulScale ||
+            hasMeaningfulAngle ||
+            Boolean(computedTransform.flipX) ||
+            Boolean(computedTransform.flipY) ||
+            Boolean(computedTransform.hasReflection)
+          ) {
+            return true;
+          }
+          node = node.parentElement;
+          depth += 1;
+        }
+        return false;
+      };
+
       const getNumericZIndex = (element, stopAtNode) => {
         let best = null;
         let node = element;
@@ -2599,6 +2935,27 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
           reader.onerror = () => resolve("");
           reader.readAsDataURL(blob);
         });
+
+      const readRemoteImageAssetAsDataUrl = async (sourceUrl, maxBytes = 8_000_000) => {
+        const normalizedUrl = normalizeAssetUrl(sourceUrl);
+        if (!normalizedUrl) return "";
+        if (/^data:/i.test(normalizedUrl) || /^blob:/i.test(normalizedUrl)) return "";
+        try {
+          const response = await fetch(normalizedUrl, {
+            credentials: "include",
+            cache: "force-cache",
+          });
+          if (!response.ok) return "";
+          const blob = await response.blob();
+          if (!blob || blob.size <= 0 || blob.size > maxBytes) return "";
+          const mimeType = String(blob.type || "").trim().toLowerCase();
+          if (mimeType && !mimeType.startsWith("image/")) return "";
+          const dataUrl = await toDataUrlFromBlob(blob);
+          return String(dataUrl).startsWith("data:image/") ? dataUrl : "";
+        } catch (_error) {
+          return "";
+        }
+      };
 
       const sanitizeFontFileName = (value, fallback = "imported-font.ttf") => {
         const source = String(value || "").trim();
@@ -2892,7 +3249,12 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
 
       const isTransparentColor = (value) => {
         const color = String(value || "").trim().toLowerCase();
-        return !color || color === "transparent" || color === "rgba(0, 0, 0, 0)";
+        return (
+          !color ||
+          color === "none" ||
+          color === "transparent" ||
+          color === "rgba(0, 0, 0, 0)"
+        );
       };
 
       const resolveTextBackgroundStyle = (element, stopAtNode) => {
@@ -3054,6 +3416,79 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         );
       };
 
+      const shouldPreferRenderedImageSnapshot = (layerNode, imageElement) => {
+        if (!layerNode || !imageElement) return false;
+        if (hasMeaningfulTransformBetween(imageElement, layerNode)) return true;
+
+        const renderableDescendants = Array.from(
+          layerNode.querySelectorAll("img, image, svg, canvas")
+        ).filter(
+          (candidate) =>
+            !isInsideForeignLayer(candidate, layerNode) &&
+            candidate !== imageElement &&
+            !candidate.contains?.(imageElement)
+        );
+        if (renderableDescendants.length > 0) return true;
+
+        if (findCssImageUrl(layerNode)) return true;
+
+        const primarySource = getImageElementSource(imageElement);
+        const siblingSources = getScopedImageElements(layerNode)
+          .filter((candidate) => candidate !== imageElement)
+          .map((candidate) => getImageElementSource(candidate))
+          .filter(Boolean);
+        return siblingSources.some((candidate) => candidate !== primarySource);
+      };
+
+      const resolveThinVectorStrokeStyle = (layerNode) => {
+        const svgCandidate = findBestSvgRenderCandidate(layerNode);
+        if (!(svgCandidate instanceof SVGElement)) {
+          return { color: "", strokeOnly: false };
+        }
+        const vectorNodes = Array.from(
+          svgCandidate.querySelectorAll("path,line,polyline,polygon,rect,ellipse,circle")
+        ).filter((candidate) => !candidate.closest("defs"));
+        let bestColor = "";
+        let bestStrokeOnly = false;
+        let bestScore = -1;
+
+        for (let index = 0; index < vectorNodes.length; index += 1) {
+          const candidate = vectorNodes[index];
+          const style = window.getComputedStyle(candidate);
+          const opacity = Number(style.opacity);
+          if (Number.isFinite(opacity) && opacity <= 0.01) continue;
+          const stroke = String(style.stroke || "").trim();
+          const fill = String(style.fill || "").trim();
+          const strokeWidth = parseNumericPx(style.strokeWidth || "");
+          const rect = candidate.getBoundingClientRect();
+          const score = Math.max(1, rectArea(rect)) + strokeWidth * 10;
+          const strokeVisible = !isTransparentColor(stroke);
+          const fillVisible = !isTransparentColor(fill);
+          if (!strokeVisible && !fillVisible) continue;
+          if (score <= bestScore) continue;
+          bestScore = score;
+          bestColor = strokeVisible ? stroke : fill;
+          bestStrokeOnly = strokeVisible && !fillVisible;
+        }
+
+        if (!bestColor) {
+          const svgStyle = window.getComputedStyle(svgCandidate);
+          const svgStroke = String(svgStyle.stroke || "").trim();
+          const svgFill = String(svgStyle.fill || "").trim();
+          const svgStrokeVisible = !isTransparentColor(svgStroke);
+          const svgFillVisible = !isTransparentColor(svgFill);
+          if (svgStrokeVisible || svgFillVisible) {
+            bestColor = svgStrokeVisible ? svgStroke : svgFill;
+            bestStrokeOnly = svgStrokeVisible && !svgFillVisible;
+          }
+        }
+
+        return {
+          color: bestColor,
+          strokeOnly: bestStrokeOnly,
+        };
+      };
+
       const hasVisibleBackgroundPaint = (element) => {
         if (!element) return false;
         const bgImage = findCssImageUrl(element);
@@ -3192,11 +3627,21 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         });
       };
 
-      const serializeSvgElementToDataUrl = (svgElement, targetWidth, targetHeight) => {
+      const stripTextNodesFromElement = (rootElement) => {
+        if (!(rootElement instanceof Element)) return;
+        Array.from(rootElement.querySelectorAll("text, tspan, foreignObject")).forEach((candidate) =>
+          candidate.remove()
+        );
+      };
+
+      const serializeSvgElementToDataUrl = (svgElement, targetWidth, targetHeight, options = {}) => {
         if (!(svgElement instanceof SVGElement)) return "";
         try {
           const clone = svgElement.cloneNode(true);
           copyComputedSvgStyles(svgElement, clone);
+          if (options?.excludeTextNodes) {
+            stripTextNodesFromElement(clone);
+          }
 
           const rect = svgElement.getBoundingClientRect();
           const width = Math.max(
@@ -3374,7 +3819,7 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         }
       };
 
-      const extractShapeImageDataUrl = (layerNode, targetWidth, targetHeight) => {
+      const extractShapeImageDataUrl = (layerNode, targetWidth, targetHeight, options = {}) => {
         if (!layerNode) return "";
 
         const clipPathShapeCandidate = findBestClipPathShapeCandidate(layerNode);
@@ -3392,7 +3837,7 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
 
         const svgCandidate = findBestSvgRenderCandidate(layerNode);
         if (svgCandidate) {
-          const svgDataUrl = serializeSvgElementToDataUrl(svgCandidate, targetWidth, targetHeight);
+          const svgDataUrl = serializeSvgElementToDataUrl(svgCandidate, targetWidth, targetHeight, options);
           if (svgDataUrl.startsWith("data:image/")) {
             return svgDataUrl;
           }
@@ -3817,7 +4262,8 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
 
           let shapeFill = "";
           let shapeImageDataUrl = "";
-          if (!imageElement && !text) {
+          let thinVectorStrokeStyle = { color: "", strokeOnly: false };
+          if (!imageElement) {
             const shapeCandidates = [
               node,
               ...Array.from(node.querySelectorAll("*")).filter(
@@ -3837,7 +4283,10 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
                 break;
               }
             }
-            shapeImageDataUrl = extractShapeImageDataUrl(node, width, height);
+            thinVectorStrokeStyle = resolveThinVectorStrokeStyle(node);
+            shapeImageDataUrl = extractShapeImageDataUrl(node, width, height, {
+              excludeTextNodes: Boolean(text),
+            });
             const shouldRasterizeThinVectorShape =
               shapeImageDataUrl.startsWith("data:image/svg+xml") &&
               hasVectorSignal &&
@@ -3883,6 +4332,13 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
                 imageSrc = imageDataUrl;
               }
             }
+            if (!imageDataUrl && /^https?:\/\//i.test(String(imageSrc || ""))) {
+              const fetchedImageDataUrl = await readRemoteImageAssetAsDataUrl(imageSrc);
+              if (fetchedImageDataUrl) {
+                imageDataUrl = fetchedImageDataUrl;
+                imageSrc = fetchedImageDataUrl;
+              }
+            }
           }
 
           if (!imageSrc) {
@@ -3908,10 +4364,26 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
                 break;
               }
             }
+            if (!imageDataUrl && /^https?:\/\//i.test(String(imageSrc || ""))) {
+              const fetchedImageDataUrl = await readRemoteImageAssetAsDataUrl(imageSrc);
+              if (fetchedImageDataUrl) {
+                imageDataUrl = fetchedImageDataUrl;
+                imageSrc = fetchedImageDataUrl;
+              }
+            }
           }
 
           if (imageElement && (imageSrc || imageDataUrl)) {
-            preferSnapshot = shouldUseVisibleGeometry;
+            preferSnapshot =
+              shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement);
+          }
+          if (
+            !preferSnapshot &&
+            shapeImageDataUrl.startsWith("data:image/") &&
+            hasVectorSignal &&
+            (Math.max(1, Math.round(width)) <= 8 || Math.max(1, Math.round(height)) <= 8)
+          ) {
+            preferSnapshot = true;
           }
 
           const textStyle = textStyleElement ? window.getComputedStyle(textStyleElement) : null;
@@ -3960,8 +4432,25 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             isInsidePageFrame &&
             opacitySignal &&
             imageConfidence >= 5;
+          const roundedWidth = Math.max(1, Math.round(width));
+          const roundedHeight = Math.max(1, Math.round(height));
+          const vectorAspectRatio =
+            Math.max(roundedWidth, roundedHeight) / Math.max(1, Math.min(roundedWidth, roundedHeight));
+          const isThinVectorDividerLayer =
+            !imageElement &&
+            !text &&
+            hasVectorSignal &&
+            thinVectorStrokeStyle.strokeOnly &&
+            Boolean(thinVectorStrokeStyle.color) &&
+            vectorAspectRatio >= 12 &&
+            (roundedWidth <= 8 ||
+              roundedHeight <= 8 ||
+              viewportRect.width <= 8 ||
+              viewportRect.height <= 8);
 
-          const kind = shapeImageDataUrl
+          const kind = isThinVectorDividerLayer
+            ? "shape"
+            : shapeImageDataUrl
             ? "image"
             : isLikelyImageLayer
               ? "image"
@@ -3983,6 +4472,10 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
                 ? "unresolved-image-source"
                 : "";
 
+          const normalizedLayerAngle = isThinVectorDividerLayer ? 0 : layerAngle;
+          const normalizedLayerFlipX = isThinVectorDividerLayer ? false : layerFlipX;
+          const normalizedLayerFlipY = isThinVectorDividerLayer ? false : layerFlipY;
+
           const layerRecord = {
             id: String(node.id || `layer-${layerIndex + 1}`),
             parentId: parentId || null,
@@ -3994,11 +4487,11 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             kind,
             x,
             y,
-            width: Math.max(1, Math.round(width)),
-            height: Math.max(1, Math.round(height)),
-            angle: layerAngle,
-            flipX: layerFlipX,
-            flipY: layerFlipY,
+            width: roundedWidth,
+            height: roundedHeight,
+            angle: normalizedLayerAngle,
+            flipX: normalizedLayerFlipX,
+            flipY: normalizedLayerFlipY,
             viewportRect: {
               x: viewportRect.x,
               y: viewportRect.y,
@@ -4008,8 +4501,8 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             pageRelativeRect: {
               x,
               y,
-              width: Math.max(1, Math.round(width)),
-              height: Math.max(1, Math.round(height)),
+              width: roundedWidth,
+              height: roundedHeight,
             },
             imageSrc,
             imageDataUrl,
@@ -4030,7 +4523,7 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             textDecoration,
             textBackgroundColor,
             textBackgroundRadius,
-            fill: shapeFill || "",
+            fill: isThinVectorDividerLayer ? thinVectorStrokeStyle.color : shapeFill || "",
             zIndex: zIndex ?? layerIndex,
             opacity: effectiveOpacity,
             titleEn: kind === "image" ? imageTitleHint : "",
@@ -4045,6 +4538,67 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             fallback: Boolean(fallbackReason),
             fallbackReason,
           };
+          let companionTextRecord = null;
+          if (kind === "image" && text && textStyleElement) {
+            const textViewportInfo = getTransformedViewportRect(textStyleElement, rect);
+            if (textViewportInfo) {
+              const textViewportRect = {
+                x: textViewportInfo.x,
+                y: textViewportInfo.y,
+                width: textViewportInfo.width,
+                height: textViewportInfo.height,
+              };
+              const textWidth = Math.max(1, Math.round(textViewportRect.width * designScaleX));
+              const textHeight = Math.max(1, Math.round(textViewportRect.height * designScaleY));
+              const textX = (textViewportRect.x - rect.x) * designScaleX;
+              const textY = (textViewportRect.y - rect.y) * designScaleY;
+              companionTextRecord = {
+                id: `${String(node.id || `layer-${layerIndex + 1}`)}__text`,
+                parentId: String(node.id || "").trim() || null,
+                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} Text`,
+                kind: "text",
+                x: textX,
+                y: textY,
+                width: textWidth,
+                height: textHeight,
+                angle: 0,
+                flipX: false,
+                flipY: false,
+                viewportRect: textViewportRect,
+                pageRelativeRect: {
+                  x: textX,
+                  y: textY,
+                  width: textWidth,
+                  height: textHeight,
+                },
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text,
+                textAlign: textStyle?.textAlign || "left",
+                color: textStyle?.color || "#111827",
+                fontFamily: resolvedFontFamily,
+                fontSize: resolvedFontSize,
+                fontStyle: textStyle?.fontStyle || "normal",
+                fontWeight: parseFontWeight(textStyle?.fontWeight),
+                lineHeight: Math.max(0.8, textLineHeight || 1.2),
+                letterSpacing: textLetterSpacing,
+                textDecoration,
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                zIndex: (zIndex ?? layerIndex) + 0.25,
+                opacity: effectiveOpacity,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                fallback: false,
+                fallbackReason: "",
+              };
+            }
+          }
           if (kind === "image") {
             imageMetadataCandidates.push({
               id: layerRecord.id,
@@ -4060,6 +4614,9 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
           }
           if (!isDuplicateLayerEntry(layerRecord)) {
             layers.push(layerRecord);
+          }
+          if (companionTextRecord && !isDuplicateLayerEntry(companionTextRecord)) {
+            layers.push(companionTextRecord);
           }
         }
 
@@ -4257,6 +4814,13 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
                 if (blobDataUrl.startsWith("data:image/")) {
                   imageSrc = blobDataUrl;
                   imageDataUrl = blobDataUrl;
+                }
+              }
+              if (!imageDataUrl && /^https?:\/\//i.test(String(imageSrc || ""))) {
+                const fetchedImageDataUrl = await readRemoteImageAssetAsDataUrl(imageSrc);
+                if (fetchedImageDataUrl.startsWith("data:image/")) {
+                  imageSrc = fetchedImageDataUrl;
+                  imageDataUrl = fetchedImageDataUrl;
                 }
               }
 
@@ -5022,7 +5586,84 @@ async function importActiveCanvaTab(message) {
     throw new Error("Failed to build image payload from Canva tab.");
   }
 
-  const extractedLayers = hasExtractedLayerMetadata ? captureMeta.layers : [];
+  let extractedLayers = hasExtractedLayerMetadata ? captureMeta.layers : [];
+  const isolatedSnapshotWarnings = [];
+  if (screenshotDataUrl.startsWith("data:image/") && extractedLayers.length > 0) {
+    const preferSnapshotLayers = extractedLayers
+      .filter((layer) => String(layer?.kind || "").toLowerCase() === "image")
+      .filter((layer) => Boolean(layer?.preferSnapshot))
+      .filter((layer) => String(layer?.id || "").trim().startsWith("LB"))
+      .filter((layer) => layer?.viewportRect)
+      .sort((a, b) => {
+        const aArea = numberOr(a?.width, 0) * numberOr(a?.height, 0);
+        const bArea = numberOr(b?.width, 0) * numberOr(b?.height, 0);
+        return bArea - aArea;
+      })
+      .slice(0, 24);
+
+    if (preferSnapshotLayers.length > 0) {
+      try {
+        const visibleBitmap = await timePhase("decodeVisibleSnapshotBitmap", () =>
+          decodeDataUrlToBitmap(screenshotDataUrl)
+        );
+        const isolatedSnapshotsById = new Map();
+
+        for (let index = 0; index < preferSnapshotLayers.length; index += 1) {
+          const layer = preferSnapshotLayers[index];
+          const layerId = String(layer?.id || "").trim();
+          if (!layerId) continue;
+          try {
+            await setCanvaLayerVisibility(tab.id, [layerId], true);
+            let isolatedDataUrl = "";
+            const isolationWaits = [140, 240];
+            for (let attempt = 0; attempt < isolationWaits.length; attempt += 1) {
+              await sleep(isolationWaits[attempt]);
+              const hiddenScreenshotDataUrl = await timePhase(
+                `captureLayerHidden_${index + 1}_${attempt + 1}`,
+                () => chrome.tabs.captureVisibleTab(tab.windowId, { format: "png" })
+              );
+              const hiddenBitmap = await timePhase(
+                `decodeLayerHiddenBitmap_${index + 1}_${attempt + 1}`,
+                () => decodeDataUrlToBitmap(hiddenScreenshotDataUrl)
+              );
+              isolatedDataUrl = await timePhase(
+                `isolateLayerSnapshot_${index + 1}_${attempt + 1}`,
+                () =>
+                  isolateLayerSnapshotFromBitmaps(visibleBitmap, hiddenBitmap, layer.viewportRect, {
+                    dpr: Number(captureMeta.devicePixelRatio || 1),
+                    targetWidth: Math.max(1, Math.round(numberOr(layer?.width, 1))),
+                    targetHeight: Math.max(1, Math.round(numberOr(layer?.height, 1))),
+                  })
+              );
+              if (isolatedDataUrl.startsWith("data:image/")) break;
+            }
+            if (isolatedDataUrl.startsWith("data:image/")) {
+              isolatedSnapshotsById.set(layerId, isolatedDataUrl);
+            } else {
+              isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
+            }
+          } catch (_error) {
+            isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
+          } finally {
+            await setCanvaLayerVisibility(tab.id, [layerId], false).catch(() => {});
+            await sleep(80);
+          }
+        }
+
+        if (isolatedSnapshotsById.size > 0) {
+          extractedLayers = extractedLayers.map((layer) => {
+            const layerId = String(layer?.id || "").trim();
+            const isolatedImageDataUrl = isolatedSnapshotsById.get(layerId);
+            return isolatedImageDataUrl
+              ? { ...layer, isolatedImageDataUrl }
+              : layer;
+          });
+        }
+      } catch (_error) {
+        isolatedSnapshotWarnings.push("Could not isolate merged Canva layers; using screenshot crops.");
+      }
+    }
+  }
   const extractionLikelyDegraded = extractedLayers.length <= 1;
   const usedFontsFromLayers = collectUsedFontFamilies(extractedLayers);
   const fontTargetsByFamily = buildUsedFontTargetsByFamily(extractedLayers);
@@ -5060,6 +5701,9 @@ async function importActiveCanvaTab(message) {
   }
   if (String(captureMeta?.sourceType || "").toLowerCase().startsWith("fallback")) {
     importWarnings.push("Canvas frame detection used fallback mode.");
+  }
+  if (isolatedSnapshotWarnings.length > 0) {
+    importWarnings.push(...isolatedSnapshotWarnings);
   }
   const fontResolutionWarnings = [];
   const resolvedFontsPromise = resolveImportedCustomFonts(
@@ -5149,6 +5793,26 @@ async function importActiveCanvaTab(message) {
     if (type === "textbox") return Boolean(String(object?.text || "").trim());
     return false;
   });
+  const thinVectorDebugEntries = extractedLayers
+    .filter((layer) => {
+      const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
+      const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
+      const ratio = Math.max(width, height) / Math.max(1, Math.min(width, height));
+      return ratio >= 12 && Math.min(width, height) <= 8;
+    })
+    .slice(0, 6)
+    .map((layer) => {
+      const object = fabricObjects.find(
+        (candidate) => String(candidate?.importNodeId || "").trim() === String(layer?.id || "").trim()
+      );
+      const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
+      const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
+      const angle = Math.round(numberOr(layer?.angle, 0));
+      return `${String(layer?.id || "layer").trim()}:${String(layer?.kind || "?")}/${width}x${height}@${angle}->${String(object?.type || "missing").toLowerCase()}`;
+    });
+  if (thinVectorDebugEntries.length > 0) {
+    importWarnings.push(`Thin vector debug: ${thinVectorDebugEntries.join(", ")}`);
+  }
   const hasExtractedLayers = fabricObjects.length > 0 && hasMeaningfulDrawableLayers;
 
   const fabricData = {

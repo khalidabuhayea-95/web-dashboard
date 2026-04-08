@@ -393,6 +393,15 @@ export const BUILTIN_SHAPE_ASSETS: BuiltInShapeAsset[] = [
      <rect x="30" y="36" width="60" height="48" fill="white" stroke="${SHAPE_MUTED}" stroke-width="2" stroke-dasharray="4 4" />`,
     ["frame", "picture", "border", "basic", "shape"]
   ),
+  createShape(
+    "shape-light-frame-9x19",
+    "Light frame",
+    "basic",
+    180,
+    380,
+    `<rect x="6" y="6" width="168" height="368" fill="none" stroke="#cbd5e1" stroke-width="4" />`,
+    ["frame", "light", "border", "portrait", "9:19", "story", "mobile", "basic", "shape"]
+  ),
   createBasicShape(
     "shape-heart",
     "Heart",

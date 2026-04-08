@@ -3,31 +3,37 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
+  Check,
+  CheckSquare2,
   ChevronLeft,
   ChevronRight,
+  Clapperboard,
   Eye,
   EyeOff,
   Facebook,
   FileText,
+  ImagePlus,
   GripVertical,
   Image as ImageIcon,
   Instagram,
-  Layers,
-  LayoutTemplate,
+  LayoutGrid,
   Linkedin,
   Lock,
-  PaintBucket,
   Palette,
+  PanelsTopLeft,
   Search,
   Shapes,
+  SwatchBook,
+  Sparkles,
+  Square,
   Info,
-  Tag,
+  Scaling,
+  Tags,
+  TextCursorInput,
   Twitter,
-  Type,
   Unlock,
   Upload,
   Trash2,
-  Frame,
   X,
   Video as VideoIcon,
   Youtube,
@@ -55,6 +61,22 @@ import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 import { TEMPLATE_CATEGORY_SETTINGS } from "@/lib/templates/templateSettings";
 import { DEFAULT_BACKGROUND_CATEGORY } from "@/lib/backgrounds/categorySettings";
 import {
+  DEFAULT_ANIMATION_DURATION_MS,
+  DEFAULT_PAGE_DURATION_MS,
+  EDITOR_ANIMATION_OPTIONS,
+  type EditorAnimationType,
+  normalizeAnimationDelayMs,
+  normalizeAnimationDirection,
+  normalizeAnimationEasing,
+  normalizeAnimationDurationMs,
+  normalizeAnimationInfinite,
+  normalizeAnimationIntensity,
+  normalizeAnimationMode,
+  normalizeAnimationType,
+} from "@/lib/editor/animationTimeline";
+import { FRAME_PRESETS, type FramePreset } from "@/lib/editor/frames";
+import { getPublishablePageElements } from "@/lib/editor/publishableElements";
+import {
   createElementFromAsset,
   isBackgroundLayerElement,
   useEditorStore,
@@ -64,16 +86,18 @@ import {
 } from "@/store/editorStore";
 
 const TOOL_TABS: Array<{ key: SidebarTab; label: string; icon: ComponentType<{ size?: number; className?: string }> }> = [
-  { key: "templates", label: "Templates", icon: LayoutTemplate },
-  { key: "text", label: "Text", icon: Type },
-  { key: "videos", label: "Videos", icon: VideoIcon },
+  { key: "templates", label: "Templates", icon: LayoutGrid },
+  { key: "text", label: "Text", icon: TextCursorInput },
+  { key: "videos", label: "Videos", icon: Clapperboard },
   { key: "shapes", label: "Shapes", icon: Shapes },
-  { key: "elements", label: "Elements", icon: ImageIcon },
-  { key: "category", label: "Category", icon: Tag },
+  { key: "elements", label: "Elements", icon: ImagePlus },
+  { key: "frames", label: "Frames", icon: Square },
+  { key: "category", label: "Category", icon: Tags },
   { key: "upload", label: "Upload", icon: Upload },
-  { key: "backgrounds", label: "Background", icon: PaintBucket },
-  { key: "layers", label: "Layers", icon: Layers },
-  { key: "resize", label: "Resize", icon: Frame },
+  { key: "backgrounds", label: "Background", icon: SwatchBook },
+  { key: "layers", label: "Layers", icon: PanelsTopLeft },
+  { key: "resize", label: "Resize", icon: Scaling },
+  { key: "animation", label: "Animation", icon: Sparkles },
 ];
 
 const COLOR_SWATCHES = [
@@ -176,6 +200,290 @@ const RESIZE_PRESETS: ResizePresetGroup[] = [
     ],
   },
 ];
+
+function getAnimationPreviewClass(type: EditorAnimationType) {
+  switch (type) {
+    case "NONE":
+      return "animation-sample-none";
+    case "RISE":
+      return "animation-sample-rise";
+    case "PAN":
+      return "animation-sample-pan";
+    case "FADE":
+      return "animation-sample-fade";
+    case "POP":
+      return "animation-sample-pop";
+    case "WIPE":
+      return "animation-sample-wipe";
+    case "BLUR":
+      return "animation-sample-blur";
+    case "SUCCESSION":
+      return "animation-sample-succession";
+    case "BREATHE":
+      return "animation-sample-breathe";
+    case "BASELINE":
+      return "animation-sample-baseline";
+    case "DRIFT":
+      return "animation-sample-drift";
+    case "TECTONIC":
+      return "animation-sample-tectonic";
+    case "TUMBLE":
+      return "animation-sample-tumble";
+    case "NEON":
+      return "animation-sample-neon";
+    case "SCRAPBOOK":
+      return "animation-sample-scrapbook";
+    case "STOMP":
+      return "animation-sample-stomp";
+    case "ROTATE":
+      return "animation-sample-rotate";
+    case "FLICKER":
+      return "animation-sample-flicker";
+    case "PULSE":
+      return "animation-sample-pulse";
+    case "WIGGLE":
+      return "animation-sample-wiggle";
+    default:
+      return "animation-sample-fade";
+  }
+}
+
+function renderAnimationArrow(d: string, color: string) {
+  return (
+    <path
+      d={d}
+      fill="none"
+      stroke={color}
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.9"
+    />
+  );
+}
+
+function renderAnimationSquare(options: {
+  x: number;
+  y: number;
+  size: number;
+  fill: string;
+  opacity?: number;
+  strokeColor?: string;
+  radius?: number;
+  rotate?: number;
+}) {
+  const { x, y, size, fill, opacity = 1, strokeColor, radius = 8, rotate = 0 } = options;
+  return (
+    <rect
+      x={x}
+      y={y}
+      width={size}
+      height={size}
+      rx={radius}
+      fill={fill}
+      fillOpacity={opacity}
+      stroke={strokeColor}
+      strokeWidth={strokeColor ? 1.6 : 0}
+      transform={rotate ? `rotate(${rotate} ${x + size / 2} ${y + size / 2})` : undefined}
+    />
+  );
+}
+
+function AnimationSampleGlyph({ type }: { type: EditorAnimationType }) {
+  const purple = "#7c3aed";
+  const purpleMid = "#8b5cf6";
+  const purpleSoft = "#c4b5fd";
+  const purplePale = "#e9ddff";
+  const pink = "#fb7185";
+  const pinkSoft = "#fda4af";
+  const stroke = "#8b5cf6";
+  const className = `animation-sample-glyph ${getAnimationPreviewClass(type)}`;
+
+  const baseProps = { className, viewBox: "0 0 48 48", fill: "none" as const };
+
+  switch (type) {
+    case "RISE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 16, y: 24, size: 16, fill: purpleMid, opacity: 0.28 })}
+          {renderAnimationSquare({ x: 16, y: 17, size: 16, fill: purpleMid, opacity: 0.52 })}
+          {renderAnimationSquare({ x: 16, y: 10, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M36 29v-11m0 0-3.5 3.5M36 18l3.5 3.5", stroke)}
+        </svg>
+      );
+    case "PAN":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 8, y: 12, size: 18, fill: purpleSoft, opacity: 0.55 })}
+          {renderAnimationSquare({ x: 14, y: 12, size: 18, fill: purpleSoft, opacity: 0.75 })}
+          {renderAnimationSquare({ x: 20, y: 12, size: 18, fill: purpleMid })}
+          {renderAnimationArrow("M16 35h14m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+        </svg>
+      );
+    case "FADE":
+      return (
+        <svg {...baseProps}>
+          <rect x="10" y="11" width="9" height="24" rx="5" fill={purpleSoft} opacity="0.45" />
+          <rect x="16" y="11" width="9" height="24" rx="5" fill={purpleSoft} opacity="0.65" />
+          <rect x="22" y="11" width="9" height="24" rx="5" fill={purpleMid} opacity="0.82" />
+          <rect x="28" y="11" width="9" height="24" rx="5" fill={purpleMid} />
+        </svg>
+      );
+    case "POP":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 12, y: 12, size: 24, fill: purplePale, strokeColor: purpleSoft })}
+          {renderAnimationSquare({ x: 16, y: 16, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M6 24h3m30 0h3M24 6v3m0 30v3", pink)}
+        </svg>
+      );
+    case "WIPE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 11, y: 12, size: 24, fill: purpleSoft })}
+          <path d="M23 12h12v24H23z" fill={purpleMid} />
+          <line x1="23" y1="11" x2="23" y2="37" stroke="#6d28d9" strokeWidth="2" />
+        </svg>
+      );
+    case "BLUR":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleMid })}
+          <rect x="13" y="13" width="22" height="22" rx="8" fill={purpleMid} opacity="0.68" style={{ filter: "blur(3px)" }} />
+        </svg>
+      );
+    case "SUCCESSION":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleMid, opacity: 0.18 })}
+          <rect x="13" y="13" width="22" height="22" rx="8" fill={purpleMid} opacity="0.5" style={{ filter: "blur(2px)" }} />
+          {renderAnimationArrow("M12 14l-3 3m0-3h3M36 14l3 3m-3 0h3M12 34l-3-3m0 3h3M36 34l3-3m-3 0h3", stroke)}
+        </svg>
+      );
+    case "BREATHE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 11, y: 11, size: 26, fill: "none", strokeColor: purpleSoft, radius: 10 })}
+          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: "none", strokeColor: purpleMid, radius: 8 })}
+          {renderAnimationSquare({ x: 19, y: 19, size: 10, fill: purpleMid, radius: 4 })}
+          {renderAnimationArrow("M10 10l-3-3m0 3V7M38 10l3-3v3h-3M10 38l-3 3h3v-3M38 38l3 3v-3h-3", stroke)}
+        </svg>
+      );
+    case "BASELINE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 16, y: 24, size: 16, fill: purpleMid, opacity: 0.28 })}
+          {renderAnimationSquare({ x: 16, y: 17, size: 16, fill: purpleMid, opacity: 0.52 })}
+          {renderAnimationSquare({ x: 16, y: 10, size: 16, fill: purpleMid })}
+          <line x1="10" y1="36" x2="38" y2="36" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    case "DRIFT":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 10, y: 15, size: 18, fill: purpleSoft, opacity: 0.72 })}
+          {renderAnimationSquare({ x: 20, y: 15, size: 18, fill: purpleMid })}
+          {renderAnimationArrow("M13 35h15m0 0-3.5-3.5M28 35l-3.5 3.5", stroke)}
+        </svg>
+      );
+    case "TECTONIC":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 8, y: 14, size: 16, fill: purpleSoft, opacity: 0.45 })}
+          {renderAnimationSquare({ x: 14, y: 14, size: 16, fill: purpleSoft, opacity: 0.7 })}
+          {renderAnimationSquare({ x: 20, y: 14, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M15 35h15m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+        </svg>
+      );
+    case "TUMBLE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 12, y: 13, size: 18, fill: purpleSoft, opacity: 0.65, rotate: -16 })}
+          {renderAnimationSquare({ x: 20, y: 15, size: 18, fill: purpleMid, rotate: 6 })}
+          {renderAnimationArrow("M12 11c4-4 12-5 18 0m0 0-1.5-3m1.5 3-3 1.5", stroke)}
+        </svg>
+      );
+    case "NEON":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 18, y: 18, size: 12, fill: purpleMid })}
+          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: "none", strokeColor: purpleMid })}
+          {renderAnimationSquare({ x: 20, y: 20, size: 12, fill: "none", strokeColor: pinkSoft, radius: 4 })}
+          {renderAnimationArrow("M9 22h3m-1.5-1.5V23.5M36 22h3m-1.5-1.5V23.5", pink)}
+        </svg>
+      );
+    case "SCRAPBOOK":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 11, y: 12, size: 18, fill: purpleSoft, opacity: 0.7, rotate: -18 })}
+          {renderAnimationSquare({ x: 20, y: 16, size: 18, fill: purpleMid, rotate: 2 })}
+        </svg>
+      );
+    case "STOMP":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 10, y: 10, size: 28, fill: "none", strokeColor: purpleSoft, radius: 10 })}
+          {renderAnimationSquare({ x: 14, y: 14, size: 20, fill: "none", strokeColor: purpleMid, radius: 8 })}
+          {renderAnimationSquare({ x: 18, y: 18, size: 12, fill: purpleMid, radius: 5 })}
+          {renderAnimationArrow("M10 10l-3-3M38 10l3-3M10 38l-3 3M38 38l3 3", stroke)}
+        </svg>
+      );
+    case "ROTATE":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="24" r="12" fill={purpleMid} />
+          {renderAnimationArrow("M13 13c2-2.5 5.5-4 9.5-4m0 0-2.5-2m2.5 2-1.2 3", stroke)}
+          {renderAnimationArrow("M35 35c-2 2.5-5.5 4-9.5 4m0 0 2.5 2m-2.5-2 1.2-3", stroke)}
+        </svg>
+      );
+    case "FLICKER":
+      return (
+        <svg {...baseProps}>
+          <path d="M24 10c7.7 0 14 6.3 14 14s-6.3 14-14 14V10Z" fill={purpleMid} />
+          <path d="M24 10c-7.7 0-14 6.3-14 14s6.3 14 14 14V10Z" fill={purpleSoft} />
+        </svg>
+      );
+    case "PULSE":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="24" r="13" fill="none" stroke={purpleSoft} strokeWidth="4" />
+          <circle cx="24" cy="24" r="8.5" fill="none" stroke={purpleMid} strokeWidth="4" />
+          <circle cx="24" cy="24" r="4.5" fill={purpleSoft} />
+          {renderAnimationArrow("M10 10l-3-3M38 10l3-3M10 38l-3 3M38 38l3 3", stroke)}
+        </svg>
+      );
+    case "WIGGLE":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="24" r="12" fill={purpleMid} />
+          <path d="M9 17c2 1 2 5 4 6 1 1 1 3-1 4" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          <path d="M39 31c-2-1-2-5-4-6-1-1-1-3 1-4" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    default:
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 12, y: 12, size: 24, fill: purpleMid })}
+        </svg>
+      );
+  }
+}
+
+function AnimationSampleTile({ type }: { type: EditorAnimationType }) {
+  if (type === "NONE") {
+    return (
+      <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-[#d6dce6] bg-white">
+        <div className="h-8 w-8 rounded-2xl border-2 border-[#a1aab8]" />
+        <div className="absolute h-9 w-px rotate-45 bg-[#a1aab8]" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="relative flex h-12 w-12 items-center justify-center overflow-hidden rounded-2xl bg-[linear-gradient(180deg,#f8fbff_0%,#eef3f9_100%)] ring-1 ring-inset ring-[#d8e0ea]">
+      <AnimationSampleGlyph type={type} />
+    </div>
+  );
+}
 
 interface StoredTemplate {
   id: string;
@@ -628,13 +936,26 @@ function toEditorDesignFromTemplate(
   fallbackHeight: number
 ): EditorDesign | null {
   if (!template || !template.id) return null;
+  const templateThumbnailSrc = String(template.thumbnailDataUrl || "").trim();
 
   if (template.data && typeof template.data === "object") {
     const maybeDesign = template.data as Partial<EditorDesign>;
     if (Array.isArray(maybeDesign.pages) && maybeDesign.pages.length > 0) {
       return {
-        version: 1,
+        version: Number(maybeDesign.version || 2),
         activePageId: maybeDesign.activePageId || maybeDesign.pages[0].id,
+        ...(maybeDesign.timeline
+          ? {
+              timeline: {
+                ...maybeDesign.timeline,
+                preview: {
+                  ...(maybeDesign.timeline.preview || {}),
+                  posterUrl:
+                    String(maybeDesign.timeline.preview?.posterUrl || "").trim() || templateThumbnailSrc || null,
+                },
+              },
+            }
+          : {}),
         pages: maybeDesign.pages as EditorDesign["pages"],
       };
     }
@@ -754,6 +1075,31 @@ function toEditorDesignFromTemplate(
         scaleX: signedScaleX,
         scaleY: signedScaleY,
         blendMode: toEditorBlendMode(item.blendMode),
+        timelineStartMs: Math.max(0, toNumber(item.timelineStartMs, 0)),
+        timelineEndMs: Math.max(0, toNumber(item.timelineEndMs, DEFAULT_PAGE_DURATION_MS)),
+        mediaAnimationType: normalizeAnimationType(item.mediaAnimationType || item.animationType || undefined),
+        mediaAnimationMode: normalizeAnimationMode(item.mediaAnimationMode || item.animationMode || undefined),
+        mediaAnimationInfinite: normalizeAnimationInfinite(
+          item.mediaAnimationInfinite ?? item.animationInfinite,
+          item.mediaAnimationMode || item.animationMode || undefined
+        ),
+        mediaAnimationDurationMs: normalizeAnimationDurationMs(
+          item.mediaAnimationDurationMs ?? item.animationDurationMs ?? item.animationDuration
+        ),
+        mediaAnimationDelayMs: normalizeAnimationDelayMs(item.mediaAnimationDelayMs ?? item.animationDelayMs ?? item.animationDelay),
+        mediaAnimationDirection: normalizeAnimationDirection(
+          item.mediaAnimationDirection ?? item.animationDirection,
+          item.mediaAnimationType || item.animationType || undefined
+        ),
+        mediaAnimationEasing: normalizeAnimationEasing(
+          item.mediaAnimationEasing ?? item.animationEasing,
+          item.mediaAnimationType || item.animationType || undefined
+        ),
+        mediaAnimationIntensity: normalizeAnimationIntensity(
+          item.mediaAnimationIntensity ?? item.animationIntensity
+        ),
+        sourceAnimationLabel: String(item.sourceAnimationLabel || item.animationLabel || "").trim() || undefined,
+        sourceAnimationName: String(item.sourceAnimationName || item.rawAnimationName || "").trim() || undefined,
         ...(importNodeId ? { importNodeId } : {}),
         ...(String(item.importParentId || "").trim() ? { importParentId: String(item.importParentId).trim() } : {}),
         ...(String(item.importKind || "").trim() ? { importKind: String(item.importKind).trim() } : {}),
@@ -992,14 +1338,31 @@ function toEditorDesignFromTemplate(
 
   const backgroundColor = parseColor(fabric?.backgroundColor, "#ffffff");
   return {
-    version: 1,
+    version: 2,
     activePageId: pageId,
+    timeline: {
+      enabled: true,
+      fps: 30,
+      totalDurationMs: DEFAULT_PAGE_DURATION_MS,
+      preview: {
+        status: "not_requested",
+        url: null,
+        posterUrl: templateThumbnailSrc || null,
+        generatedAt: null,
+        error: null,
+      },
+      source: {
+        origin: isCanvaTemplate ? "canva" : "manual",
+        animatedImport: false,
+      },
+    },
     pages: [
       {
         id: pageId,
         name: template.name || "Template",
         width,
         height,
+        durationMs: DEFAULT_PAGE_DURATION_MS,
         background: {
           type: "color",
           color: backgroundColor,
@@ -1016,6 +1379,7 @@ function layerTypeLabel(element: EditorElement) {
   if (element.type === "text") return "Text";
   if (element.type === "image") return "Image";
   if (element.type === "video") return "Video";
+  if (element.type === "frame") return "Frame";
   if (element.type === "arrow") return "Arrow";
   if (element.type === "line") return "Line";
   if (element.type === "circle") return "Circle";
@@ -1045,6 +1409,22 @@ function layerDisplayName(layer: EditorElement, page: { width: number; height: n
 
 function assetPayload(payload: Record<string, unknown>) {
   return JSON.stringify(payload);
+}
+
+function framePreviewClipPath(preset: FramePreset) {
+  if (preset.kind === "circle") return "circle(48% at 50% 50%)";
+  if (preset.kind === "rect") {
+    const radius = Math.max(0, Math.min(48, Number(preset.cornerRadius || 0)));
+    return `inset(0 round ${radius}px)`;
+  }
+  if (Array.isArray(preset.points) && preset.points.length >= 6) {
+    const pairs: string[] = [];
+    for (let index = 0; index < preset.points.length; index += 2) {
+      pairs.push(`${preset.points[index]}% ${preset.points[index + 1]}%`);
+    }
+    return `polygon(${pairs.join(", ")})`;
+  }
+  return "inset(0 round 18px)";
 }
 
 function sanitizeFontFamilyFromFileName(fileName: string) {
@@ -1160,6 +1540,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const activeTemplateSubCategory = useEditorStore((state) => state.activeTemplateSubCategory);
   const activeTemplateTags = useEditorStore((state) => state.activeTemplateTags);
   const selectedIds = useEditorStore((state) => state.selectedIds);
+  const publishCandidateIds = useEditorStore((state) => state.publishCandidateIds);
   const resizeUseMagic = useEditorStore((state) => state.resizeUseMagic);
 
   const setSidebarTab = useEditorStore((state) => state.setSidebarTab);
@@ -1170,21 +1551,28 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const addTextElement = useEditorStore((state) => state.addTextElement);
   const addImageElement = useEditorStore((state) => state.addImageElement);
   const addVideoElement = useEditorStore((state) => state.addVideoElement);
+  const addFrameElement = useEditorStore((state) => state.addFrameElement);
+  const setFrameContent = useEditorStore((state) => state.setFrameContent);
   const loadDesign = useEditorStore((state) => state.loadDesign);
   const registerFontFamilies = useEditorStore((state) => state.registerFontFamilies);
   const setBackground = useEditorStore((state) => state.setBackground);
+  const setPublishCandidateIds = useEditorStore((state) => state.setPublishCandidateIds);
   const setSelectedIds = useEditorStore((state) => state.setSelectedIds);
+  const togglePublishCandidate = useEditorStore((state) => state.togglePublishCandidate);
   const toggleVisibility = useEditorStore((state) => state.toggleVisibility);
   const toggleLock = useEditorStore((state) => state.toggleLock);
   const reorderLayer = useEditorStore((state) => state.reorderLayer);
   const deleteElement = useEditorStore((state) => state.deleteElement);
   const resizeActivePage = useEditorStore((state) => state.resizeActivePage);
   const updateElement = useEditorStore((state) => state.updateElement);
+  const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const recordHistory = useEditorStore((state) => state.recordHistory);
 
   const [templateSearch, setTemplateSearch] = useState("");
   const [shapeSearch, setShapeSearch] = useState("");
+  const [frameSearch, setFrameSearch] = useState("");
   const [elementSearch, setElementSearch] = useState("");
+  const [elementsPanelTab, setElementsPanelTab] = useState<"published" | "queue">("published");
   const [importedElements, setImportedElements] = useState<ImportedElementRecord[]>([]);
   const [importedElementsLoading, setImportedElementsLoading] = useState(false);
   const [importedElementsError, setImportedElementsError] = useState("");
@@ -1231,6 +1619,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     [templateQueryKey]
   );
   const loadedTemplateSignatureRef = useRef("");
+  const previousSelectedCountRef = useRef(selectedIds.length);
 
   const updateTemplateQueryInUrl = useCallback(
     (templateId: string, updatedAt = "") => {
@@ -1266,6 +1655,32 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     () => pages.find((page) => page.id === activePageId) || pages[0],
     [activePageId, pages]
   );
+  const publishableElements = useMemo(() => getPublishablePageElements(activePage), [activePage]);
+  const publishCandidatesSet = useMemo(() => new Set(publishCandidateIds), [publishCandidateIds]);
+  const normalizedElementSearch = elementSearch.trim().toLowerCase();
+  const filteredPublishableElements = useMemo(() => {
+    if (!normalizedElementSearch) return publishableElements;
+    return publishableElements.filter((element) => {
+      const haystacks = [
+        String(element.name || ""),
+        String(element.type || ""),
+        String(element.titleEn || ""),
+        String(element.titleAr || ""),
+      ];
+      return haystacks.some((value) => value.toLowerCase().includes(normalizedElementSearch));
+    });
+  }, [normalizedElementSearch, publishableElements]);
+  const allVisiblePublishableSelected =
+    filteredPublishableElements.length > 0 &&
+    filteredPublishableElements.every((element) => publishCandidatesSet.has(element.id));
+  const visibleToolTabs = useMemo(
+    () => TOOL_TABS.filter((tab) => tab.key !== "animation" || selectedIds.length > 0),
+    [selectedIds.length]
+  );
+  const elementSearchPlaceholder =
+    elementsPanelTab === "published"
+      ? "Search published elements..."
+      : "Search elements to publish...";
 
   useEffect(() => {
     if (!activePage) return;
@@ -1274,13 +1689,13 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   }, [activePage]);
 
   useEffect(() => {
-    if (activeTab !== "elements") return;
+    if (activeTab !== "elements" || elementsPanelTab !== "published") return;
     setImportedElementsPage(1);
     setImportedElementsHasNextPage(false);
     importedElementsScrollLockRef.current = false;
     setOpenImportedElementInfoId("");
     setCopiedImportedTagKey("");
-  }, [activeTab, elementSearch, importedElementsKindTab, importedElementsRefreshKey]);
+  }, [activeTab, elementSearch, elementsPanelTab, importedElementsKindTab, importedElementsRefreshKey]);
 
   useEffect(() => {
     return () => {
@@ -1294,8 +1709,58 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     if (!activePage) return [];
     return [...activePage.elements].reverse();
   }, [activePage]);
+  const selectedElements = useMemo(
+    () => activePage.elements.filter((element) => selectedIds.includes(element.id)),
+    [activePage.elements, selectedIds]
+  );
+  const selectedFrameElement = useMemo(
+    () => selectedElements.find((element) => element.type === "frame") || null,
+    [selectedElements]
+  );
+  const selectedAnimationType = useMemo(() => {
+    if (selectedElements.length === 0) return null;
+    const values = new Set(selectedElements.map((element) => normalizeAnimationType(element.mediaAnimationType)));
+    return values.size === 1 ? Array.from(values)[0] : null;
+  }, [selectedElements]);
+  const selectedAnimationInfinite = useMemo(() => {
+    if (selectedElements.length === 0) return null;
+    const values = new Set(
+      selectedElements.map((element) =>
+        normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode)
+      )
+    );
+    return values.size === 1 ? Array.from(values)[0] : null;
+  }, [selectedElements]);
+  const selectedAnimationDurationMs = useMemo(() => {
+    if (selectedElements.length === 0) return null;
+    const values = new Set(
+      selectedElements.map((element) => normalizeAnimationDurationMs(element.mediaAnimationDurationMs))
+    );
+    return values.size === 1 ? Array.from(values)[0] : null;
+  }, [selectedElements]);
+  const primarySelectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
+  const [animationDurationDraft, setAnimationDurationDraft] = useState("");
   const activeBackgroundColor = String(activePage?.background?.color || "#ffffff").trim();
   const activeBackgroundImageUri = String(activePage?.background?.imageUri || "").trim();
+
+  useEffect(() => {
+    const previousSelectedCount = previousSelectedCountRef.current;
+    if (previousSelectedCount === 0 && selectedIds.length > 0 && activeTab !== "animation") {
+      setSidebarTab("animation");
+    }
+    previousSelectedCountRef.current = selectedIds.length;
+  }, [activeTab, selectedIds.length, setSidebarTab]);
+
+  useEffect(() => {
+    if (selectedIds.length === 0 && activeTab === "animation") {
+      setSidebarTab("resize");
+    }
+  }, [activeTab, selectedIds.length, setSidebarTab]);
+
+  useEffect(() => {
+    setAnimationDurationDraft(selectedAnimationDurationMs === null ? "" : String(selectedAnimationDurationMs));
+  }, [selectedAnimationDurationMs]);
+
   const applyBackgroundColorSelection = useCallback(
     (nextColor: string) => {
       const normalizedColor = String(nextColor || "#ffffff").trim() || "#ffffff";
@@ -1545,13 +2010,24 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     (shape: BuiltInShapeAsset) => {
       const aspectRatio = Math.max(0.1, shape.width / Math.max(1, shape.height));
       const isLineLike = shape.category === "lines";
+      const isPortraitFrame =
+        aspectRatio <= 0.6 &&
+        (shape.id.includes("frame") ||
+          shape.keywords.some((keyword) => {
+            const normalized = String(keyword || "").toLowerCase();
+            return normalized === "frame" || normalized === "border" || normalized === "portrait";
+          }));
       let width = isLineLike
         ? Math.min(activePage.width * 0.42, 320)
-        : Math.min(activePage.width * 0.24, 220);
+        : isPortraitFrame
+          ? Math.min(activePage.width * 0.44, 420)
+          : Math.min(activePage.width * 0.24, 220);
       let height = width / aspectRatio;
       const maxHeight = isLineLike
         ? Math.min(activePage.height * 0.12, 96)
-        : Math.min(activePage.height * 0.24, 220);
+        : isPortraitFrame
+          ? Math.min(activePage.height * 0.68, 980)
+          : Math.min(activePage.height * 0.24, 220);
       if (height > maxHeight) {
         height = maxHeight;
         width = height * aspectRatio;
@@ -1593,7 +2069,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           state.pages.find((item) => item.id === state.activePageId) || state.pages[0];
         const element = page?.elements.find((item) => item.id === elementId);
         if (!element || element.type !== "image") return;
-        const trimmed = await computeTrimTransparentPaddingPatch(element);
+        const trimmed = await computeTrimTransparentPaddingPatch(element as EditorElement & { type: "image" });
         if (!trimmed.supported || !trimmed.patch) return;
         updateElement(elementId, trimmed.patch, { recordHistory: false });
       } catch {
@@ -1643,6 +2119,21 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
     return sections;
   }, [builtInShapeLookup, recentBuiltInShapeIds, shapeSearchQuery]);
+
+  const filteredFramePresets = useMemo(() => {
+    const query = frameSearch.trim().toLowerCase();
+    if (!query) return FRAME_PRESETS;
+    return FRAME_PRESETS.filter((preset) =>
+      [preset.name, preset.kind, ...preset.keywords].join(" ").toLowerCase().includes(query)
+    );
+  }, [frameSearch]);
+
+  const addFramePresetToCanvas = useCallback(
+    (preset: FramePreset) => {
+      addFrameElement(preset.id);
+    },
+    [addFrameElement]
+  );
 
   const customFontLanguageByFamily = useMemo(() => {
     const map = new Map<string, "arabic" | "english">();
@@ -1731,7 +2222,18 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         const imageDimensions = await readImageFileDimensions(file);
         const baseTitle = file.name.replace(/\.[^.]+$/, "") || "Image Upload";
 
-        if (activeTab !== "backgrounds") {
+        if (activeTab !== "backgrounds" && selectedFrameElement) {
+          setFrameContent(
+            selectedFrameElement.id,
+            {
+              kind: "image",
+              src: uploaded.url,
+              sourceWidth: imageDimensions.width || undefined,
+              sourceHeight: imageDimensions.height || undefined,
+            },
+            { recordHistory: true }
+          );
+        } else if (activeTab !== "backgrounds") {
           addImageElement(uploaded.url, {
             name: baseTitle || "upload",
             width: Math.min(780, activePage.width * 0.65),
@@ -1864,6 +2366,17 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       if (!file.type.startsWith("video/")) continue;
       try {
         const uploaded = await uploadEditorMediaFile(file, "video");
+        if (selectedFrameElement) {
+          setFrameContent(
+            selectedFrameElement.id,
+            {
+              kind: "video",
+              src: uploaded.url,
+            },
+            { recordHistory: true }
+          );
+          continue;
+        }
         addVideoElement(uploaded.url, {
           name: file.name.replace(/\.[^.]+$/, "") || "Video",
           width: Math.min(960, activePage.width * 0.7),
@@ -1993,7 +2506,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   }, [activeTab]);
 
   useEffect(() => {
-    if (activeTab !== "elements") return;
+    if (activeTab !== "elements" || elementsPanelTab !== "published") return;
 
     let cancelled = false;
     const controller = new AbortController();
@@ -2087,7 +2600,14 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       window.clearTimeout(timeoutId);
       controller.abort();
     };
-  }, [activeTab, elementSearch, importedElementsKindTab, importedElementsPage, importedElementsRefreshKey]);
+  }, [
+    activeTab,
+    elementSearch,
+    elementsPanelTab,
+    importedElementsKindTab,
+    importedElementsPage,
+    importedElementsRefreshKey,
+  ]);
 
   useEffect(() => {
     if (activeTab !== "backgrounds") return;
@@ -2613,7 +3133,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       }`}
     >
       <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-[#d7dbe1] bg-white py-2">
-        {TOOL_TABS.map((tab) => {
+        {visibleToolTabs.map((tab) => {
           const Icon = tab.icon;
           const active = tab.key === activeTab;
           return (
@@ -2621,6 +3141,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               key={tab.key}
               type="button"
               onClick={() => {
+                if (active && !collapsed) {
+                  setShowLeftSidebar(false);
+                  return;
+                }
                 setSidebarTab(tab.key);
                 if (collapsed) {
                   setShowLeftSidebar(true);
@@ -2956,6 +3480,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                     type="button"
                                     draggable
                                     onDragStart={(event) => {
+                                      event.dataTransfer.effectAllowed = "copy";
                                       event.dataTransfer.setData(
                                         "application/x-editor-asset",
                                         assetPayload({
@@ -2997,11 +3522,31 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
             {activeTab === "elements" ? (
               <section className="flex h-full min-h-0 flex-col gap-3">
+                <div className="grid grid-cols-2 gap-1 rounded-md border border-[#d3d8e1] bg-white p-1">
+                  {[
+                    { key: "published", label: `All published (${importedElementsTotal})` },
+                    { key: "queue", label: `Need to publish (${publishableElements.length})` },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      type="button"
+                      className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
+                        elementsPanelTab === item.key
+                          ? "bg-[#dce9fb] text-[#0f172a]"
+                          : "text-[#64748b] hover:bg-[#eef3fa]"
+                      }`}
+                      onClick={() => setElementsPanelTab(item.key as "published" | "queue")}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="relative">
                   <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
                   <Input
                     className="!h-9 !rounded-full !bg-white !pl-9"
-                    placeholder="Search imported elements..."
+                    placeholder={elementSearchPlaceholder}
                     value={elementSearch}
                     onChange={(event) => setElementSearch(event.target.value)}
                   />
@@ -3010,344 +3555,519 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                 <div className="flex min-h-0 flex-1 flex-col rounded-md border border-[#d3d8e1] bg-white p-2">
                   <div
                     className="min-h-0 flex-1 overflow-y-auto pr-1"
-                    onScroll={handleImportedElementsScroll}
+                    onScroll={elementsPanelTab === "published" ? handleImportedElementsScroll : undefined}
                   >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold text-[#202a38]">
-                        Imported ({importedElementsTotal})
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <button
-                          type="button"
-                          aria-label="Upload image"
-                          title="Upload image"
-                          onClick={() => openImageUploadPicker()}
-                          className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
-                        >
-                          <Upload size={14} />
-                        </button>
-                        <div className="inline-flex rounded-full border border-[#d3d8e1] bg-[#f2f4f7] p-0.5 text-[11px]">
-                          {[
-                            { key: "all", label: "All" },
-                            { key: "icon", label: "Icons" },
-                          ].map((item) => (
+                    {elementsPanelTab === "published" ? (
+                      <>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div className="text-sm font-semibold text-[#202a38]">
+                            Imported ({importedElementsTotal})
+                          </div>
+                          <div className="flex items-center gap-2">
                             <button
-                              key={item.key}
                               type="button"
-                              className={`rounded-full px-2 py-0.5 ${
-                                importedElementsKindTab === item.key
-                                  ? "bg-white font-semibold text-[#1f2a39]"
-                                  : "text-[#637087]"
-                              }`}
-                              onClick={() =>
-                                setImportedElementsKindTab(item.key as "all" | "icon")
-                              }
+                              aria-label="Upload image"
+                              title="Upload image"
+                              onClick={() => openImageUploadPicker()}
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
                             >
-                              {item.label}
+                              <Upload size={14} />
                             </button>
-                          ))}
+                            <div className="inline-flex rounded-full border border-[#d3d8e1] bg-[#f2f4f7] p-0.5 text-[11px]">
+                              {[
+                                { key: "all", label: "All" },
+                                { key: "icon", label: "Icons" },
+                              ].map((item) => (
+                                <button
+                                  key={item.key}
+                                  type="button"
+                                  className={`rounded-full px-2 py-0.5 ${
+                                    importedElementsKindTab === item.key
+                                      ? "bg-white font-semibold text-[#1f2a39]"
+                                      : "text-[#637087]"
+                                  }`}
+                                  onClick={() =>
+                                    setImportedElementsKindTab(item.key as "all" | "icon")
+                                  }
+                                >
+                                  {item.label}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
                         </div>
-                      </div>
-                    </div>
 
-                    {importedElements.length > 0 ? (
-                      <div className="grid grid-cols-2 gap-2">
-                        {importedElements.map((item) => {
-                          const isGifAsset = isGifSource(item.assetUrl);
-                          const videoSource = deriveFreepikAnimatedVideoUrl(item);
-                          const addAsVideo = !isGifAsset && isVideoSource(videoSource);
-                          const deletingImported = deletingImportedElementId === item.id;
-                          const showingInfo = openImportedElementInfoId === item.id;
-                          const searchableTagsEn = Array.from(
-                            new Set(
-                              [
-                                ...(Array.isArray(item.tagsEn) ? item.tagsEn : []),
-                                ...(Array.isArray(item.labelsEn) ? item.labelsEn : []),
-                                ...(!Array.isArray(item.tagsEn) || item.tagsEn.length === 0 ? item.tags : []),
-                                ...(!Array.isArray(item.labelsEn) || item.labelsEn.length === 0 ? item.labels : []),
-                              ]
-                                .map((value) => String(value || "").trim())
-                                .filter(Boolean)
-                            )
-                          ).slice(0, 24);
-                          const searchableTagsAr = Array.from(
-                            new Set(
-                              [
-                                ...(Array.isArray(item.tagsAr) ? item.tagsAr : []),
-                                ...(Array.isArray(item.labelsAr) ? item.labelsAr : []),
-                              ]
-                                .map((value) => String(value || "").trim())
-                                .filter(Boolean)
-                            )
-                          ).slice(0, 24);
-                          const importedSourcePayload =
-                            item.sourcePayload && typeof item.sourcePayload === "object"
-                              ? item.sourcePayload
-                              : {};
-                          const importedRasterOriginalSrc = String(
-                            importedSourcePayload.rasterOriginalSrc || item.assetUrl || ""
-                          ).trim();
-                          const importedRasterPalette = Array.isArray(importedSourcePayload.rasterPalette)
-                            ? importedSourcePayload.rasterPalette
-                                .map((value) => String(value || "").trim())
-                                .filter(Boolean)
-                            : [];
-                          const importedRasterPaletteVersion = Number.isFinite(
-                            Number(importedSourcePayload.rasterPaletteVersion)
-                          )
-                            ? Number(importedSourcePayload.rasterPaletteVersion)
-                            : 0;
-                          const importedRasterColorMap =
-                            importedSourcePayload.rasterColorMap &&
-                            typeof importedSourcePayload.rasterColorMap === "object" &&
-                            !Array.isArray(importedSourcePayload.rasterColorMap)
-                              ? importedSourcePayload.rasterColorMap
-                              : {};
-                          const importedImagePayload = {
-                            type: "image",
-                            src: item.assetUrl,
-                            name: item.title || "Imported Icon",
-                            rasterOriginalSrc: importedRasterOriginalSrc || item.assetUrl,
-                            rasterPalette: importedRasterPalette,
-                            rasterPaletteVersion: importedRasterPaletteVersion,
-                            rasterColorMap: importedRasterColorMap as Record<string, string>,
-                          } as const;
-                          const addImportedElementToCanvas = () => {
-                            if (addAsVideo) {
-                              addVideoElement(videoSource, {
+                        {importedElements.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {importedElements.map((item) => {
+                              const isGifAsset = isGifSource(item.assetUrl);
+                              const videoSource = deriveFreepikAnimatedVideoUrl(item);
+                              const addAsVideo = !isGifAsset && isVideoSource(videoSource);
+                              const deletingImported = deletingImportedElementId === item.id;
+                              const showingInfo = openImportedElementInfoId === item.id;
+                              const searchableTagsEn = Array.from(
+                                new Set(
+                                  [
+                                    ...(Array.isArray(item.tagsEn) ? item.tagsEn : []),
+                                    ...(Array.isArray(item.labelsEn) ? item.labelsEn : []),
+                                    ...(!Array.isArray(item.tagsEn) || item.tagsEn.length === 0 ? item.tags : []),
+                                    ...(!Array.isArray(item.labelsEn) || item.labelsEn.length === 0 ? item.labels : []),
+                                  ]
+                                    .map((value) => String(value || "").trim())
+                                    .filter(Boolean)
+                                )
+                              ).slice(0, 24);
+                              const searchableTagsAr = Array.from(
+                                new Set(
+                                  [
+                                    ...(Array.isArray(item.tagsAr) ? item.tagsAr : []),
+                                    ...(Array.isArray(item.labelsAr) ? item.labelsAr : []),
+                                  ]
+                                    .map((value) => String(value || "").trim())
+                                    .filter(Boolean)
+                                )
+                              ).slice(0, 24);
+                              const importedSourcePayload =
+                                item.sourcePayload && typeof item.sourcePayload === "object"
+                                  ? item.sourcePayload
+                                  : {};
+                              const importedRasterOriginalSrc = String(
+                                importedSourcePayload.rasterOriginalSrc || item.assetUrl || ""
+                              ).trim();
+                              const importedRasterPalette = Array.isArray(importedSourcePayload.rasterPalette)
+                                ? importedSourcePayload.rasterPalette
+                                    .map((value) => String(value || "").trim())
+                                    .filter(Boolean)
+                                : [];
+                              const importedRasterPaletteVersion = Number.isFinite(
+                                Number(importedSourcePayload.rasterPaletteVersion)
+                              )
+                                ? Number(importedSourcePayload.rasterPaletteVersion)
+                                : 0;
+                              const importedRasterColorMap =
+                                importedSourcePayload.rasterColorMap &&
+                                typeof importedSourcePayload.rasterColorMap === "object" &&
+                                !Array.isArray(importedSourcePayload.rasterColorMap)
+                                  ? importedSourcePayload.rasterColorMap
+                                  : {};
+                              const importedImagePayload = {
+                                type: "image",
+                                src: item.assetUrl,
                                 name: item.title || "Imported Icon",
-                              });
-                              return;
-                            }
-                            addImageElement(item.assetUrl, importedImagePayload);
-                          };
+                                rasterOriginalSrc: importedRasterOriginalSrc || item.assetUrl,
+                                rasterPalette: importedRasterPalette,
+                                rasterPaletteVersion: importedRasterPaletteVersion,
+                                rasterColorMap: importedRasterColorMap as Record<string, string>,
+                              } as const;
+                              const addImportedElementToCanvas = () => {
+                                if (selectedFrameElement) {
+                                  setFrameContent(
+                                    selectedFrameElement.id,
+                                    addAsVideo
+                                      ? {
+                                          kind: "video",
+                                          src: videoSource,
+                                        }
+                                      : {
+                                          kind: "image",
+                                          src: item.assetUrl,
+                                        },
+                                    { recordHistory: true }
+                                  );
+                                  return;
+                                }
+                                if (addAsVideo) {
+                                  addVideoElement(videoSource, {
+                                    name: item.title || "Imported Icon",
+                                  });
+                                  return;
+                                }
+                                addImageElement(item.assetUrl, importedImagePayload);
+                              };
 
-                          return (
-                            <div
-                              key={item.id}
-                              role="button"
-                              tabIndex={0}
-                              draggable
-                              onDragStart={(event) => {
-                                const payload = addAsVideo
-                                  ? assetPayload({
-                                      kind: "video",
-                                      src: videoSource,
-                                    })
-                                  : assetPayload({
-                                        payload: importedImagePayload,
-                                      });
-                                event.dataTransfer.setData(
-                                  "application/x-editor-asset",
-                                  payload
-                                );
-                              }}
-                              onClick={addImportedElementToCanvas}
-                              onKeyDown={(event) => {
-                                if (event.key !== "Enter" && event.key !== " ") return;
-                                event.preventDefault();
-                                addImportedElementToCanvas();
-                              }}
-                              className="rounded-md border border-[#d3d8e1] bg-[#f3f4f6] p-2 text-left hover:bg-[#eef2f7] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/40"
-                            >
-                              <div className="relative rounded-md bg-[#eef1f5] p-1">
-                                <span
-                                  title="Show search tags"
-                                  aria-label="Show search tags"
+                              return (
+                                <div
+                                  key={item.id}
                                   role="button"
                                   tabIndex={0}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    setOpenImportedElementInfoId((current) =>
-                                      current === item.id ? "" : item.id
+                                  draggable
+                                  onDragStart={(event) => {
+                                    event.dataTransfer.effectAllowed = "copy";
+                                    const payload = addAsVideo
+                                      ? assetPayload({
+                                          kind: "video",
+                                          src: videoSource,
+                                        })
+                                      : assetPayload({
+                                            payload: importedImagePayload,
+                                          });
+                                    event.dataTransfer.setData(
+                                      "application/x-editor-asset",
+                                      payload
                                     );
                                   }}
+                                  onClick={addImportedElementToCanvas}
                                   onKeyDown={(event) => {
                                     if (event.key !== "Enter" && event.key !== " ") return;
                                     event.preventDefault();
-                                    event.stopPropagation();
-                                    setOpenImportedElementInfoId((current) =>
-                                      current === item.id ? "" : item.id
-                                    );
+                                    addImportedElementToCanvas();
                                   }}
-                                  className="absolute left-1 bottom-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#cbd5e1] bg-white text-[#475569] hover:bg-[#f8fafc]"
+                                  className="rounded-md border border-[#d3d8e1] bg-[#f3f4f6] p-2 text-left hover:bg-[#eef2f7] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/40"
                                 >
-                                  <Info size={11} />
-                                </span>
-                                <span
-                                  title="Delete imported element"
-                                  aria-label="Delete imported element"
-                                  role="button"
-                                  tabIndex={deletingImported ? -1 : 0}
-                                  onClick={(event) => {
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    if (deletingImported) return;
-                                    void handleDeleteImportedElement(item.id);
-                                  }}
-                                  onKeyDown={(event) => {
-                                    if (deletingImported) return;
-                                    if (event.key !== "Enter" && event.key !== " ") return;
-                                    event.preventDefault();
-                                    event.stopPropagation();
-                                    void handleDeleteImportedElement(item.id);
-                                  }}
-                                  className={`absolute bottom-1 right-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fee2e2] ${
-                                    deletingImported ? "cursor-not-allowed opacity-60" : ""
+                                  <div className="relative rounded-md bg-[#eef1f5] p-1">
+                                    <span
+                                      title="Show search tags"
+                                      aria-label="Show search tags"
+                                      role="button"
+                                      tabIndex={0}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setOpenImportedElementInfoId((current) =>
+                                          current === item.id ? "" : item.id
+                                        );
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (event.key !== "Enter" && event.key !== " ") return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        setOpenImportedElementInfoId((current) =>
+                                          current === item.id ? "" : item.id
+                                        );
+                                      }}
+                                      className="absolute left-1 bottom-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#cbd5e1] bg-white text-[#475569] hover:bg-[#f8fafc]"
+                                    >
+                                      <Info size={11} />
+                                    </span>
+                                    <span
+                                      title="Delete imported element"
+                                      aria-label="Delete imported element"
+                                      role="button"
+                                      tabIndex={deletingImported ? -1 : 0}
+                                      onClick={(event) => {
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        if (deletingImported) return;
+                                        void handleDeleteImportedElement(item.id);
+                                      }}
+                                      onKeyDown={(event) => {
+                                        if (deletingImported) return;
+                                        if (event.key !== "Enter" && event.key !== " ") return;
+                                        event.preventDefault();
+                                        event.stopPropagation();
+                                        void handleDeleteImportedElement(item.id);
+                                      }}
+                                      className={`absolute bottom-1 right-1 z-10 inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#fecaca] bg-white text-[#b91c1c] hover:bg-[#fee2e2] ${
+                                        deletingImported ? "cursor-not-allowed opacity-60" : ""
+                                      }`}
+                                    >
+                                      <Trash2 size={11} />
+                                    </span>
+                                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                                    <img
+                                      src={resolveImportedElementPreviewUrl(item)}
+                                      alt={item.title || "Imported element"}
+                                      className="h-20 w-full rounded object-contain"
+                                    />
+                                    {showingInfo ? (
+                                      <div className="absolute inset-x-1 top-1 z-20 rounded-md border border-[#dbe3ee] bg-white/98 p-2 shadow-lg">
+                                        <div className="mb-1 flex items-start justify-between gap-2">
+                                          <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
+                                            Search Tags
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={(event) => {
+                                              event.preventDefault();
+                                              event.stopPropagation();
+                                              setOpenImportedElementInfoId("");
+                                            }}
+                                            className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#dbe3ee] bg-white text-[#64748b] hover:bg-[#f8fafc]"
+                                            aria-label="Close search tags"
+                                            title="Close"
+                                          >
+                                            <X size={11} />
+                                          </button>
+                                        </div>
+                                        {searchableTagsEn.length > 0 || searchableTagsAr.length > 0 ? (
+                                          <div className="space-y-2">
+                                            <div>
+                                              <div className="mb-1 text-[10px] font-semibold text-[#475569]">
+                                                English
+                                              </div>
+                                              {searchableTagsEn.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                  {searchableTagsEn.map((tag) => {
+                                                    const tagKey = `${item.id}:${tag}`;
+                                                    const isCopied = copiedImportedTagKey === tagKey;
+                                                    return (
+                                                      <button
+                                                        key={`${item.id}-en-${tag}`}
+                                                        type="button"
+                                                        onClick={(event) => {
+                                                          event.preventDefault();
+                                                          event.stopPropagation();
+                                                          void handleCopyImportedTag(item.id, tag);
+                                                        }}
+                                                        className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
+                                                          isCopied
+                                                            ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
+                                                            : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
+                                                        }`}
+                                                        title={isCopied ? "Copied" : "Click to copy"}
+                                                      >
+                                                        {tag}
+                                                      </button>
+                                                    );
+                                                  })}
+                                                </div>
+                                              ) : (
+                                                <div className="text-[10px] text-[#94a3b8]">No English tags.</div>
+                                              )}
+                                            </div>
+                                            <div>
+                                              <div className="mb-1 text-[10px] font-semibold text-[#475569]">
+                                                العربية
+                                              </div>
+                                              {searchableTagsAr.length > 0 ? (
+                                                <div className="flex flex-wrap gap-1">
+                                                  {searchableTagsAr.map((tag) => {
+                                                    const tagKey = `${item.id}:${tag}`;
+                                                    const isCopied = copiedImportedTagKey === tagKey;
+                                                    return (
+                                                      <button
+                                                        key={`${item.id}-ar-${tag}`}
+                                                        type="button"
+                                                        onClick={(event) => {
+                                                          event.preventDefault();
+                                                          event.stopPropagation();
+                                                          void handleCopyImportedTag(item.id, tag);
+                                                        }}
+                                                        className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
+                                                          isCopied
+                                                            ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
+                                                            : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
+                                                        }`}
+                                                        title={isCopied ? "Copied" : "Click to copy"}
+                                                      >
+                                                        {tag}
+                                                      </button>
+                                                    );
+                                                  })}
+                                                </div>
+                                              ) : (
+                                                <div className="text-[10px] text-[#94a3b8]">لا توجد كلمات عربية.</div>
+                                              )}
+                                            </div>
+                                          </div>
+                                        ) : (
+                                          <div className="text-[10px] text-[#64748b]">
+                                            No search tags available.
+                                          </div>
+                                        )}
+                                      </div>
+                                    ) : null}
+                                    {isGifAsset ? (
+                                      <span className="absolute right-1 top-1 rounded-full bg-[#1f2a39] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
+                                        GIF
+                                      </span>
+                                    ) : null}
+                                  </div>
+                                  <div className="mt-1 truncate text-[11px] font-semibold text-[#1f2a39]">
+                                    {item.title || "Imported Icon"}
+                                  </div>
+                                  <div className="text-[10px] uppercase text-[#64748b]">
+                                    {item.kind}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+
+                        {importedElementsLoading && importedElements.length === 0 ? (
+                          <div className="py-2 text-xs text-[#64748b]">Loading imported elements...</div>
+                        ) : null}
+
+                        {importedElementsError ? (
+                          <div className="py-2 text-xs text-[#b45309]">{importedElementsError}</div>
+                        ) : null}
+
+                        {!importedElementsLoading && !importedElementsError && importedElements.length === 0 ? (
+                          <div className="py-2 text-xs text-[#64748b]">
+                            No imported elements found. Import from Freepik or upload an image to build a recolorable elements library.
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <>
+                        <div className="mb-2 flex items-center justify-between gap-2">
+                          <div>
+                            <div className="text-sm font-semibold text-[#202a38]">
+                              Need to publish ({publishableElements.length})
+                            </div>
+                            <div className="text-[11px] text-[#637087]">
+                              {publishCandidateIds.length} selected for publish
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            className="inline-flex h-8 items-center gap-1 rounded-md border border-[#d3d8e1] bg-white px-2 text-[12px] font-medium text-[#334155] hover:bg-[#f8fafc]"
+                            onClick={() => {
+                              if (allVisiblePublishableSelected) {
+                                setPublishCandidateIds([]);
+                              } else {
+                                setPublishCandidateIds(filteredPublishableElements.map((element) => element.id));
+                              }
+                            }}
+                            disabled={filteredPublishableElements.length === 0}
+                          >
+                            {allVisiblePublishableSelected ? <CheckSquare2 size={14} /> : <Square size={14} />}
+                            {allVisiblePublishableSelected ? "Clear" : "Select all"}
+                          </button>
+                        </div>
+
+                        {filteredPublishableElements.length > 0 ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {filteredPublishableElements.map((element) => {
+                              const previewSrc = String(element.rasterOriginalSrc || element.src || "").trim();
+                              const isSelected = publishCandidatesSet.has(element.id);
+                              return (
+                                <button
+                                  key={element.id}
+                                  type="button"
+                                  onClick={() => togglePublishCandidate(element.id)}
+                                  className={`rounded-md border p-2 text-left transition ${
+                                    isSelected
+                                      ? "border-[#2563eb] bg-[#eff6ff] shadow-[inset_0_0_0_1px_rgba(37,99,235,0.12)]"
+                                      : "border-[#d3d8e1] bg-[#f3f4f6] hover:bg-[#eef2f7]"
                                   }`}
                                 >
-                                  <Trash2 size={11} />
-                                </span>
-                                {/* eslint-disable-next-line @next/next/no-img-element */}
-                                <img
-                                  src={resolveImportedElementPreviewUrl(item)}
-                                  alt={item.title || "Imported element"}
-                                  className="h-20 w-full rounded object-contain"
-                                />
-                                {showingInfo ? (
-                                  <div className="absolute inset-x-1 top-1 z-20 rounded-md border border-[#dbe3ee] bg-white/98 p-2 shadow-lg">
-                                    <div className="mb-1 flex items-start justify-between gap-2">
-                                      <div className="text-[10px] font-semibold uppercase tracking-[0.12em] text-[#64748b]">
-                                        Search Tags
-                                      </div>
-                                      <button
-                                        type="button"
-                                        onClick={(event) => {
-                                          event.preventDefault();
-                                          event.stopPropagation();
-                                          setOpenImportedElementInfoId("");
-                                        }}
-                                        className="inline-flex h-5 w-5 items-center justify-center rounded-full border border-[#dbe3ee] bg-white text-[#64748b] hover:bg-[#f8fafc]"
-                                        aria-label="Close search tags"
-                                        title="Close"
-                                      >
-                                        <X size={11} />
-                                      </button>
-                                    </div>
-                                    {searchableTagsEn.length > 0 || searchableTagsAr.length > 0 ? (
-                                      <div className="space-y-2">
-                                        <div>
-                                          <div className="mb-1 text-[10px] font-semibold text-[#475569]">
-                                            English
-                                          </div>
-                                          {searchableTagsEn.length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                              {searchableTagsEn.map((tag) => {
-                                                const tagKey = `${item.id}:${tag}`;
-                                                const isCopied = copiedImportedTagKey === tagKey;
-                                                return (
-                                                  <button
-                                                    key={`${item.id}-en-${tag}`}
-                                                    type="button"
-                                                    onClick={(event) => {
-                                                      event.preventDefault();
-                                                      event.stopPropagation();
-                                                      void handleCopyImportedTag(item.id, tag);
-                                                    }}
-                                                    className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
-                                                      isCopied
-                                                        ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
-                                                        : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
-                                                    }`}
-                                                    title={isCopied ? "Copied" : "Click to copy"}
-                                                  >
-                                                    {tag}
-                                                  </button>
-                                                );
-                                              })}
-                                            </div>
-                                          ) : (
-                                            <div className="text-[10px] text-[#94a3b8]">No English tags.</div>
-                                          )}
-                                        </div>
-                                        <div>
-                                          <div className="mb-1 text-[10px] font-semibold text-[#475569]">
-                                            العربية
-                                          </div>
-                                          {searchableTagsAr.length > 0 ? (
-                                            <div className="flex flex-wrap gap-1">
-                                              {searchableTagsAr.map((tag) => {
-                                                const tagKey = `${item.id}:${tag}`;
-                                                const isCopied = copiedImportedTagKey === tagKey;
-                                                return (
-                                                  <button
-                                                    key={`${item.id}-ar-${tag}`}
-                                                    type="button"
-                                                    onClick={(event) => {
-                                                      event.preventDefault();
-                                                      event.stopPropagation();
-                                                      void handleCopyImportedTag(item.id, tag);
-                                                    }}
-                                                    className={`rounded-full border px-1.5 py-0.5 text-[10px] ${
-                                                      isCopied
-                                                        ? "border-[#bfdbfe] bg-[#dbeafe] text-[#1d4ed8]"
-                                                        : "border-[#dbe3ee] bg-[#f8fafc] text-[#475569]"
-                                                    }`}
-                                                    title={isCopied ? "Copied" : "Click to copy"}
-                                                  >
-                                                    {tag}
-                                                  </button>
-                                                );
-                                              })}
-                                            </div>
-                                          ) : (
-                                            <div className="text-[10px] text-[#94a3b8]">لا توجد كلمات عربية.</div>
-                                          )}
-                                        </div>
-                                      </div>
+                                  <div className="relative rounded-md bg-[#eef1f5] p-1">
+                                    {previewSrc ? (
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      <img
+                                        src={previewSrc}
+                                        alt={element.name || "Canvas element"}
+                                        className="h-20 w-full rounded object-contain"
+                                      />
                                     ) : (
-                                      <div className="text-[10px] text-[#64748b]">
-                                        No search tags available.
+                                      <div className="flex h-20 w-full items-center justify-center rounded bg-white text-[#94a3b8]">
+                                        <ImageIcon size={18} />
                                       </div>
                                     )}
+                                    <span className="absolute right-1 top-1 rounded-full bg-white/90 p-[2px] text-[#1d4ed8] shadow-sm">
+                                      {isSelected ? <CheckSquare2 size={11} /> : <Square size={11} />}
+                                    </span>
                                   </div>
-                                ) : null}
-                                {isGifAsset ? (
-                                  <span className="absolute right-1 top-1 rounded-full bg-[#1f2a39] px-1.5 py-0.5 text-[9px] font-semibold uppercase text-white">
-                                    GIF
-                                  </span>
-                                ) : null}
-                              </div>
-                              <div className="mt-1 truncate text-[11px] font-semibold text-[#1f2a39]">
-                                {item.title || "Imported Icon"}
-                              </div>
-                              <div className="text-[10px] uppercase text-[#64748b]">
-                                {item.kind}
+                                  <div className="mt-1 truncate text-[11px] font-semibold text-[#1f2a39]">
+                                    {element.name || "Image layer"}
+                                  </div>
+                                  <div className="mt-0.5 flex items-center gap-1 text-[10px] text-[#64748b]">
+                                    <Sparkles size={10} />
+                                    Canvas image layer
+                                  </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : (
+                          <div className="rounded-md border border-dashed border-[#d3d8e1] bg-[#f8fafc] p-3 text-xs text-[#64748b]">
+                            {publishableElements.length === 0
+                              ? "No reusable image elements on the current canvas."
+                              : "No canvas elements match this search."}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+
+                  {elementsPanelTab === "published" ? (
+                    <div className="mt-2 flex items-center justify-between border-t border-[#e6e9ef] pt-2 text-[11px] text-[#637087]">
+                      <span>
+                        Showing {importedElements.length}/{importedElementsTotal}
+                      </span>
+                      <span>
+                        {importedElementsLoading
+                          ? "Loading..."
+                          : importedElementsHasNextPage
+                          ? "Scroll to load more"
+                          : "All loaded"}
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center justify-between border-t border-[#e6e9ef] pt-2 text-[11px] text-[#637087]">
+                      <span>{publishCandidateIds.length} selected</span>
+                      <span>Use Publish Elements to finish</span>
+                    </div>
+                  )}
+                </div>
+              </section>
+            ) : null}
+
+            {activeTab === "frames" ? (
+              <section className="flex h-full min-h-0 flex-col gap-3">
+                <div className="relative">
+                  <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
+                  <Input
+                    className="!h-9 !rounded-full !bg-white !pl-9"
+                    placeholder="Search frames..."
+                    value={frameSearch}
+                    onChange={(event) => setFrameSearch(event.target.value)}
+                  />
+                </div>
+
+                <div className="rounded-xl border border-[#d3d8e1] bg-white p-3 text-xs leading-5 text-[#64748b]">
+                  Add a frame, then drop an image or video onto it. Double-click a filled frame on the canvas to pan its content.
+                </div>
+
+                <div className="min-h-0 flex-1 overflow-y-auto rounded-md border border-[#d3d8e1] bg-white p-2">
+                  {filteredFramePresets.length > 0 ? (
+                    <div className="grid grid-cols-2 gap-2">
+                      {filteredFramePresets.map((preset) => {
+                        const clipPath = framePreviewClipPath(preset);
+                        return (
+                          <button
+                            key={preset.id}
+                            type="button"
+                            draggable
+                            onDragStart={(event) => {
+                              event.dataTransfer.effectAllowed = "copy";
+                              event.dataTransfer.setData(
+                                "application/x-editor-asset",
+                                assetPayload({
+                                  kind: "frame",
+                                  framePresetId: preset.id,
+                                })
+                              );
+                            }}
+                            onClick={() => addFramePresetToCanvas(preset)}
+                            className="group rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9fb4d6] hover:bg-[#eef3fa] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/30"
+                            title={preset.name}
+                          >
+                            <div className="flex h-24 items-center justify-center rounded-lg p-3">
+                              <div
+                                className="relative h-full w-full overflow-hidden bg-[#dff4ff] shadow-inner ring-1 ring-[#d8e2ef]"
+                                style={{ clipPath }}
+                              >
+                                <div className="absolute inset-0 bg-gradient-to-b from-[#dff4ff] via-[#f8fdff] to-[#d6ecb6]" />
+                                <div className="absolute -left-4 bottom-1 h-9 w-24 rotate-[-8deg] rounded-[50%] bg-[#8ab443]" />
+                                <div className="absolute -right-5 bottom-3 h-8 w-28 rotate-[7deg] rounded-[50%] bg-[#a6c85a]" />
+                                <div className="absolute left-1/2 top-1/3 h-7 w-12 -translate-x-1/2 rounded-full bg-white/85 shadow-sm before:absolute before:-left-2 before:top-2 before:h-4 before:w-4 before:rounded-full before:bg-white/90 after:absolute after:right-1 after:top-[-8px] after:h-7 after:w-7 after:rounded-full after:bg-white/90" />
                               </div>
                             </div>
-                          );
-                        })}
-                      </div>
-                    ) : null}
-
-                    {importedElementsLoading && importedElements.length === 0 ? (
-                      <div className="py-2 text-xs text-[#64748b]">Loading imported elements...</div>
-                    ) : null}
-
-                    {importedElementsError ? (
-                      <div className="py-2 text-xs text-[#b45309]">{importedElementsError}</div>
-                    ) : null}
-
-                    {!importedElementsLoading && !importedElementsError && importedElements.length === 0 ? (
-                      <div className="py-2 text-xs text-[#64748b]">
-                        No imported elements found. Import from Freepik or upload an image to build a recolorable elements library.
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="mt-2 flex items-center justify-between border-t border-[#e6e9ef] pt-2 text-[11px] text-[#637087]">
-                    <span>
-                      Showing {importedElements.length}/{importedElementsTotal}
-                    </span>
-                    <span>
-                      {importedElementsLoading
-                        ? "Loading..."
-                        : importedElementsHasNextPage
-                        ? "Scroll to load more"
-                        : "All loaded"}
-                    </span>
-                  </div>
+                            <div className="mt-2 line-clamp-2 text-[12px] font-semibold leading-4 text-[#1f2a39]">
+                              {preset.name}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="rounded-md border border-dashed border-[#d3d8e1] bg-[#f8fafc] p-3 text-xs text-[#64748b]">
+                      No frames match this search.
+                    </div>
+                  )}
                 </div>
               </section>
             ) : null}
@@ -3826,10 +4546,499 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                     </div>
                   </div>
                 ))}
+
+              </section>
+            ) : null}
+
+            {activeTab === "animation" && selectedElements.length > 0 ? (
+              <section className="editor-animation-panel space-y-4">
+                <div className="space-y-1">
+                  <div className="text-sm font-semibold text-[#202a38]">Animation</div>
+                  <div className="text-[11px] text-[#64748b]">
+                    {selectedElements.length === 1
+                      ? `Editing ${primarySelectedElement?.name || "selected layer"}`
+                      : `Apply to ${selectedElements.length} selected layers`}
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-[#5b6472]">Animation time (ms)</Label>
+                    <div className="relative">
+                      <Input
+                        className={`!h-10 !rounded-xl !pr-12 ${
+                          selectedAnimationInfinite
+                            ? "!cursor-not-allowed !border-[#e2e8f0] !bg-[#f8fafc] !text-[#94a3b8]"
+                            : "!bg-white"
+                        }`}
+                        type="number"
+                        min={200}
+                        max={15000}
+                        step={100}
+                        value={animationDurationDraft}
+                        placeholder={selectedElements.length > 1 ? "Mixed" : String(DEFAULT_ANIMATION_DURATION_MS)}
+                        disabled={Boolean(selectedAnimationInfinite)}
+                        onChange={(event) => setAnimationDurationDraft(String(event.target.value || "").trim())}
+                        onKeyDown={(event) => {
+                          if (selectedAnimationInfinite) return;
+                          if (event.key !== "Enter") return;
+                          const nextValue = String(animationDurationDraft || "").trim();
+                          if (!nextValue) return;
+                          updateSelectedElements({
+                            mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                          });
+                        }}
+                      />
+                      <button
+                        type="button"
+                        aria-label="Apply animation time"
+                        title="Apply animation time"
+                        disabled={Boolean(selectedAnimationInfinite)}
+                        onClick={() => {
+                          const nextValue = String(animationDurationDraft || "").trim();
+                          if (!nextValue) return;
+                          updateSelectedElements({
+                            mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                          });
+                        }}
+                        className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-white shadow-sm transition ${
+                          selectedAnimationInfinite
+                            ? "cursor-not-allowed bg-[#cbd5e1]"
+                            : "bg-[#fb7185] hover:bg-[#f43f5e]"
+                        }`}
+                      >
+                        <Check size={14} />
+                      </button>
+                    </div>
+                    {selectedAnimationInfinite ? (
+                      <div className="text-[11px] text-[#94a3b8]">Animation time is ignored while infinite is enabled.</div>
+                    ) : null}
+                  </div>
+
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold text-[#5b6472]">Infinite</Label>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        updateSelectedElements({
+                          mediaAnimationInfinite: !(selectedAnimationInfinite ?? false),
+                        })
+                      }
+                      className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
+                        selectedAnimationInfinite
+                          ? "border-[#fb7185] bg-[#fff1f4] text-[#be123c]"
+                          : "border-[#d6dce6] bg-white text-[#334155] hover:border-[#c2cedd]"
+                      }`}
+                    >
+                      <span>{selectedAnimationInfinite === null ? "Mixed" : selectedAnimationInfinite ? "Yes" : "No"}</span>
+                      <span
+                        className={`relative h-5 w-9 rounded-full transition ${
+                          selectedAnimationInfinite ? "bg-[#fb7185]" : "bg-[#cbd5e1]"
+                        }`}
+                      >
+                        <span
+                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                            selectedAnimationInfinite ? "left-4.5" : "left-0.5"
+                          }`}
+                        />
+                      </span>
+                    </button>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-3 gap-2">
+                  {EDITOR_ANIMATION_OPTIONS.map((option) => {
+                    const active = selectedAnimationType === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() =>
+                          updateSelectedElements({
+                            mediaAnimationType: option.value as EditorAnimationType,
+                          })
+                        }
+                        className={`group rounded-2xl border p-2 text-center transition ${
+                          active
+                            ? "border-[#fb7185] bg-[#fff1f4] shadow-[inset_0_0_0_1px_rgba(251,113,133,0.12)]"
+                            : "border-[#d6dce6] bg-white hover:border-[#c2cedd] hover:bg-[#f8fbff]"
+                        }`}
+                      >
+                        <div className="flex justify-center">
+                          <AnimationSampleTile type={option.value as EditorAnimationType} />
+                        </div>
+                        <div className="mt-2 text-[11px] font-semibold leading-tight text-[#243041]">
+                          {option.label}
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim() ? (
+                  <div className="rounded-xl border border-[#d6dce6] bg-white px-3 py-2 text-[11px] text-[#64748b]">
+                    Imported animation: {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim()}
+                  </div>
+                ) : null}
               </section>
             ) : null}
         </div>
       </div>
+      <style jsx global>{`
+        .editor-animation-panel .animation-sample-glyph {
+          display: block;
+          height: 40px;
+          width: 40px;
+          will-change: transform, opacity;
+          animation-duration: 1.45s;
+          animation-iteration-count: infinite;
+          animation-timing-function: ease-in-out;
+          animation-direction: alternate;
+          animation-fill-mode: both;
+          animation-play-state: running;
+          transform-origin: center;
+          overflow: visible;
+        }
+
+        .editor-animation-panel .animation-sample-rise {
+          animation-name: sampleRise;
+        }
+
+        .editor-animation-panel .animation-sample-pan {
+          animation-name: samplePan;
+        }
+
+        .editor-animation-panel .animation-sample-fade {
+          animation-name: sampleFade;
+        }
+
+        .editor-animation-panel .animation-sample-pop {
+          animation-name: samplePop;
+        }
+
+        .editor-animation-panel .animation-sample-wipe {
+          animation-name: sampleWipe;
+        }
+
+        .editor-animation-panel .animation-sample-blur {
+          animation-name: sampleBlur;
+        }
+
+        .editor-animation-panel .animation-sample-succession {
+          animation-name: sampleSuccession;
+        }
+
+        .editor-animation-panel .animation-sample-breathe {
+          animation-name: sampleBreathe;
+          animation-duration: 1.8s;
+        }
+
+        .editor-animation-panel .animation-sample-baseline {
+          animation-name: sampleBaseline;
+        }
+
+        .editor-animation-panel .animation-sample-drift {
+          animation-name: sampleDrift;
+        }
+
+        .editor-animation-panel .animation-sample-tectonic {
+          animation-name: sampleTectonic;
+        }
+
+        .editor-animation-panel .animation-sample-tumble {
+          animation-name: sampleTumble;
+        }
+
+        .editor-animation-panel .animation-sample-neon {
+          animation-name: sampleNeon;
+        }
+
+        .editor-animation-panel .animation-sample-scrapbook {
+          animation-name: sampleScrapbook;
+        }
+
+        .editor-animation-panel .animation-sample-stomp {
+          animation-name: sampleStomp;
+        }
+
+        .editor-animation-panel .animation-sample-rotate {
+          animation-name: sampleRotate;
+          animation-duration: 1.7s;
+          animation-direction: normal;
+          animation-timing-function: linear;
+        }
+
+        .editor-animation-panel .animation-sample-flicker {
+          animation-name: sampleFlicker;
+          animation-duration: 0.9s;
+          animation-direction: normal;
+        }
+
+        .editor-animation-panel .animation-sample-pulse {
+          animation-name: samplePulse;
+          animation-duration: 1.4s;
+        }
+
+        .editor-animation-panel .animation-sample-wiggle {
+          animation-name: sampleWiggle;
+          animation-duration: 1.15s;
+        }
+
+        @keyframes sampleFade {
+          0%,
+          100% {
+            opacity: 0.28;
+          }
+          50% {
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleRise {
+          0%,
+          100% {
+            transform: translateY(7px);
+            opacity: 0.52;
+          }
+          50% {
+            transform: translateY(-5px);
+            opacity: 1;
+          }
+        }
+
+        @keyframes samplePan {
+          0%,
+          100% {
+            transform: translateX(-7px);
+            opacity: 0.45;
+          }
+          50% {
+            transform: translateX(7px);
+            opacity: 1;
+          }
+        }
+
+        @keyframes samplePop {
+          0%,
+          100% {
+            transform: scale(0.84);
+            opacity: 0.74;
+          }
+          50% {
+            transform: scale(1.08);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleWipe {
+          0%,
+          100% {
+            transform: scaleX(0.72);
+            opacity: 0.65;
+          }
+          50% {
+            transform: scaleX(1);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleBlur {
+          0%,
+          100% {
+            transform: scale(0.96);
+            opacity: 0.45;
+            filter: blur(1.8px);
+          }
+          50% {
+            transform: scale(1);
+            opacity: 1;
+            filter: blur(0px);
+          }
+        }
+
+        @keyframes sampleSuccession {
+          0%,
+          100% {
+            transform: scale(0.8);
+            opacity: 0.35;
+          }
+          50% {
+            transform: scale(1.08);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleBreathe {
+          0%,
+          100% {
+            transform: scale(0.9);
+            opacity: 0.85;
+          }
+          50% {
+            transform: scale(1.04);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleBaseline {
+          0%,
+          100% {
+            transform: translateY(3px) scale(0.94);
+          }
+          45% {
+            transform: translateY(-7px) scale(1.01);
+          }
+          65% {
+            transform: translateY(-2px) scale(0.98);
+          }
+        }
+
+        @keyframes sampleDrift {
+          0%,
+          100% {
+            transform: translateX(-4px) translateY(1px);
+            opacity: 0.62;
+          }
+          50% {
+            transform: translateX(6px) translateY(-1px);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleTectonic {
+          0%,
+          100% {
+            transform: translateX(-8px) scaleX(0.88);
+            opacity: 0.6;
+          }
+          50% {
+            transform: translateX(5px) scaleX(1);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleTumble {
+          0%,
+          100% {
+            transform: rotate(-14deg) translateY(1px) scale(0.94);
+            opacity: 0.7;
+          }
+          50% {
+            transform: rotate(10deg) translateY(-3px) scale(1.03);
+            opacity: 1;
+          }
+        }
+
+        @keyframes sampleNeon {
+          0%,
+          100% {
+            transform: scale(0.95);
+            opacity: 0.84;
+            filter: drop-shadow(0 0 0 rgba(251, 113, 133, 0));
+          }
+          50% {
+            transform: scale(1.04);
+            opacity: 1;
+            filter: drop-shadow(0 0 5px rgba(251, 113, 133, 0.45));
+          }
+        }
+
+        @keyframes sampleScrapbook {
+          0%,
+          100% {
+            transform: rotate(-7deg) translateX(-2px);
+          }
+          50% {
+            transform: rotate(5deg) translateX(3px);
+          }
+        }
+
+        @keyframes sampleStomp {
+          0%,
+          100% {
+            transform: scale(0.82);
+            opacity: 0.7;
+          }
+          35% {
+            transform: scale(1.08);
+            opacity: 1;
+          }
+          55% {
+            transform: scale(0.96);
+          }
+        }
+
+        @keyframes sampleFlicker {
+          0%,
+          100% {
+            opacity: 1;
+          }
+          20% {
+            opacity: 0.4;
+          }
+          40% {
+            opacity: 1;
+          }
+          60% {
+            opacity: 0.25;
+          }
+          80% {
+            opacity: 0.9;
+          }
+        }
+
+        @keyframes sampleRotate {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
+
+        @keyframes samplePulse {
+          0%,
+          100% {
+            transform: scale(0.92);
+          }
+          30% {
+            transform: scale(1.05);
+          }
+          60% {
+            transform: scale(0.96);
+          }
+        }
+
+        @keyframes sampleWiggle {
+          0%,
+          100% {
+            transform: rotate(-6deg);
+          }
+          50% {
+            transform: rotate(6deg);
+          }
+        }
+
+        @keyframes sampleHeartbeat {
+          0%,
+          100% {
+            transform: scale(0.9);
+          }
+          20% {
+            transform: scale(1.04);
+          }
+          40% {
+            transform: scale(0.92);
+          }
+          60% {
+            transform: scale(1.08);
+          }
+          80% {
+            transform: scale(0.95);
+          }
+        }
+
+      `}</style>
     </aside>
   );
 }

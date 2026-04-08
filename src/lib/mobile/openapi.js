@@ -537,7 +537,7 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source).",
+          "Project layers. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source). FRAME layers include `shape`, `content`, and `contentTransform` so the mobile renderer can position the frame and clipped image/video independently.",
         items: {
           type: "object",
           additionalProperties: true,
@@ -546,6 +546,47 @@ const schemas = {
       meta: {
         type: "object",
         additionalProperties: true,
+        properties: {
+          frameInfo: {
+            $ref: "#/components/schemas/MobileTemplateFrameInfo",
+          },
+          compatibilityWarnings: {
+            type: "array",
+            items: { type: "string" },
+          },
+        },
+      },
+    },
+  },
+  MobileTemplateFrameInfo: {
+    type: "object",
+    required: ["hasFrames", "count", "shapes", "frames", "message"],
+    properties: {
+      hasFrames: { type: "boolean" },
+      count: { type: "integer" },
+      shapes: {
+        type: "array",
+        items: { type: "string" },
+      },
+      frames: {
+        type: "array",
+        items: {
+          type: "object",
+          required: ["id", "name", "shape", "presetId", "shapeKind", "hasContent", "contentKind"],
+          properties: {
+            id: { type: "string" },
+            name: { type: "string" },
+            shape: { type: "string" },
+            presetId: { type: "string", nullable: true },
+            shapeKind: { type: "string", nullable: true },
+            hasContent: { type: "boolean" },
+            contentKind: { type: "string", nullable: true },
+          },
+        },
+      },
+      message: {
+        type: "string",
+        example: "This template contains 1 frame: Circle.",
       },
     },
   },
@@ -582,6 +623,13 @@ const schemas = {
       subCategoryValue: { type: "string" },
       thumbnailUrl: { type: "string" },
       thumbnailDataUrl: { type: "string" },
+      frameInfo: {
+        $ref: "#/components/schemas/MobileTemplateFrameInfo",
+      },
+      compatibilityWarnings: {
+        type: "array",
+        items: { type: "string" },
+      },
     },
   },
   MobileTemplateDetail: {

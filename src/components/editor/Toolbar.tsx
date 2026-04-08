@@ -14,6 +14,7 @@ import {
   Layers,
   Menu,
   Scissors,
+  SlidersHorizontal,
   Strikethrough,
   Underline,
   Undo2,
@@ -1307,7 +1308,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
             className={topActionClass}
             onClick={onToggleRight}
           >
-            <Layers size={14} /> Position
+            <SlidersHorizontal size={14} /> Properties
           </button>
           <Button
             type="button"

@@ -6,6 +6,37 @@ import {
   mergeFontFamilies,
   normalizeFontFamilyName,
 } from "@/lib/editor/fonts";
+import {
+  DEFAULT_ANIMATION_DURATION_MS,
+  DEFAULT_PAGE_DURATION_MS,
+  DEFAULT_TIMELINE_FPS,
+  clampTimelinePlayheadMs,
+  clampTimelineWindow,
+  getPageDurationMs,
+  getTotalTimelineDurationMs,
+  hasAnimatedTemplateContent,
+  normalizeAnimationDelayMs,
+  normalizeAnimationDirection,
+  normalizeAnimationEasing,
+  normalizeAnimationDurationMs,
+  normalizeAnimationInfinite,
+  normalizeAnimationIntensity,
+  normalizeAnimationMode,
+  normalizeAnimationType,
+  type EditorAnimationDirection,
+  type EditorAnimationEasing,
+  type EditorAnimationMode,
+  type EditorAnimationType,
+} from "@/lib/editor/animationTimeline";
+import {
+  DEFAULT_FRAME_CONTENT_TRANSFORM,
+  createFrameShapeFromPreset,
+  normalizeFrameContentTransform,
+  resolveFramePreset,
+  type FrameContent,
+  type FrameContentTransform,
+  type FrameShape,
+} from "@/lib/editor/frames";
 
 export type ToolMode = "select" | "pan" | "draw" | "crop";
 export type SidebarTab =
@@ -14,17 +45,20 @@ export type SidebarTab =
   | "videos"
   | "shapes"
   | "elements"
+  | "frames"
   | "category"
   | "draw"
   | "upload"
   | "backgrounds"
   | "layers"
-  | "resize";
+  | "resize"
+  | "animation";
 export type ShapeType = "rect" | "circle" | "line" | "arrow" | "star";
-export type ElementType = "text" | "image" | "video" | ShapeType;
+export type ElementType = "text" | "image" | "video" | "frame" | ShapeType;
 export type AlignType = "left" | "center" | "right" | "top" | "middle" | "bottom";
 export type DrawTool = "selection" | "brush" | "highlighter";
 export type TemplateLifecycleStatus = "draft" | "published";
+export type TimelinePreviewStatus = "not_requested" | "queued" | "processing" | "ready" | "failed";
 
 export interface EditorElement {
   id: string;
@@ -69,9 +103,24 @@ export interface EditorElement {
   lineHeight: number;
   letterSpacing: number;
   color: string;
+  timelineStartMs?: number;
+  timelineEndMs?: number;
+  mediaAnimationType?: EditorAnimationType;
+  mediaAnimationMode?: EditorAnimationMode;
+  mediaAnimationInfinite?: boolean;
+  mediaAnimationDurationMs?: number;
+  mediaAnimationDelayMs?: number;
+  mediaAnimationDirection?: EditorAnimationDirection;
+  mediaAnimationEasing?: EditorAnimationEasing;
+  mediaAnimationIntensity?: number;
+  sourceAnimationName?: string;
+  sourceAnimationLabel?: string;
   videoStart?: number;
   videoEnd?: number;
   videoDuration?: number;
+  frameShape?: FrameShape;
+  frameContent?: FrameContent | null;
+  frameContentTransform?: FrameContentTransform;
   sourceWidth?: number;
   sourceHeight?: number;
   cropX?: number;
@@ -111,13 +160,36 @@ export interface EditorPage {
   name: string;
   width: number;
   height: number;
+  durationMs?: number;
   background: PageBackground;
   elements: EditorElement[];
+}
+
+export interface EditorTimelinePreview {
+  status: TimelinePreviewStatus;
+  url?: string | null;
+  posterUrl?: string | null;
+  generatedAt?: string | null;
+  error?: string | null;
+}
+
+export interface EditorTimelineSourceMeta {
+  origin: "manual" | "canva";
+  animatedImport: boolean;
+}
+
+export interface EditorTimeline {
+  enabled: boolean;
+  fps: number;
+  totalDurationMs: number;
+  preview: EditorTimelinePreview;
+  source?: EditorTimelineSourceMeta;
 }
 
 export interface EditorDesign {
   version: number;
   activePageId: string;
+  timeline?: EditorTimeline;
   pages: EditorPage[];
 }
 
@@ -167,6 +239,9 @@ interface TemplateMetaPatch {
 interface EditorStore {
   pages: EditorPage[];
   activePageId: string;
+  designTimeline: EditorTimeline;
+  timelinePlayheadMs: number;
+  timelineIsPlaying: boolean;
   selectedIds: string[];
   publishCandidateIds: string[];
   importedElementsRefreshKey: number;
@@ -203,6 +278,10 @@ interface EditorStore {
   setDrawColor: (value: string) => void;
   setDrawOpacity: (value: number) => void;
   setResizeUseMagic: (value: boolean) => void;
+  updateTimeline: (patch: Partial<EditorTimeline>, options?: UpdateOptions) => void;
+  setTimelinePlayheadMs: (value: number) => void;
+  setTimelinePlaying: (value: boolean) => void;
+  toggleTimelinePlaying: () => void;
 
   setSelectedIds: (ids: string[]) => void;
   setPublishCandidateIds: (ids: string[]) => void;
@@ -218,9 +297,13 @@ interface EditorStore {
   addShapeElement: (shape: ShapeType, partial?: Partial<EditorElement>) => string;
   addImageElement: (src: string, partial?: Partial<EditorElement>) => string;
   addVideoElement: (src: string, partial?: Partial<EditorElement>) => string;
+  addFrameElement: (presetId: string, partial?: Partial<EditorElement>) => string;
   addFreehandLine: (points: number[], partial?: Partial<EditorElement>) => string;
 
   updateElement: (id: string, patch: Partial<EditorElement>, options?: UpdateOptions) => void;
+  setFrameContent: (id: string, content: FrameContent, options?: UpdateOptions) => void;
+  updateFrameContentTransform: (id: string, patch: Partial<FrameContentTransform>, options?: UpdateOptions) => void;
+  clearFrameContent: (id: string, options?: UpdateOptions) => void;
   updateSelectedElements: (patch: Partial<EditorElement>, options?: UpdateOptions) => void;
   deleteElement: (id: string) => void;
   deleteSelected: () => void;
@@ -245,6 +328,8 @@ interface EditorStore {
   deletePage: (pageId: string) => void;
   reorderPages: (sourceId: string, targetId: string, position: "before" | "after") => void;
   setActivePageId: (pageId: string) => void;
+  setActivePageIdSilently: (pageId: string) => void;
+  setPageDuration: (pageId: string, durationMs: number, options?: UpdateOptions) => void;
 
   applyTemplate: (template: EditorTemplatePreset) => void;
   exportDesign: () => string;
@@ -295,6 +380,32 @@ function createDefaultBackground(): PageBackground {
   };
 }
 
+function createDefaultTimelinePreview(): EditorTimelinePreview {
+  return {
+    status: "not_requested",
+    url: null,
+    posterUrl: null,
+    generatedAt: null,
+    error: null,
+  };
+}
+
+function createDefaultDesignTimeline(
+  pages: Array<Pick<EditorPage, "durationMs" | "elements">>,
+  partial: Partial<EditorTimeline> = {}
+): EditorTimeline {
+  return {
+    enabled: partial.enabled ?? hasAnimatedTemplateContent(pages, partial),
+    fps: Number.isFinite(Number(partial.fps)) && Number(partial.fps) > 0 ? Math.round(Number(partial.fps)) : DEFAULT_TIMELINE_FPS,
+    totalDurationMs: getTotalTimelineDurationMs(pages),
+    preview: {
+      ...createDefaultTimelinePreview(),
+      ...(partial.preview || {}),
+    },
+    ...(partial.source ? { source: { ...partial.source } } : {}),
+  };
+}
+
 function createBaseElement(pageId: string, partial: Partial<EditorElement> = {}): EditorElement {
   const normalizedFontFamily = normalizeFontFamilyName(partial.fontFamily);
   return {
@@ -336,9 +447,105 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     lineHeight: partial.lineHeight ?? 1.1,
     letterSpacing: partial.letterSpacing ?? 0,
     color: partial.color ?? "#111827",
+    timelineStartMs: partial.timelineStartMs ?? 0,
+    timelineEndMs: partial.timelineEndMs ?? DEFAULT_PAGE_DURATION_MS,
+    mediaAnimationType: normalizeAnimationType(partial.mediaAnimationType),
+    mediaAnimationMode: normalizeAnimationMode(partial.mediaAnimationMode),
+    mediaAnimationInfinite: normalizeAnimationInfinite(
+      partial.mediaAnimationInfinite,
+      partial.mediaAnimationMode
+    ),
+    mediaAnimationDurationMs: normalizeAnimationDurationMs(
+      partial.mediaAnimationDurationMs ?? DEFAULT_ANIMATION_DURATION_MS
+    ),
+    mediaAnimationDelayMs: normalizeAnimationDelayMs(partial.mediaAnimationDelayMs),
+    mediaAnimationDirection: normalizeAnimationDirection(
+      partial.mediaAnimationDirection,
+      partial.mediaAnimationType
+    ),
+    mediaAnimationEasing: normalizeAnimationEasing(
+      partial.mediaAnimationEasing,
+      partial.mediaAnimationType
+    ),
+    mediaAnimationIntensity: normalizeAnimationIntensity(partial.mediaAnimationIntensity),
+    sourceAnimationName: partial.sourceAnimationName ?? "",
+    sourceAnimationLabel: partial.sourceAnimationLabel ?? "",
     videoStart: partial.videoStart ?? 0,
     videoEnd: partial.videoEnd ?? 0,
     videoDuration: partial.videoDuration ?? 0,
+    frameShape: partial.frameShape,
+    frameContent: partial.frameContent ?? null,
+    frameContentTransform: normalizeFrameContentTransform(
+      partial.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+    ),
+  };
+}
+
+function normalizePageDuration(durationMs: unknown) {
+  void durationMs;
+  return DEFAULT_PAGE_DURATION_MS;
+}
+
+function normalizeTimelinePreview(preview: Partial<EditorTimelinePreview> | null | undefined): EditorTimelinePreview {
+  return {
+    ...createDefaultTimelinePreview(),
+    ...(preview || {}),
+  };
+}
+
+function normalizeElementForEditor(
+  element: EditorElement,
+  pageDurationMs: number
+): EditorElement {
+  const timelineWindow = clampTimelineWindow(element.timelineStartMs, element.timelineEndMs, pageDurationMs);
+  return {
+    ...element,
+    ...(element.type === "text"
+      ? { fontFamily: normalizeFontFamilyName(element.fontFamily) || FONT_FAMILY_DEFAULT }
+      : {}),
+    timelineStartMs: timelineWindow.startMs,
+    timelineEndMs: timelineWindow.endMs,
+    mediaAnimationType: normalizeAnimationType(element.mediaAnimationType),
+    mediaAnimationMode: normalizeAnimationMode(element.mediaAnimationMode),
+    mediaAnimationInfinite: normalizeAnimationInfinite(
+      element.mediaAnimationInfinite,
+      element.mediaAnimationMode
+    ),
+    mediaAnimationDurationMs: normalizeAnimationDurationMs(element.mediaAnimationDurationMs),
+    mediaAnimationDelayMs: normalizeAnimationDelayMs(element.mediaAnimationDelayMs),
+    mediaAnimationDirection: normalizeAnimationDirection(
+      element.mediaAnimationDirection,
+      element.mediaAnimationType
+    ),
+    mediaAnimationEasing: normalizeAnimationEasing(
+      element.mediaAnimationEasing,
+      element.mediaAnimationType
+    ),
+    mediaAnimationIntensity: normalizeAnimationIntensity(element.mediaAnimationIntensity),
+    sourceAnimationName: String(element.sourceAnimationName || ""),
+    sourceAnimationLabel: String(element.sourceAnimationLabel || ""),
+    ...(element.type === "frame"
+      ? {
+        frameShape:
+          element.frameShape ||
+          createFrameShapeFromPreset("frame-circle"),
+          frameContent: element.frameContent || null,
+          frameContentTransform: normalizeFrameContentTransform(
+            element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+          ),
+        }
+      : {}),
+  };
+}
+
+function normalizePageForEditor(page: EditorPage): EditorPage {
+  const durationMs = normalizePageDuration(page.durationMs);
+  return {
+    ...page,
+    durationMs,
+    elements: Array.isArray(page.elements)
+      ? page.elements.map((element) => normalizeElementForEditor(element, durationMs))
+      : [],
   };
 }
 
@@ -368,6 +575,7 @@ function normalizeElementTypeName(type: ElementType) {
   if (type === "text") return "Text";
   if (type === "image") return "Image";
   if (type === "video") return "Video";
+  if (type === "frame") return "Frame";
   if (type === "rect") return "Rectangle";
   if (type === "circle") return "Circle";
   if (type === "line") return "Line";
@@ -382,6 +590,7 @@ function createBlankPage(name = "Page 1"): EditorPage {
     name,
     width: 1080,
     height: 1350,
+    durationMs: DEFAULT_PAGE_DURATION_MS,
     background: createDefaultBackground(),
     elements: [
       {
@@ -397,26 +606,42 @@ function createBlankPage(name = "Page 1"): EditorPage {
           fontWeight: "800",
           color: "#111827",
           fill: "#111827",
+          timelineEndMs: DEFAULT_PAGE_DURATION_MS,
         }),
       },
     ],
   };
 }
 
-function serializeHistorySnapshot(pages: EditorPage[], activePageId: string) {
+function serializeHistorySnapshot(pages: EditorPage[], activePageId: string, designTimeline: EditorTimeline) {
   return JSON.stringify({
     activePageId,
+    timeline: {
+      ...designTimeline,
+      totalDurationMs: getTotalTimelineDurationMs(pages),
+    },
     pages,
   });
 }
 
-function deserializeHistorySnapshot(snapshot: string): Pick<EditorStore, "pages" | "activePageId"> | null {
+function deserializeHistorySnapshot(
+  snapshot: string
+): Pick<EditorStore, "pages" | "activePageId" | "designTimeline"> | null {
   try {
-    const parsed = JSON.parse(snapshot) as { activePageId?: string; pages?: EditorPage[] };
+    const parsed = JSON.parse(snapshot) as {
+      activePageId?: string;
+      pages?: EditorPage[];
+      timeline?: Partial<EditorTimeline>;
+    };
     if (!Array.isArray(parsed.pages) || typeof parsed.activePageId !== "string") return null;
+    const normalizedPages = parsed.pages.map((page) => normalizePageForEditor(page));
     return {
-      pages: parsed.pages,
+      pages: normalizedPages,
       activePageId: parsed.activePageId,
+      designTimeline: createDefaultDesignTimeline(normalizedPages, {
+        ...(parsed.timeline || {}),
+        preview: normalizeTimelinePreview(parsed.timeline?.preview),
+      }),
     };
   } catch {
     return null;
@@ -475,11 +700,15 @@ function scaleElementForResize(element: EditorElement, scaleX: number, scaleY: n
 }
 
 const initialPage = createBlankPage();
-const initialSnapshot = serializeHistorySnapshot([initialPage], initialPage.id);
+const initialTimeline = createDefaultDesignTimeline([initialPage]);
+const initialSnapshot = serializeHistorySnapshot([initialPage], initialPage.id, initialTimeline);
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   pages: [initialPage],
   activePageId: initialPage.id,
+  designTimeline: initialTimeline,
+  timelinePlayheadMs: 0,
+  timelineIsPlaying: false,
   selectedIds: [],
   publishCandidateIds: [],
   importedElementsRefreshKey: 0,
@@ -516,6 +745,40 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setDrawColor: (drawColor) => set({ drawColor }),
   setDrawOpacity: (drawOpacity) => set({ drawOpacity: clamp(drawOpacity, 0.05, 1) }),
   setResizeUseMagic: (resizeUseMagic) => set({ resizeUseMagic }),
+  updateTimeline: (patch, options = {}) => {
+    set((state) => {
+      const nextTimeline = createDefaultDesignTimeline(state.pages, {
+        ...state.designTimeline,
+        ...patch,
+        preview: normalizeTimelinePreview({
+          ...state.designTimeline.preview,
+          ...(patch.preview || {}),
+        }),
+      });
+      return {
+        designTimeline: nextTimeline,
+      };
+    });
+    if (options.recordHistory !== false) {
+      get().recordHistory();
+    }
+  },
+  setTimelinePlayheadMs: (timelinePlayheadMs) =>
+    set((state) => ({
+      timelinePlayheadMs: clampTimelinePlayheadMs(Math.round(Number(timelinePlayheadMs) || 0), state.pages),
+    })),
+  setTimelinePlaying: (timelineIsPlaying) => set({ timelineIsPlaying: Boolean(timelineIsPlaying) }),
+  toggleTimelinePlaying: () =>
+    set((state) => {
+      const totalDurationMs = getTotalTimelineDurationMs(state.pages);
+      if (totalDurationMs <= 0) return { timelineIsPlaying: false, timelinePlayheadMs: 0 };
+      const nextPlayheadMs =
+        state.timelinePlayheadMs >= totalDurationMs ? 0 : clampTimelinePlayheadMs(state.timelinePlayheadMs, state.pages);
+      return {
+        timelineIsPlaying: !state.timelineIsPlaying,
+        timelinePlayheadMs: nextPlayheadMs,
+      };
+    }),
 
   setSelectedIds: (selectedIds) => set({ selectedIds }),
   setPublishCandidateIds: (publishCandidateIds) =>
@@ -601,6 +864,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         fontWeight: partial.fontWeight || "700",
         fontFamily: normalizeFontFamilyName(partial.fontFamily) || FONT_FAMILY_DEFAULT,
         align: partial.align || "left",
+        timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
       }),
       ...partial,
     } as EditorElement;
@@ -633,6 +897,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       fill: partial.fill || (shape === "line" || shape === "arrow" ? "#111827" : "#3b82f6"),
       stroke: partial.stroke || "#1e293b",
       strokeWidth: partial.strokeWidth ?? (shape === "line" || shape === "arrow" ? 6 : 0),
+      timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
       points:
         partial.points ||
         (shape === "line" || shape === "arrow"
@@ -672,6 +937,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         height: partial.height ?? page.height * 0.46,
         fill: "#e5e7eb",
         src,
+        timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
       }),
       ...partial,
       src,
@@ -708,10 +974,58 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         videoStart: partial.videoStart ?? 0,
         videoEnd: partial.videoEnd ?? 0,
         videoDuration: partial.videoDuration ?? 0,
+        timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
       }),
       ...partial,
       src,
       type: "video",
+    } as EditorElement;
+
+    set((prev) => ({
+      pages: mutateActivePage(prev, (activePage) => ({
+        ...activePage,
+        elements: [...activePage.elements, element],
+      })),
+      selectedIds: [element.id],
+    }));
+
+    get().recordHistory();
+    return element.id;
+  },
+
+  addFrameElement: (presetId, partial = {}) => {
+    const state = get();
+    const page = findActivePage(state);
+    if (!page) return "";
+
+    const preset = resolveFramePreset(presetId);
+    const targetWidth = Math.min(page.width * 0.46, Math.max(160, preset.width * 1.35));
+    const targetHeight = targetWidth * (preset.height / Math.max(1, preset.width));
+    const element = {
+      ...createBaseElement(page.id, {
+        type: "frame",
+        name: partial.name || preset.name,
+        x: partial.x ?? (page.width - targetWidth) / 2,
+        y: partial.y ?? (page.height - targetHeight) / 2,
+        width: partial.width ?? targetWidth,
+        height: partial.height ?? targetHeight,
+        fill: partial.fill || "#edf7ff",
+        stroke: partial.stroke || "#94a3b8",
+        strokeWidth: partial.strokeWidth ?? 2,
+        frameShape: partial.frameShape || createFrameShapeFromPreset(preset.id),
+        frameContent: partial.frameContent ?? null,
+        frameContentTransform: normalizeFrameContentTransform(
+          partial.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+        ),
+        timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
+      }),
+      ...partial,
+      type: "frame",
+      frameShape: partial.frameShape || createFrameShapeFromPreset(preset.id),
+      frameContent: partial.frameContent ?? null,
+      frameContentTransform: normalizeFrameContentTransform(
+        partial.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+      ),
     } as EditorElement;
 
     set((prev) => ({
@@ -743,6 +1057,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         fill: partial.fill || "#111827",
         stroke: partial.stroke || "#111827",
         strokeWidth: partial.strokeWidth ?? 4,
+        timelineEndMs: partial.timelineEndMs ?? getPageDurationMs(page),
       }),
       ...partial,
       points,
@@ -762,24 +1077,157 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   updateElement: (id, patch, options = {}) => {
     if (!id) return;
-    const normalizedPatch = {
-      ...patch,
-      ...(typeof patch.fontFamily !== "undefined"
-        ? { fontFamily: normalizeFontFamilyName(patch.fontFamily) || FONT_FAMILY_DEFAULT }
-        : {}),
-    };
+    set((state) => {
+      const activePage = findActivePage(state);
+      const pageDurationMs = getPageDurationMs(activePage);
+      const normalizedPatch = {
+        ...patch,
+        ...(typeof patch.fontFamily !== "undefined"
+          ? { fontFamily: normalizeFontFamilyName(patch.fontFamily) || FONT_FAMILY_DEFAULT }
+          : {}),
+        ...(typeof patch.mediaAnimationType !== "undefined"
+          ? { mediaAnimationType: normalizeAnimationType(patch.mediaAnimationType) }
+          : {}),
+        ...(typeof patch.mediaAnimationMode !== "undefined"
+          ? { mediaAnimationMode: normalizeAnimationMode(patch.mediaAnimationMode) }
+          : {}),
+        ...(typeof patch.mediaAnimationInfinite !== "undefined"
+          ? {
+              mediaAnimationInfinite: normalizeAnimationInfinite(
+                patch.mediaAnimationInfinite,
+                patch.mediaAnimationMode
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationDurationMs !== "undefined"
+          ? { mediaAnimationDurationMs: normalizeAnimationDurationMs(patch.mediaAnimationDurationMs) }
+          : {}),
+        ...(typeof patch.mediaAnimationDelayMs !== "undefined"
+          ? { mediaAnimationDelayMs: normalizeAnimationDelayMs(patch.mediaAnimationDelayMs) }
+          : {}),
+        ...(typeof patch.mediaAnimationDirection !== "undefined"
+          ? {
+              mediaAnimationDirection: normalizeAnimationDirection(
+                patch.mediaAnimationDirection,
+                patch.mediaAnimationType
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationEasing !== "undefined"
+          ? {
+              mediaAnimationEasing: normalizeAnimationEasing(
+                patch.mediaAnimationEasing,
+                patch.mediaAnimationType
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationIntensity !== "undefined"
+          ? { mediaAnimationIntensity: normalizeAnimationIntensity(patch.mediaAnimationIntensity) }
+          : {}),
+      };
+
+      return {
+        pages: mutateActivePage(state, (page) => ({
+          ...page,
+          elements: page.elements.map((element) => {
+            if (element.id !== id) return element;
+            const merged = { ...element, ...normalizedPatch };
+            const timelineWindow = clampTimelineWindow(
+              merged.timelineStartMs,
+              merged.timelineEndMs,
+              pageDurationMs
+            );
+            return {
+              ...merged,
+              timelineStartMs: timelineWindow.startMs,
+              timelineEndMs: timelineWindow.endMs,
+            };
+          }),
+        })),
+        availableFontFamilies:
+          typeof normalizedPatch.fontFamily === "string"
+            ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
+            : state.availableFontFamilies,
+      };
+    });
+
+    if (options.recordHistory !== false) {
+      get().recordHistory();
+    }
+  },
+
+  setFrameContent: (id, content, options = {}) => {
+    const targetId = String(id || "").trim();
+    const src = String(content?.src || "").trim();
+    if (!targetId || !src) return;
 
     set((state) => ({
-      pages: mutateActivePage(state, (activePage) => ({
-        ...activePage,
-        elements: activePage.elements.map((element) =>
-          element.id === id ? { ...element, ...normalizedPatch } : element
+      pages: mutateActivePage(state, (page) => ({
+        ...page,
+        elements: page.elements.map((element) => {
+          if (element.id !== targetId || element.type !== "frame") return element;
+          return {
+            ...element,
+            frameContent: {
+              ...content,
+              kind: content.kind === "video" ? "video" : "image",
+              src,
+            },
+            frameContentTransform: normalizeFrameContentTransform(
+              element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+            ),
+          };
+        }),
+      })),
+    }));
+
+    if (options.recordHistory !== false) {
+      get().recordHistory();
+    }
+  },
+
+  updateFrameContentTransform: (id, patch, options = {}) => {
+    const targetId = String(id || "").trim();
+    if (!targetId) return;
+
+    set((state) => ({
+      pages: mutateActivePage(state, (page) => ({
+        ...page,
+        elements: page.elements.map((element) => {
+          if (element.id !== targetId || element.type !== "frame") return element;
+          return {
+            ...element,
+            frameContentTransform: normalizeFrameContentTransform({
+              ...(element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM),
+              ...patch,
+            }),
+          };
+        }),
+      })),
+    }));
+
+    if (options.recordHistory !== false) {
+      get().recordHistory();
+    }
+  },
+
+  clearFrameContent: (id, options = {}) => {
+    const targetId = String(id || "").trim();
+    if (!targetId) return;
+
+    set((state) => ({
+      pages: mutateActivePage(state, (page) => ({
+        ...page,
+        elements: page.elements.map((element) =>
+          element.id === targetId && element.type === "frame"
+            ? {
+                ...element,
+                frameContent: null,
+                frameContentTransform: normalizeFrameContentTransform(DEFAULT_FRAME_CONTENT_TRANSFORM),
+              }
+            : element
         ),
       })),
-      availableFontFamilies:
-        typeof normalizedPatch.fontFamily === "string"
-          ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
-          : state.availableFontFamilies,
     }));
 
     if (options.recordHistory !== false) {
@@ -790,26 +1238,80 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   updateSelectedElements: (patch, options = {}) => {
     const selected = get().selectedIds;
     if (selected.length === 0) return;
-    const normalizedPatch = {
-      ...patch,
-      ...(typeof patch.fontFamily !== "undefined"
-        ? { fontFamily: normalizeFontFamilyName(patch.fontFamily) || FONT_FAMILY_DEFAULT }
-        : {}),
-    };
-
     const selectedSet = new Set(selected);
-    set((state) => ({
-      pages: mutateActivePage(state, (activePage) => ({
-        ...activePage,
-        elements: activePage.elements.map((element) =>
-          selectedSet.has(element.id) ? { ...element, ...normalizedPatch } : element
-        ),
-      })),
-      availableFontFamilies:
-        typeof normalizedPatch.fontFamily === "string"
-          ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
-          : state.availableFontFamilies,
-    }));
+    set((state) => {
+      const activePage = findActivePage(state);
+      const pageDurationMs = getPageDurationMs(activePage);
+      const normalizedPatch = {
+        ...patch,
+        ...(typeof patch.fontFamily !== "undefined"
+          ? { fontFamily: normalizeFontFamilyName(patch.fontFamily) || FONT_FAMILY_DEFAULT }
+          : {}),
+        ...(typeof patch.mediaAnimationType !== "undefined"
+          ? { mediaAnimationType: normalizeAnimationType(patch.mediaAnimationType) }
+          : {}),
+        ...(typeof patch.mediaAnimationMode !== "undefined"
+          ? { mediaAnimationMode: normalizeAnimationMode(patch.mediaAnimationMode) }
+          : {}),
+        ...(typeof patch.mediaAnimationInfinite !== "undefined"
+          ? {
+              mediaAnimationInfinite: normalizeAnimationInfinite(
+                patch.mediaAnimationInfinite,
+                patch.mediaAnimationMode
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationDurationMs !== "undefined"
+          ? { mediaAnimationDurationMs: normalizeAnimationDurationMs(patch.mediaAnimationDurationMs) }
+          : {}),
+        ...(typeof patch.mediaAnimationDelayMs !== "undefined"
+          ? { mediaAnimationDelayMs: normalizeAnimationDelayMs(patch.mediaAnimationDelayMs) }
+          : {}),
+        ...(typeof patch.mediaAnimationDirection !== "undefined"
+          ? {
+              mediaAnimationDirection: normalizeAnimationDirection(
+                patch.mediaAnimationDirection,
+                patch.mediaAnimationType
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationEasing !== "undefined"
+          ? {
+              mediaAnimationEasing: normalizeAnimationEasing(
+                patch.mediaAnimationEasing,
+                patch.mediaAnimationType
+              ),
+            }
+          : {}),
+        ...(typeof patch.mediaAnimationIntensity !== "undefined"
+          ? { mediaAnimationIntensity: normalizeAnimationIntensity(patch.mediaAnimationIntensity) }
+          : {}),
+      };
+
+      return {
+        pages: mutateActivePage(state, (page) => ({
+          ...page,
+          elements: page.elements.map((element) => {
+            if (!selectedSet.has(element.id)) return element;
+            const merged = { ...element, ...normalizedPatch };
+            const timelineWindow = clampTimelineWindow(
+              merged.timelineStartMs,
+              merged.timelineEndMs,
+              pageDurationMs
+            );
+            return {
+              ...merged,
+              timelineStartMs: timelineWindow.startMs,
+              timelineEndMs: timelineWindow.endMs,
+            };
+          }),
+        })),
+        availableFontFamilies:
+          typeof normalizedPatch.fontFamily === "string"
+            ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
+            : state.availableFontFamilies,
+      };
+    });
 
     if (options.recordHistory !== false) {
       get().recordHistory();
@@ -980,14 +1482,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       ...createBaseElement(page.id, {
         type: "image",
         name: payload.name || "Image",
-        x: payload.x,
-        y: payload.y,
-        width: Math.max(2, payload.width),
-        height: Math.max(2, payload.height),
-        fill: "#e5e7eb",
-        src,
-        groupId: null,
-      }),
+      x: payload.x,
+      y: payload.y,
+      width: Math.max(2, payload.width),
+      height: Math.max(2, payload.height),
+      fill: "#e5e7eb",
+      src,
+      groupId: null,
+      timelineEndMs: getPageDurationMs(page),
+    }),
       type: "image",
       src,
       x: payload.x,
@@ -1252,10 +1755,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   addPage: () => {
     const state = get();
     const nextPage = createBlankPage(`Page ${state.pages.length + 1}`);
+    const nextPages = [...state.pages, nextPage];
 
     set({
-      pages: [...state.pages, nextPage],
+      pages: nextPages,
       activePageId: nextPage.id,
+      designTimeline: createDefaultDesignTimeline(nextPages, state.designTimeline),
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, nextPages),
       selectedIds: [],
       publishCandidateIds: [],
     });
@@ -1285,6 +1791,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       pages,
       activePageId: cloned.id,
+      designTimeline: createDefaultDesignTimeline(pages, state.designTimeline),
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, pages),
       selectedIds: [],
       publishCandidateIds: [],
     });
@@ -1304,6 +1812,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       pages: nextPages,
       activePageId: nextActive,
+      designTimeline: createDefaultDesignTimeline(nextPages, state.designTimeline),
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, nextPages),
+      timelineIsPlaying: state.timelineIsPlaying && nextPages.length > 0,
       selectedIds: [],
       publishCandidateIds: [],
     });
@@ -1325,7 +1836,11 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (fromIndex < insertIndex) insertIndex -= 1;
     nextPages.splice(insertIndex, 0, moving);
 
-    set({ pages: nextPages });
+    set({
+      pages: nextPages,
+      designTimeline: createDefaultDesignTimeline(nextPages, state.designTimeline),
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, nextPages),
+    });
     get().recordHistory();
   },
 
@@ -1334,9 +1849,43 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     get().recordHistory();
   },
 
+  setActivePageIdSilently: (activePageId) => {
+    set({ activePageId });
+  },
+
+  setPageDuration: (pageId, durationMs, options = {}) => {
+    const state = get();
+    const nextDurationMs = normalizePageDuration(durationMs);
+    const nextPages = state.pages.map((page) => {
+      if (page.id !== pageId) return page;
+      return {
+        ...page,
+        durationMs: nextDurationMs,
+        elements: page.elements.map((element) => {
+          const window = clampTimelineWindow(element.timelineStartMs, element.timelineEndMs, nextDurationMs);
+          return {
+            ...element,
+            timelineStartMs: window.startMs,
+            timelineEndMs: window.endMs,
+          };
+        }),
+      };
+    });
+
+    set({
+      pages: nextPages,
+      designTimeline: createDefaultDesignTimeline(nextPages, state.designTimeline),
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, nextPages),
+    });
+
+    if (options.recordHistory !== false) {
+      get().recordHistory();
+    }
+  },
+
   applyTemplate: (template) => {
     const state = get();
-    const page = deepClone(template.page);
+    const page = normalizePageForEditor(deepClone(template.page));
     page.id = state.activePageId;
     page.name = template.name;
     page.elements = page.elements.map((element) => ({
@@ -1348,6 +1897,12 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     set({
       pages: mutateActivePage(state, () => page),
+      designTimeline: createDefaultDesignTimeline(
+        mutateActivePage(state, () => page),
+        state.designTimeline
+      ),
+      timelinePlayheadMs: 0,
+      timelineIsPlaying: false,
       selectedIds: [],
       publishCandidateIds: [],
     });
@@ -1357,35 +1912,37 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   exportDesign: () => {
     const state = get();
+    const normalizedPages = state.pages.map((page) => normalizePageForEditor(page));
     const payload: EditorDesign = {
-      version: 1,
+      version: 2,
       activePageId: state.activePageId,
-      pages: state.pages,
+      timeline: {
+        ...state.designTimeline,
+        enabled: hasAnimatedTemplateContent(normalizedPages, state.designTimeline),
+        totalDurationMs: getTotalTimelineDurationMs(normalizedPages),
+        preview: normalizeTimelinePreview(state.designTimeline.preview),
+      },
+      pages: normalizedPages,
     };
     return JSON.stringify(payload, null, 2);
   },
 
   loadDesign: (payload) => {
     if (!payload || !Array.isArray(payload.pages) || payload.pages.length === 0) return;
-    const activePageId = payload.activePageId || payload.pages[0].id;
-    const normalizedPages = deepClone(payload.pages).map((page) => ({
-      ...page,
-      elements: Array.isArray(page.elements)
-        ? page.elements.map((element) =>
-            element.type === "text"
-              ? {
-                  ...element,
-                  fontFamily: normalizeFontFamilyName(element.fontFamily) || FONT_FAMILY_DEFAULT,
-                }
-              : element
-          )
-        : [],
-    }));
+    const normalizedPages = deepClone(payload.pages).map((page) => normalizePageForEditor(page));
+    const activePageId = payload.activePageId || normalizedPages[0].id;
     const designFonts = collectFontFamiliesFromPages(normalizedPages);
+    const designTimeline = createDefaultDesignTimeline(normalizedPages, {
+      ...(payload.timeline || {}),
+      preview: normalizeTimelinePreview(payload.timeline?.preview),
+    });
 
     set((state) => ({
       pages: normalizedPages,
       activePageId,
+      designTimeline,
+      timelinePlayheadMs: 0,
+      timelineIsPlaying: false,
       selectedIds: [],
       publishCandidateIds: [],
       availableFontFamilies: mergeFontFamilies(state.availableFontFamilies, designFonts),
@@ -1405,6 +1962,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       pages: snapshot.pages,
       activePageId: snapshot.activePageId,
+      designTimeline: snapshot.designTimeline,
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, snapshot.pages),
+      timelineIsPlaying: false,
       selectedIds: [],
       publishCandidateIds: [],
       historyIndex: nextIndex,
@@ -1422,6 +1982,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set({
       pages: snapshot.pages,
       activePageId: snapshot.activePageId,
+      designTimeline: snapshot.designTimeline,
+      timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, snapshot.pages),
+      timelineIsPlaying: false,
       selectedIds: [],
       publishCandidateIds: [],
       historyIndex: nextIndex,
@@ -1433,7 +1996,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   recordHistory: () => {
     set((state) => {
-      const snapshot = serializeHistorySnapshot(state.pages, state.activePageId);
+      const snapshot = serializeHistorySnapshot(state.pages, state.activePageId, state.designTimeline);
       if (state.history[state.historyIndex] === snapshot) {
         return state;
       }
@@ -1453,7 +2016,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   resetHistory: () => {
     set((state) => {
-      const snapshot = serializeHistorySnapshot(state.pages, state.activePageId);
+      const snapshot = serializeHistorySnapshot(state.pages, state.activePageId, state.designTimeline);
       return {
         history: [snapshot],
         historyIndex: 0,

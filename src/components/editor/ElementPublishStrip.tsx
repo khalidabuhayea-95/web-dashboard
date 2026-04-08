@@ -24,8 +24,11 @@ export default function ElementPublishStrip() {
 
   return (
     <div className="flex min-w-0 flex-1 items-center gap-3 overflow-hidden">
-      <div className="shrink-0">
-        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]">Publish to Elements</div>
+      <div className="flex shrink-0 items-center gap-2 whitespace-nowrap">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-[#64748b]">
+          Publish to Elements
+        </div>
+        <span className="h-1 w-1 rounded-full bg-[#cbd5e1]" />
         <div className="text-xs text-[#475569]">
           {publishCandidateIds.length > 0 ? `${publishCandidateIds.length} selected` : `${publishableElements.length} reusable images`}
         </div>

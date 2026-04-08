@@ -1,7 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 
 import Toolbar from "@/components/editor/Toolbar";
 import SidePanel from "@/components/editor/SidePanel";
@@ -22,6 +22,7 @@ import {
   renderClipboardHtmlToImageDataUrl,
   writeInternalEditorClipboardMarker,
 } from "@/lib/editor/clipboardImport";
+import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 
 const CanvasEditor = dynamic(() => import("@/components/editor/CanvasEditor"), {
   ssr: false,
@@ -60,6 +61,8 @@ function isLikelyImageUrl(value: string) {
 export default function EditorLayout() {
   const showLeftSidebar = useEditorStore((state) => state.showLeftSidebar);
   const showRightSidebar = useEditorStore((state) => state.showRightSidebar);
+  const pages = useEditorStore((state) => state.pages);
+  const designTimeline = useEditorStore((state) => state.designTimeline);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const setShowLeftSidebar = useEditorStore((state) => state.setShowLeftSidebar);
   const setShowRightSidebar = useEditorStore((state) => state.setShowRightSidebar);
@@ -72,6 +75,10 @@ export default function EditorLayout() {
   const pasteFromClipboard = useEditorStore((state) => state.pasteFromClipboard);
   const addImageElement = useEditorStore((state) => state.addImageElement);
   const addTextElement = useEditorStore((state) => state.addTextElement);
+  const showAnimationTimeline = useMemo(
+    () => hasAnimatedTemplateContent(pages, designTimeline),
+    [designTimeline, pages]
+  );
   useEffect(() => {
     const sync = () => {
       if (window.innerWidth < 1024) {
@@ -297,7 +304,7 @@ export default function EditorLayout() {
               <CanvasEditor />
             </ErrorBoundary>
           </div>
-          <PagesTimeline />
+          <PagesTimeline showTimeline={showAnimationTimeline} />
         </div>
 
         <PropertiesPanel collapsed={!showRightSidebar} />

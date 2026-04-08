@@ -853,6 +853,117 @@ function mapVideoLayer(item, index, canvasSize, options) {
   };
 }
 
+function normalizeFrameContentTransform(value) {
+  const transform = asObject(value) || {};
+  const fit = ["contain", "manual"].includes(String(transform.fit || "").toLowerCase())
+    ? String(transform.fit).toLowerCase()
+    : "cover";
+  return {
+    fit,
+    scale: clamp(numberOr(transform.scale, 1), 0.1, 8),
+    offsetX: clamp(numberOr(transform.offsetX, 0), -10000, 10000),
+    offsetY: clamp(numberOr(transform.offsetY, 0), -10000, 10000),
+  };
+}
+
+function mapFrameShapePayload(item) {
+  const frameShape = asObject(item?.frameShape) || {};
+  const presetId = String(
+    frameShape.presetId || item?.framePresetId || item?.presetId || item?.frameShapePresetId || ""
+  ).trim();
+  const kind = String(frameShape.kind || item?.frameShapeKind || item?.shapeKind || "rect")
+    .trim()
+    .toLowerCase();
+  const points = Array.isArray(frameShape.points)
+    ? frameShape.points.map((point) => numberOr(point, 0)).filter((point) => Number.isFinite(point))
+    : [];
+  const cornerRadius = numberOr(frameShape.cornerRadius, numberOr(item?.cornerRadius, 0));
+
+  return {
+    presetId: presetId || null,
+    name: resolveFrameShapeName(item),
+    kind: kind || "rect",
+    points,
+    cornerRadius: Math.max(0, cornerRadius),
+  };
+}
+
+function mapFrameContentPayload(item, index, options) {
+  const content = asObject(item?.frameContent);
+  if (!content?.src) return null;
+
+  const kind = String(content.kind || "").trim().toLowerCase() === "video" ? "VIDEO" : "IMAGE";
+  const sourceWidth = Math.max(Math.round(numberOr(content.sourceWidth, item.width || 1)), 1);
+  const sourceHeight = Math.max(Math.round(numberOr(content.sourceHeight, item.height || 1)), 1);
+  const contentUri = resolveMediaUri(content.src || "", {
+    assetResolver: options?.assetResolver,
+    scope: "layer",
+    elementId: item.id || item.layerId || "",
+    index,
+    field: "frameContent.src",
+  });
+
+  if (kind === "VIDEO") {
+    const durationMs = readVideoDurationMs(content);
+    const trimStartMs = readVideoTrimStartMs(content);
+    const trimEndMs = readVideoTrimEndMs(content, durationMs, trimStartMs);
+    return {
+      type: "VIDEO",
+      videoUri: contentUri,
+      thumbnailUri: resolveMediaUri(content.posterSrc || content.src || "", {
+        assetResolver: options?.assetResolver,
+        scope: "layer",
+        elementId: item.id || item.layerId || "",
+        index,
+        field: content.posterSrc ? "frameContent.posterSrc" : "frameContent.src",
+      }),
+      sourceWidth,
+      sourceHeight,
+      trimStartMs: Math.round(trimStartMs),
+      trimEndMs: Math.round(trimEndMs),
+      durationMs: Math.round(durationMs),
+    };
+  }
+
+  return {
+    type: "IMAGE",
+    imageUri: contentUri,
+    sourceWidth,
+    sourceHeight,
+  };
+}
+
+function mapFrameLayer(item, index, canvasSize, options) {
+  const base = baseLayer(item, index, canvasSize);
+  const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
+  const frameWidth = Math.max(numberOr(item.width, 1), 1);
+  const frameHeight = Math.max(numberOr(item.height, 1), 1);
+
+  return {
+    ...base,
+    transform: buildTransform({
+      item,
+      canvasSize,
+      centerX,
+      centerY,
+      rawScaleX,
+      rawScaleY,
+      baseWidth: frameWidth,
+      baseHeight: frameHeight,
+      scaleBounds: { min: MIN_MEDIA_VISUAL_SCALE, max: MAX_MEDIA_VISUAL_SCALE },
+    }),
+    type: "FRAME",
+    frameWidth,
+    frameHeight,
+    shape: mapFrameShapePayload(item),
+    content: mapFrameContentPayload(item, index, options),
+    contentTransform: normalizeFrameContentTransform(item.frameContentTransform),
+    filters: mediaFilters(item, {
+      includeShapeMask: false,
+    }),
+  };
+}
+
 function mapShapeLayerAsImage(item, index, canvasSize, options) {
   const frame = getShapeRasterFrame(item);
   const rasterItem = {
@@ -943,6 +1054,9 @@ function mapStickerLayer(item, index, canvasSize) {
 
 function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
   const layerType = String(item.layerType || item.type || "").toLowerCase();
+  if (layerType === "frame" || item?.frameShape || item?.frameContent) {
+    return mapFrameLayer(item, index, canvasSize, options);
+  }
   if (layerType === "sticker") {
     return mapStickerLayer(item, index, canvasSize);
   }
@@ -1015,6 +1129,110 @@ function resolveCanvasSize(template) {
   };
 }
 
+const FRAME_PRESET_NAMES = new Map([
+  ["frame-circle", "Circle"],
+  ["frame-rounded-square", "Rounded square"],
+  ["frame-square", "Square"],
+  ["frame-diamond", "Diamond"],
+  ["frame-inverted-triangle", "Inverted triangle"],
+  ["frame-trapezoid", "Trapezoid"],
+  ["frame-pentagon", "Pentagon"],
+  ["frame-hexagon", "Hexagon"],
+  ["frame-star", "Star"],
+  ["frame-kite", "Kite"],
+  ["frame-octagon", "Octagon"],
+  ["frame-burst", "Burst"],
+  ["frame-scallop-circle", "Scallop circle"],
+  ["frame-scallop-badge", "Scallop badge"],
+  ["frame-tag-left", "Left tag"],
+  ["frame-tag-right", "Right tag"],
+]);
+
+function humanizeFrameShape(value) {
+  const normalized = String(value || "")
+    .trim()
+    .replace(/^frame[-_\s]*/i, "")
+    .replace(/[-_]+/g, " ")
+    .replace(/\s+/g, " ");
+  if (!normalized) return "Custom";
+  return normalized.replace(/\b\w/g, (match) => match.toUpperCase());
+}
+
+function resolveFrameShapeName(item) {
+  const frameShape = asObject(item?.frameShape);
+  const presetId = String(
+    frameShape?.presetId || item?.framePresetId || item?.presetId || item?.frameShapePresetId || ""
+  ).trim();
+  if (FRAME_PRESET_NAMES.has(presetId)) {
+    return FRAME_PRESET_NAMES.get(presetId);
+  }
+  if (presetId) return humanizeFrameShape(presetId);
+
+  const shapeKind = String(frameShape?.kind || item?.frameShapeKind || item?.shapeKind || "").trim();
+  if (shapeKind) return humanizeFrameShape(shapeKind);
+
+  return "Custom";
+}
+
+function buildFrameInfoFromObjects(objects) {
+  const frames = (Array.isArray(objects) ? objects : [])
+    .map((item, index) => {
+      if (!item || typeof item !== "object") return null;
+      const layerType = String(item.layerType || item.type || item.importKind || "").trim().toLowerCase();
+      const frameShape = asObject(item.frameShape);
+      const frameContent = asObject(item.frameContent);
+      const isFrame = layerType === "frame" || Boolean(frameShape) || Boolean(frameContent);
+      if (!isFrame) return null;
+
+      const presetId = String(
+        frameShape?.presetId || item.framePresetId || item.presetId || item.frameShapePresetId || ""
+      ).trim();
+      const shapeKind = String(frameShape?.kind || item.frameShapeKind || item.shapeKind || "").trim();
+      const contentKind = String(frameContent?.kind || item.frameContentKind || "").trim().toLowerCase();
+
+      return {
+        id: String(item.id || item.layerId || `frame-${index + 1}`),
+        name: String(item.name || item.layerName || `Frame ${index + 1}`),
+        shape: resolveFrameShapeName(item),
+        presetId: presetId || null,
+        shapeKind: shapeKind || null,
+        hasContent: Boolean(frameContent?.src || item.frameContentSrc),
+        contentKind: contentKind || null,
+      };
+    })
+    .filter(Boolean);
+
+  const shapes = Array.from(new Set(frames.map((frame) => frame.shape).filter(Boolean)));
+  const shapeSummary = shapes.length > 0 ? shapes.join(", ") : "";
+  const count = frames.length;
+
+  return {
+    hasFrames: count > 0,
+    count,
+    shapes,
+    frames,
+    message:
+      count > 0
+        ? `This template contains ${count} frame${count === 1 ? "" : "s"}${shapeSummary ? `: ${shapeSummary}` : ""}.`
+        : "",
+  };
+}
+
+function getMobileTemplateFrameInfo(template) {
+  if (!Object.prototype.hasOwnProperty.call(template || {}, "data")) return null;
+  const rawData = template?.data || {};
+  const data = extractFabricData(rawData) || rawData || {};
+  return buildFrameInfoFromObjects(Array.isArray(data?.objects) ? data.objects : []);
+}
+
+function buildMobileCompatibilityWarnings(frameInfo) {
+  const warnings = [];
+  if (frameInfo?.hasFrames) {
+    warnings.push(frameInfo.message);
+  }
+  return warnings;
+}
+
 export function toMobileProject(template, options = {}) {
   const canvasSize = resolveCanvasSize(template);
 
@@ -1024,6 +1242,8 @@ export function toMobileProject(template, options = {}) {
   const layers = objects.map((item, index) =>
     mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options)
   );
+  const frameInfo = buildFrameInfoFromObjects(objects);
+  const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
 
   return {
     id: String(template?.id || ""),
@@ -1040,6 +1260,8 @@ export function toMobileProject(template, options = {}) {
       version: template?.version || 1,
       category: String(template?.category || "general"),
       subCategory: String(template?.subCategory || "general"),
+      frameInfo,
+      compatibilityWarnings,
     },
   };
 }
@@ -1057,6 +1279,8 @@ export function toMobileTemplate(template, options = {}) {
         field: "thumbnailDataUrl",
       })
     : rawThumbnail;
+  const frameInfo = getMobileTemplateFrameInfo(template);
+  const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
   return {
     id: String(template?.id || ""),
     title: String(template?.name || "Untitled"),
@@ -1068,6 +1292,7 @@ export function toMobileTemplate(template, options = {}) {
     subCategory: String(template?.subCategory || "general"),
     thumbnailUrl: resolvedThumbnail,
     thumbnailDataUrl: resolvedThumbnail,
+    ...(frameInfo ? { frameInfo, compatibilityWarnings } : {}),
     ...(includeProject ? { project: toMobileProject(template, options) } : {}),
   };
 }

@@ -5,6 +5,10 @@ import { SlidersHorizontal } from "lucide-react";
 
 import { Input, Label, Select } from "@/components/ui/form";
 import {
+  getPageDurationMs,
+  resolveTimelineWindow,
+} from "@/lib/editor/animationTimeline";
+import {
   extractImagePaletteFromSource,
   normalizeRasterColorMap,
   RASTER_PALETTE_VERSION,
@@ -31,6 +35,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   const updateElement = useEditorStore((state) => state.updateElement);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
+  const setPageDuration = useEditorStore((state) => state.setPageDuration);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -43,6 +48,11 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   );
 
   const activeElement = selectedElements.length === 1 ? selectedElements[0] : null;
+  const activePageDurationMs = useMemo(() => getPageDurationMs(activePage), [activePage]);
+  const activeTimelineWindow = useMemo(
+    () => resolveTimelineWindow(activeElement, activePageDurationMs),
+    [activeElement, activePageDurationMs]
+  );
   const activeImageElement = activeElement?.type === "image" ? activeElement : null;
   const activeImageId = String(activeImageElement?.id || "");
   const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
@@ -109,7 +119,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   return (
     <aside
-      className={`shrink-0 overflow-hidden bg-white transition-[width,padding,opacity,border-color] duration-300 ease-out dark:bg-slate-950 ${
+      className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width,padding,opacity,border-color] duration-300 ease-out dark:bg-slate-950 ${
         collapsed
           ? "w-0 border-l border-transparent p-0 opacity-0"
           : "w-[320px] border-l border-slate-200 p-3 opacity-100 dark:border-slate-800"
@@ -117,7 +127,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
       aria-hidden={collapsed}
     >
       <div
-        className={`h-full transition-opacity duration-150 ${
+        className={`flex h-full min-h-0 flex-col overflow-y-auto pr-1 transition-opacity duration-150 ${
           collapsed ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
       >
@@ -314,6 +324,49 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   })
                 }
               />
+            </div>
+          </div>
+
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
+              Timeline
+            </div>
+
+            <div className="space-y-1">
+              <Label>Template Duration (ms)</Label>
+              <Input
+                value={activePageDurationMs}
+                disabled
+                onChange={() => setPageDuration(activePage.id, activePageDurationMs)}
+              />
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                Fixed to 15 seconds in this phase.
+              </div>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1">
+                <Label>Layer Start (ms)</Label>
+                <Input
+                  value={activeTimelineWindow.startMs}
+                  onChange={(event) =>
+                    updateElement(activeElement.id, {
+                      timelineStartMs: Math.max(0, numberOr(event.target.value, activeTimelineWindow.startMs)),
+                    })
+                  }
+                />
+              </div>
+              <div className="space-y-1">
+                <Label>Layer End (ms)</Label>
+                <Input
+                  value={activeTimelineWindow.endMs}
+                  onChange={(event) =>
+                    updateElement(activeElement.id, {
+                      timelineEndMs: Math.max(activeTimelineWindow.startMs + 100, numberOr(event.target.value, activeTimelineWindow.endMs)),
+                    })
+                  }
+                />
+              </div>
             </div>
           </div>
 
