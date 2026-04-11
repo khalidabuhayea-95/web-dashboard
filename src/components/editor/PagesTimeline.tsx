@@ -11,11 +11,14 @@ import {
 } from "react";
 import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
 
+import { FilmstripFrames, FilmstripOverlay } from "@/components/editor/TimelineFilmstrip";
+import { useTimelineScrubber } from "@/components/editor/useTimelineScrubber";
 import {
   MIN_LAYER_DURATION_MS,
   clampTimelineWindow,
   formatTimelineTime,
   getPageDurationMs,
+  normalizeAnimationType,
   resolveTimelineWindow,
 } from "@/lib/editor/animationTimeline";
 import { useEditorStore } from "@/store/editorStore";
@@ -51,82 +54,164 @@ interface TimelineTrackBounds {
   width: number;
 }
 
-interface ScrubSessionState {
-  wasPlaying: boolean;
-  pointerId: number | null;
-}
-
 interface PagesTimelineProps {
   showTimeline?: boolean;
 }
 
-type FilmstripTone = "selected" | "preview";
+const SCRUB_DEAD_ZONE_PX = 2;
+const TRIM_HANDLE_WIDTH_PX = 32;
 
-function FilmstripFrames({
-  count,
-  imageSrc,
-  tone,
-}: {
-  count: number;
-  imageSrc?: string;
-  tone: FilmstripTone;
-}) {
-  const frameCount = Math.max(8, count);
-  const frameClassName =
-    tone === "selected"
-      ? "relative min-w-0 flex-1 overflow-hidden rounded-[4px] border border-[#6d4e12]/55 bg-[#f6c15f] shadow-[inset_0_1px_0_rgba(255,255,255,0.42)]"
-      : "relative min-w-0 flex-1 overflow-hidden rounded-[4px] border border-black/25 bg-[#d6d7db] shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]";
-  const overlayClassName =
-    tone === "selected"
-      ? "bg-[linear-gradient(180deg,rgba(255,255,255,0.12),rgba(102,63,7,0.14))]"
-      : "bg-[linear-gradient(180deg,rgba(255,255,255,0.18),rgba(15,23,42,0.16))]";
-
+function isLikelyVideoSource(source: string) {
+  const safeSource = String(source || "").trim().toLowerCase();
   return (
-    <div className="flex h-full items-stretch gap-[2px] px-1 py-1">
-      {Array.from({ length: frameCount }, (_, index) => (
-        <div key={`${tone}-frame-${index}`} className={frameClassName}>
-          {imageSrc ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img
-              src={imageSrc}
-              alt=""
-              className={`h-full w-full object-cover ${tone === "preview" ? "grayscale" : ""}`}
-            />
-          ) : (
-            <div
-              className={`h-full w-full ${
-                tone === "selected"
-                  ? "bg-[linear-gradient(180deg,#f3d79d_0%,#b48229_100%)]"
-                  : "bg-[linear-gradient(180deg,#f8fafc_0%,#9ca3af_100%)]"
-              }`}
-            />
-          )}
-          <div className={`absolute inset-0 ${overlayClassName}`} />
-          <div className="absolute inset-y-0 left-[28%] w-px bg-black/30" />
-          <div className="absolute inset-y-0 right-[28%] w-px bg-black/22" />
-        </div>
-      ))}
-    </div>
+    safeSource.startsWith("data:video/") ||
+    /\.(mp4|mov|webm|m4v|ogg)(\?.*)?$/i.test(safeSource)
   );
 }
 
-function FilmstripOverlay({ count }: { count: number }) {
-  const frameCount = Math.max(8, count);
+function getElementVideoSource(
+  element:
+    | {
+        type?: unknown;
+        src?: unknown;
+        frameContent?: { kind?: unknown; src?: unknown } | null;
+      }
+    | null
+    | undefined
+) {
+  const type = String(element?.type || "").trim().toLowerCase();
+  if (type === "video") return String(element?.src || "").trim();
+  if (type === "frame" && String(element?.frameContent?.kind || "").trim().toLowerCase() === "video") {
+    return String(element?.frameContent?.src || "").trim();
+  }
+  return "";
+}
 
-  return (
-    <div className="pointer-events-none absolute inset-0 flex gap-[2px] px-1 py-1">
-      {Array.from({ length: frameCount }, (_, index) => (
-        <div
-          key={`overlay-frame-${index}`}
-          className="relative min-w-0 flex-1 overflow-hidden rounded-[4px] border border-black/28 bg-white/5 shadow-[inset_0_1px_0_rgba(255,255,255,0.3)]"
-        >
-          <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.16),rgba(15,23,42,0.08))]" />
-          <div className="absolute inset-y-0 left-[28%] w-px bg-black/30" />
-          <div className="absolute inset-y-0 right-[28%] w-px bg-black/24" />
-        </div>
-      ))}
-    </div>
-  );
+function getElementVideoDurationSeconds(
+  element:
+    | {
+        type?: unknown;
+        videoDuration?: unknown;
+        videoEnd?: unknown;
+        frameContent?: { kind?: unknown; videoDuration?: unknown; videoEnd?: unknown } | null;
+      }
+    | null
+    | undefined
+) {
+  const type = String(element?.type || "").trim().toLowerCase();
+  if (type === "video") {
+    const videoEnd = Number(element?.videoEnd);
+    if (Number.isFinite(videoEnd) && videoEnd > 0) return videoEnd;
+    const videoDuration = Number(element?.videoDuration);
+    return Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0;
+  }
+  if (type === "frame" && String(element?.frameContent?.kind || "").trim().toLowerCase() === "video") {
+    const videoEnd = Number(element?.frameContent?.videoEnd);
+    if (Number.isFinite(videoEnd) && videoEnd > 0) return videoEnd;
+    const videoDuration = Number(element?.frameContent?.videoDuration);
+    return Number.isFinite(videoDuration) && videoDuration > 0 ? videoDuration : 0;
+  }
+  return 0;
+}
+
+async function captureVideoFilmstripFrames(
+  source: string,
+  durationSeconds: number,
+  frameCount: number
+) {
+  const safeSource = String(source || "").trim();
+  if (!safeSource) return [];
+
+  const video = document.createElement("video");
+  video.src = safeSource;
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.preload = "metadata";
+  video.playsInline = true;
+  video.setAttribute("playsinline", "true");
+
+  const canvas = document.createElement("canvas");
+  canvas.width = 72;
+  canvas.height = 72;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return [];
+
+  const cleanup = () => {
+    video.pause();
+    video.removeAttribute("src");
+    video.load();
+  };
+
+  const waitForReady = () =>
+    new Promise<void>((resolve) => {
+      if (video.readyState >= 1) {
+        resolve();
+        return;
+      }
+      const done = () => {
+        video.removeEventListener("loadedmetadata", done);
+        video.removeEventListener("loadeddata", done);
+        video.removeEventListener("canplay", done);
+        video.removeEventListener("error", done);
+        resolve();
+      };
+      video.addEventListener("loadedmetadata", done);
+      video.addEventListener("loadeddata", done);
+      video.addEventListener("canplay", done);
+      video.addEventListener("error", done);
+      video.load();
+    });
+
+  const seekTo = (time: number) =>
+    new Promise<void>((resolve) => {
+      const done = () => {
+        video.removeEventListener("seeked", done);
+        video.removeEventListener("error", done);
+        resolve();
+      };
+      video.addEventListener("seeked", done);
+      video.addEventListener("error", done);
+      try {
+        const duration =
+          Number.isFinite(video.duration) && video.duration > 0
+            ? video.duration
+            : durationSeconds;
+        const safeTime = Math.max(0, Math.min(time, Math.max(0, duration - 0.02)));
+        video.currentTime = safeTime;
+      } catch {
+        resolve();
+      }
+    });
+
+  const drawFrame = () => {
+    try {
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      return canvas.toDataURL("image/jpeg", 0.55);
+    } catch {
+      return "";
+    }
+  };
+
+  try {
+    await waitForReady();
+    const resolvedDuration =
+      Number.isFinite(video.duration) && video.duration > 0
+        ? video.duration
+        : Math.max(0.25, durationSeconds);
+    const frames: string[] = [];
+    for (let index = 0; index < frameCount; index += 1) {
+      const ratio = frameCount > 1 ? index / (frameCount - 1) : 0;
+      await seekTo(ratio * resolvedDuration);
+      const frame = drawFrame();
+      if (frame) {
+        frames.push(frame);
+      }
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+    }
+    return frames;
+  } finally {
+    cleanup();
+  }
 }
 
 export default function PagesTimeline({ showTimeline = true }: PagesTimelineProps) {
@@ -172,10 +257,18 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     [activePageDurationMs, selectedElement]
   );
   const [canvasPreviewSrc, setCanvasPreviewSrc] = useState("");
+  const [templateStageFrames, setTemplateStageFrames] = useState<string[]>([]);
+  const [templateVideoFrames, setTemplateVideoFrames] = useState<string[]>([]);
+  const [selectedVideoFrames, setSelectedVideoFrames] = useState<string[]>([]);
   const previewUrl = String(designTimeline.preview?.url || "").trim();
   const previewPosterUrl = String(designTimeline.preview?.posterUrl || "").trim();
   const activeBackgroundImageUri =
     activePage?.background?.type === "image" ? String(activePage.background.imageUri || "").trim() : "";
+  const firstVideoSource = useMemo(() => {
+    if (!activePage) return "";
+    const videoElement = activePage.elements.find((element) => Boolean(getElementVideoSource(element)));
+    return getElementVideoSource(videoElement);
+  }, [activePage]);
   const firstVisualSource = useMemo(() => {
     if (!activePage) return "";
     const visualElement = activePage.elements.find((element) =>
@@ -183,6 +276,31 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     );
     return String(visualElement?.rasterOriginalSrc || visualElement?.src || "").trim();
   }, [activePage]);
+  const selectedVideoSource = useMemo(() => getElementVideoSource(selectedElement), [selectedElement]);
+  const selectedPreviewKind = useMemo(() => {
+    if (!selectedElement) return "none";
+    const elementType = String(selectedElement.type || "").trim().toLowerCase();
+    if (elementType === "text") return "text";
+    if (elementType === "video") return "video";
+    if (elementType === "frame") {
+      const frameContentKind = String(selectedElement.frameContent?.kind || "").trim().toLowerCase();
+      if (frameContentKind === "video") return "video";
+      if (frameContentKind === "image") return "image";
+    }
+    if (elementType === "image") return "image";
+    return "generic";
+  }, [selectedElement]);
+  const selectedTextPreview = useMemo(() => {
+    if (selectedPreviewKind !== "text") return "";
+    const rawText = String(selectedElement?.text || "").replace(/\s+/g, " ").trim();
+    if (!rawText) return "Text";
+    return rawText.length > 18 ? `${rawText.slice(0, 18).trim()}…` : rawText;
+  }, [selectedElement?.text, selectedPreviewKind]);
+  const selectedHasAnimationStrip = useMemo(() => {
+    if (!selectedElement) return false;
+    if (normalizeAnimationType(selectedElement.mediaAnimationType) !== "NONE") return true;
+    return selectedWindow.startMs > 0 || selectedWindow.endMs < activePageDurationMs;
+  }, [activePageDurationMs, selectedElement, selectedWindow.endMs, selectedWindow.startMs]);
   const selectedPreviewSrc = useMemo(() => {
     if (!selectedElement) return previewPosterUrl || activeBackgroundImageUri || firstVisualSource || canvasPreviewSrc;
     const directSource = String(selectedElement.rasterOriginalSrc || selectedElement.src || "").trim();
@@ -190,8 +308,12 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     return previewPosterUrl || activeBackgroundImageUri || firstVisualSource || canvasPreviewSrc;
   }, [activeBackgroundImageUri, canvasPreviewSrc, firstVisualSource, previewPosterUrl, selectedElement]);
   const templatePreviewSrc = useMemo(
-    () => previewPosterUrl || activeBackgroundImageUri || firstVisualSource || canvasPreviewSrc,
+    () => canvasPreviewSrc || previewPosterUrl || activeBackgroundImageUri || firstVisualSource,
     [activeBackgroundImageUri, canvasPreviewSrc, firstVisualSource, previewPosterUrl]
+  );
+  const templateVideoSource = useMemo(
+    () => (isLikelyVideoSource(previewUrl) ? previewUrl : firstVideoSource),
+    [firstVideoSource, previewUrl]
   );
 
   const playheadRef = useRef(timelinePlayheadMs);
@@ -200,50 +322,96 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   const previewVideoRef = useRef<HTMLVideoElement | null>(null);
   const timelineTrackBoundsRef = useRef<TimelineTrackBounds | null>(null);
   const pendingTrimRef = useRef<{ startMs: number; endMs: number } | null>(null);
-  const scrubSessionRef = useRef<ScrubSessionState | null>(null);
-  const isScrubbingRef = useRef(false);
-  const pendingScrubClientXRef = useRef<number | null>(null);
-  const scrubRafRef = useRef<number | null>(null);
-  const lastScrubTargetMsRef = useRef<number | null>(null);
+  const timelineScrubPlaybackRef = useRef<{ wasPlaying: boolean; resumeOnRelease: boolean } | null>(null);
   const [trimDrag, setTrimDrag] = useState<TrimDragState | null>(null);
   const [timelineViewportWidth, setTimelineViewportWidth] = useState(0);
-  const [timelineIsScrubbing, setTimelineIsScrubbing] = useState(false);
 
   useEffect(() => {
     playheadRef.current = timelinePlayheadMs;
   }, [timelinePlayheadMs]);
 
   useEffect(() => {
-    if (templatePreviewSrc) {
-      return;
-    }
     if (!stageApi?.captureThumbnailDataUrl) return;
 
     let cancelled = false;
-    let attemptCount = 0;
-    let timeoutId: number | null = null;
+    let timeoutIds: number[] = [];
 
     const tryCapture = () => {
       if (cancelled) return;
       const captured = String(stageApi.captureThumbnailDataUrl() || "").trim();
       if (captured) {
         setCanvasPreviewSrc(captured);
-        return;
       }
-      attemptCount += 1;
-      if (attemptCount >= 12) return;
-      timeoutId = window.setTimeout(tryCapture, attemptCount < 4 ? 120 : 220);
     };
 
-    timeoutId = window.setTimeout(tryCapture, 120);
+    // Refresh a few times after edits/load so the filmstrip keeps matching the live stage.
+    [40, 140, 320, 620].forEach((delay) => {
+      const timeoutId = window.setTimeout(tryCapture, delay);
+      timeoutIds.push(timeoutId);
+    });
 
     return () => {
       cancelled = true;
-      if (timeoutId !== null) {
-        window.clearTimeout(timeoutId);
-      }
+      timeoutIds.forEach((timeoutId) => window.clearTimeout(timeoutId));
     };
-  }, [activePage?.background?.imageUri, activePage?.elements, stageApi, templatePreviewSrc]);
+  }, [activePage?.background?.imageUri, activePage?.elements, selectedIds, showTimeline, stageApi]);
+
+  useEffect(() => {
+    if (!templateVideoSource) return;
+
+    let disposed = false;
+
+    void captureVideoFilmstripFrames(
+      templateVideoSource,
+      Math.max(0.25, totalDurationMs / 1000),
+      24
+    )
+      .then((frames) => {
+        if (disposed) return;
+        setTemplateVideoFrames(frames);
+      })
+      .catch(() => {
+        if (disposed) return;
+        setTemplateVideoFrames([]);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [templateVideoSource, totalDurationMs]);
+
+  useEffect(() => {
+    if (!selectedVideoSource || selectedPreviewKind !== "video") return;
+
+    let disposed = false;
+
+    void captureVideoFilmstripFrames(
+      selectedVideoSource,
+      Math.max(0.25, (selectedWindow.endMs - selectedWindow.startMs) / 1000),
+      16
+    )
+      .then((frames) => {
+        if (disposed) return;
+        setSelectedVideoFrames(frames);
+      })
+      .catch(() => {
+        if (disposed) return;
+        setSelectedVideoFrames([]);
+      });
+
+    return () => {
+      disposed = true;
+    };
+  }, [
+    selectedPreviewKind,
+    selectedVideoSource,
+    selectedWindow.endMs,
+    selectedWindow.startMs,
+    totalDurationMs,
+  ]);
+  const effectiveTemplateVideoFrames = templateVideoSource ? templateVideoFrames : templateStageFrames;
+  const effectiveSelectedVideoFrames =
+    selectedVideoSource && selectedPreviewKind === "video" ? selectedVideoFrames : [];
 
   useEffect(() => {
     if (!showTimeline) return;
@@ -299,15 +467,142 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
 
   useEffect(
     () => () => {
-      if (scrubRafRef.current !== null) {
-        window.cancelAnimationFrame(scrubRafRef.current);
-        scrubRafRef.current = null;
-      }
-      pendingScrubClientXRef.current = null;
-      lastScrubTargetMsRef.current = null;
+      timelineScrubPlaybackRef.current = null;
     },
     []
   );
+
+  const playheadRatio = totalDurationMs > 0 ? clamp(timelinePlayheadMs / totalDurationMs, 0, 1) : 0;
+  const timelineContentWidthPx = useMemo(() => {
+    const durationWidth = Math.max(720, Math.ceil((totalDurationMs / 1000) * 84));
+    if (timelineViewportWidth <= 0) return durationWidth;
+    return Math.max(durationWidth, Math.ceil(timelineViewportWidth * 1.65));
+  }, [timelineViewportWidth, totalDurationMs]);
+  const timelineScrollOffsetPx = useMemo(() => {
+    if (timelineViewportWidth <= 0) return 0;
+    const centerInset = timelineViewportWidth / 2;
+    const minOffset = Math.min(centerInset, centerInset - timelineContentWidthPx);
+    const maxOffset = centerInset;
+    const centeredOffset = timelineViewportWidth / 2 - playheadRatio * timelineContentWidthPx;
+    return clamp(centeredOffset, minOffset, maxOffset);
+  }, [playheadRatio, timelineContentWidthPx, timelineViewportWidth]);
+  const playheadViewportXPx = useMemo(() => {
+    if (timelineViewportWidth <= 0) return 0;
+    const x = playheadRatio * timelineContentWidthPx + timelineScrollOffsetPx;
+    return clamp(x, 0, timelineViewportWidth);
+  }, [playheadRatio, timelineContentWidthPx, timelineScrollOffsetPx, timelineViewportWidth]);
+  const playheadLabelXPx = useMemo(() => {
+    if (timelineViewportWidth <= 0) return 0;
+    const minX = 64;
+    const maxX = Math.max(minX, timelineViewportWidth - 132);
+    return clamp(playheadViewportXPx, minX, maxX);
+  }, [playheadViewportXPx, timelineViewportWidth]);
+  const timelineContentStyle = useMemo(
+    () => ({
+      width: `${timelineContentWidthPx}px`,
+      transform: `translateX(${timelineScrollOffsetPx}px)`,
+    }),
+    [timelineContentWidthPx, timelineScrollOffsetPx]
+  );
+  const filmstripFrameCount = Math.max(12, Math.min(48, Math.ceil(timelineContentWidthPx / 40)));
+
+  const measureTimelineTrackBounds = useCallback(() => {
+    const node = timelineTrackRef.current;
+    if (!node) return null;
+    const rect = node.getBoundingClientRect();
+    const bounds = {
+      left: rect.left,
+      width: rect.width || node.clientWidth || 0,
+    };
+    timelineTrackBoundsRef.current = bounds;
+    return bounds;
+  }, []);
+
+  const { isScrubbing: timelineIsScrubbing, activePointerId, startScrubbing, updateScrubbing, endScrubbing } =
+    useTimelineScrubber({
+      totalDurationMs,
+      contentWidthPx: timelineContentWidthPx,
+      deadZonePx: SCRUB_DEAD_ZONE_PX,
+      snapMs: scrubFrameStepMs,
+      invertDirection: true,
+      getBounds: () => timelineTrackBoundsRef.current || measureTimelineTrackBounds(),
+      getCurrentTime: () => playheadRef.current,
+      onCommit: (time) => {
+        playheadRef.current = time;
+        setTimelinePlayheadMs(time);
+      },
+      onStart: () => {
+        setTimelinePlaying(false);
+      },
+      onEnd: () => {
+        const shouldResumePlayback =
+          timelineScrubPlaybackRef.current?.resumeOnRelease === true &&
+          timelineScrubPlaybackRef.current?.wasPlaying === true;
+        timelineScrubPlaybackRef.current = null;
+        setTimelinePlaying(shouldResumePlayback);
+      },
+    });
+
+  const beginTimelineScrub = useCallback(
+    (clientX: number, pointerId: number | null, resumeOnRelease = false) => {
+      if (totalDurationMs <= 0) return;
+      timelineScrubPlaybackRef.current = {
+        wasPlaying: timelineIsPlaying,
+        resumeOnRelease,
+      };
+      measureTimelineTrackBounds();
+      startScrubbing(clientX, pointerId);
+    },
+    [measureTimelineTrackBounds, startScrubbing, timelineIsPlaying, totalDurationMs]
+  );
+
+  useEffect(() => {
+    if (!showTimeline || !stageApi?.captureTimelineStripDataUrls || totalDurationMs <= 0) return;
+    if (templateVideoSource) return;
+    if (timelineIsPlaying || timelineIsScrubbing) return;
+
+    let disposed = false;
+    const timeouts: number[] = [];
+
+    const captureStrip = () => {
+      const sampleCount = Math.max(10, Math.min(24, filmstripFrameCount));
+      const playheads = Array.from({ length: sampleCount }, (_, index) => {
+        if (sampleCount <= 1) return 0;
+        return (index / (sampleCount - 1)) * totalDurationMs;
+      });
+
+      void stageApi
+        .captureTimelineStripDataUrls(playheads)
+        .then((frames) => {
+          if (disposed) return;
+          setTemplateStageFrames(frames);
+        })
+        .catch(() => {
+          if (disposed) return;
+          setTemplateStageFrames([]);
+        });
+    };
+
+    [80, 260].forEach((delay) => {
+      timeouts.push(window.setTimeout(captureStrip, delay));
+    });
+
+    return () => {
+      disposed = true;
+      timeouts.forEach((timeoutId) => window.clearTimeout(timeoutId));
+    };
+  }, [
+    activePage?.background?.imageUri,
+    activePage?.elements,
+    filmstripFrameCount,
+    selectedIds,
+    showTimeline,
+    stageApi,
+    templateVideoSource,
+    timelineIsPlaying,
+    timelineIsScrubbing,
+    totalDurationMs,
+  ]);
 
   useEffect(() => {
     const video = previewVideoRef.current;
@@ -352,142 +647,10 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     }
   }, [previewUrl, scrubFrameStepMs, timelineIsPlaying, timelineIsScrubbing, timelinePlayheadMs]);
 
-  const playheadRatio = totalDurationMs > 0 ? clamp(timelinePlayheadMs / totalDurationMs, 0, 1) : 0;
-  const timelineContentWidthPx = useMemo(() => {
-    const durationWidth = Math.max(720, Math.ceil((totalDurationMs / 1000) * 84));
-    if (timelineViewportWidth <= 0) return durationWidth;
-    return Math.max(durationWidth, Math.ceil(timelineViewportWidth * 1.65));
-  }, [timelineViewportWidth, totalDurationMs]);
-  const timelineScrollOffsetPx = useMemo(() => {
-    if (timelineViewportWidth <= 0) return 0;
-    const minOffset = Math.min(0, timelineViewportWidth - timelineContentWidthPx);
-    const centeredOffset = timelineViewportWidth / 2 - playheadRatio * timelineContentWidthPx;
-    return clamp(centeredOffset, minOffset, 0);
-  }, [playheadRatio, timelineContentWidthPx, timelineViewportWidth]);
-  const playheadViewportXPx = useMemo(() => {
-    if (timelineViewportWidth <= 0) return 0;
-    const x = playheadRatio * timelineContentWidthPx + timelineScrollOffsetPx;
-    return clamp(x, 0, timelineViewportWidth);
-  }, [playheadRatio, timelineContentWidthPx, timelineScrollOffsetPx, timelineViewportWidth]);
-  const playheadLabelXPx = useMemo(() => {
-    if (timelineViewportWidth <= 0) return 0;
-    const minX = 64;
-    const maxX = Math.max(minX, timelineViewportWidth - 132);
-    return clamp(playheadViewportXPx, minX, maxX);
-  }, [playheadViewportXPx, timelineViewportWidth]);
-  const timelineContentStyle = useMemo(
-    () => ({
-      width: `${timelineContentWidthPx}px`,
-      transform: `translateX(${timelineScrollOffsetPx}px)`,
-    }),
-    [timelineContentWidthPx, timelineScrollOffsetPx]
-  );
-
-  const measureTimelineTrackBounds = useCallback(() => {
-    const node = timelineTrackRef.current;
-    if (!node) return null;
-    const rect = node.getBoundingClientRect();
-    const bounds = {
-      left: rect.left,
-      width: rect.width || node.clientWidth || 0,
-    };
-    timelineTrackBoundsRef.current = bounds;
-    return bounds;
-  }, []);
-
-  const getScrubTimeFromPointer = useCallback(
-    (clientX: number) => {
-      const bounds = timelineTrackBoundsRef.current || measureTimelineTrackBounds();
-      if (!bounds || bounds.width <= 0 || timelineContentWidthPx <= 0 || totalDurationMs <= 0) {
-        return null;
-      }
-      const progress = getProgressFromPointerPosition(clientX, bounds.left, bounds.width);
-      const viewportX = progress * bounds.width;
-      const contentX = clamp(viewportX - timelineScrollOffsetPx, 0, timelineContentWidthPx);
-      const contentProgress = clampProgress(contentX / timelineContentWidthPx);
-      const rawMs = getTimeFromProgress(contentProgress, totalDurationMs);
-      const snappedMs = Math.round(rawMs / scrubFrameStepMs) * scrubFrameStepMs;
-      return Math.max(0, Math.min(totalDurationMs, snappedMs));
-    },
-    [measureTimelineTrackBounds, scrubFrameStepMs, timelineContentWidthPx, timelineScrollOffsetPx, totalDurationMs]
-  );
-
-  const commitScrubTime = useCallback(
-    (targetMs: number | null) => {
-      if (!Number.isFinite(targetMs as number)) return;
-      const safeTargetMs = Math.max(0, Math.min(totalDurationMs, Math.round(targetMs as number)));
-      if (lastScrubTargetMsRef.current === safeTargetMs) return;
-      lastScrubTargetMsRef.current = safeTargetMs;
-      playheadRef.current = safeTargetMs;
-      setTimelinePlayheadMs(safeTargetMs);
-    },
-    [setTimelinePlayheadMs, totalDurationMs]
-  );
-
-  const flushPendingScrub = useCallback(() => {
-    const pendingClientX = pendingScrubClientXRef.current;
-    pendingScrubClientXRef.current = null;
-    if (pendingClientX === null) return;
-    commitScrubTime(getScrubTimeFromPointer(pendingClientX));
-  }, [commitScrubTime, getScrubTimeFromPointer]);
-
-  const requestScrubUpdate = useCallback(
-    (clientX: number) => {
-      pendingScrubClientXRef.current = clientX;
-      if (scrubRafRef.current !== null) return;
-      // Batch pointer move work to one timeline update per frame to keep scrubbing smooth.
-      scrubRafRef.current = window.requestAnimationFrame(() => {
-        scrubRafRef.current = null;
-        flushPendingScrub();
-      });
-    },
-    [flushPendingScrub]
-  );
-
-  const startScrubbing = useCallback(
-    (clientX: number, pointerId: number | null) => {
-      if (totalDurationMs <= 0) return;
-      scrubSessionRef.current = {
-        wasPlaying: timelineIsPlaying,
-        pointerId,
-      };
-      isScrubbingRef.current = true;
-      setTimelineIsScrubbing(true);
-      setTimelinePlaying(false);
-      measureTimelineTrackBounds();
-      requestScrubUpdate(clientX);
-    },
-    [measureTimelineTrackBounds, requestScrubUpdate, setTimelinePlaying, timelineIsPlaying, totalDurationMs]
-  );
-
-  const updateScrubbing = useCallback(
-    (clientX: number) => {
-      if (!isScrubbingRef.current) return;
-      requestScrubUpdate(clientX);
-    },
-    [requestScrubUpdate]
-  );
-
-  const endScrubbing = useCallback(() => {
-    if (!isScrubbingRef.current) return;
-    isScrubbingRef.current = false;
-    setTimelineIsScrubbing(false);
-    if (scrubRafRef.current !== null) {
-      window.cancelAnimationFrame(scrubRafRef.current);
-      scrubRafRef.current = null;
-    }
-    flushPendingScrub();
-    const shouldResumePlayback = scrubSessionRef.current?.wasPlaying === true;
-    scrubSessionRef.current = null;
-    lastScrubTargetMsRef.current = null;
-    setTimelinePlaying(shouldResumePlayback);
-  }, [flushPendingScrub, setTimelinePlaying]);
-
   useEffect(() => {
     if (!timelineIsScrubbing) return;
 
     const handlePointerMove = (event: PointerEvent) => {
-      const activePointerId = scrubSessionRef.current?.pointerId;
       if (activePointerId !== null && event.pointerId !== activePointerId) return;
       if (event.pointerType === "touch") {
         event.preventDefault();
@@ -496,7 +659,6 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     };
 
     const handlePointerEnd = (event: PointerEvent) => {
-      const activePointerId = scrubSessionRef.current?.pointerId;
       if (activePointerId !== null && event.pointerId !== activePointerId) return;
       endScrubbing();
     };
@@ -510,7 +672,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       window.removeEventListener("pointerup", handlePointerEnd);
       window.removeEventListener("pointercancel", handlePointerEnd);
     };
-  }, [endScrubbing, timelineIsScrubbing, updateScrubbing]);
+  }, [activePointerId, endScrubbing, timelineIsScrubbing, updateScrubbing]);
 
   const handleTrackPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -518,9 +680,9 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       if (event.pointerType === "mouse" && event.button !== 0) return;
       event.preventDefault();
       event.currentTarget.setPointerCapture?.(event.pointerId);
-      startScrubbing(event.clientX, event.pointerId);
+      beginTimelineScrub(event.clientX, event.pointerId, false);
     },
-    [startScrubbing]
+    [beginTimelineScrub]
   );
 
   const startTrimDrag = useCallback(
@@ -528,6 +690,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       if (!selectedElement) return;
       event.preventDefault();
       event.stopPropagation();
+      setTimelinePlaying(false);
       setTrimDrag({
         mode,
         initialClientX: event.clientX,
@@ -539,7 +702,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
         endMs: selectedWindow.endMs,
       };
     },
-    [selectedElement, selectedWindow.endMs, selectedWindow.startMs]
+    [selectedElement, selectedWindow.endMs, selectedWindow.startMs, setTimelinePlaying]
   );
 
   useEffect(() => {
@@ -635,19 +798,15 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
         marker.ratio < 0.96
     );
   }, [secondMarkers, totalDurationMs]);
-  const filmstripFrameCount = useMemo(
-    () => Math.max(12, Math.min(48, Math.ceil(timelineContentWidthPx / 40))),
-    [timelineContentWidthPx]
-  );
-
   const selectedBarStyle = useMemo(() => {
     if (!selectedElement || totalDurationMs <= 0 || timelineContentWidthPx <= 0) return null;
     const startRatio = selectedWindow.startMs / totalDurationMs;
     const widthRatio = (selectedWindow.endMs - selectedWindow.startMs) / totalDurationMs;
+    const trimContentWidthPx = Math.max(widthRatio * timelineContentWidthPx, 92);
     return {
-      left: `${startRatio * timelineContentWidthPx}px`,
-      width: `${Math.max(widthRatio * timelineContentWidthPx, 92)}px`,
-      minWidth: "92px",
+      left: `${startRatio * timelineContentWidthPx - TRIM_HANDLE_WIDTH_PX}px`,
+      width: `${trimContentWidthPx + TRIM_HANDLE_WIDTH_PX * 2}px`,
+      minWidth: `${92 + TRIM_HANDLE_WIDTH_PX * 2}px`,
     };
   }, [
     selectedElement,
@@ -732,44 +891,63 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
               </div>
 
               <div className="space-y-2">
-                <div ref={trimTrackRef} className="relative h-14 overflow-hidden">
-                  {selectedElement && selectedBarStyle ? (
+                {selectedElement && selectedBarStyle ? (
+                  <div ref={trimTrackRef} className="relative h-14 overflow-hidden">
                     <div className="absolute left-0 top-0 h-full" style={timelineContentStyle}>
                       <div
                         data-trim-bar
-                        className="absolute top-0 z-20 h-14 rounded-[18px] bg-[#ff5b78] px-7 shadow-[0_10px_22px_rgba(255,91,120,0.32)]"
+                        className="absolute top-0 z-20 h-14 rounded-[18px] bg-[#ff5b78] px-8 shadow-[0_10px_22px_rgba(255,91,120,0.32)]"
                         style={selectedBarStyle}
                         onMouseDown={(event) => startTrimDrag("move", event)}
                       >
-                        <div className="absolute inset-y-1.5 left-7 right-7 overflow-hidden rounded-[12px]">
-                          <FilmstripFrames
-                            count={Math.max(8, Math.ceil(((selectedWindow.endMs - selectedWindow.startMs) / totalDurationMs) * filmstripFrameCount))}
-                            imageSrc={selectedPreviewSrc || undefined}
-                            tone="selected"
-                          />
+                        <div className="absolute inset-y-1.5 left-8 right-8 overflow-hidden rounded-[12px]">
+                          {selectedPreviewKind === "text" ? (
+                            <div className="flex h-full items-center justify-center rounded-[12px] bg-[linear-gradient(180deg,#fffefe_0%,#f8f9fb_100%)] px-4 shadow-[inset_0_1px_0_rgba(255,255,255,0.85)]">
+                              <div className="inline-flex max-w-[78%] items-center justify-center rounded-[10px] border border-[#eceff3] bg-white px-4 py-1.5 shadow-[0_8px_16px_rgba(15,23,42,0.08)]">
+                                <span
+                                  className="block truncate whitespace-nowrap text-center text-[15px] font-semibold leading-none"
+                                  style={{
+                                    color: String(selectedElement?.color || selectedElement?.fill || "#111827"),
+                                  }}
+                                >
+                                  {selectedTextPreview}
+                                </span>
+                              </div>
+                            </div>
+                          ) : (
+                            <div className="px-1">
+                              <FilmstripFrames
+                                count={Math.max(8, Math.ceil(((selectedWindow.endMs - selectedWindow.startMs) / totalDurationMs) * filmstripFrameCount))}
+                                images={effectiveSelectedVideoFrames.length > 0 ? effectiveSelectedVideoFrames : undefined}
+                                imageSrc={
+                                  effectiveSelectedVideoFrames.length === 0 &&
+                                  (selectedPreviewKind === "image" || selectedPreviewKind === "generic")
+                                    ? selectedPreviewSrc || undefined
+                                    : undefined
+                                }
+                                tone="selected"
+                              />
+                            </div>
+                          )}
                         </div>
                         <div
                           data-trim-handle
-                          className="absolute inset-y-0 left-0 flex w-7 cursor-ew-resize items-center justify-center text-white"
+                          className="absolute inset-y-0 left-0 flex w-8 cursor-ew-resize items-center justify-center rounded-l-[18px] bg-[#ff5b78] text-white"
                           onMouseDown={(event) => startTrimDrag("start", event)}
                         >
                           <ChevronLeft size={18} />
                         </div>
                         <div
                           data-trim-handle
-                          className="absolute inset-y-0 right-0 flex w-7 cursor-ew-resize items-center justify-center text-white"
+                          className="absolute inset-y-0 right-0 flex w-8 cursor-ew-resize items-center justify-center rounded-r-[18px] bg-[#ff5b78] text-white"
                           onMouseDown={(event) => startTrimDrag("end", event)}
                         >
                           <ChevronRight size={18} />
                         </div>
                       </div>
                     </div>
-                  ) : (
-                    <div className="flex h-14 items-center justify-center rounded-[18px] border border-dashed border-[#d7dde7] bg-white/80 text-[13px] text-[#8b94a3]">
-                      Select one layer to trim when it appears in the animation.
-                    </div>
-                  )}
-                </div>
+                  </div>
+                ) : null}
 
                 <div className="relative h-14 overflow-hidden rounded-[16px] border border-[#d0d6df] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
                   {previewUrl ? (
@@ -787,7 +965,8 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
                   <div className="absolute left-0 top-0 h-full" style={timelineContentStyle}>
                     <FilmstripFrames
                       count={filmstripFrameCount}
-                      imageSrc={templatePreviewSrc || undefined}
+                      images={effectiveTemplateVideoFrames.length > 0 ? effectiveTemplateVideoFrames : undefined}
+                      imageSrc={effectiveTemplateVideoFrames.length === 0 ? templatePreviewSrc || undefined : undefined}
                       tone="preview"
                     />
                     <FilmstripOverlay count={filmstripFrameCount} />

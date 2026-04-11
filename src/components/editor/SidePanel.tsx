@@ -499,6 +499,13 @@ interface StoredTemplate {
     height?: number;
   } | null;
   thumbnailDataUrl?: string | null;
+  previewVideoUrl?: string | null;
+  previewPosterUrl?: string | null;
+  previewStatus?: string | null;
+  previewDurationMs?: number | null;
+  previewVersion?: number | null;
+  previewError?: string | null;
+  previewUpdatedAt?: string | null;
 }
 
 interface TaxonomySubCategorySetting {
@@ -937,6 +944,12 @@ function toEditorDesignFromTemplate(
 ): EditorDesign | null {
   if (!template || !template.id) return null;
   const templateThumbnailSrc = String(template.thumbnailDataUrl || "").trim();
+  const dbPreviewUrl = String(template.previewVideoUrl || "").trim();
+  const dbPreviewPosterUrl =
+    String(template.previewPosterUrl || "").trim() || templateThumbnailSrc || null;
+  const dbPreviewStatus = String(template.previewStatus || "").trim() || "not_requested";
+  const dbPreviewGeneratedAt = String(template.previewUpdatedAt || "").trim() || null;
+  const dbPreviewError = String(template.previewError || "").trim() || null;
 
   if (template.data && typeof template.data === "object") {
     const maybeDesign = template.data as Partial<EditorDesign>;
@@ -950,8 +963,18 @@ function toEditorDesignFromTemplate(
                 ...maybeDesign.timeline,
                 preview: {
                   ...(maybeDesign.timeline.preview || {}),
+                  status: dbPreviewStatus || maybeDesign.timeline.preview?.status || "not_requested",
+                  url: dbPreviewUrl || String(maybeDesign.timeline.preview?.url || "").trim() || null,
                   posterUrl:
-                    String(maybeDesign.timeline.preview?.posterUrl || "").trim() || templateThumbnailSrc || null,
+                    dbPreviewPosterUrl ||
+                    String(maybeDesign.timeline.preview?.posterUrl || "").trim() ||
+                    templateThumbnailSrc ||
+                    null,
+                  generatedAt:
+                    dbPreviewGeneratedAt ||
+                    String(maybeDesign.timeline.preview?.generatedAt || "").trim() ||
+                    null,
+                  error: dbPreviewError || String(maybeDesign.timeline.preview?.error || "").trim() || null,
                 },
               },
             }
@@ -2387,6 +2410,16 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     }
   };
 
+  const onUploadMediaFiles = async (files: FileList | null) => {
+    if (!files || files.length === 0) {
+      pendingBackgroundUploadCategoryValueRef.current = "";
+      return;
+    }
+
+    await onUploadFiles(files);
+    await onUploadVideos(files);
+  };
+
   const handleLayerDrop = (targetId: string, position: "before" | "after") => {
     if (!dragLayerId || dragLayerId === targetId) {
       setDragLayerId("");
@@ -3198,11 +3231,13 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           <input
             ref={uploadInputRef}
             type="file"
-            accept="image/*"
+            accept={activeTab === "upload" ? "image/*,video/*" : "image/*"}
             multiple
             className="hidden"
             onChange={(event) => {
-              void onUploadFiles(event.target.files);
+              void (activeTab === "upload"
+                ? onUploadMediaFiles(event.target.files)
+                : onUploadFiles(event.target.files));
               event.currentTarget.value = "";
             }}
           />

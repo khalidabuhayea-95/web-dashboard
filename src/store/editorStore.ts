@@ -206,6 +206,19 @@ interface StageApi {
   fitToScreen: () => void;
   exportPng: () => void;
   captureThumbnailDataUrl: () => string;
+  captureTimelineStripDataUrls: (playheadsMs: number[]) => Promise<string[]>;
+  recordTimelinePreviewVideo: (options?: {
+    fps?: number;
+    maxDimension?: number;
+    durationMs?: number;
+  }) => Promise<{
+    blob: Blob;
+    mimeType: string;
+    durationMs: number;
+    posterDataUrl: string;
+    width: number;
+    height: number;
+  } | null>;
   mergeSelectedLayers: () => Promise<{ merged: boolean; message?: string }>;
 }
 
@@ -242,6 +255,7 @@ interface EditorStore {
   designTimeline: EditorTimeline;
   timelinePlayheadMs: number;
   timelineIsPlaying: boolean;
+  previewGenerationActive: boolean;
   selectedIds: string[];
   publishCandidateIds: string[];
   importedElementsRefreshKey: number;
@@ -281,6 +295,7 @@ interface EditorStore {
   updateTimeline: (patch: Partial<EditorTimeline>, options?: UpdateOptions) => void;
   setTimelinePlayheadMs: (value: number) => void;
   setTimelinePlaying: (value: boolean) => void;
+  setPreviewGenerationActive: (value: boolean) => void;
   toggleTimelinePlaying: () => void;
 
   setSelectedIds: (ids: string[]) => void;
@@ -482,8 +497,22 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
 }
 
 function normalizePageDuration(durationMs: unknown) {
-  void durationMs;
-  return DEFAULT_PAGE_DURATION_MS;
+  const raw = Number(durationMs);
+  return Number.isFinite(raw) && raw > 0 ? Math.max(1, Math.round(raw)) : DEFAULT_PAGE_DURATION_MS;
+}
+
+function resolveTimelineEndInput(
+  endMs: unknown,
+  nextPageDurationMs: number,
+  previousPageDurationMs: number
+) {
+  const raw = Number(endMs);
+  if (!Number.isFinite(raw)) return nextPageDurationMs;
+  const rounded = Math.round(raw);
+  if (nextPageDurationMs > previousPageDurationMs && rounded === previousPageDurationMs) {
+    return nextPageDurationMs;
+  }
+  return rounded;
 }
 
 function normalizeTimelinePreview(preview: Partial<EditorTimelinePreview> | null | undefined): EditorTimelinePreview {
@@ -495,9 +524,14 @@ function normalizeTimelinePreview(preview: Partial<EditorTimelinePreview> | null
 
 function normalizeElementForEditor(
   element: EditorElement,
-  pageDurationMs: number
+  pageDurationMs: number,
+  previousPageDurationMs = pageDurationMs
 ): EditorElement {
-  const timelineWindow = clampTimelineWindow(element.timelineStartMs, element.timelineEndMs, pageDurationMs);
+  const timelineWindow = clampTimelineWindow(
+    element.timelineStartMs,
+    resolveTimelineEndInput(element.timelineEndMs, pageDurationMs, previousPageDurationMs),
+    pageDurationMs
+  );
   return {
     ...element,
     ...(element.type === "text"
@@ -539,13 +573,34 @@ function normalizeElementForEditor(
 }
 
 function normalizePageForEditor(page: EditorPage): EditorPage {
-  const durationMs = normalizePageDuration(page.durationMs);
+  const storedDurationMs = normalizePageDuration(page.durationMs);
+  const durationMs = getPageDurationMs({
+    ...page,
+    durationMs: storedDurationMs,
+  });
   return {
     ...page,
     durationMs,
     elements: Array.isArray(page.elements)
-      ? page.elements.map((element) => normalizeElementForEditor(element, durationMs))
+      ? page.elements.map((element) => normalizeElementForEditor(element, durationMs, storedDurationMs))
       : [],
+  };
+}
+
+function reconcilePageWithElements(
+  page: EditorPage,
+  nextElements: EditorElement[],
+  previousPageDurationMs = getPageDurationMs(page)
+) {
+  const nextPageDurationMs = getPageDurationMs({
+    ...page,
+    elements: nextElements,
+  });
+  return {
+    durationMs: nextPageDurationMs,
+    elements: nextElements.map((element) =>
+      normalizeElementForEditor(element, nextPageDurationMs, previousPageDurationMs)
+    ),
   };
 }
 
@@ -709,6 +764,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   designTimeline: initialTimeline,
   timelinePlayheadMs: 0,
   timelineIsPlaying: false,
+  previewGenerationActive: false,
   selectedIds: [],
   publishCandidateIds: [],
   importedElementsRefreshKey: 0,
@@ -768,6 +824,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       timelinePlayheadMs: clampTimelinePlayheadMs(Math.round(Number(timelinePlayheadMs) || 0), state.pages),
     })),
   setTimelinePlaying: (timelineIsPlaying) => set({ timelineIsPlaying: Boolean(timelineIsPlaying) }),
+  setPreviewGenerationActive: (previewGenerationActive) =>
+    set({ previewGenerationActive: Boolean(previewGenerationActive) }),
   toggleTimelinePlaying: () =>
     set((state) => {
       const totalDurationMs = getTotalTimelineDurationMs(state.pages);
@@ -1079,7 +1137,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (!id) return;
     set((state) => {
       const activePage = findActivePage(state);
-      const pageDurationMs = getPageDurationMs(activePage);
+      if (!activePage) return state;
+      const previousPageDurationMs = getPageDurationMs(activePage);
       const normalizedPatch = {
         ...patch,
         ...(typeof patch.fontFamily !== "undefined"
@@ -1125,24 +1184,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           ? { mediaAnimationIntensity: normalizeAnimationIntensity(patch.mediaAnimationIntensity) }
           : {}),
       };
+      const nextElements = activePage.elements.map((element) =>
+        element.id !== id ? element : { ...element, ...normalizedPatch }
+      );
+      const nextPage = reconcilePageWithElements(
+        activePage,
+        nextElements,
+        previousPageDurationMs
+      );
 
       return {
         pages: mutateActivePage(state, (page) => ({
           ...page,
-          elements: page.elements.map((element) => {
-            if (element.id !== id) return element;
-            const merged = { ...element, ...normalizedPatch };
-            const timelineWindow = clampTimelineWindow(
-              merged.timelineStartMs,
-              merged.timelineEndMs,
-              pageDurationMs
-            );
-            return {
-              ...merged,
-              timelineStartMs: timelineWindow.startMs,
-              timelineEndMs: timelineWindow.endMs,
-            };
-          }),
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
         })),
         availableFontFamilies:
           typeof normalizedPatch.fontFamily === "string"
@@ -1161,25 +1216,33 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const src = String(content?.src || "").trim();
     if (!targetId || !src) return;
 
-    set((state) => ({
-      pages: mutateActivePage(state, (page) => ({
-        ...page,
-        elements: page.elements.map((element) => {
-          if (element.id !== targetId || element.type !== "frame") return element;
-          return {
-            ...element,
-            frameContent: {
-              ...content,
-              kind: content.kind === "video" ? "video" : "image",
-              src,
-            },
-            frameContentTransform: normalizeFrameContentTransform(
-              element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
-            ),
-          };
-        }),
-      })),
-    }));
+    set((state) => {
+      const page = findActivePage(state);
+      if (!page) return state;
+      const previousPageDurationMs = getPageDurationMs(page);
+      const nextElements = page.elements.map((element) => {
+        if (element.id !== targetId || element.type !== "frame") return element;
+        return {
+          ...element,
+          frameContent: {
+            ...content,
+            kind: content.kind === "video" ? "video" : "image",
+            src,
+          },
+          frameContentTransform: normalizeFrameContentTransform(
+            element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM
+          ),
+        };
+      });
+      const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
+      return {
+        pages: mutateActivePage(state, (activePage) => ({
+          ...activePage,
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
+        })),
+      };
+    });
 
     if (options.recordHistory !== false) {
       get().recordHistory();
@@ -1215,20 +1278,28 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const targetId = String(id || "").trim();
     if (!targetId) return;
 
-    set((state) => ({
-      pages: mutateActivePage(state, (page) => ({
-        ...page,
-        elements: page.elements.map((element) =>
-          element.id === targetId && element.type === "frame"
-            ? {
-                ...element,
-                frameContent: null,
-                frameContentTransform: normalizeFrameContentTransform(DEFAULT_FRAME_CONTENT_TRANSFORM),
-              }
-            : element
-        ),
-      })),
-    }));
+    set((state) => {
+      const page = findActivePage(state);
+      if (!page) return state;
+      const previousPageDurationMs = getPageDurationMs(page);
+      const nextElements = page.elements.map((element) =>
+        element.id === targetId && element.type === "frame"
+          ? {
+              ...element,
+              frameContent: null,
+              frameContentTransform: normalizeFrameContentTransform(DEFAULT_FRAME_CONTENT_TRANSFORM),
+            }
+          : element
+      );
+      const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
+      return {
+        pages: mutateActivePage(state, (activePage) => ({
+          ...activePage,
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
+        })),
+      };
+    });
 
     if (options.recordHistory !== false) {
       get().recordHistory();
@@ -1241,7 +1312,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const selectedSet = new Set(selected);
     set((state) => {
       const activePage = findActivePage(state);
-      const pageDurationMs = getPageDurationMs(activePage);
+      if (!activePage) return state;
+      const previousPageDurationMs = getPageDurationMs(activePage);
       const normalizedPatch = {
         ...patch,
         ...(typeof patch.fontFamily !== "undefined"
@@ -1287,24 +1359,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           ? { mediaAnimationIntensity: normalizeAnimationIntensity(patch.mediaAnimationIntensity) }
           : {}),
       };
+      const nextElements = activePage.elements.map((element) =>
+        !selectedSet.has(element.id) ? element : { ...element, ...normalizedPatch }
+      );
+      const nextPage = reconcilePageWithElements(
+        activePage,
+        nextElements,
+        previousPageDurationMs
+      );
 
       return {
         pages: mutateActivePage(state, (page) => ({
           ...page,
-          elements: page.elements.map((element) => {
-            if (!selectedSet.has(element.id)) return element;
-            const merged = { ...element, ...normalizedPatch };
-            const timelineWindow = clampTimelineWindow(
-              merged.timelineStartMs,
-              merged.timelineEndMs,
-              pageDurationMs
-            );
-            return {
-              ...merged,
-              timelineStartMs: timelineWindow.startMs,
-              timelineEndMs: timelineWindow.endMs,
-            };
-          }),
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
         })),
         availableFontFamilies:
           typeof normalizedPatch.fontFamily === "string"
@@ -1324,11 +1392,15 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const page = findActivePage(state);
     if (!page) return;
     const selectedSet = new Set(state.selectedIds.filter((item) => item !== id));
+    const previousPageDurationMs = getPageDurationMs(page);
+    const nextElements = page.elements.filter((element) => element.id !== id);
+    const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
 
     set({
       pages: mutateActivePage(state, (activePage) => ({
         ...activePage,
-        elements: activePage.elements.filter((element) => element.id !== id),
+        durationMs: nextPage.durationMs,
+        elements: nextPage.elements,
       })),
       selectedIds: Array.from(selectedSet),
       publishCandidateIds: state.publishCandidateIds.filter((item) => item !== id),
@@ -1342,14 +1414,26 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (selected.length === 0) return;
 
     const selectedSet = new Set(selected);
-    set((state) => ({
-      pages: mutateActivePage(state, (activePage) => ({
-        ...activePage,
-        elements: activePage.elements.filter((element) => !selectedSet.has(element.id)),
-      })),
-      selectedIds: [],
-      publishCandidateIds: state.publishCandidateIds.filter((item) => !selectedSet.has(item)),
-    }));
+    set((state) => {
+      const activePage = findActivePage(state);
+      if (!activePage) return state;
+      const previousPageDurationMs = getPageDurationMs(activePage);
+      const nextElements = activePage.elements.filter((element) => !selectedSet.has(element.id));
+      const nextPage = reconcilePageWithElements(
+        activePage,
+        nextElements,
+        previousPageDurationMs
+      );
+      return {
+        pages: mutateActivePage(state, (page) => ({
+          ...page,
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
+        })),
+        selectedIds: [],
+        publishCandidateIds: state.publishCandidateIds.filter((item) => !selectedSet.has(item)),
+      };
+    });
 
     get().recordHistory();
   },
@@ -1855,14 +1939,27 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
   setPageDuration: (pageId, durationMs, options = {}) => {
     const state = get();
-    const nextDurationMs = normalizePageDuration(durationMs);
+    const requestedDurationMs = normalizePageDuration(durationMs);
     const nextPages = state.pages.map((page) => {
       if (page.id !== pageId) return page;
+      const previousPageDurationMs = getPageDurationMs(page);
+      const nextPageDurationMs = getPageDurationMs({
+        ...page,
+        durationMs: requestedDurationMs,
+      });
       return {
         ...page,
-        durationMs: nextDurationMs,
+        durationMs: nextPageDurationMs,
         elements: page.elements.map((element) => {
-          const window = clampTimelineWindow(element.timelineStartMs, element.timelineEndMs, nextDurationMs);
+          const window = clampTimelineWindow(
+            element.timelineStartMs,
+            resolveTimelineEndInput(
+              element.timelineEndMs,
+              nextPageDurationMs,
+              previousPageDurationMs
+            ),
+            nextPageDurationMs
+          );
           return {
             ...element,
             timelineStartMs: window.startMs,

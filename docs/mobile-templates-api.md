@@ -37,6 +37,9 @@ Response:
 - `templatesBySubCategory`: grouped list
   - group fields: `category`, `categoryId`, `categoryValue`, `subCategory`, `subCategoryId`, `subCategoryValue`
   - `templates` entries are summary objects (no `project` payload)
+  - if a generated MP4 preview exists, each template includes `previewVideoUrl` and `previewPosterUrl`
+  - `previewVideoUrl` is a top-level alias for `preview.url`
+  - `previewPosterUrl` is a top-level alias for `preview.posterUrl`
 
 ### `GET /api/mobile/templates/:id`
 
@@ -48,6 +51,51 @@ Response:
 - `template`: full mobile template object (includes `project`)
   - includes `categoryId` and `subCategoryId` GUID values
   - `category` and `subCategory` are localized labels
+  - if a generated MP4 preview exists, use `previewVideoUrl` for motion-capable previews
+  - use `previewPosterUrl` as the static fallback image when `previewVideoUrl` is present
+  - fall back to `thumbnailDataUrl` / `thumbnailUrl` when no MP4 preview metadata exists
+  - each project layer now also includes:
+    - `timelineStartMs`
+    - `timelineEndMs`
+    - `animation`
+
+Example layer payload:
+
+```json
+{
+  "id": "layer-1",
+  "type": "IMAGE",
+  "timelineStartMs": 0,
+  "timelineEndMs": 4200,
+  "animation": {
+    "type": "RISE",
+    "infinite": false,
+    "durationMs": 900,
+    "delayMs": 0,
+    "direction": "UP",
+    "easing": "SOFT_OUT",
+    "intensity": 1
+  },
+  "transform": {
+    "x": 540,
+    "y": 960,
+    "scale": 1,
+    "scaleX": 1,
+    "scaleY": 1,
+    "rotation": 0
+  },
+  "opacity": 1,
+  "hidden": false,
+  "locked": false,
+  "zIndex": 0
+}
+```
+
+Notes:
+- `timelineStartMs` / `timelineEndMs` define the layer visibility window on the template timeline.
+- `animation.infinite = false` should be treated as a one-shot animation starting at `timelineStartMs`.
+- `animation.infinite = true` should be treated as a looping animation while the layer remains visible.
+- Legacy animation fields under `filters.animation*` may still be present for backward compatibility, but new clients should prefer the layer-level `animation` object.
 
 ### `GET /api/mobile/templates/:id/assets`
 
@@ -90,6 +138,7 @@ Response:
 - `category`: includes `id`, `value`, `label`
 - `subCategory`: includes `id`, `categoryId`, `value`, `label`
 - `templates`: summary template objects (no `project` payload)
+  - if a generated MP4 preview exists, each template includes `previewVideoUrl` and `previewPosterUrl`
 
 ### `GET /api/mobile/elements`
 

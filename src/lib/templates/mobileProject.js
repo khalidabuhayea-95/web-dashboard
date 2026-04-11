@@ -1,5 +1,6 @@
 import { extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
+import { DEFAULT_ANIMATION_DURATION_MS, DEFAULT_PAGE_DURATION_MS } from "@/lib/editor/animationTimeline";
 import {
   getShapeRasterFrame,
   isRasterizableShapeLayer,
@@ -367,6 +368,64 @@ function mapAnimationMode(value) {
   return allowed.has(next) ? next : "LOOP";
 }
 
+function mapLayerAnimationType(value) {
+  const allowed = new Set([
+    "NONE",
+    "RISE",
+    "PAN",
+    "FADE",
+    "POP",
+    "WIPE",
+    "BLUR",
+    "SUCCESSION",
+    "BREATHE",
+    "BASELINE",
+    "DRIFT",
+    "TECTONIC",
+    "TUMBLE",
+    "NEON",
+    "SCRAPBOOK",
+    "STOMP",
+    "ROTATE",
+    "FLICKER",
+    "PULSE",
+    "WIGGLE",
+  ]);
+  const next = String(value || "NONE").toUpperCase();
+  return allowed.has(next) ? next : "NONE";
+}
+
+function mapLayerAnimationDirection(value) {
+  const allowed = new Set(["LEFT", "RIGHT", "UP", "DOWN", "CENTER", "CLOCKWISE", "COUNTERCLOCKWISE"]);
+  const next = String(value || "CENTER").toUpperCase();
+  return allowed.has(next) ? next : "CENTER";
+}
+
+function mapLayerAnimationEasing(value) {
+  const allowed = new Set(["LINEAR", "EASE_OUT", "EASE_IN_OUT", "SOFT_OUT", "SOFT_IN_OUT"]);
+  const next = String(value || "SOFT_OUT").toUpperCase();
+  return allowed.has(next) ? next : "SOFT_OUT";
+}
+
+function mapLayerTimelineWindow(item) {
+  const startMs = Math.max(0, Math.round(numberOr(item?.timelineStartMs, 0)));
+  const rawEndMs = Math.round(numberOr(item?.timelineEndMs, DEFAULT_PAGE_DURATION_MS));
+  const endMs = Math.max(startMs, rawEndMs);
+  return { startMs, endMs };
+}
+
+function mapLayerAnimation(item) {
+  return {
+    type: mapLayerAnimationType(item?.mediaAnimationType),
+    infinite: parseBoolean(item?.mediaAnimationInfinite, false),
+    durationMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDurationMs, DEFAULT_ANIMATION_DURATION_MS))),
+    delayMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDelayMs, 0))),
+    direction: mapLayerAnimationDirection(item?.mediaAnimationDirection),
+    easing: mapLayerAnimationEasing(item?.mediaAnimationEasing),
+    intensity: clamp(numberOr(item?.mediaAnimationIntensity, 1), 0, 2),
+  };
+}
+
 function mapTemplateCategory(value) {
   const normalized = String(value || "").trim().toLowerCase();
   if (["business", "corporate", "work"].includes(normalized)) return "BUSINESS";
@@ -548,6 +607,7 @@ function baseLayer(item, index, canvasSize) {
   const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
   const baseWidth = Math.max(numberOr(item.width, 1), 1);
   const baseHeight = Math.max(numberOr(item.height, 1), 1);
+  const timelineWindow = mapLayerTimelineWindow(item);
 
   return {
     id: String(item.id || item.layerId || `layer-${index + 1}`),
@@ -565,6 +625,9 @@ function baseLayer(item, index, canvasSize) {
     locked: parseBoolean(item.layerLocked, false),
     hidden: parseBoolean(item.layerHidden, false),
     zIndex: index,
+    timelineStartMs: timelineWindow.startMs,
+    timelineEndMs: timelineWindow.endMs,
+    animation: mapLayerAnimation(item),
   };
 }
 
@@ -888,11 +951,23 @@ function mapFrameShapePayload(item) {
   };
 }
 
-function mapFrameContentPayload(item, index, options) {
+function resolveFramePreviewContentUri(item, index, options) {
+  return resolveMediaUri("frame-preview", {
+    assetResolver: options?.assetResolver,
+    scope: "layer",
+    elementId: item.id || item.layerId || "",
+    index,
+    field: "frameContent.preview",
+  });
+}
+
+function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
   const content = asObject(item?.frameContent);
   if (!content?.src) return null;
 
   const kind = String(content.kind || "").trim().toLowerCase() === "video" ? "VIDEO" : "IMAGE";
+  const previewWidth = Math.max(Math.round(numberOr(frameWidth, item.width || 1)), 1);
+  const previewHeight = Math.max(Math.round(numberOr(frameHeight, item.height || 1)), 1);
   const sourceWidth = Math.max(Math.round(numberOr(content.sourceWidth, item.width || 1)), 1);
   const sourceHeight = Math.max(Math.round(numberOr(content.sourceHeight, item.height || 1)), 1);
   const contentUri = resolveMediaUri(content.src || "", {
@@ -902,6 +977,16 @@ function mapFrameContentPayload(item, index, options) {
     index,
     field: "frameContent.src",
   });
+
+  if (kind === "IMAGE" || content.posterSrc) {
+    return {
+      type: "IMAGE",
+      imageUri: resolveFramePreviewContentUri(item, index, options),
+      sourceWidth: previewWidth,
+      sourceHeight: previewHeight,
+      previewOnly: true,
+    };
+  }
 
   if (kind === "VIDEO") {
     const durationMs = readVideoDurationMs(content);
@@ -938,6 +1023,15 @@ function mapFrameLayer(item, index, canvasSize, options) {
   const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
   const frameWidth = Math.max(numberOr(item.width, 1), 1);
   const frameHeight = Math.max(numberOr(item.height, 1), 1);
+  const content = mapFrameContentPayload(item, index, options, frameWidth, frameHeight);
+  const contentTransform = content?.previewOnly
+    ? {
+        fit: "manual",
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+      }
+    : normalizeFrameContentTransform(item.frameContentTransform);
 
   return {
     ...base,
@@ -956,8 +1050,8 @@ function mapFrameLayer(item, index, canvasSize, options) {
     frameWidth,
     frameHeight,
     shape: mapFrameShapePayload(item),
-    content: mapFrameContentPayload(item, index, options),
-    contentTransform: normalizeFrameContentTransform(item.frameContentTransform),
+    content,
+    contentTransform,
     filters: mediaFilters(item, {
       includeShapeMask: false,
     }),
@@ -1233,6 +1327,36 @@ function buildMobileCompatibilityWarnings(frameInfo) {
   return warnings;
 }
 
+function mapTemplatePreview(template) {
+  const status = String(template?.previewStatus || "").trim();
+  const url = String(template?.previewVideoUrl || "").trim();
+  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const durationMs = numberOr(template?.previewDurationMs, NaN);
+  const updatedAtRaw = template?.previewUpdatedAt;
+  const updatedAt =
+    updatedAtRaw instanceof Date
+      ? updatedAtRaw.getTime()
+      : updatedAtRaw
+        ? new Date(updatedAtRaw).getTime()
+        : NaN;
+  const version = numberOr(template?.previewVersion, NaN);
+  const error = String(template?.previewError || "").trim();
+
+  if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(updatedAt) && !Number.isFinite(version) && !error) {
+    return null;
+  }
+
+  return {
+    status: status || "not_requested",
+    url: url || null,
+    posterUrl: posterUrl || null,
+    durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+    version: Number.isFinite(version) ? Math.max(0, Math.round(version)) : null,
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
+    error: error || null,
+  };
+}
+
 export function toMobileProject(template, options = {}) {
   const canvasSize = resolveCanvasSize(template);
 
@@ -1269,6 +1393,7 @@ export function toMobileProject(template, options = {}) {
 export function toMobileTemplate(template, options = {}) {
   const includeProject = options.includeProject !== false;
   const canvasSize = resolveCanvasSize(template);
+  const preview = mapTemplatePreview(template);
   const rawThumbnail = String(
     template?.thumbnailDataUrl || template?.thumbnailUrl || template?.thumbnail || ""
   );
@@ -1292,6 +1417,9 @@ export function toMobileTemplate(template, options = {}) {
     subCategory: String(template?.subCategory || "general"),
     thumbnailUrl: resolvedThumbnail,
     thumbnailDataUrl: resolvedThumbnail,
+    preview,
+    previewVideoUrl: preview?.url || null,
+    previewPosterUrl: preview?.posterUrl || null,
     ...(frameInfo ? { frameInfo, compatibilityWarnings } : {}),
     ...(includeProject ? { project: toMobileProject(template, options) } : {}),
   };

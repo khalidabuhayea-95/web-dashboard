@@ -521,6 +521,34 @@ function hasPreviewTimelineContent(
 
 export function getPageDurationMs(page: { durationMs?: number | null } | null | undefined) {
   const raw = Number(page?.durationMs);
+  const elements = Array.isArray((page as { elements?: unknown[] } | null | undefined)?.elements)
+    ? ((page as { elements?: unknown[] }).elements as Array<{
+        type?: unknown;
+        videoDuration?: unknown;
+        videoEnd?: unknown;
+        frameContent?: { kind?: unknown; videoDuration?: unknown; videoEnd?: unknown } | null;
+      }>)
+    : [];
+  const longestVideoDurationMs = elements.reduce((maxDurationMs, element) => {
+    const type = String(element?.type || "").trim().toLowerCase();
+    const frameKind = String(element?.frameContent?.kind || "").trim().toLowerCase();
+    const rawSeconds =
+      type === "video"
+        ? Number.isFinite(Number(element?.videoEnd)) && Number(element?.videoEnd) > 0
+          ? Number(element?.videoEnd)
+          : Number(element?.videoDuration || 0)
+        : frameKind === "video"
+          ? Number.isFinite(Number(element?.frameContent?.videoEnd)) && Number(element?.frameContent?.videoEnd) > 0
+            ? Number(element?.frameContent?.videoEnd)
+            : Number(element?.frameContent?.videoDuration || 0)
+          : 0;
+    const nextDurationMs =
+      Number.isFinite(rawSeconds) && rawSeconds > 0 ? Math.round(rawSeconds * 1000) : 0;
+    return Math.max(maxDurationMs, nextDurationMs);
+  }, 0);
+  if (longestVideoDurationMs > 0) {
+    return Math.max(MIN_LAYER_DURATION_MS, longestVideoDurationMs);
+  }
   return Math.max(
     MIN_LAYER_DURATION_MS,
     Number.isFinite(raw) && raw > 0 ? Math.round(raw) : DEFAULT_PAGE_DURATION_MS
@@ -553,15 +581,22 @@ export function resolveTimelineWindow(
 export function hasAnimatedElementContent(
   element:
     | {
+        type?: unknown;
         mediaAnimationType?: unknown;
         timelineStartMs?: number | null;
         timelineEndMs?: number | null;
+        videoDuration?: unknown;
+        videoEnd?: unknown;
+        frameContent?: { kind?: unknown; videoDuration?: unknown; videoEnd?: unknown } | null;
       }
     | null
     | undefined,
   pageDurationMs: number
 ) {
   if (!element) return false;
+  const elementType = String(element.type || "").trim().toLowerCase();
+  const frameContentKind = String(element.frameContent?.kind || "").trim().toLowerCase();
+  if (elementType === "video" || frameContentKind === "video") return true;
   if (normalizeAnimationType(element.mediaAnimationType) !== "NONE") return true;
   const window = resolveTimelineWindow(element, pageDurationMs);
   return window.startMs > 0 || window.endMs < pageDurationMs;
@@ -574,6 +609,10 @@ export function hasAnimatedPageContent<
       mediaAnimationType?: unknown;
       timelineStartMs?: number | null;
       timelineEndMs?: number | null;
+      type?: unknown;
+      videoDuration?: unknown;
+      videoEnd?: unknown;
+      frameContent?: { kind?: unknown; videoDuration?: unknown; videoEnd?: unknown } | null;
     }> | null;
   },
 >(page: TPage | null | undefined) {

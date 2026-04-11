@@ -537,10 +537,25 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source). FRAME layers include `shape`, `content`, and `contentTransform` so the mobile renderer can position the frame and clipped image/video independently.",
+          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, and an `animation` object for mobile timeline rendering. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source). FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
         items: {
           type: "object",
           additionalProperties: true,
+          properties: {
+            timelineStartMs: {
+              type: "integer",
+              format: "int32",
+              description: "Layer visibility start on the template timeline in milliseconds.",
+            },
+            timelineEndMs: {
+              type: "integer",
+              format: "int32",
+              description: "Layer visibility end on the template timeline in milliseconds.",
+            },
+            animation: {
+              $ref: "#/components/schemas/MobileLayerAnimation",
+            },
+          },
         },
       },
       meta: {
@@ -590,6 +605,65 @@ const schemas = {
       },
     },
   },
+  MobileLayerAnimation: {
+    type: "object",
+    required: ["type", "infinite", "durationMs", "delayMs", "direction", "easing", "intensity"],
+    properties: {
+      type: {
+        type: "string",
+        enum: [
+          "NONE",
+          "RISE",
+          "PAN",
+          "FADE",
+          "POP",
+          "WIPE",
+          "BLUR",
+          "SUCCESSION",
+          "BREATHE",
+          "BASELINE",
+          "DRIFT",
+          "TECTONIC",
+          "TUMBLE",
+          "NEON",
+          "SCRAPBOOK",
+          "STOMP",
+          "ROTATE",
+          "FLICKER",
+          "PULSE",
+          "WIGGLE",
+        ],
+      },
+      infinite: { type: "boolean" },
+      durationMs: { type: "integer", format: "int32" },
+      delayMs: { type: "integer", format: "int32" },
+      direction: {
+        type: "string",
+        enum: ["LEFT", "RIGHT", "UP", "DOWN", "CENTER", "CLOCKWISE", "COUNTERCLOCKWISE"],
+      },
+      easing: {
+        type: "string",
+        enum: ["LINEAR", "EASE_OUT", "EASE_IN_OUT", "SOFT_OUT", "SOFT_IN_OUT"],
+      },
+      intensity: { type: "number" },
+    },
+  },
+  MobileTemplatePreview: {
+    type: "object",
+    required: ["status"],
+    properties: {
+      status: {
+        type: "string",
+        enum: ["not_requested", "queued", "processing", "ready", "failed"],
+      },
+      url: { type: "string", format: "uri", nullable: true },
+      posterUrl: { type: "string", format: "uri", nullable: true },
+      durationMs: { type: "integer", format: "int32", nullable: true },
+      version: { type: "integer", format: "int32", nullable: true },
+      updatedAt: { type: "integer", format: "int64", nullable: true },
+      error: { type: "string", nullable: true },
+    },
+  },
   MobileTemplateSummary: {
     type: "object",
     required: [
@@ -623,6 +697,24 @@ const schemas = {
       subCategoryValue: { type: "string" },
       thumbnailUrl: { type: "string" },
       thumbnailDataUrl: { type: "string" },
+      previewVideoUrl: {
+        type: "string",
+        format: "uri",
+        nullable: true,
+        description:
+          "Top-level alias for preview.url. When present, mobile can use this silent MP4 for motion-capable template previews.",
+      },
+      previewPosterUrl: {
+        type: "string",
+        format: "uri",
+        nullable: true,
+        description:
+          "Top-level alias for preview.posterUrl. Use as the static fallback image for previewVideoUrl.",
+      },
+      preview: {
+        allOf: [{ $ref: "#/components/schemas/MobileTemplatePreview" }],
+        nullable: true,
+      },
       frameInfo: {
         $ref: "#/components/schemas/MobileTemplateFrameInfo",
       },

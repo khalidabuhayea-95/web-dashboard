@@ -7,6 +7,8 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
   Download,
   FlipHorizontal,
@@ -22,6 +24,9 @@ import {
 } from "lucide-react";
 
 import Button from "@/components/ui/button";
+import { FilmstripFrames, FilmstripOverlay } from "@/components/editor/TimelineFilmstrip";
+import { useTimelineScrubber } from "@/components/editor/useTimelineScrubber";
+import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import {
   canUseCanvasCropForImage,
   canTrimTransparentPaddingForImage,
@@ -35,6 +40,7 @@ import {
   normalizeRasterColorMap,
   RASTER_PALETTE_VERSION,
 } from "@/lib/editor/imagePalette";
+import { formatTimelineTime, hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/editorStore";
 
 interface ToolbarProps {
@@ -73,6 +79,23 @@ function normalizeTrimRange(startInput: number, endInput: number, durationInput:
 
 const TRIM_TRACK_SLOT_COUNT = 18;
 const TRIM_PROGRESSIVE_SAMPLE_COUNT = 4;
+const VIDEO_TRIM_HANDLE_WIDTH_PX = 32;
+
+function extensionFromMimeType(mimeType: string) {
+  const value = String(mimeType || "").trim().toLowerCase();
+  if (value.includes("mp4")) return "mp4";
+  if (value.includes("webm")) return "webm";
+  if (value.includes("quicktime")) return "mov";
+  return "webm";
+}
+
+function logPreviewProgress(message: string, details?: Record<string, unknown>) {
+  if (details && Object.keys(details).length > 0) {
+    console.info("[template-preview]", message, details);
+    return;
+  }
+  console.info("[template-preview]", message);
+}
 
 export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const router = useRouter();
@@ -84,13 +107,20 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
   const [isVideoTrimOpen, setIsVideoTrimOpen] = useState(false);
   const [isTrimmingImagePadding, setIsTrimmingImagePadding] = useState(false);
+  const [previewToast, setPreviewToast] = useState<{
+    tone: "info" | "success" | "error";
+    message: string;
+  } | null>(null);
   const [videoTrimDraft, setVideoTrimDraft] = useState<TrimRange>({ start: 0, end: 1 });
   const [videoTrimDragEdge, setVideoTrimDragEdge] = useState<"start" | "end" | null>(null);
   const [videoTrimPlayhead, setVideoTrimPlayhead] = useState(0);
   const [videoTrimFrameStrip, setVideoTrimFrameStrip] = useState<string[]>([]);
   const trimTrackRef = useRef<HTMLDivElement | null>(null);
+  const videoTrimViewportRef = useRef<HTMLDivElement | null>(null);
   const videoTrimDraftRef = useRef<TrimRange>({ start: 0, end: 1 });
   const videoTrimFrameCacheRef = useRef<Map<string, string[]>>(new Map());
+  const previewGenerationIdRef = useRef(0);
+  const [videoTrimViewportWidth, setVideoTrimViewportWidth] = useState(0);
 
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -106,6 +136,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const historyLength = useEditorStore((state) => state.history.length);
   const stageApi = useEditorStore((state) => state.stageApi);
+  const designTimeline = useEditorStore((state) => state.designTimeline);
+  const timelineIsPlaying = useEditorStore((state) => state.timelineIsPlaying);
 
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
@@ -114,6 +146,9 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const updateElement = useEditorStore((state) => state.updateElement);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const setTemplateMeta = useEditorStore((state) => state.setTemplateMeta);
+  const updateTimeline = useEditorStore((state) => state.updateTimeline);
+  const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
+  const setPreviewGenerationActive = useEditorStore((state) => state.setPreviewGenerationActive);
   const clearTemplateMeta = useEditorStore((state) => state.clearTemplateMeta);
   const bumpImportedElementsRefreshKey = useEditorStore((state) => state.bumpImportedElementsRefreshKey);
   const clearPublishCandidates = useEditorStore((state) => state.clearPublishCandidates);
@@ -196,6 +231,10 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
       (activeImageRasterOriginalSrc !== activeRasterSource || activeRasterPaletteVersion < RASTER_PALETTE_VERSION)
   );
   const activeVideoDuration = Number(activeVideoElement?.videoDuration || 0);
+  const previewTimelineDurationMs = useMemo(
+    () => Math.max(1, Math.round(designTimeline.totalDurationMs || activePage?.durationMs || 0)),
+    [activePage?.durationMs, designTimeline.totalDurationMs]
+  );
   const resolvedVideoDuration = useMemo(() => {
     if (Number.isFinite(activeVideoDuration) && activeVideoDuration > 0) return activeVideoDuration;
     const fallbackEnd = Number(activeVideoElement?.videoEnd);
@@ -458,13 +497,44 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     videoTrimDraftRef.current = videoTrimDraft;
   }, [videoTrimDraft]);
 
+  useEffect(() => {
+    if (!isVideoTrimOpen) return;
+    const node = videoTrimViewportRef.current;
+    if (!node) return;
+
+    const measure = () => {
+      const rect = node.getBoundingClientRect();
+      setVideoTrimViewportWidth(rect.width || node.clientWidth || 0);
+    };
+
+    measure();
+
+    const resizeObserver =
+      typeof ResizeObserver !== "undefined" ? new ResizeObserver(() => measure()) : null;
+    resizeObserver?.observe(node);
+    window.addEventListener("resize", measure);
+
+    return () => {
+      resizeObserver?.disconnect();
+      window.removeEventListener("resize", measure);
+    };
+  }, [isVideoTrimOpen]);
+
   const updateTrimByPointer = useCallback(
     (edge: "start" | "end", clientX: number, options?: { commit?: boolean }) => {
       if (!trimTrackRef.current) return;
       const rect = trimTrackRef.current.getBoundingClientRect();
       if (rect.width <= 0) return;
-      const ratio = clampNumber((clientX - rect.left) / rect.width, 0, 1);
-      const targetTime = ratio * resolvedVideoDuration;
+      const contentWidth = Math.max(Math.ceil(videoTrimViewportWidth * 1.65), Math.max(720, Math.ceil(resolvedVideoDuration * 84)));
+      const centerInset = rect.width / 2;
+      const playheadRatio = resolvedVideoDuration > 0 ? clampNumber(videoTrimPlayhead / resolvedVideoDuration, 0, 1) : 0;
+      const scrollOffset = clampNumber(
+        rect.width / 2 - playheadRatio * contentWidth,
+        Math.min(centerInset, centerInset - contentWidth),
+        centerInset
+      );
+      const absolutePx = clampNumber(clientX - rect.left - scrollOffset, 0, contentWidth);
+      const targetTime = (absolutePx / contentWidth) * resolvedVideoDuration;
       let nextStart = videoTrimDraftRef.current.start;
       let nextEnd = videoTrimDraftRef.current.end;
       const minWindow = Math.max(0.08, resolvedVideoDuration / 600);
@@ -490,7 +560,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         );
       }
     },
-    [activeVideoElement, resolvedVideoDuration, updateElement]
+    [activeVideoElement, resolvedVideoDuration, updateElement, videoTrimPlayhead, videoTrimViewportWidth]
   );
 
   useEffect(() => {
@@ -700,6 +770,205 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     };
   }, [isVideoTrimOpen, resolvedVideoDuration, videoTrimFrameCacheKey]);
 
+  useEffect(() => {
+    if (!previewToast) return;
+    const timeoutId = window.setTimeout(() => {
+      setPreviewToast((current) => (current?.message === previewToast.message ? null : current));
+    }, previewToast.tone === "error" ? 5200 : 3200);
+    return () => window.clearTimeout(timeoutId);
+  }, [previewToast]);
+
+  const patchTemplatePreview = useCallback(
+    async ({
+      id,
+      preview,
+    }: {
+      id: string;
+      preview: {
+        status?: string | null;
+        url?: string | null;
+        posterUrl?: string | null;
+        durationMs?: number | null;
+        version?: number | null;
+        error?: string | null;
+      } | null;
+    }) => {
+      const response = await fetch("/api/templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id,
+          action: "updatePreview",
+          preview,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to update template preview.");
+      }
+      return payload?.template || null;
+    },
+    []
+  );
+
+  const generateTemplatePreview = useCallback(
+    async ({
+      templateId,
+      templateVersion,
+      fallbackPosterDataUrl,
+    }: {
+      templateId: string;
+      templateVersion: number;
+      fallbackPosterDataUrl: string;
+    }) => {
+      const stageRecorder = stageApi?.recordTimelinePreviewVideo;
+      if (!templateId || !stageRecorder) return;
+
+      const jobId = previewGenerationIdRef.current + 1;
+      previewGenerationIdRef.current = jobId;
+      const nextGeneratedAt = new Date().toISOString();
+      const wasPlaying = timelineIsPlaying;
+      const announce = (
+        tone: "info" | "success" | "error",
+        message: string,
+        details?: Record<string, unknown>
+      ) => {
+        logPreviewProgress(message, details);
+        if (previewGenerationIdRef.current !== jobId) return;
+        setPreviewToast({ tone, message });
+      };
+      const setLocalPreviewState = (patch: {
+        status?: string | null;
+        url?: string | null;
+        posterUrl?: string | null;
+        generatedAt?: string | null;
+        error?: string | null;
+      }) => {
+        if (previewGenerationIdRef.current !== jobId) return;
+        updateTimeline(
+          {
+            preview: {
+              ...designTimeline.preview,
+              ...patch,
+            },
+          },
+          { recordHistory: false }
+        );
+      };
+
+      try {
+        setPreviewGenerationActive(true);
+        announce("info", "Generating template preview...");
+        setLocalPreviewState({
+          status: "processing",
+          url: null,
+          posterUrl: fallbackPosterDataUrl || designTimeline.preview.posterUrl || null,
+          generatedAt: nextGeneratedAt,
+          error: null,
+        });
+
+        await patchTemplatePreview({
+          id: templateId,
+          preview: {
+            status: "processing",
+            posterUrl: null,
+            durationMs: previewTimelineDurationMs,
+            version: templateVersion,
+            error: null,
+          },
+        });
+        announce("info", "Recording preview video...");
+
+        setTimelinePlaying(false);
+        const recorded = await stageRecorder({
+          fps: Math.min(24, Math.max(12, designTimeline.fps || 20)),
+          maxDimension: 1080,
+          durationMs: previewTimelineDurationMs,
+        });
+        if (!recorded?.blob || recorded.blob.size <= 0) {
+          throw new Error("Preview renderer did not return a video.");
+        }
+        announce("info", "Uploading preview assets...", {
+          mimeType: recorded.mimeType,
+          durationMs: recorded.durationMs,
+          width: recorded.width,
+          height: recorded.height,
+        });
+
+        const videoExtension = extensionFromMimeType(recorded.mimeType);
+        const videoFile = new File([recorded.blob], `template-preview-${templateId}.${videoExtension}`, {
+          type: recorded.mimeType,
+        });
+        const uploadedVideo = await uploadEditorMediaFile(videoFile, "video");
+
+        let posterUrl = fallbackPosterDataUrl || designTimeline.preview.posterUrl || "";
+        if (recorded.posterDataUrl) {
+          const posterFile = dataUrlToFile(recorded.posterDataUrl, `template-preview-${templateId}.png`);
+          const uploadedPoster = await uploadEditorMediaFile(posterFile, "image");
+          posterUrl = uploadedPoster.url;
+        }
+
+        const template = await patchTemplatePreview({
+          id: templateId,
+          preview: {
+            status: "ready",
+            url: uploadedVideo.url,
+            posterUrl: posterUrl || null,
+            durationMs: recorded.durationMs,
+            version: templateVersion,
+            error: null,
+          },
+        });
+
+        setLocalPreviewState({
+          status: "ready",
+          url: String(template?.preview?.url || uploadedVideo.url || "").trim() || null,
+          posterUrl: String(template?.preview?.posterUrl || posterUrl || "").trim() || null,
+          generatedAt: nextGeneratedAt,
+          error: null,
+        });
+        announce("success", "Template preview is ready.", {
+          url: String(template?.preview?.url || uploadedVideo.url || "").trim() || null,
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Failed to generate template preview.";
+        await patchTemplatePreview({
+          id: templateId,
+          preview: {
+            status: "failed",
+            posterUrl: null,
+            durationMs: previewTimelineDurationMs,
+            version: templateVersion,
+            error: message,
+          },
+        }).catch(() => undefined);
+
+        setLocalPreviewState({
+          status: "failed",
+          generatedAt: nextGeneratedAt,
+          error: message,
+        });
+        announce("error", `Preview generation failed: ${message}`);
+      } finally {
+        setPreviewGenerationActive(false);
+        if (wasPlaying) {
+          setTimelinePlaying(true);
+        }
+      }
+    },
+    [
+      designTimeline.fps,
+      designTimeline.preview,
+      patchTemplatePreview,
+      previewTimelineDurationMs,
+      setPreviewGenerationActive,
+      stageApi,
+      setTimelinePlaying,
+      timelineIsPlaying,
+      updateTimeline,
+    ]
+  );
+
   const saveTemplate = useCallback(async () => {
     if (isSavingTemplate) return null;
 
@@ -756,6 +1025,42 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         setTemplateMeta({ name: nextName });
       }
 
+      const isMotionTemplate = hasAnimatedTemplateContent(parsedDesign.pages, parsedDesign.timeline);
+      if (template?.id) {
+        const posterUrl =
+          String(template?.preview?.posterUrl || "").trim() ||
+          String(template?.thumbnailDataUrl || "").trim() ||
+          String(thumbnailDataUrl || "").trim() ||
+          null;
+        if (isMotionTemplate && stageApi?.recordTimelinePreviewVideo) {
+          void generateTemplatePreview({
+            templateId: String(template.id),
+            templateVersion: Number(template.version || 0),
+            fallbackPosterDataUrl: String(posterUrl || ""),
+          });
+        } else {
+          const templatePreview = template?.preview || null;
+          updateTimeline(
+            {
+              preview: {
+                status: String(templatePreview?.status || "not_requested"),
+                url: String(templatePreview?.url || "").trim() || null,
+                posterUrl:
+                  String(templatePreview?.posterUrl || "").trim() ||
+                  String(posterUrl || "").trim() ||
+                  null,
+                generatedAt:
+                  Number.isFinite(Number(templatePreview?.updatedAt))
+                    ? new Date(Number(templatePreview.updatedAt)).toISOString()
+                    : null,
+                error: String(templatePreview?.error || "").trim() || null,
+              },
+            },
+            { recordHistory: false }
+          );
+        }
+      }
+
       return template;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to save template.";
@@ -773,9 +1078,11 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     activeTemplateSubCategory,
     activeTemplateTags,
     exportDesign,
+    generateTemplatePreview,
     isSavingTemplate,
     stageApi,
     setTemplateMeta,
+    updateTimeline,
     updateTemplateIdInUrl,
   ]);
 
@@ -987,24 +1294,147 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     "inline-flex h-8 w-8 items-center justify-center rounded border border-[#d7dbe1] bg-white text-[#445066] hover:bg-[#eef2f8]";
   const textControlBtnActiveClass =
     "inline-flex h-8 w-8 items-center justify-center rounded border border-[#2f6fca] bg-[#e8f1ff] text-[#2458a3]";
-  const videoTrimStartPercent = resolvedVideoDuration > 0 ? clampNumber(videoTrimDraft.start / resolvedVideoDuration, 0, 1) : 0;
-  const videoTrimEndPercent = resolvedVideoDuration > 0 ? clampNumber(videoTrimDraft.end / resolvedVideoDuration, 0, 1) : 1;
   const videoTrimPlayheadPercent = resolvedVideoDuration > 0 ? clampNumber(videoTrimPlayhead / resolvedVideoDuration, 0, 1) : 0;
   const videoTrimWindowLabel = `${formatTrimTime(videoTrimDraft.start)}s - ${formatTrimTime(videoTrimDraft.end)}s`;
   const videoTrimThumbs = useMemo(
     () => (videoTrimFrameStrip.length > 0 ? videoTrimFrameStrip : new Array(TRIM_TRACK_SLOT_COUNT).fill("")),
     [videoTrimFrameStrip]
   );
+  const videoTrimContentWidthPx = useMemo(() => {
+    const durationWidth = Math.max(720, Math.ceil(resolvedVideoDuration * 84));
+    if (videoTrimViewportWidth <= 0) return durationWidth;
+    return Math.max(durationWidth, Math.ceil(videoTrimViewportWidth * 1.65));
+  }, [resolvedVideoDuration, videoTrimViewportWidth]);
+  const videoTrimScrollOffsetPx = useMemo(() => {
+    if (videoTrimViewportWidth <= 0) return 0;
+    const centerInset = videoTrimViewportWidth / 2;
+    const minOffset = Math.min(centerInset, centerInset - videoTrimContentWidthPx);
+    const maxOffset = centerInset;
+    const centeredOffset = videoTrimViewportWidth / 2 - videoTrimPlayheadPercent * videoTrimContentWidthPx;
+    return clampNumber(centeredOffset, minOffset, maxOffset);
+  }, [videoTrimContentWidthPx, videoTrimPlayheadPercent, videoTrimViewportWidth]);
+  const videoTrimPlayheadViewportXPx = useMemo(() => {
+    if (videoTrimViewportWidth <= 0) return 0;
+    return clampNumber(
+      videoTrimPlayheadPercent * videoTrimContentWidthPx + videoTrimScrollOffsetPx,
+      0,
+      videoTrimViewportWidth
+    );
+  }, [videoTrimContentWidthPx, videoTrimPlayheadPercent, videoTrimScrollOffsetPx, videoTrimViewportWidth]);
+  const videoTrimPlayheadLabelXPx = useMemo(() => {
+    if (videoTrimViewportWidth <= 0) return 0;
+    return clampNumber(videoTrimPlayheadViewportXPx, 64, Math.max(64, videoTrimViewportWidth - 132));
+  }, [videoTrimPlayheadViewportXPx, videoTrimViewportWidth]);
+  const videoTrimContentStyle = useMemo(
+    () => ({
+      width: `${videoTrimContentWidthPx}px`,
+      transform: `translateX(${videoTrimScrollOffsetPx}px)`,
+    }),
+    [videoTrimContentWidthPx, videoTrimScrollOffsetPx]
+  );
+  const videoTrimSecondMarkers = useMemo(() => {
+    const seconds = Math.max(1, Math.ceil(resolvedVideoDuration));
+    return Array.from({ length: seconds + 1 }, (_, index) => ({
+      second: index,
+      ratio: seconds === 0 ? 0 : Math.min(1, index / Math.max(resolvedVideoDuration, 1)),
+    }));
+  }, [resolvedVideoDuration]);
+  const visibleVideoTrimSecondLabels = useMemo(() => {
+    const totalSeconds = Math.max(1, Math.ceil(resolvedVideoDuration));
+    return videoTrimSecondMarkers.filter(
+      (marker) =>
+        marker.second > 0 &&
+        marker.second < totalSeconds &&
+        marker.ratio > 0.02 &&
+        marker.ratio < 0.96
+    );
+  }, [resolvedVideoDuration, videoTrimSecondMarkers]);
+  const videoTrimFilmstripFrameCount = useMemo(
+    () => Math.max(12, Math.min(48, Math.ceil(videoTrimContentWidthPx / 40))),
+    [videoTrimContentWidthPx]
+  );
+  const videoTrimSelectedBarStyle = useMemo(() => {
+    if (resolvedVideoDuration <= 0 || videoTrimContentWidthPx <= 0) return null;
+    const startRatio = videoTrimDraft.start / resolvedVideoDuration;
+    const widthRatio = (videoTrimDraft.end - videoTrimDraft.start) / resolvedVideoDuration;
+    const trimContentWidthPx = Math.max(widthRatio * videoTrimContentWidthPx, 92);
+    return {
+      left: `${startRatio * videoTrimContentWidthPx - VIDEO_TRIM_HANDLE_WIDTH_PX}px`,
+      width: `${trimContentWidthPx + VIDEO_TRIM_HANDLE_WIDTH_PX * 2}px`,
+      minWidth: `${92 + VIDEO_TRIM_HANDLE_WIDTH_PX * 2}px`,
+    };
+  }, [resolvedVideoDuration, videoTrimContentWidthPx, videoTrimDraft.end, videoTrimDraft.start]);
+  const {
+    isScrubbing: videoTrimIsScrubbing,
+    activePointerId: activeVideoTrimPointerId,
+    startScrubbing: startVideoTrimScrubbing,
+    updateScrubbing: updateVideoTrimScrubbing,
+    endScrubbing: endVideoTrimScrubbing,
+  } = useTimelineScrubber({
+    totalDurationMs: resolvedVideoDuration,
+    contentWidthPx: videoTrimContentWidthPx,
+    deadZonePx: 2,
+    snapMs: null,
+    invertDirection: true,
+    clampMin: videoTrimDraft.start,
+    clampMax: videoTrimDraft.end,
+    getBounds: () => {
+      const node = trimTrackRef.current;
+      if (!node) return null;
+      const rect = node.getBoundingClientRect();
+      return {
+        left: rect.left,
+        width: rect.width || node.clientWidth || 0,
+      };
+    },
+    getCurrentTime: () => videoTrimPlayhead,
+    onCommit: (time) => {
+      setVideoTrimPlayhead(Math.round(time * 1000) / 1000);
+    },
+  });
+
+  useEffect(() => {
+    if (isVideoTrimOpen) return;
+    endVideoTrimScrubbing();
+  }, [endVideoTrimScrubbing, isVideoTrimOpen]);
+
+  useEffect(() => {
+    if (!videoTrimIsScrubbing) return;
+
+    const onPointerMove = (event: PointerEvent) => {
+      if (activeVideoTrimPointerId !== null && event.pointerId !== activeVideoTrimPointerId) return;
+      if (event.pointerType === "touch") {
+        event.preventDefault();
+      }
+      updateVideoTrimScrubbing(event.clientX);
+    };
+
+    const onPointerEnd = (event: PointerEvent) => {
+      if (activeVideoTrimPointerId !== null && event.pointerId !== activeVideoTrimPointerId) return;
+      endVideoTrimScrubbing();
+    };
+
+    window.addEventListener("pointermove", onPointerMove, { passive: false });
+    window.addEventListener("pointerup", onPointerEnd);
+    window.addEventListener("pointercancel", onPointerEnd);
+
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerup", onPointerEnd);
+      window.removeEventListener("pointercancel", onPointerEnd);
+    };
+  }, [activeVideoTrimPointerId, endVideoTrimScrubbing, updateVideoTrimScrubbing, videoTrimIsScrubbing]);
+
   const onTrimTrackPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
+      if ((event.target as HTMLElement)?.closest("[data-video-trim-handle]")) return;
+      if (event.pointerType === "mouse" && event.button !== 0) return;
       if (!trimTrackRef.current) return;
-      const rect = trimTrackRef.current.getBoundingClientRect();
-      if (rect.width <= 0) return;
-      const ratio = clampNumber((event.clientX - rect.left) / rect.width, 0, 1);
-      const nextTime = ratio * resolvedVideoDuration;
-      setVideoTrimPlayhead(clampNumber(nextTime, videoTrimDraft.start, videoTrimDraft.end));
+      event.preventDefault();
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+      startVideoTrimScrubbing(event.clientX, event.pointerId);
     },
-    [resolvedVideoDuration, videoTrimDraft.end, videoTrimDraft.start]
+    [startVideoTrimScrubbing]
   );
 
   const mergeSelectedLayers = useCallback(async () => {
@@ -1377,77 +1807,153 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
       </div>
 
       {hasSingleVideoSelection && activeVideoElement && isVideoTrimOpen ? (
-        <div className="mt-2 flex items-center gap-3 rounded-md border border-[#2b3038] bg-[#14181f] p-2">
-          <div className="w-[68px] shrink-0 rounded bg-[#272d36] px-2 py-1 text-right text-[28px] font-semibold tracking-tight text-[#f8fafc] [font-size:clamp(14px,2.1vw,30px)] leading-none">
-            {formatTrimTime(videoTrimPlayhead)}
-          </div>
+        <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-3">
+          <div className="rounded-[24px] border border-[#cad1db] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-4 pb-4 pt-2 shadow-sm">
+            <div className="grid grid-cols-[28px,1fr] gap-x-3">
+              <div className="pt-4" />
 
-          <div
-            ref={trimTrackRef}
-            className="relative h-12 min-w-0 flex-1 overflow-hidden rounded border border-[#2f3640] bg-[#0f1218]"
-            onPointerDown={onTrimTrackPointerDown}
-          >
-            <div className="absolute inset-0 flex">
-              {videoTrimThumbs.map((thumb, index) => (
-                <div key={`trim-thumb-${index}`} className="relative h-full min-w-0 flex-1 overflow-hidden border-r border-[#1c222b] last:border-r-0">
-                  {thumb ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img src={thumb} alt="" className="h-full w-full object-cover opacity-95" draggable={false} />
-                  ) : (
-                    <div className="h-full w-full bg-[linear-gradient(135deg,#1b222c,#11161d)]" />
-                  )}
+              <div ref={videoTrimViewportRef} className="relative min-w-0">
+                <div
+                  className="pointer-events-none absolute top-[45px] z-30 w-[3px] rounded-full bg-black/90"
+                  style={{ left: `${videoTrimPlayheadViewportXPx}px`, bottom: "0px" }}
+                />
+                <div
+                  className="pointer-events-none absolute left-0 top-0 z-30 -translate-x-1/2 whitespace-nowrap text-[13px] font-bold tabular-nums text-[#111827]"
+                  style={{ left: `${videoTrimPlayheadLabelXPx}px` }}
+                >
+                  {formatTimelineTime(videoTrimPlayhead * 1000, true)}
                 </div>
-              ))}
+                <div className="pointer-events-none absolute right-0 top-0 flex flex-col items-end justify-start pr-1 text-right leading-none">
+                  <span className="text-[11px] font-semibold text-[#9aa3ad]">Total</span>
+                  <span className="mt-1 text-[12px] font-semibold tabular-nums text-[#6b7280]">
+                    {formatTimelineTime(resolvedVideoDuration * 1000)}
+                  </span>
+                </div>
+
+                <div className="pointer-events-none relative h-11 overflow-hidden">
+                  <div className="absolute left-0 top-0 h-full" style={videoTrimContentStyle}>
+                    {videoTrimSecondMarkers.map((marker) => (
+                      <div
+                        key={`video-minor-${marker.second}`}
+                        className="absolute top-[31px] h-[3px] w-[3px] -translate-x-1/2 rounded-full bg-[#8e96a3]"
+                        style={{ left: `${marker.ratio * 100}%` }}
+                      />
+                    ))}
+                    {visibleVideoTrimSecondLabels.map((marker) => (
+                      <div
+                        key={`video-label-${marker.second}`}
+                        className="absolute top-[12px] -translate-x-1/2 text-[11px] font-semibold tabular-nums text-[#8a9099]"
+                        style={{ left: `${marker.ratio * 100}%` }}
+                      >
+                        {formatTimelineTime(marker.second * 1000)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="space-y-2">
+                  <div
+                    ref={trimTrackRef}
+                    className="relative h-14 overflow-hidden touch-none select-none"
+                    onPointerDown={onTrimTrackPointerDown}
+                  >
+                    {videoTrimSelectedBarStyle ? (
+                      <div className="absolute left-0 top-0 h-full" style={videoTrimContentStyle}>
+                        <div
+                          className="absolute top-0 z-20 h-14 rounded-[18px] bg-[#ff5b78] px-8 shadow-[0_10px_22px_rgba(255,91,120,0.32)]"
+                          style={videoTrimSelectedBarStyle}
+                        >
+                          <div className="absolute inset-y-1.5 left-8 right-8 overflow-hidden rounded-[12px]">
+                            <FilmstripFrames
+                              count={Math.max(
+                                8,
+                                Math.ceil(((videoTrimDraft.end - videoTrimDraft.start) / Math.max(resolvedVideoDuration, 0.001)) * videoTrimFilmstripFrameCount)
+                              )}
+                              images={videoTrimThumbs}
+                              tone="selected"
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            aria-label="Trim start"
+                            data-video-trim-handle
+                            className="absolute inset-y-0 left-0 flex w-8 cursor-ew-resize items-center justify-center rounded-l-[18px] bg-[#ff5b78] text-white"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setVideoTrimDragEdge("start");
+                              updateTrimByPointer("start", event.clientX);
+                            }}
+                          >
+                            <ChevronLeft size={18} />
+                          </button>
+                          <button
+                            type="button"
+                            aria-label="Trim end"
+                            data-video-trim-handle
+                            className="absolute inset-y-0 right-0 flex w-8 cursor-ew-resize items-center justify-center rounded-r-[18px] bg-[#ff5b78] text-white"
+                            onPointerDown={(event) => {
+                              event.preventDefault();
+                              event.stopPropagation();
+                              setVideoTrimDragEdge("end");
+                              updateTrimByPointer("end", event.clientX);
+                            }}
+                          >
+                            <ChevronRight size={18} />
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  <div className="relative h-14 overflow-hidden rounded-[16px] border border-[#d0d6df] bg-white shadow-[inset_0_1px_0_rgba(255,255,255,0.55)]">
+                    <div className="absolute left-0 top-0 h-full" style={videoTrimContentStyle}>
+                      <FilmstripFrames count={videoTrimFilmstripFrameCount} images={videoTrimThumbs} tone="preview" />
+                      <FilmstripOverlay count={videoTrimFilmstripFrameCount} />
+                    </div>
+                  </div>
+                </div>
+              </div>
             </div>
-
-            <div
-              className="absolute bottom-0 top-0 bg-black/55"
-              style={{ left: 0, width: `${videoTrimStartPercent * 100}%` }}
-            />
-            <div
-              className="absolute bottom-0 top-0 bg-black/55"
-              style={{ left: `${videoTrimEndPercent * 100}%`, right: 0 }}
-            />
-            <div
-              className="absolute bottom-0 top-0 border-x-2 border-[#37b2ff] bg-[#37b2ff]/10"
-              style={{
-                left: `${videoTrimStartPercent * 100}%`,
-                width: `${Math.max(0.8, (videoTrimEndPercent - videoTrimStartPercent) * 100)}%`,
-              }}
-            />
-            <div
-              className="absolute bottom-0 top-0 z-[3] w-0.5 bg-[#1fb4ff] shadow-[0_0_0_1px_rgba(31,180,255,0.45)]"
-              style={{ left: `${videoTrimPlayheadPercent * 100}%` }}
-            />
-
-            <button
-              type="button"
-              aria-label="Trim start"
-              className="absolute bottom-0 top-0 z-[4] w-2 -translate-x-1/2 cursor-ew-resize bg-[#37b2ff] shadow-[0_0_0_1px_rgba(0,0,0,0.2)]"
-              style={{ left: `${videoTrimStartPercent * 100}%` }}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setVideoTrimDragEdge("start");
-                updateTrimByPointer("start", event.clientX);
-              }}
-            />
-            <button
-              type="button"
-              aria-label="Trim end"
-              className="absolute bottom-0 top-0 z-[4] w-2 -translate-x-1/2 cursor-ew-resize bg-[#37b2ff] shadow-[0_0_0_1px_rgba(0,0,0,0.2)]"
-              style={{ left: `${videoTrimEndPercent * 100}%` }}
-              onPointerDown={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                setVideoTrimDragEdge("end");
-                updateTrimByPointer("end", event.clientX);
-              }}
-            />
           </div>
+        </div>
+      ) : null}
 
-          <div className="shrink-0 rounded bg-[#272d36] px-2 py-1 text-xs font-semibold text-[#d2d7de]">
-            {formatTrimTime(resolvedVideoDuration)}s
+      {previewToast ? (
+        <div
+          className="editor-status-toast"
+          style={
+            previewToast.tone === "success"
+              ? {
+                  borderColor: "#86efac",
+                  background: "#f0fdf4",
+                }
+              : previewToast.tone === "error"
+                ? {
+                    borderColor: "#fca5a5",
+                    background: "#fef2f2",
+                  }
+                : undefined
+          }
+        >
+          <div className="flex items-start gap-2">
+            <span
+              className={`mt-1 inline-block h-2.5 w-2.5 shrink-0 rounded-full ${
+                previewToast.tone === "success"
+                  ? "bg-[#16a34a]"
+                  : previewToast.tone === "error"
+                    ? "bg-[#dc2626]"
+                    : "bg-[#2563eb]"
+              }`}
+            />
+            <div className="min-w-0">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#667085]">
+                Template Preview
+              </p>
+              <p className="mt-1 text-sm font-medium text-[#1f2937]">
+                {previewToast.message}
+              </p>
+            </div>
           </div>
         </div>
       ) : null}

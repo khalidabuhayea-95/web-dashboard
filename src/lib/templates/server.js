@@ -69,7 +69,45 @@ export function buildSnapshot(template) {
     subCategory: template.subCategory,
     tags: template.tags,
     thumbnailDataUrl: template.thumbnailDataUrl,
+    previewVideoUrl: template.previewVideoUrl ?? null,
+    previewPosterUrl: template.previewPosterUrl ?? null,
+    previewStatus: template.previewStatus ?? null,
+    previewDurationMs: template.previewDurationMs ?? null,
+    previewVersion: template.previewVersion ?? null,
+    previewError: template.previewError ?? null,
+    previewUpdatedAt: template.previewUpdatedAt ?? null,
     data: template.data,
+  };
+}
+
+export function mapTemplatePreview(template) {
+  const status = String(template?.previewStatus || "").trim();
+  const url = String(template?.previewVideoUrl || "").trim();
+  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const durationMs = Number(template?.previewDurationMs);
+  const version = Number(template?.previewVersion);
+  const updatedAtRaw = template?.previewUpdatedAt;
+  const error = String(template?.previewError || "").trim();
+
+  if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(version) && !updatedAtRaw && !error) {
+    return null;
+  }
+
+  const updatedAt =
+    updatedAtRaw instanceof Date
+      ? updatedAtRaw.getTime()
+      : updatedAtRaw
+        ? new Date(updatedAtRaw).getTime()
+        : null;
+
+  return {
+    status: status || "not_requested",
+    url: url || null,
+    posterUrl: posterUrl || null,
+    durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+    version: Number.isFinite(version) ? Math.max(0, Math.round(version)) : null,
+    updatedAt: Number.isFinite(updatedAt) ? updatedAt : null,
+    error: error || null,
   };
 }
 

@@ -40,6 +40,120 @@ async function rasterizeSvgBytes(svgBytes) {
   return sharp(svgBytes).png().toBuffer();
 }
 
+function numberOr(value, fallback = 0) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? numeric : fallback;
+}
+
+function clamp(value, min, max) {
+  return Math.min(Math.max(value, min), max);
+}
+
+function normalizeFrameContentTransform(value) {
+  const transform = value && typeof value === "object" && !Array.isArray(value) ? value : {};
+  const fit = ["contain", "manual"].includes(String(transform.fit || "").toLowerCase())
+    ? String(transform.fit).toLowerCase()
+    : "cover";
+  return {
+    fit,
+    scale: clamp(numberOr(transform.scale, 1), 0.1, 8),
+    offsetX: clamp(numberOr(transform.offsetX, 0), -10000, 10000),
+    offsetY: clamp(numberOr(transform.offsetY, 0), -10000, 10000),
+  };
+}
+
+function resolveFramePreviewLayout(object) {
+  const frameContent = object?.frameContent && typeof object.frameContent === "object"
+    ? object.frameContent
+    : {};
+  const frameWidth = Math.max(1, Math.round(numberOr(object?.width, 1)));
+  const frameHeight = Math.max(1, Math.round(numberOr(object?.height, 1)));
+  const sourceWidth = Math.max(1, numberOr(frameContent.sourceWidth, frameWidth));
+  const sourceHeight = Math.max(1, numberOr(frameContent.sourceHeight, frameHeight));
+  const transform = normalizeFrameContentTransform(object?.frameContentTransform);
+  const baseScale =
+    transform.fit === "manual"
+      ? 1
+      : transform.fit === "contain"
+        ? Math.min(frameWidth / sourceWidth, frameHeight / sourceHeight)
+        : Math.max(frameWidth / sourceWidth, frameHeight / sourceHeight);
+  const resolvedScale = Math.max(0.01, baseScale * transform.scale);
+  const renderedWidth = Math.max(1, Math.round(sourceWidth * resolvedScale));
+  const renderedHeight = Math.max(1, Math.round(sourceHeight * resolvedScale));
+
+  return {
+    frameWidth,
+    frameHeight,
+    renderedWidth,
+    renderedHeight,
+    x: Math.round((frameWidth - renderedWidth) / 2 + transform.offsetX),
+    y: Math.round((frameHeight - renderedHeight) / 2 + transform.offsetY),
+  };
+}
+
+async function readImageSourceBytes(source) {
+  const raw = String(source || "").trim();
+  if (!raw) return null;
+
+  if (/^https?:\/\//i.test(raw)) {
+    const response = await fetch(raw);
+    if (!response.ok) return null;
+    return Buffer.from(await response.arrayBuffer());
+  }
+
+  const parsed = parseDataUri(raw);
+  return parsed?.bytes || null;
+}
+
+async function renderFrameContentPreviewPng(object) {
+  const frameContent = object?.frameContent && typeof object.frameContent === "object"
+    ? object.frameContent
+    : null;
+  if (!frameContent) return null;
+
+  const source = String(
+    frameContent.kind === "video"
+      ? frameContent.posterSrc || ""
+      : frameContent.src || ""
+  ).trim();
+  if (!source) return null;
+
+  const sourceBytes = await readImageSourceBytes(source);
+  if (!sourceBytes) return null;
+
+  const sharpModule = await import("sharp");
+  const sharp = sharpModule.default || sharpModule;
+  const layout = resolveFramePreviewLayout(object);
+  const extendLeft = Math.max(0, layout.x);
+  const extendTop = Math.max(0, layout.y);
+  const cropLeft = Math.max(0, -layout.x);
+  const cropTop = Math.max(0, -layout.y);
+  const canvasWidth = Math.max(layout.frameWidth + cropLeft, extendLeft + layout.renderedWidth);
+  const canvasHeight = Math.max(layout.frameHeight + cropTop, extendTop + layout.renderedHeight);
+  const extendRight = Math.max(0, canvasWidth - layout.renderedWidth - extendLeft);
+  const extendBottom = Math.max(0, canvasHeight - layout.renderedHeight - extendTop);
+
+  return sharp(sourceBytes, { animated: false })
+    .rotate()
+    .resize(layout.renderedWidth, layout.renderedHeight, { fit: "fill" })
+    .ensureAlpha()
+    .extend({
+      top: extendTop,
+      bottom: extendBottom,
+      left: extendLeft,
+      right: extendRight,
+      background: { r: 0, g: 0, b: 0, alpha: 0 },
+    })
+    .extract({
+      left: cropLeft,
+      top: cropTop,
+      width: layout.frameWidth,
+      height: layout.frameHeight,
+    })
+    .png()
+    .toBuffer();
+}
+
 function findLayerObject(templateData, elementId, index) {
   const data = extractFabricData(templateData) || templateData || {};
   const objects = Array.isArray(data?.objects) ? data.objects : [];
@@ -141,6 +255,27 @@ export async function GET(request, { params }) {
 
   let source = "";
   const layerObject = scope === "layer" ? findLayerObject(template.data, elementId, index) : null;
+  if (scope === "layer" && (field === "frameContent.preview" || field === "frameContentPreview")) {
+    try {
+      const bytes = await renderFrameContentPreviewPng(layerObject);
+      if (!bytes) {
+        return NextResponse.json({ error: "Asset not found." }, { status: 404 });
+      }
+      return new NextResponse(bytes, {
+        status: 200,
+        headers: {
+          "Content-Type": "image/png",
+          "Cache-Control": "public, max-age=300",
+        },
+      });
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "Failed to render frame preview asset." },
+        { status: 422 }
+      );
+    }
+  }
+
   if (scope === "layer" && field === "shape-raster") {
     if (!isRasterizableShapeLayer(layerObject)) {
       return NextResponse.json({ error: "Asset not found." }, { status: 404 });

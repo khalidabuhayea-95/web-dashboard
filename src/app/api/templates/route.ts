@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
+import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
 import { createAdminClient } from "@/lib/supabase/admin";
 import { findExternalCanvaReferences } from "@/lib/tools/importAssetSanitizer";
@@ -8,6 +9,7 @@ import {
   buildSnapshot,
   canAccessTemplate,
   getEditorSession,
+  mapTemplatePreview,
   normalizeCanvasSize,
   normalizeCategory,
   normalizeSlug,
@@ -21,6 +23,7 @@ import {
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 import { handleApiError, handleBadRequest, handleNotFound, handleForbidden } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { extractFabricData } from "@/lib/templates/editorData";
 
 const THUMBNAIL_BUCKET =
   process.env.TEMPLATE_THUMBNAIL_BUCKET || process.env.EDITOR_MEDIA_BUCKET || "editor-media";
@@ -29,8 +32,9 @@ const MAX_CANVA_REFERENCE_ERRORS = 10;
 const DEFAULT_LIST_PAGE_SIZE = 20;
 const MAX_LIST_PAGE_SIZE = 100;
 const MAX_OWNER_LOOKUPS = 50;
+const PREVIEW_STATUS_VALUES = new Set(["not_requested", "queued", "processing", "ready", "failed"]);
 
-const TEMPLATE_LIST_SELECT = {
+const TEMPLATE_LIST_SELECT: any = {
   id: true,
   ownerId: true,
   name: true,
@@ -42,6 +46,13 @@ const TEMPLATE_LIST_SELECT = {
   subCategory: true,
   tags: true,
   thumbnailDataUrl: true,
+  previewVideoUrl: true,
+  previewPosterUrl: true,
+  previewStatus: true,
+  previewDurationMs: true,
+  previewVersion: true,
+  previewError: true,
+  previewUpdatedAt: true,
   createdAt: true,
   updatedAt: true,
 };
@@ -82,6 +93,171 @@ async function ensureUniqueName(ownerId: string, baseName: string, excludeId?: s
     counter += 1;
     candidate = `${normalized} (${counter})`;
   }
+}
+
+function withTemplatePreview(template: any) {
+  return {
+    ...template,
+    preview: mapTemplatePreview(template),
+  };
+}
+
+function asPlainObject(value: any): Record<string, any> | null {
+  return value && typeof value === "object" && !Array.isArray(value) ? value : null;
+}
+
+function extractEditorPages(data: any): Array<Record<string, any>> {
+  if (Array.isArray(data?.pages)) return data.pages;
+  const extracted = extractFabricData(data);
+  if (Array.isArray(extracted?.pages)) return extracted.pages;
+  if (Array.isArray(data?.data?.pages)) return data.data.pages;
+  if (Array.isArray(extracted?.objects)) {
+    return [
+      {
+        durationMs: data?.timeline?.totalDurationMs,
+        elements: extracted.objects,
+      },
+    ];
+  }
+  return [];
+}
+
+function normalizePreviewStatus(value: unknown) {
+  const status = String(value || "").trim().toLowerCase();
+  return PREVIEW_STATUS_VALUES.has(status) ? status : null;
+}
+
+function normalizePreviewFields(input: any) {
+  const preview = asPlainObject(input);
+  if (!preview) return null;
+  const status = normalizePreviewStatus(preview.status);
+  const url = String(preview.url || "").trim();
+  const posterUrl = String(preview.posterUrl || "").trim();
+  const durationMs = Number(preview.durationMs);
+  const version = Number(preview.version);
+  const error = String(preview.error || "").trim();
+  const updatedAtRaw = preview.updatedAt;
+  const updatedAt =
+    updatedAtRaw instanceof Date
+      ? updatedAtRaw
+      : updatedAtRaw
+        ? new Date(updatedAtRaw)
+        : null;
+
+  if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(version) && !error && !updatedAt) {
+    return null;
+  }
+
+  return {
+    previewVideoUrl: url || null,
+    previewPosterUrl: posterUrl || null,
+    previewStatus: status || null,
+    previewDurationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+    previewVersion: Number.isFinite(version) ? Math.max(0, Math.round(version)) : null,
+    previewError: error || null,
+    previewUpdatedAt: updatedAt && !Number.isNaN(updatedAt.getTime()) ? updatedAt : null,
+  };
+}
+
+function buildTemplatePreviewUpdate({
+  data,
+  thumbnailDataUrl,
+  existingTemplate,
+}: {
+  data: any;
+  thumbnailDataUrl: string | null;
+  existingTemplate?: any;
+}) {
+  const pages = extractEditorPages(data);
+  const timeline = asPlainObject(data?.timeline);
+  const isMotionTemplate = hasAnimatedTemplateContent(pages as any, timeline as any);
+  const incomingPreview = normalizePreviewFields(timeline?.preview);
+
+  if (!isMotionTemplate) {
+    return {
+      previewVideoUrl: null,
+      previewPosterUrl: null,
+      previewStatus: null,
+      previewDurationMs: null,
+      previewVersion: null,
+      previewError: null,
+      previewUpdatedAt: null,
+    };
+  }
+
+  const nextPreviewVersion = existingTemplate ? Math.max(1, Number(existingTemplate.version || 0) + 1) : 1;
+  if (!incomingPreview) {
+    return {
+      previewVideoUrl: null,
+      previewPosterUrl:
+        thumbnailDataUrl ??
+        existingTemplate?.previewPosterUrl ??
+        existingTemplate?.thumbnailDataUrl ??
+        null,
+      previewStatus: "queued",
+      previewDurationMs: null,
+      previewVersion: nextPreviewVersion,
+      previewError: null,
+      previewUpdatedAt: null,
+    };
+  }
+
+  return {
+    previewVideoUrl: incomingPreview?.previewVideoUrl ?? null,
+    previewPosterUrl:
+      incomingPreview?.previewPosterUrl ??
+      thumbnailDataUrl ??
+      null,
+    previewStatus:
+      incomingPreview?.previewStatus ??
+      "queued",
+    previewDurationMs:
+      incomingPreview?.previewDurationMs ??
+      null,
+    previewVersion:
+      incomingPreview?.previewVersion ??
+      nextPreviewVersion,
+    previewError:
+      incomingPreview?.previewError ??
+      null,
+    previewUpdatedAt:
+      incomingPreview?.previewUpdatedAt ??
+      null,
+  };
+}
+
+function buildTemplatePreviewTimelinePatch(input: {
+  status?: string | null;
+  url?: string | null;
+  posterUrl?: string | null;
+  generatedAt?: Date | null;
+  error?: string | null;
+}) {
+  return {
+    status: String(input.status || "").trim() || "not_requested",
+    url: String(input.url || "").trim() || null,
+    posterUrl: String(input.posterUrl || "").trim() || null,
+    generatedAt: input.generatedAt ? input.generatedAt.toISOString() : null,
+    error: String(input.error || "").trim() || null,
+  };
+}
+
+function applyPreviewPatchToTemplateData(data: any, input: {
+  status?: string | null;
+  url?: string | null;
+  posterUrl?: string | null;
+  generatedAt?: Date | null;
+  error?: string | null;
+}) {
+  const plainData = asPlainObject(data) || {};
+  const timeline = asPlainObject(plainData.timeline) || {};
+  return {
+    ...plainData,
+    timeline: {
+      ...timeline,
+      preview: buildTemplatePreviewTimelinePatch(input),
+    },
+  };
 }
 
 function getUserDisplayName(user: any): string {
@@ -434,11 +610,11 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     if (!pagination.paginationRequested) {
-      return NextResponse.json({ templates: templatesWithOwners });
+      return NextResponse.json({ templates: templatesWithOwners.map(withTemplatePreview) });
     }
 
     return NextResponse.json({
-      templates: templatesWithOwners,
+      templates: templatesWithOwners.map(withTemplatePreview),
       page: pagination.page,
       perPage: pagination.perPage,
       total,
@@ -514,6 +690,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           { status: 422 }
         );
       }
+      const previewUpdate = buildTemplatePreviewUpdate({
+        data,
+        thumbnailDataUrl,
+        existingTemplate: existing,
+      });
 
       logger.info("Updating template", { userId: session.userId, templateId: id });
 
@@ -529,6 +710,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             subCategory,
             tags,
             thumbnailDataUrl,
+            ...previewUpdate,
             version: { increment: 1 },
           },
         });
@@ -546,7 +728,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return item;
       });
 
-      return NextResponse.json({ template: updated });
+      return NextResponse.json({ template: withTemplatePreview(updated) });
     }
 
     // Create new template
@@ -577,6 +759,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         { status: 422 }
       );
     }
+    const previewUpdate = buildTemplatePreviewUpdate({
+      data,
+      thumbnailDataUrl,
+    });
 
     logger.info("Creating new template", { userId: session.userId, name });
 
@@ -592,6 +778,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           subCategory,
           tags,
           thumbnailDataUrl,
+          ...previewUpdate,
           status: "draft",
         },
       });
@@ -609,7 +796,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return item;
     });
 
-    return NextResponse.json({ template: created }, { status: 201 });
+    return NextResponse.json({ template: withTemplatePreview(created) }, { status: 201 });
   } catch (error) {
     return handleApiError(error, "Failed to save template");
   }
@@ -630,8 +817,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const id = typeof body?.id === "string" ? body.id : "";
     const action = typeof body?.action === "string" ? body.action : "";
 
-    if (!id || !["publish", "unpublish"].includes(action)) {
-      return handleBadRequest("Invalid publish request");
+    if (!id || !["publish", "unpublish", "updatePreview"].includes(action)) {
+      return handleBadRequest("Invalid template update request");
     }
 
     const existing = await prisma.template.findUnique({ where: { id } });
@@ -640,6 +827,78 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
     if (!canAccessTemplate(session, existing)) {
       return handleForbidden("Cannot publish this template");
+    }
+
+    if (action === "updatePreview") {
+      const previewInput = body?.preview;
+      const clearPreview = previewInput === null;
+      const normalizedPreview = clearPreview ? null : normalizePreviewFields(previewInput);
+
+      if (!clearPreview && !normalizedPreview) {
+        return handleBadRequest("Invalid preview payload");
+      }
+
+      const requestedVersion = Number(
+        clearPreview ? existing.version : normalizedPreview?.previewVersion
+      );
+      if (
+        Number.isFinite(requestedVersion) &&
+        requestedVersion > 0 &&
+        requestedVersion < Number(existing.version || 0)
+      ) {
+        return NextResponse.json(
+          {
+            error: "Preview update is stale for the current template version.",
+            template: withTemplatePreview(existing),
+          },
+          { status: 409 }
+        );
+      }
+
+      const previewUpdatedAt =
+        clearPreview
+          ? null
+          : normalizedPreview?.previewUpdatedAt instanceof Date
+            ? normalizedPreview.previewUpdatedAt
+            : new Date();
+      const nextPreviewPatch = clearPreview
+        ? {
+            previewVideoUrl: null,
+            previewPosterUrl: null,
+            previewStatus: null,
+            previewDurationMs: null,
+            previewVersion: null,
+            previewError: null,
+            previewUpdatedAt: null,
+          }
+        : {
+            previewVideoUrl: normalizedPreview?.previewVideoUrl ?? null,
+            previewPosterUrl: normalizedPreview?.previewPosterUrl ?? null,
+            previewStatus: normalizedPreview?.previewStatus ?? "not_requested",
+            previewDurationMs: normalizedPreview?.previewDurationMs ?? null,
+            previewVersion: normalizedPreview?.previewVersion ?? existing.version,
+            previewError:
+              normalizedPreview?.previewStatus === "ready"
+                ? null
+                : normalizedPreview?.previewError ?? null,
+            previewUpdatedAt,
+          };
+
+      const updated = await prisma.template.update({
+        where: { id },
+        data: {
+          ...nextPreviewPatch,
+          data: applyPreviewPatchToTemplateData(existing.data, {
+            status: nextPreviewPatch.previewStatus,
+            url: nextPreviewPatch.previewVideoUrl,
+            posterUrl: nextPreviewPatch.previewPosterUrl,
+            generatedAt: nextPreviewPatch.previewUpdatedAt,
+            error: nextPreviewPatch.previewError,
+          }),
+        },
+      });
+
+      return NextResponse.json({ template: withTemplatePreview(updated) });
     }
 
     const publishData = action === "publish" ? normalizeEditorProMobileFontData(existing.data) : existing.data;
@@ -693,7 +952,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       return item;
     });
 
-    return NextResponse.json({ template });
+    return NextResponse.json({ template: withTemplatePreview(template) });
   } catch (error) {
     return handleApiError(error, "Failed to publish template");
   }

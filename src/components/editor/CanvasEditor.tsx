@@ -73,6 +73,9 @@ interface ImageNodeProps {
   element: EditorElement;
   pose: ElementRenderPose;
   canTransform: boolean;
+  playheadMs?: number;
+  pageDurationMs?: number;
+  forceTimelineSync?: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
   onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
@@ -93,6 +96,44 @@ function isGifSource(src: unknown) {
   } catch {
     return /\.gif(?:$|[?#])/i.test(value);
   }
+}
+
+function waitForAnimationFrame() {
+  return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
+function sleep(ms: number) {
+  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+}
+
+function resolveLoopingVideoTargetTime({
+  playheadMs,
+  layerStartMs,
+  sourceStart,
+  sourceEnd,
+}: {
+  playheadMs: number;
+  layerStartMs: number;
+  sourceStart: number;
+  sourceEnd: number;
+}) {
+  const sourceSpan = Math.max(0.01, sourceEnd - sourceStart);
+  const localSeconds = Math.max(0, (playheadMs - layerStartMs) / 1000);
+  const loopSeconds = localSeconds % sourceSpan;
+  return clamp(sourceStart + loopSeconds, sourceStart, Math.max(sourceStart, sourceEnd - 0.01));
+}
+
+function getPreviewRecorderMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const preferred = [
+    "video/mp4;codecs=h264,aac",
+    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
+    "video/mp4",
+    "video/webm;codecs=vp9,opus",
+    "video/webm;codecs=vp8,opus",
+    "video/webm",
+  ];
+  return preferred.find((value) => MediaRecorder.isTypeSupported?.(value)) || "";
 }
 
 function resolveKonvaImageCrop(
@@ -342,6 +383,9 @@ function CanvasVideoNode({
   element,
   pose,
   canTransform,
+  playheadMs = 0,
+  pageDurationMs = 0,
+  forceTimelineSync = false,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -351,7 +395,8 @@ function CanvasVideoNode({
   onVideoMetadata,
 }: ImageNodeProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
-  const imageRef = useRef<Konva.Image | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const mediaRef = useRef<Konva.Shape | null>(null);
   const onMetadataRef = useRef(onVideoMetadata);
 
   useEffect(() => {
@@ -368,80 +413,113 @@ function CanvasVideoNode({
     htmlVideo.src = element.src;
     htmlVideo.crossOrigin = "anonymous";
     htmlVideo.muted = true;
-    htmlVideo.loop = false;
+    htmlVideo.defaultMuted = true;
+    htmlVideo.autoplay = true;
+    htmlVideo.controls = false;
+    htmlVideo.loop = true;
     htmlVideo.preload = "auto";
     htmlVideo.playsInline = true;
     htmlVideo.setAttribute("playsinline", "true");
 
-    const applyTrimWindow = () => {
-      const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
-      const start = Math.max(0, element.videoStart || 0);
-      const fallbackEnd = duration > 0 ? duration : start + 0.25;
-      const rawVideoEnd = Number(element.videoEnd);
-      const requestedEnd = Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd;
-      const end = Math.max(start + 0.01, duration > 0 ? Math.min(requestedEnd, duration) : requestedEnd);
-
-      if (htmlVideo.currentTime < start || htmlVideo.currentTime >= end) {
-        try {
-          htmlVideo.currentTime = start;
-        } catch {
-          // ignore seek errors while metadata is initializing
-        }
-      }
-    };
-
     const handleLoadedMetadata = () => {
       const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
+      const start = Math.max(0, Number(element.videoStart) || 0);
       onMetadataRef.current?.({ duration });
-      applyTrimWindow();
-      void htmlVideo.play().catch(() => undefined);
+      try {
+        htmlVideo.currentTime = Math.min(start, Math.max(0, duration - 0.01));
+      } catch {
+        // Ignore initial seek failures while metadata is settling.
+      }
     };
 
     const handleCanPlay = () => {
       if (!mounted) return;
+      videoRef.current = htmlVideo;
       setVideo(htmlVideo);
       void htmlVideo.play().catch(() => undefined);
     };
 
-    const handleTimeUpdate = () => {
-      applyTrimWindow();
-    };
-
     htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
     htmlVideo.addEventListener("canplay", handleCanPlay);
-    htmlVideo.addEventListener("timeupdate", handleTimeUpdate);
     htmlVideo.load();
 
     return () => {
       mounted = false;
       htmlVideo.pause();
+      if (videoRef.current === htmlVideo) {
+        videoRef.current = null;
+      }
       htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
       htmlVideo.removeEventListener("canplay", handleCanPlay);
-      htmlVideo.removeEventListener("timeupdate", handleTimeUpdate);
       setVideo((current) => (current === htmlVideo ? null : current));
     };
   }, [element.src, element.videoEnd, element.videoStart]);
 
   useEffect(() => {
-    let frame = 0;
-    const redraw = () => {
-      imageRef.current?.getLayer()?.batchDraw();
-      frame = requestAnimationFrame(redraw);
-    };
-    if (video) {
-      frame = requestAnimationFrame(redraw);
+    const media = videoRef.current;
+    if (!media || !forceTimelineSync) return;
+    const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+    const sourceStart = Math.max(0, Number(element.videoStart) || 0);
+    const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+    const rawVideoEnd = Number(element.videoEnd);
+    const sourceEnd = Math.max(
+      sourceStart + 0.01,
+      duration > 0
+        ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+        : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+          ? rawVideoEnd
+          : fallbackEnd
+    );
+    const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+    const targetTime = resolveLoopingVideoTargetTime({
+      playheadMs,
+      layerStartMs: layerWindow.startMs,
+      sourceStart,
+      sourceEnd,
+    });
+
+    if (Math.abs(media.currentTime - targetTime) <= 0.02) {
+      media.pause();
+      return;
     }
-    return () => cancelAnimationFrame(frame);
+
+    try {
+      media.pause();
+      media.currentTime = targetTime;
+    } catch {
+      // Ignore sync failures until metadata and keyframes are ready.
+    }
+  }, [element, forceTimelineSync, pageDurationMs, playheadMs, video]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media || forceTimelineSync) return;
+    media.loop = true;
+    void media.play().catch(() => undefined);
+  }, [forceTimelineSync, video]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    const redraw = () => mediaRef.current?.getLayer()?.batchDraw();
+    media.addEventListener("seeked", redraw);
+    media.addEventListener("loadeddata", redraw);
+    media.addEventListener("canplay", redraw);
+    redraw();
+    return () => {
+      media.removeEventListener("seeked", redraw);
+      media.removeEventListener("loadeddata", redraw);
+      media.removeEventListener("canplay", redraw);
+    };
   }, [video]);
 
   return (
-    <KonvaImage
+    <Shape
       ref={(node) => {
-        imageRef.current = node;
+        mediaRef.current = node;
         registerRef(element.id, node);
       }}
       id={element.id}
-      image={video || undefined}
       x={pose.x}
       y={pose.y}
       width={element.width}
@@ -454,17 +532,42 @@ function CanvasVideoNode({
       draggable={canTransform}
       listening={canTransform}
       globalCompositeOperation={element.blendMode}
-      cornerRadius={element.cornerRadius || 0}
-      shadowColor={element.shadowColor}
-      shadowBlur={element.shadowBlur}
-      shadowOffsetX={element.shadowOffsetX}
-      shadowOffsetY={element.shadowOffsetY}
       onClick={onSelect}
       onTap={onSelect}
       onContextMenu={onContextMenu}
       onDragMove={onDragMove}
       onDragEnd={onDragEnd}
       onTransformEnd={onTransformEnd}
+      shadowColor={element.shadowColor}
+      shadowBlur={element.shadowBlur}
+      shadowOffsetX={element.shadowOffsetX}
+      shadowOffsetY={element.shadowOffsetY}
+      sceneFunc={(context, shape) => {
+        const radius = Math.max(0, Number(element.cornerRadius || 0));
+        context.beginPath();
+        if (radius > 0) {
+          context.moveTo(radius, 0);
+          context.lineTo(element.width - radius, 0);
+          context.quadraticCurveTo(element.width, 0, element.width, radius);
+          context.lineTo(element.width, element.height - radius);
+          context.quadraticCurveTo(element.width, element.height, element.width - radius, element.height);
+          context.lineTo(radius, element.height);
+          context.quadraticCurveTo(0, element.height, 0, element.height - radius);
+          context.lineTo(0, radius);
+          context.quadraticCurveTo(0, 0, radius, 0);
+        } else {
+          context.rect(0, 0, element.width, element.height);
+        }
+        context.closePath();
+        context.clip();
+        if (video) {
+          context.drawImage(video, 0, 0, element.width, element.height);
+        } else {
+          context.fillStyle = "rgba(255,255,255,0.001)";
+          context.fillRect(0, 0, element.width, element.height);
+        }
+        context.fillStrokeShape(shape);
+      }}
     />
   );
 }
@@ -475,6 +578,9 @@ interface FrameNodeProps {
   canTransform: boolean;
   isDropTarget: boolean;
   isContentEditing: boolean;
+  playheadMs: number;
+  pageDurationMs: number;
+  forceTimelineSync: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
   onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
@@ -585,6 +691,9 @@ function CanvasFrameNode({
   canTransform,
   isDropTarget,
   isContentEditing,
+  playheadMs,
+  pageDurationMs,
+  forceTimelineSync,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -603,6 +712,7 @@ function CanvasFrameNode({
   const transform = element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM;
   const [image] = useImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameGroupRef = useRef<Konva.Group | null>(null);
   const mediaRef = useRef<Konva.Image | null>(null);
   const dropFeedbackRef = useRef<Konva.Group | null>(null);
@@ -639,6 +749,9 @@ function CanvasFrameNode({
     htmlVideo.src = frameContent.src;
     htmlVideo.crossOrigin = "anonymous";
     htmlVideo.muted = true;
+    htmlVideo.defaultMuted = true;
+    htmlVideo.autoplay = true;
+    htmlVideo.controls = false;
     htmlVideo.loop = true;
     htmlVideo.preload = "auto";
     htmlVideo.playsInline = true;
@@ -646,10 +759,16 @@ function CanvasFrameNode({
 
     const handleLoadedMetadata = () => {
       if (!mounted) return;
+      const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
+      const start = Math.max(0, Number(frameContent.videoStart) || 0);
+      try {
+        htmlVideo.currentTime = Math.min(start, Math.max(0, duration - 0.01));
+      } catch {
+        // Ignore initial seek failures while metadata is settling.
+      }
       if (transform.fit === "manual") return;
       const width = Number(htmlVideo.videoWidth || 0);
       const height = Number(htmlVideo.videoHeight || 0);
-      const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
       metadataRef.current?.({
         sourceWidth: width > 0 ? width : undefined,
         sourceHeight: height > 0 ? height : undefined,
@@ -660,6 +779,7 @@ function CanvasFrameNode({
 
     const handleCanPlay = () => {
       if (!mounted) return;
+      videoRef.current = htmlVideo;
       setVideo(htmlVideo);
       void htmlVideo.play().catch(() => undefined);
     };
@@ -671,22 +791,71 @@ function CanvasFrameNode({
     return () => {
       mounted = false;
       htmlVideo.pause();
+      if (videoRef.current === htmlVideo) {
+        videoRef.current = null;
+      }
       htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
       htmlVideo.removeEventListener("canplay", handleCanPlay);
       setVideo((current) => (current === htmlVideo ? null : current));
     };
-  }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, transform.fit]);
+  }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, frameContent?.videoStart, transform.fit]);
 
   useEffect(() => {
-    let frame = 0;
-    const redraw = () => {
-      mediaRef.current?.getLayer()?.batchDraw();
-      frame = requestAnimationFrame(redraw);
-    };
-    if (video) {
-      frame = requestAnimationFrame(redraw);
+    const media = videoRef.current;
+    if (!media || frameContent?.kind !== "video" || !forceTimelineSync) return;
+    const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+    const sourceStart = Math.max(0, Number(frameContent.videoStart) || 0);
+    const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+    const rawVideoEnd = Number(frameContent.videoEnd);
+    const sourceEnd = Math.max(
+      sourceStart + 0.01,
+      duration > 0
+        ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+        : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+          ? rawVideoEnd
+          : fallbackEnd
+    );
+    const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+    const targetTime = resolveLoopingVideoTargetTime({
+      playheadMs,
+      layerStartMs: layerWindow.startMs,
+      sourceStart,
+      sourceEnd,
+    });
+
+    if (Math.abs(media.currentTime - targetTime) <= 0.02) {
+      media.pause();
+      return;
     }
-    return () => cancelAnimationFrame(frame);
+
+    try {
+      media.pause();
+      media.currentTime = targetTime;
+    } catch {
+      // Ignore sync failures until metadata and keyframes are ready.
+    }
+  }, [element, forceTimelineSync, frameContent, pageDurationMs, playheadMs, video]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media || frameContent?.kind !== "video" || forceTimelineSync) return;
+    media.loop = true;
+    void media.play().catch(() => undefined);
+  }, [forceTimelineSync, frameContent?.kind, video]);
+
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    const redraw = () => mediaRef.current?.getLayer()?.batchDraw();
+    media.addEventListener("seeked", redraw);
+    media.addEventListener("loadeddata", redraw);
+    media.addEventListener("canplay", redraw);
+    redraw();
+    return () => {
+      media.removeEventListener("seeked", redraw);
+      media.removeEventListener("loadeddata", redraw);
+      media.removeEventListener("canplay", redraw);
+    };
   }, [video]);
 
   useEffect(() => {
@@ -1263,9 +1432,13 @@ export default function CanvasEditor() {
   const drawOpacity = useEditorStore((state) => state.drawOpacity);
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
   const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
+  const designTimeline = useEditorStore((state) => state.designTimeline);
+  const previewGenerationActive = useEditorStore((state) => state.previewGenerationActive);
 
   const setStageApi = useEditorStore((state) => state.setStageApi);
   const setZoomPercent = useEditorStore((state) => state.setZoomPercent);
+  const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
+  const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
   const setSelectedIds = useEditorStore((state) => state.setSelectedIds);
   const setShowRightSidebar = useEditorStore((state) => state.setShowRightSidebar);
   const clearSelection = useEditorStore((state) => state.clearSelection);
@@ -1297,10 +1470,13 @@ export default function CanvasEditor() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string } | null>(null);
   const [frameDropTargetId, setFrameDropTargetId] = useState("");
   const [frameContentEditId, setFrameContentEditId] = useState("");
+  const [capturePlayheadOverrideMs, setCapturePlayheadOverrideMs] = useState<number | null>(null);
 
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
   const expiredFrameDropTargetRef = useRef("");
+  const timelinePlayheadRef = useRef(0);
+  const activePagePlayheadRef = useRef(0);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -1317,6 +1493,17 @@ export default function CanvasEditor() {
     () => Math.max(0, Math.min(activePageDurationMs, timelinePlayheadMs - activePageTimelineStartMs)),
     [activePageDurationMs, activePageTimelineStartMs, timelinePlayheadMs]
   );
+  const effectiveActivePagePlayheadMs =
+    capturePlayheadOverrideMs === null ? activePagePlayheadMs : capturePlayheadOverrideMs;
+  const forceTimelineMediaSync = capturePlayheadOverrideMs !== null || previewGenerationActive;
+
+  useEffect(() => {
+    timelinePlayheadRef.current = timelinePlayheadMs;
+  }, [timelinePlayheadMs]);
+
+  useEffect(() => {
+    activePagePlayheadRef.current = activePagePlayheadMs;
+  }, [activePagePlayheadMs]);
 
   useEffect(() => {
     if (!frameContentEditId) return;
@@ -1425,6 +1612,260 @@ export default function CanvasEditor() {
       return "";
     }
   }, [activePage, viewport.scale, viewport.x, viewport.y]);
+
+  const renderCurrentPageToCanvas = useCallback(
+    (maxDimension = 720) => {
+      const stage = stageRef.current;
+      if (!stage || !activePage) return null;
+
+      const x = viewport.x;
+      const y = viewport.y;
+      const width = activePage.width * viewport.scale;
+      const height = activePage.height * viewport.scale;
+      const safeMaxDimension = Math.max(240, Math.round(Number(maxDimension) || 720));
+      const previewScale = Math.min(1, safeMaxDimension / Math.max(activePage.width, activePage.height));
+      const pixelRatio = Math.max(0.1, previewScale / Math.max(viewport.scale, 0.1));
+
+      try {
+        const canvas = stage.toCanvas({
+          x,
+          y,
+          width,
+          height,
+          pixelRatio,
+        });
+        return {
+          canvas,
+          width: Math.max(1, Math.round(activePage.width * previewScale)),
+          height: Math.max(1, Math.round(activePage.height * previewScale)),
+        };
+      } catch {
+        return null;
+      }
+    },
+    [activePage, viewport.scale, viewport.x, viewport.y]
+  );
+
+  const recordTimelinePreviewVideo = useCallback(
+    async (options?: { fps?: number; maxDimension?: number; durationMs?: number }) => {
+      const stage = stageRef.current;
+      const transformer = transformerRef.current;
+      if (!stage || !activePage) return null;
+      if (typeof MediaRecorder === "undefined") {
+        throw new Error("Preview recording is not supported in this browser.");
+      }
+
+      const mimeType = getPreviewRecorderMimeType();
+      if (!mimeType) {
+        throw new Error("No supported video recorder format is available in this browser.");
+      }
+
+      const output = renderCurrentPageToCanvas(options?.maxDimension ?? 720);
+      if (!output) {
+        throw new Error("Unable to capture the current template preview.");
+      }
+
+      const fps = clamp(
+        Math.round(Number(options?.fps) || designTimeline.fps || 20),
+        12,
+        24
+      );
+      const durationMs = Math.max(
+        300,
+        Math.round(
+          Number(options?.durationMs) ||
+            Number(designTimeline.totalDurationMs) ||
+            Number(activePageDurationMs) ||
+            0
+        )
+      );
+      const recordingCanvas = document.createElement("canvas");
+      recordingCanvas.width = output.width;
+      recordingCanvas.height = output.height;
+      const recordingContext = recordingCanvas.getContext("2d");
+      if (!recordingContext) {
+        throw new Error("Preview recorder canvas is unavailable.");
+      }
+
+      let stream = recordingCanvas.captureStream(fps);
+      let canvasTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+      const supportsManualFrameCapture = Boolean(
+        canvasTrack && typeof canvasTrack.requestFrame === "function"
+      );
+      if (supportsManualFrameCapture) {
+        stream.getTracks().forEach((track) => track.stop());
+        stream = recordingCanvas.captureStream(0);
+        canvasTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
+      }
+      const tracks = stream.getTracks();
+      const recorder = new MediaRecorder(stream, {
+        mimeType,
+        videoBitsPerSecond: Math.max(6_000_000, Math.round(output.width * output.height * 5)),
+      });
+      const chunks: Blob[] = [];
+      const previousNodes = transformer?.nodes() || [];
+      let recorderStopResolve: ((blob: Blob) => void) | null = null;
+      let recorderStopReject: ((error: Error) => void) | null = null;
+      const recorderStopped = new Promise<Blob>((resolve, reject) => {
+        recorderStopResolve = resolve;
+        recorderStopReject = reject;
+      });
+
+      recorder.addEventListener("dataavailable", (event) => {
+        if (event.data && event.data.size > 0) {
+          chunks.push(event.data);
+        }
+      });
+      recorder.addEventListener("stop", () => {
+        recorderStopResolve?.(new Blob(chunks, { type: mimeType }));
+      });
+      recorder.addEventListener("error", () => {
+        recorderStopReject?.(new Error("Preview recorder failed while encoding the video."));
+      });
+
+      let posterDataUrl = "";
+      const previousAbsolutePlayheadMs = timelinePlayheadRef.current;
+      const captureCurrentFrame = async () => {
+        stage.batchDraw();
+        await waitForAnimationFrame();
+        const captured = renderCurrentPageToCanvas(options?.maxDimension ?? 720);
+        if (!captured) return;
+        recordingContext.clearRect(0, 0, recordingCanvas.width, recordingCanvas.height);
+        recordingContext.drawImage(captured.canvas, 0, 0, recordingCanvas.width, recordingCanvas.height);
+
+        if (!posterDataUrl) {
+          try {
+            posterDataUrl = recordingCanvas.toDataURL("image/png");
+          } catch {
+            posterDataUrl = "";
+          }
+        }
+
+        if (supportsManualFrameCapture && canvasTrack && typeof canvasTrack.requestFrame === "function") {
+          canvasTrack.requestFrame();
+        }
+      };
+
+      try {
+        transformer?.nodes([]);
+        transformer?.forceUpdate();
+        transformer?.getLayer()?.batchDraw();
+
+        setTimelinePlaying(false);
+        setTimelinePlayheadMs(activePageTimelineStartMs);
+        await waitForAnimationFrame();
+        await captureCurrentFrame();
+
+        recorder.start();
+
+        // Start the same shared timeline playback the user sees from the play button,
+        // then sample the canvas from the actual playhead progression instead of a
+        // separate recording timer. That keeps recording aligned with visible playback.
+        setTimelinePlaying(true);
+
+        const startedAt = performance.now();
+        const frameStepMs = Math.max(1, Math.round(1000 / fps));
+        let nextCapturePlayheadMs = frameStepMs;
+
+        while (true) {
+          await waitForAnimationFrame();
+          const now = performance.now();
+          const currentPlayheadMs = activePagePlayheadRef.current;
+          const reachedEnd = currentPlayheadMs >= durationMs || now - startedAt >= durationMs + 500;
+
+          while (currentPlayheadMs >= nextCapturePlayheadMs && nextCapturePlayheadMs <= durationMs) {
+            await captureCurrentFrame();
+            nextCapturePlayheadMs += frameStepMs;
+          }
+
+          if (reachedEnd) {
+            if (currentPlayheadMs < nextCapturePlayheadMs) {
+              await captureCurrentFrame();
+            }
+            break;
+          }
+        }
+
+        setTimelinePlaying(false);
+        setTimelinePlayheadMs(activePageTimelineStartMs + durationMs);
+        await waitForAnimationFrame();
+        await captureCurrentFrame();
+      } finally {
+        setTimelinePlaying(false);
+        setTimelinePlayheadMs(previousAbsolutePlayheadMs);
+        transformer?.nodes(previousNodes);
+        transformer?.forceUpdate();
+        transformer?.getLayer()?.batchDraw();
+        stage.batchDraw();
+      }
+
+      recorder.stop();
+      const blob = await recorderStopped;
+      tracks.forEach((track) => track.stop());
+
+      return {
+        blob,
+        mimeType,
+        durationMs,
+        posterDataUrl,
+        width: recordingCanvas.width,
+        height: recordingCanvas.height,
+      };
+    },
+    [
+      activePage,
+      activePageDurationMs,
+      activePageTimelineStartMs,
+      designTimeline.fps,
+      designTimeline.totalDurationMs,
+      renderCurrentPageToCanvas,
+      setTimelinePlayheadMs,
+      setTimelinePlaying,
+    ]
+  );
+
+  const captureTimelineStripDataUrls = useCallback(
+    async (playheadsMs: number[]) => {
+      const stage = stageRef.current;
+      if (!stage || !activePage || !Array.isArray(playheadsMs) || playheadsMs.length === 0) {
+        return [];
+      }
+
+      const pageContainsVideo = activePage.elements.some((element) => {
+        const type = String(element.type || "").trim().toLowerCase();
+        if (type === "video") return true;
+        if (type !== "frame") return false;
+        return String(element.frameContent?.kind || "").trim().toLowerCase() === "video";
+      });
+      if (pageContainsVideo) {
+        return [];
+      }
+
+      const waitForCanvasFrame = async () => {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      };
+
+      const captures: string[] = [];
+      try {
+        for (const playhead of playheadsMs) {
+          setCapturePlayheadOverrideMs(clamp(Number(playhead) || 0, 0, activePageDurationMs));
+          await waitForCanvasFrame();
+          stage.batchDraw();
+          await waitForCanvasFrame();
+          const captured = String(captureThumbnailDataUrl() || "").trim();
+          if (captured) {
+            captures.push(captured);
+          }
+        }
+      } finally {
+        setCapturePlayheadOverrideMs(null);
+      }
+
+      return captures;
+    },
+    [activePage, activePageDurationMs, captureThumbnailDataUrl]
+  );
 
   const mergeSelectedLayers = useCallback(async () => {
     const stage = stageRef.current;
@@ -1606,8 +2047,16 @@ export default function CanvasEditor() {
       .filter((node): node is Konva.Node => Boolean(node));
 
     transformer.nodes(nodes);
+    transformer.forceUpdate();
     transformer.getLayer()?.batchDraw();
   }, [selectedIds, elements, frameContentEditId]);
+
+  const syncTransformerVisuals = useCallback(() => {
+    const transformer = transformerRef.current;
+    if (!transformer) return;
+    transformer.forceUpdate();
+    transformer.getLayer()?.batchDraw();
+  }, []);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -1651,17 +2100,28 @@ export default function CanvasEditor() {
   }, [availableFontFamilies, elements]);
 
   const selectionMenuPos = useMemo(() => {
+    if (capturePlayheadOverrideMs !== null || previewGenerationActive) return null;
     if (selectedIds.length === 0) return null;
 
     const active = elements.find((element) => element.id === selectedIds[0]);
     if (!active) return null;
-    if (!isElementVisibleAtPlayhead(active, activePagePlayheadMs, activePageDurationMs)) return null;
+    if (!isElementVisibleAtPlayhead(active, effectiveActivePagePlayheadMs, activePageDurationMs)) return null;
 
     return {
       x: viewport.x + (active.x + active.width * 0.5) * viewport.scale,
       y: viewport.y + active.y * viewport.scale - 40,
     };
-  }, [activePageDurationMs, activePagePlayheadMs, elements, selectedIds, viewport.scale, viewport.x, viewport.y]);
+  }, [
+    capturePlayheadOverrideMs,
+    previewGenerationActive,
+    activePageDurationMs,
+    effectiveActivePagePlayheadMs,
+    elements,
+    selectedIds,
+    viewport.scale,
+    viewport.x,
+    viewport.y,
+  ]);
 
   useEffect(() => {
     setStageApi({
@@ -1670,11 +2130,22 @@ export default function CanvasEditor() {
       fitToScreen,
       exportPng,
       captureThumbnailDataUrl,
+      captureTimelineStripDataUrls,
+      recordTimelinePreviewVideo,
       mergeSelectedLayers,
     });
 
     return () => setStageApi(null);
-  }, [captureThumbnailDataUrl, exportPng, fitToScreen, mergeSelectedLayers, setStageApi, zoomBy]);
+  }, [
+    captureThumbnailDataUrl,
+    captureTimelineStripDataUrls,
+    recordTimelinePreviewVideo,
+    exportPng,
+    fitToScreen,
+    mergeSelectedLayers,
+    setStageApi,
+    zoomBy,
+  ]);
 
   const screenToPage = useCallback(
     (point: { x: number; y: number }) => ({
@@ -2520,10 +2991,14 @@ export default function CanvasEditor() {
             clipHeight={activePage.height}
           >
             {elements.map((element) => {
-              if (!isElementVisibleAtPlayhead(element, activePagePlayheadMs, activePageDurationMs)) {
+              if (!isElementVisibleAtPlayhead(element, effectiveActivePagePlayheadMs, activePageDurationMs)) {
                 return null;
               }
-              const pose = resolveAnimatedElementPose(element, activePagePlayheadMs, activePageDurationMs);
+              const pose = resolveAnimatedElementPose(
+                element,
+                effectiveActivePagePlayheadMs,
+                activePageDurationMs
+              );
               const isEditingFrameContent = frameContentEditId === element.id;
               const canTransform = !element.locked && toolMode !== "draw" && !isEditingFrameContent;
 
@@ -2548,6 +3023,7 @@ export default function CanvasEditor() {
                 onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => openContextMenu(event, element.id),
                 onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => updateNodeDrag(event, element),
                 onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => finishNodeDrag(event, element),
+                onTransform: syncTransformerVisuals,
                 onTransformEnd: (event: Konva.KonvaEventObject<Event>) => updateNodeTransform(event, element),
               };
 
@@ -2560,6 +3036,9 @@ export default function CanvasEditor() {
                     canTransform={canTransform}
                     isDropTarget={frameDropTargetId === element.id}
                     isContentEditing={isEditingFrameContent}
+                    playheadMs={effectiveActivePagePlayheadMs}
+                    pageDurationMs={activePageDurationMs}
+                    forceTimelineSync={forceTimelineMediaSync}
                     registerRef={setNodeRef}
                     onSelect={(event) => selectNode(event, element.id)}
                     onContextMenu={(event) => openContextMenu(event, element.id)}
@@ -2602,6 +3081,9 @@ export default function CanvasEditor() {
                     element={element}
                     pose={pose}
                     canTransform={canTransform}
+                    playheadMs={effectiveActivePagePlayheadMs}
+                    pageDurationMs={activePageDurationMs}
+                    forceTimelineSync={forceTimelineMediaSync}
                     registerRef={setNodeRef}
                     onSelect={(event) => selectNode(event, element.id)}
                     onContextMenu={(event) => openContextMenu(event, element.id)}
@@ -2645,6 +3127,9 @@ export default function CanvasEditor() {
                     element={element}
                     pose={pose}
                     canTransform={canTransform}
+                    playheadMs={effectiveActivePagePlayheadMs}
+                    pageDurationMs={activePageDurationMs}
+                    forceTimelineSync={forceTimelineMediaSync}
                     registerRef={setNodeRef}
                     onSelect={(event) => selectNode(event, element.id)}
                     onContextMenu={(event) => openContextMenu(event, element.id)}
@@ -2823,6 +3308,7 @@ export default function CanvasEditor() {
               transformerRef.current = node;
             }}
             rotateEnabled
+            flipEnabled={false}
             enabledAnchors={[
               "top-left",
               "top-center",
@@ -2842,6 +3328,15 @@ export default function CanvasEditor() {
           />
         </Layer>
       </Stage>
+
+      {previewGenerationActive || capturePlayheadOverrideMs !== null ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7d7d9]/78 backdrop-blur-[1px]">
+          <div className="rounded-2xl border border-white/80 bg-white/92 px-5 py-3 text-center shadow-lg">
+            <div className="text-sm font-semibold text-[#111827]">Generating preview</div>
+            <div className="mt-1 text-xs text-[#6b7280]">Please wait while the template preview is rendered.</div>
+          </div>
+        </div>
+      ) : null}
 
       {contextMenu ? (
         <div

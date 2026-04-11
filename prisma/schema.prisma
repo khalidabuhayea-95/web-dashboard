@@ -25,6 +25,13 @@ model Template {
   subCategory     String             @default("general")
   tags            Json
   thumbnailDataUrl String?
+  previewVideoUrl String?
+  previewPosterUrl String?
+  previewStatus   String?
+  previewDurationMs Int?
+  previewVersion  Int?
+  previewError    String?
+  previewUpdatedAt DateTime?
   data            Json
   publishedAt DateTime?
   createdAt       DateTime           @default(now())

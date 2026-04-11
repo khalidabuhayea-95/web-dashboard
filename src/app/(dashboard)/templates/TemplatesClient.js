@@ -75,18 +75,38 @@ function buildPreviewFallbackDataUrl({
   return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
 }
 
-function resolveTemplatePreview(template) {
+function resolveTemplatePreviewMedia(template) {
+  const previewVideoUrl = String(template?.preview?.url || template?.previewVideoUrl || "").trim();
+  const previewPosterUrl = String(template?.preview?.posterUrl || template?.previewPosterUrl || "").trim();
+  if (previewVideoUrl) {
+    return {
+      type: "video",
+      src: previewVideoUrl,
+      posterUrl: previewPosterUrl || null,
+    };
+  }
+
   const explicit = String(template?.thumbnailDataUrl || "").trim();
-  if (explicit) return explicit;
+  if (explicit) {
+    return {
+      type: "image",
+      src: explicit,
+      posterUrl: null,
+    };
+  }
 
   const parsed = parseTemplateData(template?.data);
   if (!parsed || typeof parsed !== "object") {
-    return buildPreviewFallbackDataUrl({
-      name: template?.name,
-      bgColor: "#eef2f7",
-      width: template?.canvasSize?.width,
-      height: template?.canvasSize?.height,
-    });
+    return {
+      type: "image",
+      src: buildPreviewFallbackDataUrl({
+        name: template?.name,
+        bgColor: "#eef2f7",
+        width: template?.canvasSize?.width,
+        height: template?.canvasSize?.height,
+      }),
+      posterUrl: null,
+    };
   }
 
   const pages = Array.isArray(parsed.pages) ? parsed.pages : [];
@@ -103,7 +123,13 @@ function resolveTemplatePreview(template) {
           typeof element.src === "string" &&
           element.src.startsWith("data:image/")
       );
-    if (imageLayer?.src) return imageLayer.src;
+    if (imageLayer?.src) {
+      return {
+        type: "image",
+        src: imageLayer.src,
+        posterUrl: null,
+      };
+    }
 
     const textLayer = elements.find(
       (element) =>
@@ -113,14 +139,18 @@ function resolveTemplatePreview(template) {
         String(element.text || "").trim()
     );
 
-    return buildPreviewFallbackDataUrl({
-      name: template?.name,
-      text: String(textLayer?.text || ""),
-      bgColor: page?.background?.color || "#eef2f7",
-      textColor: textLayer?.color || textLayer?.fill || "#111827",
-      width: page?.width || template?.canvasSize?.width,
-      height: page?.height || template?.canvasSize?.height,
-    });
+    return {
+      type: "image",
+      src: buildPreviewFallbackDataUrl({
+        name: template?.name,
+        text: String(textLayer?.text || ""),
+        bgColor: page?.background?.color || "#eef2f7",
+        textColor: textLayer?.color || textLayer?.fill || "#111827",
+        width: page?.width || template?.canvasSize?.width,
+        height: page?.height || template?.canvasSize?.height,
+      }),
+      posterUrl: null,
+    };
   }
 
   const fabric = parsed.fabric && typeof parsed.fabric === "object" ? parsed.fabric : parsed;
@@ -128,7 +158,13 @@ function resolveTemplatePreview(template) {
   const fabricImage = objects.find(
     (item) => item && typeof item.src === "string" && item.src.startsWith("data:image/")
   );
-  if (fabricImage?.src) return fabricImage.src;
+  if (fabricImage?.src) {
+    return {
+      type: "image",
+      src: fabricImage.src,
+      posterUrl: null,
+    };
+  }
   const fabricText = objects.find(
     (item) =>
       item &&
@@ -137,14 +173,30 @@ function resolveTemplatePreview(template) {
       String(item.text || "").trim()
   );
 
-  return buildPreviewFallbackDataUrl({
-    name: template?.name,
-    text: String(fabricText?.text || ""),
-    bgColor: fabric.backgroundColor || "#eef2f7",
-    textColor: fabricText?.fill || "#111827",
-    width: template?.canvasSize?.width,
-    height: template?.canvasSize?.height,
-  });
+  return {
+    type: "image",
+    src: buildPreviewFallbackDataUrl({
+      name: template?.name,
+      text: String(fabricText?.text || ""),
+      bgColor: fabric.backgroundColor || "#eef2f7",
+      textColor: fabricText?.fill || "#111827",
+      width: template?.canvasSize?.width,
+      height: template?.canvasSize?.height,
+    }),
+    posterUrl: null,
+  };
+}
+
+function resolveTemplateAspectRatio(template) {
+  const parsed = parseTemplateData(template?.data);
+  const pages = Array.isArray(parsed?.pages) ? parsed.pages : [];
+  const firstPage = pages[0] || null;
+  const width = Number(firstPage?.width || template?.canvasSize?.width || 0);
+  const height = Number(firstPage?.height || template?.canvasSize?.height || 0);
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 1;
+  }
+  return Math.max(0.35, Math.min(3, height / width));
 }
 
 export default function TemplatesClient() {
@@ -176,7 +228,7 @@ export default function TemplatesClient() {
   const previewByTemplateId = useMemo(() => {
     const next = new Map();
     templates.forEach((template) => {
-      next.set(template.id, resolveTemplatePreview(template));
+      next.set(template.id, resolveTemplatePreviewMedia(template));
     });
     return next;
   }, [templates]);
@@ -509,7 +561,10 @@ export default function TemplatesClient() {
               </TableHead>
               <TableBody>
                 {templates.map((template) => {
-                  const previewSrc = String(previewByTemplateId.get(template.id) || "").trim();
+                  const previewMedia = previewByTemplateId.get(template.id) || null;
+                  const previewSrc = String(previewMedia?.src || "").trim();
+                  const previewAspectRatio = resolveTemplateAspectRatio(template);
+                  const previewWidth = Math.max(28, Math.min(64, Math.round(48 / previewAspectRatio)));
                   return (
                   <TableRow key={template.id}>
                     <TableCell className="align-middle">
@@ -529,18 +584,35 @@ export default function TemplatesClient() {
                           onClick={() =>
                             setPreviewPopup({
                               name: template.name,
+                              type: previewMedia?.type || "image",
                               src: previewSrc,
+                              posterUrl: String(previewMedia?.posterUrl || "").trim() || null,
                             })
                           }
                           aria-label={`Preview ${template.name}`}
                         >
-                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                          <img
-                            src={previewSrc}
-                            alt={`${template.name} thumbnail`}
-                            className="h-12 w-12 rounded-md border border-border object-cover"
-                            loading="lazy"
-                          />
+                          {previewMedia?.type === "video" ? (
+                            <video
+                              src={previewSrc}
+                              poster={String(previewMedia?.posterUrl || "").trim() || undefined}
+                              className="h-12 rounded-md border border-border object-contain bg-white"
+                              style={{ width: `${previewWidth}px` }}
+                              muted
+                              playsInline
+                              autoPlay
+                              loop
+                              preload="metadata"
+                            />
+                          ) : (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={previewSrc}
+                              alt={`${template.name} thumbnail`}
+                              className="h-12 rounded-md border border-border object-contain bg-white"
+                              style={{ width: `${previewWidth}px` }}
+                              loading="lazy"
+                            />
+                          )}
                         </button>
                       ) : (
                         <div className="h-12 w-12 rounded-md border border-border bg-muted" />
@@ -649,12 +721,24 @@ export default function TemplatesClient() {
               </button>
             </div>
             <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded-lg border border-[#d7dbe1] bg-[#f5f7fa]">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={String(previewPopup.src || "")}
-                alt={previewPopup.name || "Template preview"}
-                className="max-h-[68vh] w-full object-contain"
-              />
+              {previewPopup.type === "video" ? (
+                <video
+                  src={String(previewPopup.src || "")}
+                  poster={String(previewPopup.posterUrl || "").trim() || undefined}
+                  className="max-h-[68vh] w-full object-contain"
+                  controls
+                  playsInline
+                  autoPlay
+                  loop
+                />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  src={String(previewPopup.src || "")}
+                  alt={previewPopup.name || "Template preview"}
+                  className="max-h-[68vh] w-full object-contain"
+                />
+              )}
             </div>
           </div>
         </div>
