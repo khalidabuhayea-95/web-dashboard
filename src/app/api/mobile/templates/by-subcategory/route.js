@@ -5,7 +5,6 @@ import { createTemplateAssetResolver } from "@/lib/mobile/templateAssets";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import {
   localizeCategoryOptions,
-  localizeTemplateTaxonomy,
   prepareMobileTaxonomy,
   resolveCategoryFilterValue,
   resolveSubCategoryFilterValue,
@@ -78,13 +77,10 @@ export async function GET(request) {
         )
         .map((subCategory) => ({
           category: {
-            id: String(category.id || ""),
             value: String(category.value || ""),
             label: String(category.label || ""),
           },
           subCategory: {
-            id: String(subCategory.id || ""),
-            categoryId: String(subCategory.categoryId || category.id || ""),
             value: String(subCategory.value || ""),
             label: String(subCategory.label || ""),
           },
@@ -106,21 +102,12 @@ export async function GET(request) {
         select: {
           id: true,
           name: true,
-          version: true,
-          category: true,
-          subCategory: true,
-          tags: true,
           canvasSize: true,
           thumbnailDataUrl: true,
           previewVideoUrl: true,
           previewPosterUrl: true,
           previewStatus: true,
           previewDurationMs: true,
-          previewVersion: true,
-          previewError: true,
-          previewUpdatedAt: true,
-          createdAt: true,
-          updatedAt: true,
         },
       })
     )
@@ -129,16 +116,35 @@ export async function GET(request) {
   const subCategories = subCategoryDescriptors.map((descriptor, index) => {
     const rows = templateRowsPerSubCategory[index] || [];
     const templates = rows.map((template) => {
-      const localized = localizeTemplateTaxonomy(template, taxonomy, locale);
       const assetResolver = createTemplateAssetResolver(request, template);
+      const mobileTemplate = toMobileTemplate(template, { assetResolver, includeProject: false });
+      const previewStatus = String(mobileTemplate.preview?.status || "").trim().toLowerCase();
+      const preview =
+        previewStatus === "ready"
+          ? {
+              status: "ready",
+              ...(typeof mobileTemplate.preview?.url === "string" && mobileTemplate.preview.url
+                ? { url: mobileTemplate.preview.url }
+                : {}),
+              ...(typeof mobileTemplate.preview?.posterUrl === "string" &&
+              mobileTemplate.preview.posterUrl
+                ? { posterUrl: mobileTemplate.preview.posterUrl }
+                : {}),
+              ...(Number.isFinite(Number(mobileTemplate.preview?.durationMs))
+                ? { durationMs: Math.max(0, Math.round(Number(mobileTemplate.preview.durationMs))) }
+                : {}),
+            }
+          : null;
+
       return {
-        ...toMobileTemplate(template, { assetResolver, includeProject: false }),
-        category: localized.categoryLabel,
-        subCategory: localized.subCategoryLabel,
-        categoryId: localized.categoryId,
-        categoryValue: localized.categoryValue,
-        subCategoryId: localized.subCategoryId,
-        subCategoryValue: localized.subCategoryValue,
+        id: mobileTemplate.id,
+        title: mobileTemplate.title,
+        canvasWidth: mobileTemplate.canvasWidth,
+        canvasHeight: mobileTemplate.canvasHeight,
+        thumbnailUrl: mobileTemplate.thumbnailUrl,
+        ...(preview ? { preview } : {}),
+        ...(preview?.url ? { previewVideoUrl: preview.url } : {}),
+        ...(preview?.posterUrl ? { previewPosterUrl: preview.posterUrl } : {}),
       };
     });
 
@@ -151,8 +157,6 @@ export async function GET(request) {
 
   return NextResponse.json(
     {
-      locale,
-      templatesPerSubCategory,
       subCategories,
     },
     {

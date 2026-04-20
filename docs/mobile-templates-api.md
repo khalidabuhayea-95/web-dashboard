@@ -47,17 +47,18 @@ Path params:
 - `id` (required, template UUID; slug also accepted for backward compatibility)
 
 Response:
-- `locale`
 - `template`: full mobile template object (includes `project`)
-  - includes `categoryId` and `subCategoryId` GUID values
   - `category` and `subCategory` are localized labels
-  - if a generated MP4 preview exists, use `previewVideoUrl` for motion-capable previews
-  - use `previewPosterUrl` as the static fallback image when `previewVideoUrl` is present
-  - fall back to `thumbnailDataUrl` / `thumbnailUrl` when no MP4 preview metadata exists
+  - `categoryValue` and `subCategoryValue` are the stable taxonomy values
+  - `thumbnailUrl` is the single static preview image field
+  - if a generated MP4 preview exists, use `template.preview.url` for motion-capable previews
+  - use `template.preview.posterUrl` as the static fallback image when `template.preview.url` is present
   - each project layer now also includes:
     - `timelineStartMs`
     - `timelineEndMs`
     - `animation`
+  - `project` is slimmed to `canvasWidth`, `canvasHeight`, `background`, and `layers`
+  - `project.meta`, top-level preview aliases, and redundant template/project identity fields are omitted on this endpoint
 
 Example layer payload:
 
@@ -134,11 +135,13 @@ Query params:
 - `limit` (optional, default `100`, max `200`)
 
 Response:
-- `locale`
-- `category`: includes `id`, `value`, `label`
-- `subCategory`: includes `id`, `categoryId`, `value`, `label`
-- `templates`: summary template objects (no `project` payload)
-  - if a generated MP4 preview exists, each template includes `previewVideoUrl` and `previewPosterUrl`
+- `subCategories`
+  - `category`: includes `value`, `label`
+  - `subCategory`: includes `value`, `label`
+  - `templates`: slim summary template objects (no `project` payload)
+    - `id`, `title`, `canvasWidth`, `canvasHeight`, `thumbnailUrl`
+    - if a generated mobile preview is ready, the template also includes `preview`
+    - `previewVideoUrl` and `previewPosterUrl` are only emitted when populated
 
 ### `GET /api/mobile/elements`
 

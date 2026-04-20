@@ -664,6 +664,30 @@ const schemas = {
       error: { type: "string", nullable: true },
     },
   },
+  MobileTemplatePreviewSlim: {
+    type: "object",
+    required: ["status"],
+    properties: {
+      status: {
+        type: "string",
+        enum: ["not_requested", "queued", "processing", "ready", "failed"],
+      },
+      url: { type: "string", format: "uri", nullable: true },
+      posterUrl: { type: "string", format: "uri", nullable: true },
+      durationMs: { type: "integer", format: "int32", nullable: true },
+    },
+  },
+  MobileLayerFontSummary: {
+    type: "object",
+    properties: {
+      id: { type: "string", format: "uuid", nullable: true },
+      fontName: { type: "string", nullable: true },
+      displayName: { type: "string", nullable: true },
+      downloadUrl: { type: "string", format: "uri", nullable: true },
+      mobileDownloadUrl: { type: "string", format: "uri", nullable: true },
+      mobileCompatible: { type: "boolean", nullable: true },
+    },
+  },
   MobileTemplateSummary: {
     type: "object",
     required: [
@@ -724,21 +748,104 @@ const schemas = {
       },
     },
   },
-  MobileTemplateDetail: {
-    allOf: [
-      {
-        $ref: "#/components/schemas/MobileTemplateSummary",
+  MobileTemplateBySubCategorySummary: {
+    type: "object",
+    required: [
+      "id",
+      "title",
+      "canvasWidth",
+      "canvasHeight",
+      "thumbnailUrl",
+    ],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      title: { type: "string" },
+      canvasWidth: { type: "number" },
+      canvasHeight: { type: "number" },
+      thumbnailUrl: { type: "string" },
+      previewVideoUrl: {
+        type: "string",
+        format: "uri",
+        nullable: true,
+        description:
+          "Present only when the mobile preview is ready. Mirrors `preview.url`.",
       },
-      {
+      previewPosterUrl: {
+        type: "string",
+        format: "uri",
+        nullable: true,
+        description:
+          "Present only when the mobile preview is ready and a poster image exists. Mirrors `preview.posterUrl`.",
+      },
+      preview: {
         type: "object",
-        required: ["project"],
+        nullable: true,
+        required: ["status"],
         properties: {
-          project: {
-            $ref: "#/components/schemas/MobileProject",
+          status: {
+            type: "string",
+            enum: ["ready"],
+          },
+          url: { type: "string", format: "uri", nullable: true },
+          posterUrl: { type: "string", format: "uri", nullable: true },
+          durationMs: { type: "integer", format: "int32", nullable: true },
+        },
+        description:
+          "Included only when the generated mobile preview is ready.",
+      },
+    },
+  },
+  MobileTemplateDetail: {
+    type: "object",
+    required: [
+      "id",
+      "title",
+      "category",
+      "categoryValue",
+      "subCategory",
+      "subCategoryValue",
+      "thumbnailUrl",
+      "project",
+    ],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      title: { type: "string" },
+      category: { type: "string", description: "Localized category label." },
+      categoryValue: { type: "string" },
+      subCategory: { type: "string", description: "Localized sub category label." },
+      subCategoryValue: { type: "string" },
+      thumbnailUrl: { type: "string" },
+      preview: {
+        allOf: [{ $ref: "#/components/schemas/MobileTemplatePreviewSlim" }],
+        nullable: true,
+      },
+      project: {
+        type: "object",
+        required: ["canvasWidth", "canvasHeight", "background", "layers"],
+        properties: {
+          canvasWidth: { type: "number" },
+          canvasHeight: { type: "number" },
+          background: {
+            type: "object",
+            additionalProperties: true,
+          },
+          layers: {
+            type: "array",
+            description:
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform`, `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, and `animation`. TEXT layers expose a slim `font` object. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
+            items: {
+              type: "object",
+              additionalProperties: true,
+              properties: {
+                font: {
+                  $ref: "#/components/schemas/MobileLayerFontSummary",
+                },
+              },
+            },
           },
         },
       },
-    ],
+    },
   },
   TemplatesBySubCategoryGroup: {
     type: "object",
@@ -850,12 +957,8 @@ const schemas = {
   },
   TemplateByIdResponse: {
     type: "object",
-    required: ["locale", "template"],
+    required: ["template"],
     properties: {
-      locale: {
-        type: "string",
-        enum: ["en", "ar"],
-      },
       template: {
         $ref: "#/components/schemas/MobileTemplateDetail",
       },
@@ -867,19 +970,16 @@ const schemas = {
     properties: {
       category: {
         type: "object",
-        required: ["id", "value", "label"],
+        required: ["value", "label"],
         properties: {
-          id: { type: "string", format: "uuid" },
           value: { type: "string" },
           label: { type: "string" },
         },
       },
       subCategory: {
         type: "object",
-        required: ["id", "categoryId", "value", "label"],
+        required: ["value", "label"],
         properties: {
-          id: { type: "string", format: "uuid" },
-          categoryId: { type: "string", format: "uuid" },
           value: { type: "string" },
           label: { type: "string" },
         },
@@ -887,24 +987,15 @@ const schemas = {
       templates: {
         type: "array",
         items: {
-          $ref: "#/components/schemas/MobileTemplateSummary",
+          $ref: "#/components/schemas/MobileTemplateBySubCategorySummary",
         },
       },
     },
   },
   BySubCategoryResponse: {
     type: "object",
-    required: ["locale", "templatesPerSubCategory", "subCategories"],
+    required: ["subCategories"],
     properties: {
-      locale: {
-        type: "string",
-        enum: ["en", "ar"],
-      },
-      templatesPerSubCategory: {
-        type: "integer",
-        minimum: 1,
-        example: 10,
-      },
       subCategories: {
         type: "array",
         items: {
