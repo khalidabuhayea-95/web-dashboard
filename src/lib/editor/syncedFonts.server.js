@@ -2,6 +2,11 @@ import {
   readEditorFontLibraryRaw,
   writeEditorFontLibraryRaw,
 } from "@/lib/editor/fontLibraryStore.server";
+import {
+  FONT_SOURCE_CUSTOM,
+  listFontFamilies,
+  toEditorFontRecord,
+} from "@/lib/editor/fontStorage.server";
 
 const FONT_SYNC_SOURCES = {
   google: "google",
@@ -889,8 +894,8 @@ export function listFontSyncSources() {
 }
 
 export async function getEditorSyncedFonts() {
-  const state = await readSyncedFontState();
-  return Array.isArray(state.fonts) ? state.fonts : [];
+  const fonts = await listFontFamilies({ excludeSource: FONT_SOURCE_CUSTOM });
+  return fonts.map(toEditorFontRecord).filter(Boolean);
 }
 
 export async function getEditorSyncedFontsSummary() {

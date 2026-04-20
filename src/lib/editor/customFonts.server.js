@@ -1,8 +1,23 @@
 import { normalizeFontFamilyName } from "@/lib/editor/fonts";
 import {
+  deleteFontFamily,
+  FONT_FILE_KIND_MOBILE,
+  FONT_SOURCE_CUSTOM,
+  FONT_STATUS_FAILED,
+  FONT_STATUS_PENDING,
+  FONT_STATUS_READY,
+  findFontFamiliesByNames,
+  listFontFamilies,
+  normalizeFontStorageKey,
+  toEditorFontRecord,
+  upsertFontFamilyWithFiles,
+} from "@/lib/editor/fontStorage.server";
+import {
   readEditorFontLibraryRaw,
   writeEditorFontLibraryRaw,
 } from "@/lib/editor/fontLibraryStore.server";
+import { createAdminClient } from "@/lib/supabase/admin";
+import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
 
@@ -42,6 +57,7 @@ const FONT_CONVERTER_SCRIPT_PATH = path.join(
   "scripts",
   "convert-font-to-mobile.mjs"
 );
+const FONT_STORAGE_BUCKET = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
 
 function isFontConversionRuntimeSupported() {
   const runtime = String(process.env.NEXT_RUNTIME || "").toLowerCase();
@@ -609,6 +625,115 @@ export function resolveEditorCustomFontMobileVariant(font) {
   return null;
 }
 
+async function ensureFontStorageBucket(admin) {
+  const { data, error } = await admin.storage.getBucket(FONT_STORAGE_BUCKET);
+  if (error) {
+    const create = await admin.storage.createBucket(FONT_STORAGE_BUCKET, {
+      public: true,
+      fileSizeLimit: `${MAX_CUSTOM_FONT_BYTES}`,
+    });
+    if (create.error && !String(create.error.message || "").toLowerCase().includes("exists")) {
+      throw create.error;
+    }
+    return;
+  }
+  if (data && data.public === false) {
+    await admin.storage.updateBucket(FONT_STORAGE_BUCKET, {
+      public: true,
+      fileSizeLimit: `${MAX_CUSTOM_FONT_BYTES}`,
+    });
+  }
+}
+
+function sanitizeStorageFileName(value, fallback = "font.ttf") {
+  const source = String(value || fallback).trim() || fallback;
+  return source
+    .replace(/^.*[\\/]/, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")
+    .replace(/-+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 140) || fallback;
+}
+
+function resolveVariantSizeBytes(variant) {
+  const parsed = parseDataUri(variant?.dataUrl);
+  if (parsed?.bytes?.length) return parsed.bytes.length;
+  return null;
+}
+
+async function uploadFontVariantDataUrl({ fontId, family, kind, variant }) {
+  const parsed = parseDataUri(variant?.dataUrl);
+  if (!parsed?.bytes?.length) {
+    return null;
+  }
+  if (parsed.bytes.length > MAX_CUSTOM_FONT_BYTES) {
+    throw new Error("Font file is too large.");
+  }
+
+  const checksum = createHash("sha256").update(parsed.bytes).digest("hex");
+  const safeFileName = sanitizeStorageFileName(
+    variant.fileName || `${family}.${extensionForFormat(variant.format || "ttf")}`,
+    `${family || "font"}.${extensionForFormat(variant.format || "ttf")}`
+  );
+  const objectPath = `fonts/${fontId}/${kind}/${checksum.slice(0, 16)}-${safeFileName}`;
+  const admin = createAdminClient();
+  await ensureFontStorageBucket(admin);
+  const { error } = await admin.storage.from(FONT_STORAGE_BUCKET).upload(objectPath, parsed.bytes, {
+    cacheControl: "31536000",
+    contentType: variant.mimeType || parsed.mimeType || "application/octet-stream",
+    upsert: true,
+  });
+  if (error) {
+    throw error;
+  }
+  const { data } = admin.storage.from(FONT_STORAGE_BUCKET).getPublicUrl(objectPath);
+  const publicUrl = String(data?.publicUrl || "").trim();
+  if (!publicUrl) {
+    throw new Error("Uploaded font URL is unavailable.");
+  }
+  return {
+    storageBucket: FONT_STORAGE_BUCKET,
+    storagePath: objectPath,
+    publicUrl,
+    sizeBytes: parsed.bytes.length,
+    checksum,
+  };
+}
+
+async function materializeFontVariant({
+  fontId,
+  family,
+  kind,
+  variant,
+  storageBucket,
+  storagePath,
+  sizeBytes,
+}) {
+  if (!variant) return null;
+  const uploaded = variant.dataUrl
+    ? await uploadFontVariantDataUrl({ fontId, family, kind, variant })
+    : null;
+  const publicUrl = String(uploaded?.publicUrl || variant.fileUrl || "").trim();
+  const resolvedStoragePath = String(uploaded?.storagePath || storagePath || "").trim();
+  const resolvedStorageBucket = String(uploaded?.storageBucket || storageBucket || "").trim();
+  if (!publicUrl && !resolvedStoragePath) return null;
+  return {
+    kind,
+    format: String(variant.format || inferFontFormat(variant) || "unknown").trim().toLowerCase(),
+    mimeType: normalizeMimeType(variant.mimeType || canonicalMimeForFormat(variant.format || "ttf")),
+    fileName: normalizeFileName(variant.fileName || `${family}.ttf`),
+    publicUrl,
+    storageBucket: resolvedStorageBucket || null,
+    storagePath: resolvedStoragePath || null,
+    sizeBytes:
+      uploaded?.sizeBytes ||
+      (Number.isFinite(Number(sizeBytes)) ? Math.max(0, Math.round(Number(sizeBytes))) : null) ||
+      resolveVariantSizeBytes(variant),
+    checksum: uploaded?.checksum || null,
+    status: FONT_STATUS_READY,
+  };
+}
+
 function normalizeStoredFontRecord(value) {
   if (!value || typeof value !== "object") return null;
   const source = value;
@@ -758,7 +883,8 @@ async function writeStoredFonts(fonts) {
 }
 
 export async function getEditorCustomFonts() {
-  return readStoredFonts();
+  const fonts = await listFontFamilies({ source: FONT_SOURCE_CUSTOM });
+  return fonts.map(toEditorFontRecord).filter(Boolean);
 }
 
 export async function upsertEditorCustomFont({
@@ -768,44 +894,15 @@ export async function upsertEditorCustomFont({
   fileUrl,
   mimeType,
   categories,
+  storageBucket,
+  storagePath,
+  sizeBytes,
 }) {
   const normalizedFamily = normalizeFontFamilyName(family);
   if (!normalizedFamily) {
     throw new Error("Font family is required.");
   }
   const familyKey = normalizeFamilyKey(normalizedFamily);
-
-  const library = await readEditorFontLibraryRaw();
-  const existingSyncedFont = readSyncedFontsFromLibrary(library).find(
-    (item) => normalizeFamilyKey(item?.family) === familyKey
-  );
-  if (existingSyncedFont) {
-    const existingCustomFonts = normalizeStoredFonts(library.customFonts);
-    const syncedMobileCompatible = Boolean(existingSyncedFont?.mobileCompatible);
-    return {
-      font: {
-        id: String(existingSyncedFont?.id || ""),
-        family: normalizedFamily,
-        fileName: String(existingSyncedFont?.fileName || ""),
-        mimeType: String(existingSyncedFont?.mimeType || ""),
-        fileUrl: String(existingSyncedFont?.fileUrl || ""),
-        conversionStatus: syncedMobileCompatible
-          ? FONT_CONVERSION_STATUS_READY
-          : FONT_CONVERSION_STATUS_PENDING,
-        conversionError: syncedMobileCompatible
-          ? ""
-          : "A synced font with the same family already exists.",
-        categories: resolveFontCategories(
-          existingSyncedFont?.categories,
-          normalizedFamily
-        ),
-        source: "synced",
-      },
-      fonts: existingCustomFonts,
-      skippedDuplicate: true,
-      skippedReason: "synced-family-exists",
-    };
-  }
 
   const safeDataUrl = sanitizeDataUrl(dataUrl);
   const safeFileUrl = sanitizeFileUrl(fileUrl);
@@ -910,63 +1007,68 @@ export async function upsertEditorCustomFont({
   }
 
   const nowIso = new Date().toISOString();
-  const existingFonts = normalizeStoredFonts(library.customFonts);
   const providedCategories = normalizeFontCategoryInput(categories);
-  const existingIndex = existingFonts.findIndex(
-    (item) => normalizeFamilyKey(item.family) === familyKey
-  );
-
-  if (existingIndex >= 0) {
-    const existing = existingFonts[existingIndex];
-    const resolvedCategories =
-      providedCategories.length > 0
-        ? resolveFontCategories(providedCategories, normalizedFamily)
-        : resolveFontCategories(existing?.categories, existing?.family || normalizedFamily);
-    const legacyFields = toLegacyFontFields(sourceVariant, normalizedFamily);
-    existingFonts[existingIndex] = {
-      ...existing,
-      family: normalizedFamily,
-      categories: resolvedCategories,
-      ...legacyFields,
-      source: sourceVariant,
-      mobile: mobileVariant,
-      conversionStatus,
-      conversionError,
-      conversionAttempts,
-      lastConversionAt,
-      updatedAt: nowIso,
-    };
-  } else {
-    const resolvedCategories = resolveFontCategories(
-      providedCategories,
-      normalizedFamily
+  const existingFontLookup = await findFontFamiliesByNames([normalizedFamily, familyKey]);
+  const existingFont = existingFontLookup.get(normalizeFontStorageKey(normalizedFamily)) ||
+    existingFontLookup.get(normalizeFontStorageKey(familyKey));
+  const fontId = existingFont?.id || randomUUID();
+  if (!mobileVariant) {
+    throw new Error(
+      conversionError ||
+        `Could not prepare ${sourceVariant.format || "font"} as a mobile-compatible font.`
     );
-    const legacyFields = toLegacyFontFields(sourceVariant, normalizedFamily);
-    existingFonts.push({
-      id: makeFontId(),
-      family: normalizedFamily,
-      categories: resolvedCategories,
-      ...legacyFields,
-      source: sourceVariant,
-      mobile: mobileVariant,
-      conversionStatus,
-      conversionError,
-      conversionAttempts,
-      lastConversionAt,
-      createdAt: nowIso,
-      updatedAt: nowIso,
-    });
   }
 
-  validateFontCollectionLimits(existingFonts);
-  await writeStoredFonts(existingFonts);
+  const mobileFile = await materializeFontVariant({
+    fontId,
+    family: normalizedFamily,
+    kind: FONT_FILE_KIND_MOBILE,
+    variant: mobileVariant,
+    storageBucket,
+    storagePath,
+    sizeBytes,
+  });
+  if (!mobileFile) {
+    throw new Error("Mobile font file is unavailable.");
+  }
 
-  const stored = existingFonts.find(
-    (item) => normalizeFamilyKey(item.family) === familyKey
-  );
+  const stored = await upsertFontFamilyWithFiles({
+    id: fontId,
+    family: normalizedFamily,
+    displayName: normalizedFamily,
+    source: FONT_SOURCE_CUSTOM,
+    status:
+      conversionStatus === FONT_CONVERSION_STATUS_READY
+        ? FONT_STATUS_READY
+        : conversionStatus === FONT_CONVERSION_STATUS_FAILED
+          ? FONT_STATUS_FAILED
+          : FONT_STATUS_PENDING,
+    categories:
+      providedCategories.length > 0
+        ? resolveFontCategories(providedCategories, normalizedFamily)
+        : resolveFontCategories(categories, normalizedFamily),
+    cssFontFamily: `'${normalizedFamily}'`,
+    removable: true,
+    files: [mobileFile],
+    aliases: [normalizedFamily, familyKey],
+  });
+  const editorFont = toEditorFontRecord({
+    ...stored,
+    conversionStatus,
+    conversionError,
+    conversionAttempts,
+    lastConversionAt,
+    createdAt: stored?.createdAt || nowIso,
+    updatedAt: stored?.updatedAt || nowIso,
+  });
+  const fonts = await getEditorCustomFonts();
   return {
-    font: stored || null,
-    fonts: existingFonts,
+    font: editorFont,
+    fonts,
+    conversionStatus,
+    conversionError,
+    conversionAttempts,
+    lastConversionAt,
   };
 }
 
@@ -977,21 +1079,14 @@ export async function deleteEditorCustomFont({ id, family }) {
     throw new Error("Missing font id or family.");
   }
 
-  const existingFonts = await readStoredFonts();
-  const nextFonts = existingFonts.filter((item) => {
-    if (normalizedId && item.id === normalizedId) return false;
-    if (
-      normalizedFamily &&
-      String(item.family || "").toLowerCase() === normalizedFamily.toLowerCase()
-    ) {
-      return false;
-    }
-    return true;
+  const result = await deleteFontFamily({
+    id: normalizedId,
+    family: normalizedFamily,
+    source: FONT_SOURCE_CUSTOM,
   });
-
-  await writeStoredFonts(nextFonts);
+  const fonts = await getEditorCustomFonts();
   return {
-    deleted: nextFonts.length !== existingFonts.length,
-    fonts: nextFonts,
+    deleted: result.deleted,
+    fonts,
   };
 }

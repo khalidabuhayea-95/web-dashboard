@@ -152,6 +152,9 @@ export async function POST(request: NextRequest) {
       fileUrl: body?.fileUrl,
       mimeType: body?.mimeType,
       categories: body?.categories,
+      storageBucket: body?.storageBucket,
+      storagePath: body?.storagePath,
+      sizeBytes: body?.sizeBytes,
     });
 
     const fonts = await buildEditorFontList();

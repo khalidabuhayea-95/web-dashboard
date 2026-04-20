@@ -3035,6 +3035,9 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           fileName: file.name,
           mimeType: uploaded.mimeType || file.type,
           fileUrl: uploaded.url,
+          storageBucket: uploaded.bucket,
+          storagePath: uploaded.path,
+          sizeBytes: uploaded.size || file.size,
         }),
       });
       const payload = await response.json().catch(() => ({}));

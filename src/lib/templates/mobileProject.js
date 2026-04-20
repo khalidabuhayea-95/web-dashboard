@@ -1,3 +1,5 @@
+import { performance } from "node:perf_hooks";
+
 import { extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
 import { DEFAULT_ANIMATION_DURATION_MS, DEFAULT_PAGE_DURATION_MS } from "@/lib/editor/animationTimeline";
@@ -10,6 +12,42 @@ import {
 function numberOr(value, fallback = 0) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
+}
+
+function roundTiming(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function addTiming(telemetry, key, duration) {
+  if (!telemetry || typeof telemetry !== "object" || !key) return;
+  const currentValue = Number(telemetry[key]) || 0;
+  telemetry[key] = roundTiming(currentValue + duration);
+}
+
+function incrementCount(telemetry, key, amount = 1) {
+  if (!telemetry || typeof telemetry !== "object" || !key) return;
+  const currentValue = Number(telemetry[key]) || 0;
+  telemetry[key] = currentValue + amount;
+}
+
+function resolveLayerTelemetryPrefix(layer) {
+  const normalizedType = String(layer?.type || "").trim().toUpperCase();
+  switch (normalizedType) {
+    case "TEXT":
+      return "text";
+    case "FRAME":
+      return "frame";
+    case "IMAGE":
+      return "image";
+    case "VIDEO_CLIP":
+      return "video";
+    case "SHAPE":
+      return "shape";
+    case "STICKER":
+      return "sticker";
+    default:
+      return "other";
+  }
 }
 
 function parseBoolean(value, fallback = false) {
@@ -652,7 +690,33 @@ function textTransformFromFabric(item, canvasSize) {
   };
 }
 
-function mapTextLayer(item, index, canvasSize) {
+function normalizeFontLookupKey(value) {
+  return String(value || "")
+    .trim()
+    .replace(/^['"]+|['"]+$/g, "")
+    .replace(/[_\s-]+/g, "")
+    .toLowerCase();
+}
+
+function buildTextLayerFontPayload(fontName, fontLookup) {
+  if (!(fontLookup instanceof Map)) return null;
+  const matched = fontLookup.get(normalizeFontLookupKey(fontName));
+  if (!matched) return null;
+
+  return {
+    id: matched?.id || null,
+    fontName: fontName || null,
+    displayName: matched?.displayName || fontName || null,
+    downloadUrl: matched?.downloadUrl || null,
+    mobileDownloadUrl: matched?.mobileDownloadUrl || null,
+    mobileCompatible:
+      typeof matched?.mobileCompatible === "boolean"
+        ? matched.mobileCompatible
+        : null,
+  };
+}
+
+function mapTextLayer(item, index, canvasSize, options = {}) {
   const base = baseLayer(item, index, canvasSize);
   const strokeColor = rgbaToHexWithOpacity(item.stroke, "#000000");
   const shadow = readShadow(item);
@@ -660,13 +724,15 @@ function mapTextLayer(item, index, canvasSize) {
   const textFormat = resolveTextFormat(item);
   const bgColor = normalizeHex(item.textBackgroundBaseColor || item.textBackgroundColor, "#000000");
   const bgOpacity = clamp(numberOr(item.textBackgroundOpacity, item.textBackgroundColor ? 1 : 0), 0, 1);
+  const fontName = resolveEditorTextFontName(item);
+  const font = buildTextLayerFontPayload(fontName, options?.fontLookup);
 
   return {
     ...base,
     transform: textTransformFromFabric(item, canvasSize),
     type: "TEXT",
     text: String(item.text || ""),
-    fontName: resolveEditorTextFontName(item),
+    fontName,
     size: numberOr(item.fontSize, 42),
     bold: textFormat.bold,
     italic: textFormat.italic,
@@ -700,6 +766,7 @@ function mapTextLayer(item, index, canvasSize) {
     backgroundColorHex: bgColor,
     backgroundAngleSize: clamp(numberOr(item.textBackgroundAngleSize, 0), 0, 1),
     backgroundOpacity: bgOpacity,
+    ...(font ? { font } : {}),
   };
 }
 
@@ -1174,7 +1241,7 @@ function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
     return mapStickerLayer(item, index, canvasSize);
   }
   if (layerType === "text" || String(item.type || "").toLowerCase().includes("text")) {
-    return mapTextLayer(item, index, canvasSize);
+    return mapTextLayer(item, index, canvasSize, options);
   }
   if (layerType === "video") {
     return mapVideoLayer(item, index, canvasSize, options);
@@ -1376,11 +1443,201 @@ function mapTemplatePreview(template) {
   };
 }
 
+function mapTemplatePreviewSlim(template) {
+  const status = String(template?.previewStatus || "").trim();
+  const url = String(template?.previewVideoUrl || "").trim();
+  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const durationMs = numberOr(template?.previewDurationMs, NaN);
+
+  if (!status && !url && !posterUrl && !Number.isFinite(durationMs)) {
+    return null;
+  }
+
+  return {
+    status: status || "not_requested",
+    ...(url ? { url } : {}),
+    ...(posterUrl ? { posterUrl } : {}),
+    ...(Number.isFinite(durationMs) ? { durationMs: Math.max(0, Math.round(durationMs)) } : {}),
+  };
+}
+
+function resolveTemplateThumbnailUrl(template, options = {}) {
+  const rawThumbnail = String(
+    template?.thumbnailDataUrl || template?.thumbnailUrl || template?.thumbnail || ""
+  );
+  return isDataUri(rawThumbnail)
+    ? resolveMediaUri(rawThumbnail, {
+        assetResolver: options?.assetResolver,
+        scope: "thumbnail",
+        field: "thumbnailDataUrl",
+      })
+    : rawThumbnail;
+}
+
+function slimLayerFont(font) {
+  if (!font || typeof font !== "object") return undefined;
+
+  const id = String(font.id || "").trim();
+  const fontName = String(font.fontName || "").trim();
+  const displayName = String(font.displayName || "").trim();
+  const downloadUrl = String(font.downloadUrl || "").trim();
+  const mobileDownloadUrl = String(font.mobileDownloadUrl || "").trim();
+  const mobileCompatible =
+    typeof font.mobileCompatible === "boolean" ? font.mobileCompatible : null;
+
+  if (!id && !fontName && !displayName && !downloadUrl && !mobileDownloadUrl && mobileCompatible === null) {
+    return undefined;
+  }
+
+  return {
+    ...(id ? { id } : {}),
+    ...(fontName ? { fontName } : {}),
+    ...(displayName ? { displayName } : {}),
+    ...(downloadUrl ? { downloadUrl } : {}),
+    ...(mobileDownloadUrl ? { mobileDownloadUrl } : {}),
+    ...(mobileCompatible !== null ? { mobileCompatible } : {}),
+  };
+}
+
+function slimFrameShape(shape) {
+  if (!shape || typeof shape !== "object") return undefined;
+
+  return {
+    kind: String(shape.kind || "rect").trim().toLowerCase() || "rect",
+    points: Array.isArray(shape.points) ? shape.points : [],
+    cornerRadius: Math.max(0, Number(shape.cornerRadius) || 0),
+  };
+}
+
+function slimFrameContent(content) {
+  if (!content || typeof content !== "object") return null;
+
+  return {
+    type: String(content.type || "").trim().toUpperCase() || "IMAGE",
+    ...(content.imageUri ? { imageUri: content.imageUri } : {}),
+    ...(content.videoUri ? { videoUri: content.videoUri } : {}),
+    ...(content.thumbnailUri ? { thumbnailUri: content.thumbnailUri } : {}),
+    ...(Number.isFinite(Number(content.sourceWidth))
+      ? { sourceWidth: Math.max(1, Math.round(Number(content.sourceWidth))) }
+      : {}),
+    ...(Number.isFinite(Number(content.sourceHeight))
+      ? { sourceHeight: Math.max(1, Math.round(Number(content.sourceHeight))) }
+      : {}),
+    ...(typeof content.sourceHasAlpha === "boolean" ? { sourceHasAlpha: content.sourceHasAlpha } : {}),
+    ...(typeof content.previewOnly === "boolean" ? { previewOnly: content.previewOnly } : {}),
+    ...(Number.isFinite(Number(content.trimStartMs))
+      ? { trimStartMs: Math.max(0, Math.round(Number(content.trimStartMs))) }
+      : {}),
+    ...(Number.isFinite(Number(content.trimEndMs))
+      ? { trimEndMs: Math.max(0, Math.round(Number(content.trimEndMs))) }
+      : {}),
+    ...(Number.isFinite(Number(content.durationMs))
+      ? { durationMs: Math.max(0, Math.round(Number(content.durationMs))) }
+      : {}),
+  };
+}
+
+function slimMobileLayer(layer) {
+  if (!layer || typeof layer !== "object") return layer;
+
+  const common = {
+    id: layer.id,
+    type: layer.type,
+    transform: layer.transform,
+    opacity: layer.opacity,
+    locked: layer.locked,
+    hidden: layer.hidden,
+    zIndex: layer.zIndex,
+    timelineStartMs: layer.timelineStartMs,
+    timelineEndMs: layer.timelineEndMs,
+    animation: layer.animation,
+  };
+
+  switch (String(layer.type || "").toUpperCase()) {
+    case "IMAGE":
+      return {
+        ...common,
+        imageUri: layer.imageUri,
+        frameWidth: layer.frameWidth,
+        frameHeight: layer.frameHeight,
+        sourceWidth: layer.sourceWidth,
+        sourceHeight: layer.sourceHeight,
+        sourceHasAlpha: layer.sourceHasAlpha,
+        cropRect: layer.cropRect,
+        filters: layer.filters,
+        ...(layer.assetKind ? { assetKind: layer.assetKind } : {}),
+        ...(layer.colorEditMode ? { colorEditMode: layer.colorEditMode } : {}),
+        ...(layer.rasterOriginalUri ? { rasterOriginalUri: layer.rasterOriginalUri } : {}),
+        ...(Array.isArray(layer.rasterPalette) ? { rasterPalette: layer.rasterPalette } : {}),
+        ...(layer.rasterColorMap && typeof layer.rasterColorMap === "object"
+          ? { rasterColorMap: layer.rasterColorMap }
+          : {}),
+      };
+    case "VIDEO_CLIP":
+      return {
+        ...common,
+        videoUri: layer.videoUri,
+        frameWidth: layer.frameWidth,
+        frameHeight: layer.frameHeight,
+        ...(layer.thumbnailUri ? { thumbnailUri: layer.thumbnailUri } : {}),
+        sourceWidth: layer.sourceWidth,
+        sourceHeight: layer.sourceHeight,
+        ...(typeof layer.sourceHasAlpha === "boolean" ? { sourceHasAlpha: layer.sourceHasAlpha } : {}),
+        cropRect: layer.cropRect,
+        filters: layer.filters,
+        ...(Number.isFinite(Number(layer.trimStartMs)) ? { trimStartMs: layer.trimStartMs } : {}),
+        ...(Number.isFinite(Number(layer.trimEndMs)) ? { trimEndMs: layer.trimEndMs } : {}),
+      };
+    case "TEXT": {
+      const font = slimLayerFont(layer.font);
+      return {
+        ...common,
+        text: layer.text,
+        ...(typeof layer.isRtl === "boolean" ? { isRtl: layer.isRtl } : {}),
+        fontName: layer.fontName,
+        size: layer.size,
+        colorHex: layer.colorHex,
+        shadow: layer.shadow,
+        stroke: layer.stroke,
+        letterSpacing: layer.letterSpacing,
+        lineHeight: layer.lineHeight,
+        alignment: layer.alignment,
+        bold: layer.bold,
+        italic: layer.italic,
+        underline: layer.underline,
+        strikethrough: layer.strikethrough,
+        textCase: layer.textCase,
+        curveConfig: layer.curveConfig,
+        backgroundVisible: layer.backgroundVisible,
+        backgroundColorHex: layer.backgroundColorHex,
+        backgroundAngleSize: layer.backgroundAngleSize,
+        backgroundOpacity: layer.backgroundOpacity,
+        ...(font ? { font } : {}),
+      };
+    }
+    case "FRAME": {
+      const shape = slimFrameShape(layer.shape);
+      const content = slimFrameContent(layer.content);
+      return {
+        ...common,
+        frameWidth: layer.frameWidth,
+        frameHeight: layer.frameHeight,
+        ...(shape ? { shape } : {}),
+        ...(layer.content ? { content } : {}),
+        ...(layer.contentTransform ? { contentTransform: layer.contentTransform } : {}),
+        filters: layer.filters,
+      };
+    }
+    default:
+      return layer;
+  }
+}
+
 export function toMobileProject(template, options = {}) {
   const canvasSize = resolveCanvasSize(template);
 
   const rawData = template?.data || {};
-  const data = extractFabricData(rawData) || rawData || {};
+  const data = options?.fabricData || extractFabricData(rawData) || rawData || {};
   const objects = Array.isArray(data?.objects) ? data.objects : [];
   const layers = objects.map((item, index) =>
     mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options)
@@ -1413,16 +1670,7 @@ export function toMobileTemplate(template, options = {}) {
   const includeProject = options.includeProject !== false;
   const canvasSize = resolveCanvasSize(template);
   const preview = mapTemplatePreview(template);
-  const rawThumbnail = String(
-    template?.thumbnailDataUrl || template?.thumbnailUrl || template?.thumbnail || ""
-  );
-  const resolvedThumbnail = isDataUri(rawThumbnail)
-    ? resolveMediaUri(rawThumbnail, {
-        assetResolver: options?.assetResolver,
-        scope: "thumbnail",
-        field: "thumbnailDataUrl",
-      })
-    : rawThumbnail;
+  const resolvedThumbnail = resolveTemplateThumbnailUrl(template, options);
   const frameInfo = getMobileTemplateFrameInfo(template);
   const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
   return {
@@ -1441,5 +1689,72 @@ export function toMobileTemplate(template, options = {}) {
     previewPosterUrl: preview?.posterUrl || null,
     ...(frameInfo ? { frameInfo, compatibilityWarnings } : {}),
     ...(includeProject ? { project: toMobileProject(template, options) } : {}),
+  };
+}
+
+export function toMobileProjectSlim(template, options = {}) {
+  const telemetry =
+    options && typeof options === "object" && options.telemetry && typeof options.telemetry === "object"
+      ? options.telemetry
+      : null;
+  const canvasSize = resolveCanvasSize(template);
+  const rawData = template?.data || {};
+  const data = options?.fabricData || extractFabricData(rawData) || rawData || {};
+  const objects = Array.isArray(data?.objects) ? data.objects : [];
+  if (telemetry) {
+    telemetry.objectCount = objects.length;
+  }
+
+  const backgroundStartedAt = performance.now();
+  const background = mapBackground(data.background, options);
+  addTiming(telemetry, "mapBackgroundMs", performance.now() - backgroundStartedAt);
+
+  const layers = objects.map((item, index) => {
+    const layerStartedAt = performance.now();
+    const mappedLayer = slimMobileLayer(mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options));
+    const layerDurationMs = performance.now() - layerStartedAt;
+    const layerPrefix = resolveLayerTelemetryPrefix(mappedLayer);
+    incrementCount(telemetry, `${layerPrefix}LayerCount`);
+    addTiming(telemetry, `${layerPrefix}LayerMapMs`, layerDurationMs);
+    return mappedLayer;
+  });
+
+  if (telemetry) {
+    telemetry.layerCount = layers.length;
+  }
+
+  return {
+    canvasWidth: canvasSize.width,
+    canvasHeight: canvasSize.height,
+    background,
+    layers,
+  };
+}
+
+export function toMobileTemplateDetailSlim(template, options = {}) {
+  const telemetry =
+    options && typeof options === "object" && options.telemetry && typeof options.telemetry === "object"
+      ? options.telemetry
+      : null;
+  const previewStartedAt = performance.now();
+  const preview = mapTemplatePreviewSlim(template);
+  addTiming(telemetry, "mapPreviewMs", performance.now() - previewStartedAt);
+  const thumbnailStartedAt = performance.now();
+  const thumbnailUrl = resolveTemplateThumbnailUrl(template, options);
+  addTiming(telemetry, "resolveThumbnailMs", performance.now() - thumbnailStartedAt);
+  const projectStartedAt = performance.now();
+  const project = toMobileProjectSlim(template, options);
+  addTiming(telemetry, "mapProjectMs", performance.now() - projectStartedAt);
+
+  return {
+    id: String(template?.id || ""),
+    title: String(template?.name || "Untitled"),
+    category: String(options?.categoryLabel || template?.category || ""),
+    categoryValue: String(options?.categoryValue || template?.category || ""),
+    subCategory: String(options?.subCategoryLabel || template?.subCategory || ""),
+    subCategoryValue: String(options?.subCategoryValue || template?.subCategory || ""),
+    thumbnailUrl,
+    ...(preview ? { preview } : {}),
+    project,
   };
 }

@@ -56,6 +56,63 @@ model TemplateRevision {
   @@index([templateId, createdAt(sort: Desc)])
 }
 
+model FontFamily {
+  id               String      @id @default(uuid()) @db.Uuid
+  family           String
+  normalizedFamily String      @unique
+  displayName      String?
+  source           String      @default("custom")
+  sourceId         String?
+  status           String      @default("ready")
+  categories       Json
+  previewText      String?
+  previewWeight    Int?
+  cssFontFamily    String?
+  removable        Boolean     @default(true)
+  createdAt        DateTime    @default(now())
+  updatedAt        DateTime    @updatedAt
+  files            FontFile[]
+  aliases          FontAlias[]
+
+  @@index([source])
+  @@index([status])
+  @@index([updatedAt])
+}
+
+model FontFile {
+  id            String     @id @default(uuid()) @db.Uuid
+  fontId        String     @db.Uuid
+  kind          String
+  format        String
+  mimeType      String
+  fileName      String?
+  storageBucket String?
+  storagePath   String?
+  publicUrl     String?
+  sizeBytes     Int?
+  checksum      String?
+  status        String     @default("ready")
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+  font          FontFamily @relation(fields: [fontId], references: [id], onDelete: Cascade)
+
+  @@unique([fontId, kind])
+  @@index([fontId])
+  @@index([kind])
+  @@index([status])
+}
+
+model FontAlias {
+  id              String     @id @default(uuid()) @db.Uuid
+  fontId          String     @db.Uuid
+  alias           String
+  normalizedAlias String     @unique
+  createdAt       DateTime   @default(now())
+  font            FontFamily @relation(fields: [fontId], references: [id], onDelete: Cascade)
+
+  @@index([fontId])
+}
+
 model AppSetting {
   key       String   @id
   value     Json
