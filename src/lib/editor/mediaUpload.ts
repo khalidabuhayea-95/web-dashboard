@@ -12,7 +12,8 @@ export type EditorMediaUploadResult = {
 
 export async function uploadEditorMediaFile(
   file: File,
-  kind: EditorMediaKind
+  kind: EditorMediaKind,
+  options?: { signal?: AbortSignal }
 ): Promise<EditorMediaUploadResult> {
   const formData = new FormData();
   formData.set("kind", kind);
@@ -21,6 +22,7 @@ export async function uploadEditorMediaFile(
   const response = await fetch("/api/editor/media", {
     method: "POST",
     body: formData,
+    signal: options?.signal,
   });
 
   const payload = (await response.json().catch(() => ({}))) as Partial<EditorMediaUploadResult> & {

@@ -1,4 +1,5 @@
 import type { EditorElement, EditorPage } from "@/store/editorStore";
+import type { FrameShape } from "@/lib/editor/frames";
 
 type ImageElement = EditorElement & { type: "image" };
 
@@ -19,6 +20,9 @@ const EPSILON = 0.0001;
 const ROTATION_TOLERANCE = 0.001;
 const DEFAULT_ALPHA_THRESHOLD = 8;
 const MAX_TRIM_SCAN_SIDE = 4096;
+const EDGE_BACKGROUND_MIN_CHANNEL = 240;
+const EDGE_BACKGROUND_WHITE_DISTANCE = 32;
+const MAX_ALPHA_SHAPE_SAMPLES = 28;
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value));
@@ -194,16 +198,74 @@ export function canUseCanvasCropForImage(element: EditorElement | null | undefin
     };
   }
 
-  const sourceWidth = toNumber(element.sourceWidth, 0);
-  const sourceHeight = toNumber(element.sourceHeight, 0);
-  if (sourceWidth <= 0 || sourceHeight <= 0) {
+  const source = String(element.src || element.rasterOriginalSrc || "").trim();
+  if (!source) {
     return {
       supported: false,
-      reason: "Image metadata is still loading. Try again in a moment.",
+      reason: "This image has no source to analyze.",
     };
   }
 
   return { supported: true };
+}
+
+export async function prepareImageElementForCanvasCrop(element: ImageElement): Promise<{
+  supported: boolean;
+  element: ImageElement | null;
+  reason?: string;
+}> {
+  const support = canUseCanvasCropForImage(element);
+  if (!support.supported) {
+    return { supported: false, element: null, reason: support.reason };
+  }
+
+  const currentSourceWidth = toNumber(element.sourceWidth, 0);
+  const currentSourceHeight = toNumber(element.sourceHeight, 0);
+  if (currentSourceWidth > 0 && currentSourceHeight > 0) {
+    return { supported: true, element };
+  }
+
+  const source = String(element.src || element.rasterOriginalSrc || "").trim();
+  if (!source) {
+    return {
+      supported: false,
+      element: null,
+      reason: "This image has no source to analyze.",
+    };
+  }
+
+  let image: HTMLImageElement;
+  try {
+    image = await loadBrowserImage(source);
+  } catch (error) {
+    return {
+      supported: false,
+      element: null,
+      reason: error instanceof Error ? error.message : "Failed to load image metadata.",
+    };
+  }
+
+  const sourceWidth = Math.max(1, Math.round(Number(image.naturalWidth || image.width || 0)));
+  const sourceHeight = Math.max(1, Math.round(Number(image.naturalHeight || image.height || 0)));
+
+  return {
+    supported: true,
+    element: {
+      ...element,
+      sourceWidth,
+      sourceHeight,
+      cropX: Number.isFinite(Number(element.cropX)) ? element.cropX : 0,
+      cropY: Number.isFinite(Number(element.cropY)) ? element.cropY : 0,
+      cropWidth:
+        Number.isFinite(Number(element.cropWidth)) && Number(element.cropWidth) > 0
+          ? element.cropWidth
+          : sourceWidth,
+      cropHeight:
+        Number.isFinite(Number(element.cropHeight)) && Number(element.cropHeight) > 0
+          ? element.cropHeight
+          : sourceHeight,
+    },
+  };
 }
 
 export function canTrimTransparentPaddingForImage(element: EditorElement | null | undefined) {
@@ -411,6 +473,460 @@ export async function computeTrimTransparentPaddingPatch(
       cropHeight: nextCropHeight,
     },
   };
+}
+
+function isEdgeWhiteBackgroundPixel(
+  pixels: Uint8ClampedArray,
+  pixelIndex: number,
+  options: {
+    alphaThreshold: number;
+    minChannel: number;
+    whiteDistance: number;
+  }
+) {
+  const offset = pixelIndex * 4;
+  const alpha = pixels[offset + 3];
+  if (alpha < options.alphaThreshold) return true;
+
+  const red = pixels[offset];
+  const green = pixels[offset + 1];
+  const blue = pixels[offset + 2];
+  if (Math.min(red, green, blue) < options.minChannel) return false;
+
+  const distanceToWhite = Math.sqrt(
+    (255 - red) * (255 - red) +
+      (255 - green) * (255 - green) +
+      (255 - blue) * (255 - blue)
+  );
+  return distanceToWhite <= options.whiteDistance;
+}
+
+function clearEdgeWhiteBackgroundPixels(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  options: {
+    alphaThreshold: number;
+    minChannel: number;
+    whiteDistance: number;
+  }
+) {
+  const pixelCount = width * height;
+  const visited = new Uint8Array(pixelCount);
+  const queue = new Int32Array(pixelCount);
+  let queueStart = 0;
+  let queueEnd = 0;
+
+  const enqueue = (pixelIndex: number) => {
+    if (pixelIndex < 0 || pixelIndex >= pixelCount || visited[pixelIndex]) return;
+    if (!isEdgeWhiteBackgroundPixel(pixels, pixelIndex, options)) return;
+    visited[pixelIndex] = 1;
+    queue[queueEnd] = pixelIndex;
+    queueEnd += 1;
+  };
+
+  for (let x = 0; x < width; x += 1) {
+    enqueue(x);
+    enqueue((height - 1) * width + x);
+  }
+  for (let y = 1; y < height - 1; y += 1) {
+    enqueue(y * width);
+    enqueue(y * width + width - 1);
+  }
+
+  let clearedPixels = 0;
+  while (queueStart < queueEnd) {
+    const pixelIndex = queue[queueStart];
+    queueStart += 1;
+
+    const offset = pixelIndex * 4;
+    if (pixels[offset + 3] !== 0) {
+      pixels[offset + 3] = 0;
+      clearedPixels += 1;
+    }
+
+    const x = pixelIndex % width;
+    if (x > 0) enqueue(pixelIndex - 1);
+    if (x < width - 1) enqueue(pixelIndex + 1);
+    if (pixelIndex >= width) enqueue(pixelIndex - width);
+    if (pixelIndex < pixelCount - width) enqueue(pixelIndex + width);
+  }
+
+  return clearedPixels;
+}
+
+function measureVisibleAlphaBounds(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  alphaThreshold: number
+) {
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const alpha = pixels[(y * width + x) * 4 + 3];
+      if (alpha < alphaThreshold) continue;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (maxX < minX || maxY < minY) return null;
+  return { minX, minY, maxX, maxY };
+}
+
+function buildFrameShapeFromVisibleAlpha(
+  pixels: Uint8ClampedArray,
+  width: number,
+  height: number,
+  alphaThreshold: number
+): FrameShape | null {
+  const bounds = measureVisibleAlphaBounds(pixels, width, height, alphaThreshold);
+  if (!bounds) return null;
+
+  const trimmedWidth = Math.max(1, bounds.maxX - bounds.minX + 1);
+  const trimmedHeight = Math.max(1, bounds.maxY - bounds.minY + 1);
+  const stepCount = Math.max(3, Math.min(MAX_ALPHA_SHAPE_SAMPLES, trimmedWidth));
+  const topPoints: number[] = [];
+  const bottomPoints: number[] = [];
+  const topRatios: number[] = [];
+  const bottomRatios: number[] = [];
+
+  for (let step = 0; step < stepCount; step += 1) {
+    const sampleRatio = stepCount === 1 ? 0 : step / (stepCount - 1);
+    const sampleX = bounds.minX + Math.round(sampleRatio * (trimmedWidth - 1));
+    let topY = -1;
+    let bottomY = -1;
+
+    for (let y = bounds.minY; y <= bounds.maxY; y += 1) {
+      const alpha = pixels[(y * width + sampleX) * 4 + 3];
+      if (alpha < alphaThreshold) continue;
+      if (topY < 0) topY = y;
+      bottomY = y;
+    }
+
+    if (topY < 0 || bottomY < 0) continue;
+
+    const normalizedX = trimmedWidth <= 1 ? 0 : ((sampleX - bounds.minX) / (trimmedWidth - 1)) * 100;
+    const normalizedTopY = trimmedHeight <= 1 ? 0 : ((topY - bounds.minY) / (trimmedHeight - 1)) * 100;
+    const normalizedBottomY =
+      trimmedHeight <= 1 ? 100 : ((bottomY - bounds.minY) / (trimmedHeight - 1)) * 100;
+
+    topRatios.push(normalizedTopY);
+    bottomRatios.push(normalizedBottomY);
+    topPoints.push(normalizedX, normalizedTopY);
+    bottomPoints.unshift(normalizedBottomY);
+    bottomPoints.unshift(normalizedX);
+  }
+
+  const points = [...topPoints, ...bottomPoints];
+  if (points.length < 6) return null;
+  const isRectLike =
+    bounds.minX === 0 &&
+    bounds.minY === 0 &&
+    bounds.maxX === width - 1 &&
+    bounds.maxY === height - 1 &&
+    topRatios.every((value) => value <= 1) &&
+    bottomRatios.every((value) => value >= 99);
+  if (isRectLike) return null;
+
+  return {
+    presetId: "frame-alpha-mask",
+    kind: "polygon",
+    points: points.map((value) => clamp(Number(value.toFixed(4)), 0, 100)),
+  };
+}
+
+export async function computeRemoveEdgeWhiteBackgroundPatch(
+  element: ImageElement,
+  options: {
+    alphaThreshold?: number;
+    minChannel?: number;
+    whiteDistance?: number;
+  } = {}
+): Promise<ImageCanvasPatchResult> {
+  const support = canTrimTransparentPaddingForImage(element);
+  if (!support.supported) {
+    return { supported: false, patch: null, reason: support.reason };
+  }
+
+  if (typeof document === "undefined") {
+    return {
+      supported: false,
+      patch: null,
+      reason: "Background cleanup is only available in the browser.",
+    };
+  }
+
+  const source = String(element.src || element.rasterOriginalSrc || "").trim();
+  let image: HTMLImageElement;
+  try {
+    image = await loadBrowserImage(source);
+  } catch (error) {
+    return {
+      supported: false,
+      patch: null,
+      reason: error instanceof Error ? error.message : "Failed to load image for background cleanup.",
+    };
+  }
+
+  const sourceWidth = resolveSourceDimension(
+    element.sourceWidth,
+    Number(image.naturalWidth || element.width || 1)
+  );
+  const sourceHeight = resolveSourceDimension(
+    element.sourceHeight,
+    Number(image.naturalHeight || element.height || 1)
+  );
+  const currentCrop = resolveCurrentCrop(element, sourceWidth, sourceHeight);
+  const scanScale = Math.min(
+    1,
+    MAX_TRIM_SCAN_SIDE / Math.max(currentCrop.cropWidth, currentCrop.cropHeight, 1)
+  );
+  const scanWidth = Math.max(1, Math.round(currentCrop.cropWidth * scanScale));
+  const scanHeight = Math.max(1, Math.round(currentCrop.cropHeight * scanScale));
+  const canvas = document.createElement("canvas");
+  canvas.width = scanWidth;
+  canvas.height = scanHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) {
+    return {
+      supported: false,
+      patch: null,
+      reason: "Failed to create a canvas for background cleanup.",
+    };
+  }
+
+  try {
+    context.clearRect(0, 0, scanWidth, scanHeight);
+    context.drawImage(
+      image,
+      currentCrop.cropX,
+      currentCrop.cropY,
+      currentCrop.cropWidth,
+      currentCrop.cropHeight,
+      0,
+      0,
+      scanWidth,
+      scanHeight
+    );
+  } catch (error) {
+    return {
+      supported: false,
+      patch: null,
+      reason: error instanceof Error ? error.message : "Failed to draw image for background cleanup.",
+    };
+  }
+
+  let imageData: ImageData;
+  try {
+    imageData = context.getImageData(0, 0, scanWidth, scanHeight);
+  } catch {
+    return {
+      supported: false,
+      patch: null,
+      reason: "This image source does not allow pixel inspection for background cleanup.",
+    };
+  }
+
+  const pixels = imageData.data;
+  const alphaThreshold = clamp(
+    Math.round(toNumber(options.alphaThreshold, DEFAULT_ALPHA_THRESHOLD)),
+    1,
+    255
+  );
+  const minChannel = clamp(
+    Math.round(toNumber(options.minChannel, EDGE_BACKGROUND_MIN_CHANNEL)),
+    0,
+    255
+  );
+  const whiteDistance = clamp(
+    toNumber(options.whiteDistance, EDGE_BACKGROUND_WHITE_DISTANCE),
+    0,
+    442
+  );
+  const backgroundOptions = { alphaThreshold, minChannel, whiteDistance };
+  const clearedPixels = clearEdgeWhiteBackgroundPixels(
+    pixels,
+    scanWidth,
+    scanHeight,
+    backgroundOptions
+  );
+
+  const scanBounds = measureVisibleAlphaBounds(
+    pixels,
+    scanWidth,
+    scanHeight,
+    alphaThreshold
+  );
+
+  if (!scanBounds) {
+    return {
+      supported: true,
+      patch: null,
+      reason: "No visible pixels remained after background cleanup.",
+    };
+  }
+
+  const outputWidth = Math.max(1, Math.round(currentCrop.cropWidth));
+  const outputHeight = Math.max(1, Math.round(currentCrop.cropHeight));
+  const outputCanvas = document.createElement("canvas");
+  outputCanvas.width = outputWidth;
+  outputCanvas.height = outputHeight;
+  const outputContext = outputCanvas.getContext("2d", { willReadFrequently: true });
+  if (!outputContext) {
+    return {
+      supported: false,
+      patch: null,
+      reason: "Failed to create a canvas for cleaned image output.",
+    };
+  }
+  outputContext.clearRect(0, 0, outputWidth, outputHeight);
+  outputContext.drawImage(
+    image,
+    currentCrop.cropX,
+    currentCrop.cropY,
+    currentCrop.cropWidth,
+    currentCrop.cropHeight,
+    0,
+    0,
+    outputWidth,
+    outputHeight
+  );
+
+  try {
+    const fullSizeImageData = outputContext.getImageData(0, 0, outputWidth, outputHeight);
+    clearEdgeWhiteBackgroundPixels(
+      fullSizeImageData.data,
+      outputWidth,
+      outputHeight,
+      backgroundOptions
+    );
+    const fullSizeBounds = measureVisibleAlphaBounds(
+      fullSizeImageData.data,
+      outputWidth,
+      outputHeight,
+      alphaThreshold
+    );
+    if (!fullSizeBounds) {
+      return {
+        supported: true,
+        patch: null,
+        reason: "No visible pixels remained after background cleanup.",
+      };
+    }
+
+    const trimLeftRatio = clamp(fullSizeBounds.minX / outputWidth, 0, 1);
+    const trimTopRatio = clamp(fullSizeBounds.minY / outputHeight, 0, 1);
+    const trimRightRatio = clamp((fullSizeBounds.maxX + 1) / outputWidth, 0, 1);
+    const trimBottomRatio = clamp((fullSizeBounds.maxY + 1) / outputHeight, 0, 1);
+    const trimWidthRatio = trimRightRatio - trimLeftRatio;
+    const trimHeightRatio = trimBottomRatio - trimTopRatio;
+
+    const localOffsetX = Math.max(0, toNumber(element.width, 1) * trimLeftRatio);
+    const localOffsetY = Math.max(0, toNumber(element.height, 1) * trimTopRatio);
+    const scaleX = normalizeScale(element.scaleX);
+    const scaleY = normalizeScale(element.scaleY);
+    const rotatedOffset = rotateScaledLocalOffset(
+      localOffsetX,
+      localOffsetY,
+      scaleX,
+      scaleY,
+      element.rotation
+    );
+    const frameShape = buildFrameShapeFromVisibleAlpha(
+      fullSizeImageData.data,
+      outputWidth,
+      outputHeight,
+      alphaThreshold
+    );
+    const hasTrimmedPadding =
+      fullSizeBounds.minX > 0 ||
+      fullSizeBounds.minY > 0 ||
+      fullSizeBounds.maxX < outputWidth - 1 ||
+      fullSizeBounds.maxY < outputHeight - 1;
+    const hasCleanup = clearedPixels > 0;
+    const hasShapeMask = Boolean(frameShape);
+
+    if (!hasCleanup && !hasTrimmedPadding && !hasShapeMask) {
+      return {
+        supported: true,
+        patch: null,
+        reason: "No white edge background or transparent frame shape was detected in this image.",
+      };
+    }
+
+    const trimmedWidth = Math.max(1, fullSizeBounds.maxX - fullSizeBounds.minX + 1);
+    const trimmedHeight = Math.max(1, fullSizeBounds.maxY - fullSizeBounds.minY + 1);
+    let trimmedDataUrl = "";
+    if (hasCleanup || hasTrimmedPadding) {
+      const trimmedCanvas = document.createElement("canvas");
+      trimmedCanvas.width = trimmedWidth;
+      trimmedCanvas.height = trimmedHeight;
+      const trimmedContext = trimmedCanvas.getContext("2d", { willReadFrequently: true });
+      if (!trimmedContext) {
+        return {
+          supported: false,
+          patch: null,
+          reason: "Failed to create a canvas for trimmed image output.",
+        };
+      }
+
+      trimmedContext.putImageData(
+        fullSizeImageData,
+        -fullSizeBounds.minX,
+        -fullSizeBounds.minY
+      );
+
+      trimmedDataUrl = trimmedCanvas.toDataURL("image/png");
+      if (!trimmedDataUrl.startsWith("data:image/")) {
+        return {
+          supported: false,
+          patch: null,
+          reason: "Failed to build trimmed image output.",
+        };
+      }
+    }
+
+    return {
+      supported: true,
+      patch: {
+        x: toNumber(element.x, 0) + rotatedOffset.x,
+        y: toNumber(element.y, 0) + rotatedOffset.y,
+        width: Math.max(1, toNumber(element.width, 1) * trimWidthRatio),
+        height: Math.max(1, toNumber(element.height, 1) * trimHeightRatio),
+        ...(hasCleanup || hasTrimmedPadding
+          ? {
+              src: trimmedDataUrl,
+              rasterOriginalSrc: trimmedDataUrl,
+              sourceWidth: trimmedWidth,
+              sourceHeight: trimmedHeight,
+              cropX: 0,
+              cropY: 0,
+              cropWidth: trimmedWidth,
+              cropHeight: trimmedHeight,
+              rasterPalette: [],
+              rasterPaletteVersion: 0,
+              rasterColorMap: {},
+            }
+          : {}),
+        ...(frameShape ? { frameShape } : {}),
+      },
+    };
+  } catch {
+    return {
+      supported: false,
+      patch: null,
+      reason: "This image source does not allow pixel cleanup at full size.",
+    };
+  }
+
 }
 
 export function computeClipToCanvasPatch(

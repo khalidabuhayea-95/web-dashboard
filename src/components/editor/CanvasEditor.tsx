@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Konva from "konva";
 import useImage from "use-image";
-import { Copy, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Copy, Minus, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
 import {
   Arrow,
   Circle,
@@ -16,6 +16,7 @@ import {
   Stage,
   Star,
   Text,
+  TextPath,
   Transformer,
 } from "react-konva";
 
@@ -102,6 +103,15 @@ function waitForAnimationFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function createAbortError(message: string) {
+  if (typeof DOMException !== "undefined") {
+    return new DOMException(message, "AbortError");
+  }
+  const error = new Error(message);
+  error.name = "AbortError";
+  return error;
+}
+
 function sleep(ms: number) {
   return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
 }
@@ -167,6 +177,96 @@ function resolveKonvaImageCrop(
         height: cropHeight,
       }
     : undefined;
+}
+
+function computeAlphaOutlinePoints(
+  element: EditorElement,
+  sourceImage: HTMLImageElement | null | undefined,
+  crop: { x: number; y: number; width: number; height: number } | undefined
+) {
+  if (!sourceImage || typeof document === "undefined") return null;
+  const renderedWidth = Math.max(1, Number(element.width) || 1);
+  const renderedHeight = Math.max(1, Number(element.height) || 1);
+  const sourceWidth = Math.max(1, Number(sourceImage.naturalWidth || sourceImage.width || renderedWidth));
+  const sourceHeight = Math.max(1, Number(sourceImage.naturalHeight || sourceImage.height || renderedHeight));
+  const cropX = Math.max(0, Number(crop?.x) || 0);
+  const cropY = Math.max(0, Number(crop?.y) || 0);
+  const cropWidth = Math.max(1, Number(crop?.width) || sourceWidth);
+  const cropHeight = Math.max(1, Number(crop?.height) || sourceHeight);
+  const scanScale = Math.min(1, 220 / Math.max(cropWidth, cropHeight));
+  const scanWidth = Math.max(8, Math.round(cropWidth * scanScale));
+  const scanHeight = Math.max(8, Math.round(cropHeight * scanScale));
+  const canvas = document.createElement("canvas");
+  canvas.width = scanWidth;
+  canvas.height = scanHeight;
+  const context = canvas.getContext("2d", { willReadFrequently: true });
+  if (!context) return null;
+
+  try {
+    context.clearRect(0, 0, scanWidth, scanHeight);
+    context.drawImage(
+      sourceImage,
+      cropX,
+      cropY,
+      cropWidth,
+      cropHeight,
+      0,
+      0,
+      scanWidth,
+      scanHeight
+    );
+    const pixels = context.getImageData(0, 0, scanWidth, scanHeight).data;
+    const rows: Array<{ y: number; left: number; right: number; width: number }> = [];
+    for (let y = 0; y < scanHeight; y += 1) {
+      let left = scanWidth;
+      let right = -1;
+      for (let x = 0; x < scanWidth; x += 1) {
+        const alpha = pixels[(y * scanWidth + x) * 4 + 3];
+        if (alpha < 16) continue;
+        if (x < left) left = x;
+        if (x > right) right = x;
+      }
+      if (right >= left) rows.push({ y, left, right, width: right - left + 1 });
+    }
+    if (rows.length < 4) return null;
+
+    const minY = rows[0].y;
+    const maxY = rows[rows.length - 1].y;
+    const band = Math.max(2, Math.round((maxY - minY + 1) * 0.06));
+    const topRows = rows.filter((row) => row.y <= minY + band);
+    const bottomRows = rows.filter((row) => row.y >= maxY - band);
+    const median = (values: number[]) => {
+      const sorted = [...values].sort((a, b) => a - b);
+      return sorted[Math.floor(sorted.length / 2)] || 0;
+    };
+    const topLeft = median(topRows.map((row) => row.left));
+    const topRight = median(topRows.map((row) => row.right));
+    const bottomLeft = median(bottomRows.map((row) => row.left));
+    const bottomRight = median(bottomRows.map((row) => row.right));
+    const fullRectLike =
+      topLeft <= scanWidth * 0.015 &&
+      bottomLeft <= scanWidth * 0.015 &&
+      topRight >= scanWidth * 0.985 &&
+      bottomRight >= scanWidth * 0.985 &&
+      minY <= scanHeight * 0.015 &&
+      maxY >= scanHeight * 0.985;
+    if (fullRectLike) return null;
+
+    const toLocalX = (value: number) => (value / Math.max(1, scanWidth - 1)) * renderedWidth;
+    const toLocalY = (value: number) => (value / Math.max(1, scanHeight - 1)) * renderedHeight;
+    return [
+      toLocalX(topLeft),
+      toLocalY(minY),
+      toLocalX(topRight),
+      toLocalY(minY),
+      toLocalX(bottomRight),
+      toLocalY(maxY),
+      toLocalX(bottomLeft),
+      toLocalY(maxY),
+    ];
+  } catch {
+    return null;
+  }
 }
 
 function resolveBackgroundCoverLayout(
@@ -342,6 +442,10 @@ function CanvasImageNode({
   }, [isGif, image]);
 
   const crop = useMemo(() => resolveKonvaImageCrop(element, image || undefined), [element, image]);
+  const alphaOutlinePoints = useMemo(
+    () => computeAlphaOutlinePoints(element, image || undefined, crop),
+    [crop, element, image]
+  );
 
   return (
     <KonvaImage
@@ -369,6 +473,25 @@ function CanvasImageNode({
       shadowOffsetX={element.shadowOffsetX}
       shadowOffsetY={element.shadowOffsetY}
       crop={crop}
+      hitFunc={(context, shape) => {
+        if (alphaOutlinePoints) {
+          context.beginPath();
+          alphaOutlinePoints.forEach((value, index) => {
+            if (index % 2 !== 0) return;
+            const x = Number(value || 0);
+            const y = Number(alphaOutlinePoints[index + 1] || 0);
+            if (index === 0) context.moveTo(x, y);
+            else context.lineTo(x, y);
+          });
+          context.closePath();
+          context.fillStrokeShape(shape);
+          return;
+        }
+        context.beginPath();
+        context.rect(0, 0, Math.max(1, Number(element.width) || 1), Math.max(1, Number(element.height) || 1));
+        context.closePath();
+        context.fillStrokeShape(shape);
+      }}
       onClick={onSelect}
       onTap={onSelect}
       onContextMenu={onContextMenu}
@@ -705,10 +828,21 @@ function CanvasFrameNode({
   registerRef,
 }: FrameNodeProps) {
   const frameContent = element.frameContent || null;
-  const preset = useMemo(
-    () => resolveFramePreset(element.frameShape?.presetId),
-    [element.frameShape?.presetId]
-  );
+  const preset = useMemo(() => {
+    const basePreset = resolveFramePreset(element.frameShape?.presetId);
+    const shape = element.frameShape;
+    if (!shape) return basePreset;
+    return {
+      ...basePreset,
+      kind: shape.kind || basePreset.kind,
+      ...(Array.isArray(shape.points) && shape.points.length >= 6
+        ? { points: [...shape.points] }
+        : {}),
+      ...(Number.isFinite(Number(shape.cornerRadius))
+        ? { cornerRadius: Number(shape.cornerRadius) }
+        : {}),
+    };
+  }, [element.frameShape]);
   const transform = element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM;
   const [image] = useImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
@@ -974,7 +1108,7 @@ function CanvasFrameNode({
       <Shape
         width={element.width}
         height={element.height}
-        fill={frameContent ? "#f8fafc" : "#eaf6ff"}
+        fill={frameContent ? "rgba(255,255,255,0.001)" : element.fill || "#eaf6ff"}
         sceneFunc={(context, shape) => {
           drawFramePath(context, preset, element.width, element.height);
           context.fillStrokeShape(shape);
@@ -1074,6 +1208,19 @@ function clamp(value: number, min: number, max: number) {
 
 function resolveTextDirection(text: string) {
   return /[\u0590-\u08FF]/.test(String(text || "")) ? "rtl" : "ltr";
+}
+
+function resolveTextCurvePath(element: EditorElement) {
+  const width = Math.max(2, Number(element.width) || 2);
+  const height = Math.max(2, Number(element.height) || 2);
+  const fontSize = Math.max(1, Number(element.fontSize) || 1);
+  const amount = clamp(Number(element.textCurveAmount || 0), -100, 100);
+  const middleY = height / 2;
+  const maxCurveOffset = clamp(width * 0.42, Math.max(12, fontSize), Math.max(16, fontSize * 6));
+  const curveOffset = (amount / 100) * maxCurveOffset;
+  const controlY = middleY - curveOffset;
+
+  return `M 0 ${middleY} Q ${width / 2} ${controlY} ${width} ${middleY}`;
 }
 
 function toKonvaFontStyle(fontStyle: EditorElement["fontStyle"], fontWeight: EditorElement["fontWeight"]) {
@@ -1434,6 +1581,7 @@ export default function CanvasEditor() {
   const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const previewGenerationActive = useEditorStore((state) => state.previewGenerationActive);
+  const zoomPercent = useEditorStore((state) => state.zoomPercent);
 
   const setStageApi = useEditorStore((state) => state.setStageApi);
   const setZoomPercent = useEditorStore((state) => state.setZoomPercent);
@@ -1477,6 +1625,7 @@ export default function CanvasEditor() {
   const expiredFrameDropTargetRef = useRef("");
   const timelinePlayheadRef = useRef(0);
   const activePagePlayheadRef = useRef(0);
+  const autoFitPageIdRef = useRef("");
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -1538,31 +1687,35 @@ export default function CanvasEditor() {
     updateViewport({ x, y, scale });
   }, [activePage, containerSize.height, containerSize.width, updateViewport]);
 
+  const getCenteredViewportForScale = useCallback(
+    (scaleInput: number) => {
+      if (!activePage) return null;
+      const scale = clamp(scaleInput, MIN_SCALE, MAX_SCALE);
+      return {
+        x: (containerSize.width - activePage.width * scale) / 2,
+        y: (containerSize.height - activePage.height * scale) / 2,
+        scale,
+      };
+    },
+    [activePage, containerSize.height, containerSize.width]
+  );
+
   const zoomBy = useCallback(
     (factor: number) => {
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      const oldScale = viewport.scale;
-      const pointer = stage.getPointerPosition() || {
-        x: containerSize.width / 2,
-        y: containerSize.height / 2,
-      };
-
-      const nextScale = clamp(oldScale * factor, MIN_SCALE, MAX_SCALE);
-      const mousePoint = {
-        x: (pointer.x - viewport.x) / oldScale,
-        y: (pointer.y - viewport.y) / oldScale,
-      };
-
-      const nextPos = {
-        x: pointer.x - mousePoint.x * nextScale,
-        y: pointer.y - mousePoint.y * nextScale,
-      };
-
-      updateViewport({ x: nextPos.x, y: nextPos.y, scale: nextScale });
+      const next = getCenteredViewportForScale(viewport.scale * factor);
+      if (!next) return;
+      updateViewport(next);
     },
-    [containerSize.height, containerSize.width, updateViewport, viewport.scale, viewport.x, viewport.y]
+    [getCenteredViewportForScale, updateViewport, viewport.scale]
+  );
+
+  const setZoomScale = useCallback(
+    (scaleInput: number) => {
+      const next = getCenteredViewportForScale(scaleInput);
+      if (!next) return;
+      updateViewport(next);
+    },
+    [getCenteredViewportForScale, updateViewport]
   );
 
   const exportPng = useCallback(() => {
@@ -1647,10 +1800,16 @@ export default function CanvasEditor() {
   );
 
   const recordTimelinePreviewVideo = useCallback(
-    async (options?: { fps?: number; maxDimension?: number; durationMs?: number }) => {
+    async (options?: { fps?: number; maxDimension?: number; durationMs?: number; signal?: AbortSignal }) => {
       const stage = stageRef.current;
       const transformer = transformerRef.current;
       if (!stage || !activePage) return null;
+      const ensureNotAborted = () => {
+        if (options?.signal?.aborted) {
+          throw createAbortError("Preview generation was canceled.");
+        }
+      };
+      ensureNotAborted();
       if (typeof MediaRecorder === "undefined") {
         throw new Error("Preview recording is not supported in this browser.");
       }
@@ -1726,8 +1885,10 @@ export default function CanvasEditor() {
       let posterDataUrl = "";
       const previousAbsolutePlayheadMs = timelinePlayheadRef.current;
       const captureCurrentFrame = async () => {
+        ensureNotAborted();
         stage.batchDraw();
         await waitForAnimationFrame();
+        ensureNotAborted();
         const captured = renderCurrentPageToCanvas(options?.maxDimension ?? 720);
         if (!captured) return;
         recordingContext.clearRect(0, 0, recordingCanvas.width, recordingCanvas.height);
@@ -1756,6 +1917,7 @@ export default function CanvasEditor() {
         await waitForAnimationFrame();
         await captureCurrentFrame();
 
+        ensureNotAborted();
         recorder.start();
 
         // Start the same shared timeline playback the user sees from the play button,
@@ -1768,7 +1930,9 @@ export default function CanvasEditor() {
         let nextCapturePlayheadMs = frameStepMs;
 
         while (true) {
+          ensureNotAborted();
           await waitForAnimationFrame();
+          ensureNotAborted();
           const now = performance.now();
           const currentPlayheadMs = activePagePlayheadRef.current;
           const reachedEnd = currentPlayheadMs >= durationMs || now - startedAt >= durationMs + 500;
@@ -1797,8 +1961,19 @@ export default function CanvasEditor() {
         transformer?.forceUpdate();
         transformer?.getLayer()?.batchDraw();
         stage.batchDraw();
+        if (options?.signal?.aborted) {
+          try {
+            if (recorder.state !== "inactive") {
+              recorder.stop();
+            }
+          } catch {
+            // Ignore recorder shutdown errors during cancellation.
+          }
+          tracks.forEach((track) => track.stop());
+        }
       }
 
+      ensureNotAborted();
       recorder.stop();
       const blob = await recorderStopped;
       tracks.forEach((track) => track.stop());
@@ -2025,11 +2200,22 @@ export default function CanvasEditor() {
 
   useEffect(() => {
     if (!activePage) return;
+    if (!containerSize.width || !containerSize.height) return;
+    if (autoFitPageIdRef.current === activePage.id) return;
+    autoFitPageIdRef.current = activePage.id;
     const frame = requestAnimationFrame(() => {
-      fitToScreen();
+      const next = getCenteredViewportForScale(0.5);
+      if (!next) return;
+      updateViewport(next);
     });
     return () => cancelAnimationFrame(frame);
-  }, [activePage, fitToScreen]);
+  }, [
+    activePage,
+    containerSize.height,
+    containerSize.width,
+    getCenteredViewportForScale,
+    updateViewport,
+  ]);
 
   useEffect(() => {
     const handleOutsideClick = () => setContextMenu(null);
@@ -2171,7 +2357,6 @@ export default function CanvasEditor() {
     const selectedSet = new Set(selectedIds);
     return elements.find((element) => selectedSet.has(element.id) && element.type === "frame")?.id || "";
   }, [elements, selectedIds]);
-
   const clearFrameDropTargetTimeout = useCallback(() => {
     if (frameDropTargetTimeoutRef.current === null) return;
     window.clearTimeout(frameDropTargetTimeoutRef.current);
@@ -2247,29 +2432,13 @@ export default function CanvasEditor() {
     (event: Konva.KonvaEventObject<WheelEvent>) => {
       event.evt.preventDefault();
 
-      const stage = stageRef.current;
-      if (!stage) return;
-
-      const pointer = stage.getPointerPosition();
-      if (!pointer) return;
-
       const direction = event.evt.deltaY > 0 ? -1 : 1;
       const factor = direction > 0 ? 1.08 : 1 / 1.08;
-      const oldScale = viewport.scale;
-      const newScale = clamp(oldScale * factor, MIN_SCALE, MAX_SCALE);
-
-      const pointTo = {
-        x: (pointer.x - viewport.x) / oldScale,
-        y: (pointer.y - viewport.y) / oldScale,
-      };
-
-      updateViewport({
-        x: pointer.x - pointTo.x * newScale,
-        y: pointer.y - pointTo.y * newScale,
-        scale: newScale,
-      });
+      const next = getCenteredViewportForScale(viewport.scale * factor);
+      if (!next) return;
+      updateViewport(next);
     },
-    [updateViewport, viewport.scale, viewport.x, viewport.y]
+    [getCenteredViewportForScale, updateViewport, viewport.scale]
   );
 
   const applySnapping = useCallback(
@@ -2467,7 +2636,7 @@ export default function CanvasEditor() {
   );
 
   const beginInlineTextEdit = useCallback(
-    (node: Konva.Text, element: EditorElement) => {
+    (node: Konva.Node, element: EditorElement) => {
       const stage = stageRef.current;
       if (!stage || !containerRef.current) return;
 
@@ -2909,6 +3078,43 @@ export default function CanvasEditor() {
       onDragLeave={() => clearFrameDropTarget(true)}
       onDrop={onDropAsset}
     >
+      <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-start px-4">
+        <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8dde6] bg-white/94 px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur">
+          <button
+            type="button"
+            onClick={() => zoomBy(1 / 1.12)}
+            aria-label="Zoom out"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#eef2f8]"
+          >
+            <Minus size={13} />
+          </button>
+          <span className="min-w-[42px] text-[13px] font-semibold leading-none tracking-[0.01em] text-[#2b3445]">
+            {zoomPercent}%
+          </span>
+          <input
+            type="range"
+            min={10}
+            max={400}
+            step={1}
+            value={zoomPercent}
+            onChange={(event) => {
+              const nextPercent = Number(event.target.value);
+              if (!Number.isFinite(nextPercent)) return;
+              setZoomScale(nextPercent / 100);
+            }}
+            aria-label="Canvas zoom"
+            className="h-1.5 w-[150px] cursor-pointer accent-[#9aa5b5]"
+          />
+          <button
+            type="button"
+            onClick={() => zoomBy(1.12)}
+            aria-label="Zoom in"
+            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#eef2f8]"
+          >
+            <Plus size={13} />
+          </button>
+        </div>
+      </div>
       <Stage
         ref={(node) => {
           stageRef.current = node;
@@ -3161,6 +3367,39 @@ export default function CanvasEditor() {
               if (element.type === "text") {
                 const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
                 const direction = resolveTextDirection(element.text);
+                const hasTextCurve =
+                  Boolean(element.textCurveEnabled) &&
+                  Math.abs(Number(element.textCurveAmount || 0)) > 0.5;
+                if (hasTextCurve) {
+                  return (
+                    <Group
+                      key={element.id}
+                      {...commonProps}
+                      onDblClick={(event) => beginInlineTextEdit(event.target, element)}
+                      onDblTap={(event) => beginInlineTextEdit(event.target, element)}
+                    >
+                      <Rect
+                        width={element.width}
+                        height={element.height}
+                        fill="rgba(0,0,0,0)"
+                      />
+                      <TextPath
+                        data={resolveTextCurvePath(element)}
+                        text={element.text}
+                        fill={element.color || element.fill}
+                        fontSize={element.fontSize}
+                        fontFamily={resolveCssFontFamily(element.fontFamily)}
+                        fontStyle={konvaFontStyle}
+                        fontVariant="normal"
+                        align={element.align}
+                        letterSpacing={element.letterSpacing}
+                        textDecoration={element.textDecoration}
+                        textBaseline="middle"
+                        listening={false}
+                      />
+                    </Group>
+                  );
+                }
                 return (
                   <Text
                     key={element.id}

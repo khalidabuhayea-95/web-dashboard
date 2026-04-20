@@ -437,6 +437,8 @@ async function cropScreenshotToCanvas(screenshotDataUrl, canvasMeta) {
 async function isolateLayerSnapshotFromBitmaps(visibleBitmap, hiddenBitmap, rect, options = {}) {
   if (!visibleBitmap || !hiddenBitmap || !rect) return "";
   const dpr = Number(options?.dpr || 1);
+  const minVisibleDelta = Math.max(1, Math.round(numberOr(options?.minVisibleDelta, 4)));
+  const softEdgeDelta = Math.max(minVisibleDelta + 1, Math.round(numberOr(options?.softEdgeDelta, 7)));
   const visibleCrop = cleanCropRect(rect, dpr, visibleBitmap.width, visibleBitmap.height);
   const hiddenCrop = cleanCropRect(rect, dpr, hiddenBitmap.width, hiddenBitmap.height);
   const targetWidth = Math.max(1, Math.round(numberOr(options?.targetWidth, visibleCrop.width)));
@@ -483,23 +485,25 @@ async function isolateLayerSnapshotFromBitmaps(visibleBitmap, hiddenBitmap, rect
     const deltaG = Math.abs(source[index + 1] - backdrop[index + 1]);
     const deltaB = Math.abs(source[index + 2] - backdrop[index + 2]);
     const deltaA = Math.abs(source[index + 3] - backdrop[index + 3]);
-    const alphaByte = Math.min(255, Math.round(Math.max(deltaR, deltaG, deltaB, deltaA) * 1.18));
-    if (alphaByte < 10) continue;
+    const maxDelta = Math.max(deltaR, deltaG, deltaB, deltaA);
+    if (maxDelta < minVisibleDelta) continue;
 
-    const alpha = alphaByte / 255;
+    let alphaByte = 255;
+    if (maxDelta < softEdgeDelta) {
+      alphaByte = Math.max(
+        0,
+        Math.min(
+          255,
+          Math.round(((maxDelta - minVisibleDelta) / Math.max(1, softEdgeDelta - minVisibleDelta)) * 255)
+        )
+      );
+    }
+    if (alphaByte <= 0) continue;
+
+    output[index] = source[index];
+    output[index + 1] = source[index + 1];
+    output[index + 2] = source[index + 2];
     output[index + 3] = alphaByte;
-    output[index] = Math.max(
-      0,
-      Math.min(255, Math.round((source[index] - backdrop[index] * (1 - alpha)) / Math.max(alpha, 0.001)))
-    );
-    output[index + 1] = Math.max(
-      0,
-      Math.min(255, Math.round((source[index + 1] - backdrop[index + 1] * (1 - alpha)) / Math.max(alpha, 0.001)))
-    );
-    output[index + 2] = Math.max(
-      0,
-      Math.min(255, Math.round((source[index + 2] - backdrop[index + 2] * (1 - alpha)) / Math.max(alpha, 0.001)))
-    );
     nonTransparentPixelCount += 1;
   }
 
@@ -1203,6 +1207,8 @@ async function buildHybridFabricObjects(
     if (
       resolvableImageLayerCount > 0 &&
       layerArea > canvasArea * 0.8 &&
+      !layer?.isBackgroundNode &&
+      !layer?.isFullPageBackground &&
       !looksLikeDecorativeFrameLayer(layer)
     ) {
       continue;
@@ -2707,6 +2713,7 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         let opacity = 1;
         let node = element;
         let depth = 0;
+        const currentLayerNode = element?.closest?.('[id^="LB"]') || null;
         while (node && node !== stopAtNode && depth < 12) {
           const style = window.getComputedStyle(node);
           const localOpacity = Number(style.opacity);
@@ -2714,6 +2721,14 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             opacity *= localOpacity;
           }
           node = node.parentElement;
+          if (
+            node &&
+            currentLayerNode &&
+            node !== currentLayerNode &&
+            String(node.id || "").trim().startsWith("LB")
+          ) {
+            break;
+          }
           depth += 1;
         }
         return Math.max(0, Math.min(opacity, 1));
@@ -3566,6 +3581,274 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
         return match?.[2] ? String(match[2]).trim() : "";
       };
 
+      const createSvgBounds = (x, y, width, height) => {
+        const left = Number(x);
+        const top = Number(y);
+        const boxWidth = Number(width);
+        const boxHeight = Number(height);
+        if (
+          !Number.isFinite(left) ||
+          !Number.isFinite(top) ||
+          !Number.isFinite(boxWidth) ||
+          !Number.isFinite(boxHeight) ||
+          boxWidth <= 0 ||
+          boxHeight <= 0
+        ) {
+          return null;
+        }
+        return {
+          x: left,
+          y: top,
+          width: boxWidth,
+          height: boxHeight,
+          right: left + boxWidth,
+          bottom: top + boxHeight,
+        };
+      };
+
+      const mergeSvgBounds = (a, b) => {
+        if (!a) return b || null;
+        if (!b) return a || null;
+        const left = Math.min(a.x, b.x);
+        const top = Math.min(a.y, b.y);
+        const right = Math.max(a.right ?? a.x + a.width, b.right ?? b.x + b.width);
+        const bottom = Math.max(a.bottom ?? a.y + a.height, b.bottom ?? b.y + b.height);
+        return createSvgBounds(left, top, right - left, bottom - top);
+      };
+
+      const addSvgPointToBounds = (bounds, x, y) => {
+        const nextX = Number(x);
+        const nextY = Number(y);
+        if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return bounds || null;
+        return mergeSvgBounds(bounds, createSvgBounds(nextX, nextY, 0.0001, 0.0001));
+      };
+
+      const parseSvgNumber = (value, fallback = 0) => {
+        const numeric = Number.parseFloat(String(value || "").trim());
+        return Number.isFinite(numeric) ? numeric : fallback;
+      };
+
+      const parseSvgNumberList = (value) =>
+        (String(value || "").match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi) || [])
+          .map((item) => Number.parseFloat(item))
+          .filter((item) => Number.isFinite(item));
+
+      const hasSvgTransform = (element) => {
+        if (!(element instanceof Element)) return false;
+        const transformAttr = String(element.getAttribute("transform") || "").trim();
+        const inlineTransform = String(element.style?.transform || "").trim();
+        return Boolean(transformAttr || (inlineTransform && inlineTransform !== "none"));
+      };
+
+      const getPathDataBounds = (pathData) => {
+        const tokens = String(pathData || "").match(/[a-zA-Z]|[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/g) || [];
+        if (tokens.length === 0) return null;
+
+        let index = 0;
+        let command = "";
+        let x = 0;
+        let y = 0;
+        let startX = 0;
+        let startY = 0;
+        let bounds = null;
+        const isCommandToken = (token) => /^[a-zA-Z]$/.test(String(token || ""));
+        const readNumber = () => {
+          if (index >= tokens.length || isCommandToken(tokens[index])) return null;
+          const numeric = Number.parseFloat(tokens[index]);
+          index += 1;
+          return Number.isFinite(numeric) ? numeric : null;
+        };
+        const addPoint = (nextX, nextY) => {
+          x = nextX;
+          y = nextY;
+          bounds = addSvgPointToBounds(bounds, x, y);
+        };
+
+        while (index < tokens.length) {
+          if (isCommandToken(tokens[index])) {
+            command = tokens[index];
+            index += 1;
+          }
+          if (!command) break;
+
+          const upper = command.toUpperCase();
+          const relative = command === command.toLowerCase();
+
+          if (upper === "Z") {
+            addPoint(startX, startY);
+            command = "";
+            continue;
+          }
+
+          if (upper === "M" || upper === "L" || upper === "T") {
+            let firstPair = true;
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawX = readNumber();
+              const rawY = readNumber();
+              if (rawX === null || rawY === null) break;
+              const nextX = relative ? x + rawX : rawX;
+              const nextY = relative ? y + rawY : rawY;
+              addPoint(nextX, nextY);
+              if (upper === "M" && firstPair) {
+                startX = nextX;
+                startY = nextY;
+                command = relative ? "l" : "L";
+              }
+              firstPair = false;
+            }
+            continue;
+          }
+
+          if (upper === "H") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawX = readNumber();
+              if (rawX === null) break;
+              addPoint(relative ? x + rawX : rawX, y);
+            }
+            continue;
+          }
+
+          if (upper === "V") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawY = readNumber();
+              if (rawY === null) break;
+              addPoint(x, relative ? y + rawY : rawY);
+            }
+            continue;
+          }
+
+          if (upper === "C") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 6 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              for (let valueIndex = 0; valueIndex < values.length; valueIndex += 2) {
+                const pointX = relative ? x + values[valueIndex] : values[valueIndex];
+                const pointY = relative ? y + values[valueIndex + 1] : values[valueIndex + 1];
+                bounds = addSvgPointToBounds(bounds, pointX, pointY);
+              }
+              x = relative ? x + values[4] : values[4];
+              y = relative ? y + values[5] : values[5];
+            }
+            continue;
+          }
+
+          if (upper === "S" || upper === "Q") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 4 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              for (let valueIndex = 0; valueIndex < values.length; valueIndex += 2) {
+                const pointX = relative ? x + values[valueIndex] : values[valueIndex];
+                const pointY = relative ? y + values[valueIndex + 1] : values[valueIndex + 1];
+                bounds = addSvgPointToBounds(bounds, pointX, pointY);
+              }
+              x = relative ? x + values[2] : values[2];
+              y = relative ? y + values[3] : values[3];
+            }
+            continue;
+          }
+
+          if (upper === "A") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 7 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              const radiusX = Math.abs(Number(values[0] || 0));
+              const radiusY = Math.abs(Number(values[1] || 0));
+              const endX = relative ? x + values[5] : values[5];
+              const endY = relative ? y + values[6] : values[6];
+              bounds = addSvgPointToBounds(bounds, x - radiusX, y - radiusY);
+              bounds = addSvgPointToBounds(bounds, x + radiusX, y + radiusY);
+              bounds = addSvgPointToBounds(bounds, endX - radiusX, endY - radiusY);
+              bounds = addSvgPointToBounds(bounds, endX + radiusX, endY + radiusY);
+              x = endX;
+              y = endY;
+            }
+            continue;
+          }
+
+          break;
+        }
+
+        return bounds && bounds.width > 0 && bounds.height > 0 ? bounds : null;
+      };
+
+      const getManualSvgShapeBounds = (shapeElement) => {
+        if (!(shapeElement instanceof Element) || hasSvgTransform(shapeElement)) return null;
+        const tagName = String(shapeElement.tagName || "").toLowerCase();
+
+        if (tagName === "rect") {
+          return createSvgBounds(
+            parseSvgNumber(shapeElement.getAttribute("x")),
+            parseSvgNumber(shapeElement.getAttribute("y")),
+            parseSvgNumber(shapeElement.getAttribute("width")),
+            parseSvgNumber(shapeElement.getAttribute("height"))
+          );
+        }
+
+        if (tagName === "circle") {
+          const radius = Math.max(0, parseSvgNumber(shapeElement.getAttribute("r")));
+          const centerX = parseSvgNumber(shapeElement.getAttribute("cx"));
+          const centerY = parseSvgNumber(shapeElement.getAttribute("cy"));
+          return createSvgBounds(centerX - radius, centerY - radius, radius * 2, radius * 2);
+        }
+
+        if (tagName === "ellipse") {
+          const radiusX = Math.max(0, parseSvgNumber(shapeElement.getAttribute("rx")));
+          const radiusY = Math.max(0, parseSvgNumber(shapeElement.getAttribute("ry")));
+          const centerX = parseSvgNumber(shapeElement.getAttribute("cx"));
+          const centerY = parseSvgNumber(shapeElement.getAttribute("cy"));
+          return createSvgBounds(centerX - radiusX, centerY - radiusY, radiusX * 2, radiusY * 2);
+        }
+
+        if (tagName === "line") {
+          let bounds = null;
+          bounds = addSvgPointToBounds(
+            bounds,
+            parseSvgNumber(shapeElement.getAttribute("x1")),
+            parseSvgNumber(shapeElement.getAttribute("y1"))
+          );
+          bounds = addSvgPointToBounds(
+            bounds,
+            parseSvgNumber(shapeElement.getAttribute("x2")),
+            parseSvgNumber(shapeElement.getAttribute("y2"))
+          );
+          return bounds;
+        }
+
+        if (tagName === "polygon" || tagName === "polyline") {
+          const values = parseSvgNumberList(shapeElement.getAttribute("points"));
+          let bounds = null;
+          for (let pointIndex = 0; pointIndex < values.length - 1; pointIndex += 2) {
+            bounds = addSvgPointToBounds(bounds, values[pointIndex], values[pointIndex + 1]);
+          }
+          return bounds;
+        }
+
+        if (tagName === "path") {
+          return getPathDataBounds(shapeElement.getAttribute("d"));
+        }
+
+        return null;
+      };
+
+      const getSvgShapeElementsBounds = (shapeElements) => {
+        let bounds = null;
+        shapeElements.forEach((shapeElement) => {
+          bounds = mergeSvgBounds(bounds, getManualSvgShapeBounds(shapeElement));
+        });
+        if (bounds && bounds.width > 0 && bounds.height > 0) return bounds;
+
+        shapeElements.forEach((shapeElement) => {
+          if (typeof shapeElement?.getBBox !== "function") return;
+          try {
+            const box = shapeElement.getBBox();
+            bounds = mergeSvgBounds(bounds, createSvgBounds(box.x, box.y, box.width, box.height));
+          } catch (_error) {
+            // Ignore per-shape bbox failures and keep looking.
+          }
+        });
+        return bounds && bounds.width > 0 && bounds.height > 0 ? bounds : null;
+      };
+
       const hasRenderableSvgContent = (svgElement) => {
         if (!(svgElement instanceof SVGElement)) return false;
         const renderableTags = [
@@ -3768,9 +4051,10 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
           if (shapeElements.length === 0) return "";
 
           const clipBounds =
-            typeof clipPathElement.getBBox === "function"
+            getSvgShapeElementsBounds(shapeElements) ||
+            (typeof clipPathElement.getBBox === "function"
               ? clipPathElement.getBBox()
-              : shapeElements[0].getBBox?.();
+              : shapeElements[0].getBBox?.());
           if (!clipBounds || clipBounds.width <= 0 || clipBounds.height <= 0) return "";
 
           const layerRect = layerNode.getBoundingClientRect();
@@ -4077,7 +4361,12 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
             assetKey,
           });
         });
-        scoredBackgroundCandidates.sort((a, b) => b.score - a.score);
+        scoredBackgroundCandidates.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          const assetDelta = Number(Boolean(b.assetKey)) - Number(Boolean(a.assetKey));
+          if (assetDelta !== 0) return assetDelta;
+          return 0;
+        });
         const selectedBackgroundCandidates = [];
         for (let index = 0; index < scoredBackgroundCandidates.length; index += 1) {
           const candidate = scoredBackgroundCandidates[index];
@@ -4091,7 +4380,7 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
               const sameAsset =
                 Boolean(existing.assetKey && candidate.assetKey) &&
                 existing.assetKey === candidate.assetKey;
-              const uncertainAsset = !existing.assetKey || !candidate.assetKey;
+              const uncertainAsset = !existing.assetKey && !candidate.assetKey;
               return sameAsset || uncertainAsset;
             }
           );
@@ -4535,6 +4824,8 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
               kind === "image" && imageTitleHint
                 ? uniqueMetadataStrings([imageTitleHint, ...tokenizeMetadataLabel(imageTitleHint)])
                 : [],
+            isBackgroundNode,
+            isFullPageBackground,
             fallback: Boolean(fallbackReason),
             fallbackReason,
           };

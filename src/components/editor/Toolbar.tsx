@@ -32,6 +32,7 @@ import {
   canTrimTransparentPaddingForImage,
   computeClipToCanvasPatch,
   computeFitToCanvasPatch,
+  prepareImageElementForCanvasCrop,
   computeTrimTransparentPaddingPatch,
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
@@ -97,6 +98,24 @@ function logPreviewProgress(message: string, details?: Record<string, unknown>) 
   console.info("[template-preview]", message);
 }
 
+function isAbortError(error: unknown) {
+  return (
+    (error instanceof DOMException && error.name === "AbortError") ||
+    (error instanceof Error && error.name === "AbortError")
+  );
+}
+
+function buildCanceledPreviewPayload(fallbackPosterDataUrl: string, templateVersion: number, durationMs: number) {
+  return {
+    status: "not_requested",
+    url: null,
+    posterUrl: String(fallbackPosterDataUrl || "").trim() || null,
+    durationMs,
+    version: templateVersion,
+    error: null,
+  };
+}
+
 export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -120,6 +139,14 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const videoTrimDraftRef = useRef<TrimRange>({ start: 0, end: 1 });
   const videoTrimFrameCacheRef = useRef<Map<string, string[]>>(new Map());
   const previewGenerationIdRef = useRef(0);
+  const saveAbortControllerRef = useRef<AbortController | null>(null);
+  const previewAbortControllerRef = useRef<AbortController | null>(null);
+  const unloadAbortHandledRef = useRef(false);
+  const activePreviewCancelRef = useRef<{
+    templateId: string;
+    preview: ReturnType<typeof buildCanceledPreviewPayload>;
+    controller: AbortController;
+  } | null>(null);
   const [videoTrimViewportWidth, setVideoTrimViewportWidth] = useState(0);
 
   const pages = useEditorStore((state) => state.pages);
@@ -172,18 +199,22 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     }
   }, [activeTemplateId, setTemplateMeta, templateIdFromQuery]);
 
+  const buildEditorUrl = useCallback((templateId: string) => {
+    const params = new URLSearchParams(templateQueryKey);
+    if (templateId) {
+      params.set("templateId", templateId);
+    } else {
+      params.delete("templateId");
+    }
+    const nextQuery = params.toString();
+    return nextQuery ? `/editor-pro?${nextQuery}` : "/editor-pro";
+  }, [templateQueryKey]);
+
   const updateTemplateIdInUrl = useCallback(
     (templateId: string) => {
-      const params = new URLSearchParams(templateQueryKey);
-      if (templateId) {
-        params.set("templateId", templateId);
-      } else {
-        params.delete("templateId");
-      }
-      const nextQuery = params.toString();
-      router.replace(nextQuery ? `/editor-pro?${nextQuery}` : "/editor-pro");
+      router.replace(buildEditorUrl(templateId));
     },
-    [router, templateQueryKey]
+    [buildEditorUrl, router]
   );
   const selectedElements = useMemo(() => {
     if (!activePage || selectedIds.length === 0) return [];
@@ -342,9 +373,14 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     });
   }, [activeImageElement, activePage, updateElement]);
 
-  const clipSelectedImageToCanvas = useCallback(() => {
+  const clipSelectedImageToCanvas = useCallback(async () => {
     if (!activeImageElement || !activePage) return;
-    const result = computeClipToCanvasPatch(activeImageElement, activePage);
+    const prepared = await prepareImageElementForCanvasCrop(activeImageElement);
+    if (!prepared.supported || !prepared.element) {
+      if (prepared.reason) window.alert(prepared.reason);
+      return;
+    }
+    const result = computeClipToCanvasPatch(prepared.element, activePage);
     if (!result.supported) {
       if (result.reason) window.alert(result.reason);
       return;
@@ -356,9 +392,14 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     updateElement(activeImageElement.id, result.patch);
   }, [activeImageElement, activePage, updateElement]);
 
-  const fitSelectedImageToCanvas = useCallback(() => {
+  const fitSelectedImageToCanvas = useCallback(async () => {
     if (!activeImageElement || !activePage) return;
-    const result = computeFitToCanvasPatch(activeImageElement, activePage);
+    const prepared = await prepareImageElementForCanvasCrop(activeImageElement);
+    if (!prepared.supported || !prepared.element) {
+      if (prepared.reason) window.alert(prepared.reason);
+      return;
+    }
+    const result = computeFitToCanvasPatch(prepared.element, activePage);
     if (!result.supported) {
       if (result.reason) window.alert(result.reason);
       return;
@@ -778,6 +819,36 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     return () => window.clearTimeout(timeoutId);
   }, [previewToast]);
 
+  useEffect(() => {
+    const handlePageUnload = () => {
+      if (unloadAbortHandledRef.current) return;
+      unloadAbortHandledRef.current = true;
+      previewGenerationIdRef.current += 1;
+      saveAbortControllerRef.current?.abort();
+      previewAbortControllerRef.current?.abort();
+      setPreviewGenerationActive(false);
+      const activePreview = activePreviewCancelRef.current;
+      if (!activePreview?.templateId) return;
+      void fetch("/api/templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: activePreview.templateId,
+          action: "updatePreview",
+          preview: activePreview.preview,
+        }),
+        keepalive: true,
+      }).catch(() => undefined);
+    };
+
+    window.addEventListener("beforeunload", handlePageUnload);
+    window.addEventListener("pagehide", handlePageUnload);
+    return () => {
+      window.removeEventListener("beforeunload", handlePageUnload);
+      window.removeEventListener("pagehide", handlePageUnload);
+    };
+  }, [setPreviewGenerationActive]);
+
   const patchTemplatePreview = useCallback(
     async ({
       id,
@@ -792,7 +863,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         version?: number | null;
         error?: string | null;
       } | null;
-    }) => {
+    }, options?: { signal?: AbortSignal; keepalive?: boolean }) => {
       const response = await fetch("/api/templates", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -801,6 +872,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           action: "updatePreview",
           preview,
         }),
+        keepalive: options?.keepalive,
+        signal: options?.signal,
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -824,10 +897,23 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
       const stageRecorder = stageApi?.recordTimelinePreviewVideo;
       if (!templateId || !stageRecorder) return;
 
+      previewAbortControllerRef.current?.abort();
       const jobId = previewGenerationIdRef.current + 1;
       previewGenerationIdRef.current = jobId;
       const nextGeneratedAt = new Date().toISOString();
       const wasPlaying = timelineIsPlaying;
+      const controller = new AbortController();
+      const canceledPreview = buildCanceledPreviewPayload(
+        fallbackPosterDataUrl || designTimeline.preview.posterUrl || "",
+        templateVersion,
+        previewTimelineDurationMs
+      );
+      previewAbortControllerRef.current = controller;
+      activePreviewCancelRef.current = {
+        templateId,
+        preview: canceledPreview,
+        controller,
+      };
       const announce = (
         tone: "info" | "success" | "error",
         message: string,
@@ -876,7 +962,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
             version: templateVersion,
             error: null,
           },
-        });
+        }, { signal: controller.signal });
         announce("info", "Recording preview video...");
 
         setTimelinePlaying(false);
@@ -884,6 +970,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           fps: Math.min(24, Math.max(12, designTimeline.fps || 20)),
           maxDimension: 1080,
           durationMs: previewTimelineDurationMs,
+          signal: controller.signal,
         });
         if (!recorded?.blob || recorded.blob.size <= 0) {
           throw new Error("Preview renderer did not return a video.");
@@ -899,12 +986,16 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         const videoFile = new File([recorded.blob], `template-preview-${templateId}.${videoExtension}`, {
           type: recorded.mimeType,
         });
-        const uploadedVideo = await uploadEditorMediaFile(videoFile, "video");
+        const uploadedVideo = await uploadEditorMediaFile(videoFile, "video", {
+          signal: controller.signal,
+        });
 
         let posterUrl = fallbackPosterDataUrl || designTimeline.preview.posterUrl || "";
         if (recorded.posterDataUrl) {
           const posterFile = dataUrlToFile(recorded.posterDataUrl, `template-preview-${templateId}.png`);
-          const uploadedPoster = await uploadEditorMediaFile(posterFile, "image");
+          const uploadedPoster = await uploadEditorMediaFile(posterFile, "image", {
+            signal: controller.signal,
+          });
           posterUrl = uploadedPoster.url;
         }
 
@@ -918,7 +1009,13 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
             version: templateVersion,
             error: null,
           },
-        });
+        }, { signal: controller.signal });
+        if (previewAbortControllerRef.current === controller) {
+          previewAbortControllerRef.current = null;
+        }
+        if (activePreviewCancelRef.current?.controller === controller) {
+          activePreviewCancelRef.current = null;
+        }
 
         setLocalPreviewState({
           status: "ready",
@@ -931,6 +1028,26 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           url: String(template?.preview?.url || uploadedVideo.url || "").trim() || null,
         });
       } catch (error) {
+        if (isAbortError(error)) {
+          logPreviewProgress("Template preview generation canceled.", { templateId, templateVersion });
+          if (previewGenerationIdRef.current !== jobId) {
+            return;
+          }
+          if (!unloadAbortHandledRef.current) {
+            await patchTemplatePreview({
+              id: templateId,
+              preview: canceledPreview,
+            }).catch(() => undefined);
+            setLocalPreviewState({
+              status: "not_requested",
+              url: null,
+              posterUrl: canceledPreview.posterUrl,
+              generatedAt: null,
+              error: null,
+            });
+          }
+          return;
+        }
         const message = error instanceof Error ? error.message : "Failed to generate template preview.";
         await patchTemplatePreview({
           id: templateId,
@@ -941,7 +1058,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
             version: templateVersion,
             error: message,
           },
-        }).catch(() => undefined);
+        }, { signal: controller.signal }).catch(() => undefined);
 
         setLocalPreviewState({
           status: "failed",
@@ -950,6 +1067,12 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         });
         announce("error", `Preview generation failed: ${message}`);
       } finally {
+        if (previewAbortControllerRef.current === controller) {
+          previewAbortControllerRef.current = null;
+        }
+        if (activePreviewCancelRef.current?.controller === controller) {
+          activePreviewCancelRef.current = null;
+        }
         setPreviewGenerationActive(false);
         if (wasPlaying) {
           setTimelinePlaying(true);
@@ -985,6 +1108,9 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     }
 
     setIsSavingTemplate(true);
+    unloadAbortHandledRef.current = false;
+    const saveController = new AbortController();
+    saveAbortControllerRef.current = saveController;
     try {
       const parsedDesign = JSON.parse(exportDesign()) as EditorDesign;
       const thumbnailDataUrl = stageApi?.captureThumbnailDataUrl?.() || "";
@@ -1004,6 +1130,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           tags: activeTemplateTags,
           thumbnailDataUrl,
         }),
+        signal: saveController.signal,
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
@@ -1063,10 +1190,16 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
 
       return template;
     } catch (error: unknown) {
+      if (isAbortError(error)) {
+        return null;
+      }
       const message = error instanceof Error ? error.message : "Failed to save template.";
       window.alert(message);
       return null;
     } finally {
+      if (saveAbortControllerRef.current === saveController) {
+        saveAbortControllerRef.current = null;
+      }
       setIsSavingTemplate(false);
     }
   }, [
@@ -1271,7 +1404,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
       }
 
       clearTemplateMeta();
-      updateTemplateIdInUrl("");
+      window.location.assign(buildEditorUrl(""));
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : "Failed to delete template.";
       window.alert(message);
@@ -1281,9 +1414,9 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   }, [
     activeTemplateId,
     activeTemplateName,
+    buildEditorUrl,
     clearTemplateMeta,
     isDeletingTemplate,
-    updateTemplateIdInUrl,
   ]);
 
   const topActionClass =
@@ -1294,6 +1427,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     "inline-flex h-8 w-8 items-center justify-center rounded border border-[#d7dbe1] bg-white text-[#445066] hover:bg-[#eef2f8]";
   const textControlBtnActiveClass =
     "inline-flex h-8 w-8 items-center justify-center rounded border border-[#2f6fca] bg-[#e8f1ff] text-[#2458a3]";
+  const textCurveEnabled = Boolean(activeTextElement?.textCurveEnabled);
+  const textCurveAmount = Math.max(-100, Math.min(100, Number(activeTextElement?.textCurveAmount || 0)));
   const videoTrimPlayheadPercent = resolvedVideoDuration > 0 ? clampNumber(videoTrimPlayhead / resolvedVideoDuration, 0, 1) : 0;
   const videoTrimWindowLabel = `${formatTrimTime(videoTrimDraft.start)}s - ${formatTrimTime(videoTrimDraft.end)}s`;
   const videoTrimThumbs = useMemo(
@@ -1805,6 +1940,74 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           </Button>
         </div>
       </div>
+
+      {hasOnlyTextSelection && activeTextElement ? (
+        <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-2">
+          <div className="flex min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap px-1">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[#667085]">
+              Text Curve
+            </span>
+            <button
+              type="button"
+              className={
+                textCurveEnabled
+                  ? "inline-flex h-8 items-center rounded border border-[#2f6fca] bg-[#e8f1ff] px-3 text-sm font-medium text-[#2458a3]"
+                  : "inline-flex h-8 items-center rounded border border-[#d7dbe1] bg-white px-3 text-sm font-medium text-[#445066] hover:bg-[#f8fafc]"
+              }
+              onClick={() =>
+                updateSelectedElements({
+                  textCurveEnabled: !textCurveEnabled,
+                  textCurveAmount: !textCurveEnabled && textCurveAmount === 0 ? 40 : textCurveAmount,
+                })
+              }
+            >
+              {textCurveEnabled ? "On" : "Off"}
+            </button>
+            <input
+              type="range"
+              min={-100}
+              max={100}
+              step={1}
+              aria-label="Text curve amount"
+              className="h-8 w-[240px] accent-[#2f6fca] disabled:opacity-45"
+              value={textCurveAmount}
+              disabled={!textCurveEnabled}
+              onChange={(event) =>
+                updateSelectedElements({
+                  textCurveEnabled: true,
+                  textCurveAmount: Number(event.target.value) || 0,
+                })
+              }
+            />
+            <input
+              type="number"
+              min={-100}
+              max={100}
+              step={1}
+              aria-label="Text curve value"
+              className="h-8 w-20 rounded border border-[#d7dbe1] bg-white px-2 text-sm text-[#202a38] disabled:opacity-45"
+              value={Math.round(textCurveAmount)}
+              disabled={!textCurveEnabled}
+              onChange={(event) =>
+                updateSelectedElements({
+                  textCurveEnabled: true,
+                  textCurveAmount: Math.max(-100, Math.min(100, Number(event.target.value) || 0)),
+                })
+              }
+            />
+            <span className="text-xs text-[#667085]">
+              Negative bends down, positive bends up.
+            </span>
+            <button
+              type="button"
+              className="inline-flex h-8 items-center rounded border border-[#d7dbe1] bg-white px-3 text-sm font-medium text-[#445066] hover:bg-[#f8fafc]"
+              onClick={() => updateSelectedElements({ textCurveEnabled: false, textCurveAmount: 0 })}
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      ) : null}
 
       {hasSingleVideoSelection && activeVideoElement && isVideoTrimOpen ? (
         <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-3">

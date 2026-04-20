@@ -3,22 +3,33 @@
 import { useEffect, useMemo, useState } from "react";
 import { SlidersHorizontal } from "lucide-react";
 
+import Button from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/form";
-import {
-  getPageDurationMs,
-  resolveTimelineWindow,
-} from "@/lib/editor/animationTimeline";
 import {
   extractImagePaletteFromSource,
   normalizeRasterColorMap,
   RASTER_PALETTE_VERSION,
 } from "@/lib/editor/imagePalette";
+import { computeRemoveEdgeWhiteBackgroundPatch } from "@/lib/editor/imageCrop";
+import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
-import { useEditorStore } from "@/store/editorStore";
+import { useEditorStore, type EditorElement } from "@/store/editorStore";
+
+type ImageEditorElement = EditorElement & { type: "image" };
+type VideoEditorElement = EditorElement & { type: "video" };
+type MediaEditorElement = ImageEditorElement | VideoEditorElement;
 
 function numberOr(value: string, fallback: number) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
+}
+
+function isImageEditorElement(element: EditorElement | null): element is ImageEditorElement {
+  return element?.type === "image";
+}
+
+function isMediaEditorElement(element: EditorElement | null): element is MediaEditorElement {
+  return element?.type === "image" || element?.type === "video";
 }
 
 interface PropertiesPanelProps {
@@ -26,7 +37,7 @@ interface PropertiesPanelProps {
 }
 
 export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
-  const [lockAspect, setLockAspect] = useState(true);
+  const [isConvertingMediaToFrame, setIsConvertingMediaToFrame] = useState(false);
 
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -35,7 +46,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   const updateElement = useEditorStore((state) => state.updateElement);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
-  const setPageDuration = useEditorStore((state) => state.setPageDuration);
+  const convertMediaElementToFrame = useEditorStore((state) => state.convertMediaElementToFrame);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -48,12 +59,8 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   );
 
   const activeElement = selectedElements.length === 1 ? selectedElements[0] : null;
-  const activePageDurationMs = useMemo(() => getPageDurationMs(activePage), [activePage]);
-  const activeTimelineWindow = useMemo(
-    () => resolveTimelineWindow(activeElement, activePageDurationMs),
-    [activeElement, activePageDurationMs]
-  );
-  const activeImageElement = activeElement?.type === "image" ? activeElement : null;
+  const activeMediaElement = isMediaEditorElement(activeElement) ? activeElement : null;
+  const activeImageElement = isImageEditorElement(activeElement) ? activeElement : null;
   const activeImageId = String(activeImageElement?.id || "");
   const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
   const activeRasterSource = (() => {
@@ -117,6 +124,49 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
     return Array.from(set);
   }, [activeElement, availableFontFamilies]);
 
+  const convertSelectedMediaToFrame = async () => {
+    if (!activeMediaElement || isConvertingMediaToFrame) return;
+
+    if (activeMediaElement.type !== "image") {
+      convertMediaElementToFrame(activeMediaElement.id);
+      return;
+    }
+
+    setIsConvertingMediaToFrame(true);
+    try {
+      const result = await computeRemoveEdgeWhiteBackgroundPatch(activeMediaElement);
+      if (!result.supported) {
+        if (result.reason) window.alert(result.reason);
+        return;
+      }
+
+      let patch = result.patch;
+      if (patch?.src && String(patch.src).startsWith("data:image/")) {
+        try {
+          const file = dataUrlToFile(
+            String(patch.src),
+            `frame-source-${activeMediaElement.id}.png`,
+            "image/png"
+          );
+          const uploaded = await uploadEditorMediaFile(file, "image");
+          patch = {
+            ...patch,
+            src: uploaded.url,
+            rasterOriginalSrc: uploaded.url,
+          };
+        } catch {
+          // Keep conversion usable even if the upload path is temporarily unavailable.
+        }
+      }
+
+      convertMediaElementToFrame(activeMediaElement.id, patch ? { sourcePatch: patch } : undefined);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Failed to convert image to frame.");
+    } finally {
+      setIsConvertingMediaToFrame(false);
+    }
+  };
+
   return (
     <aside
       className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width,padding,opacity,border-color] duration-300 ease-out dark:bg-slate-950 ${
@@ -159,20 +209,6 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
               />
             </div>
 
-            <div className="space-y-1">
-              <Label>Blend Mode</Label>
-              <Select
-                value={selectedElements[0].blendMode}
-                onChange={(event) => updateSelectedElements({ blendMode: event.target.value as GlobalCompositeOperation })}
-              >
-                <option value="source-over">Normal</option>
-                <option value="multiply">Multiply</option>
-                <option value="screen">Screen</option>
-                <option value="overlay">Overlay</option>
-                <option value="darken">Darken</option>
-                <option value="lighten">Lighten</option>
-              </Select>
-            </div>
           </div>
         ) : null}
 
@@ -183,192 +219,24 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
             <div className="text-slate-500">{activeElement.type}</div>
           </div>
 
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>X</Label>
-              <Input
-                value={Math.round(activeElement.x)}
-                onChange={(event) => updateElement(activeElement.id, { x: numberOr(event.target.value, activeElement.x) })}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Y</Label>
-              <Input
-                value={Math.round(activeElement.y)}
-                onChange={(event) => updateElement(activeElement.id, { y: numberOr(event.target.value, activeElement.y) })}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>Width</Label>
-              <Input
-                value={Math.round(activeElement.width)}
-                onChange={(event) => {
-                  const width = Math.max(2, numberOr(event.target.value, activeElement.width));
-                  if (lockAspect) {
-                    const ratio = Math.max(0.0001, activeElement.height / Math.max(activeElement.width, 1));
-                    updateElement(activeElement.id, { width, height: width * ratio });
-                  } else {
-                    updateElement(activeElement.id, { width });
-                  }
+          {activeMediaElement ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isConvertingMediaToFrame}
+                onClick={() => {
+                  void convertSelectedMediaToFrame();
                 }}
-              />
+                className="w-full justify-start !rounded-lg !px-3 !text-sm !font-semibold"
+              >
+                {isConvertingMediaToFrame ? "Converting to frame..." : "Convert layer to frame"}
+              </Button>
+              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                Make white edge background transparent while keeping the same layer dimensions.
+              </p>
             </div>
-            <div className="space-y-1">
-              <Label>Height</Label>
-              <Input
-                value={Math.round(activeElement.height)}
-                onChange={(event) => {
-                  const height = Math.max(2, numberOr(event.target.value, activeElement.height));
-                  if (lockAspect) {
-                    const ratio = Math.max(0.0001, activeElement.width / Math.max(activeElement.height, 1));
-                    updateElement(activeElement.id, { height, width: height * ratio });
-                  } else {
-                    updateElement(activeElement.id, { height });
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          <label className="flex items-center gap-2 text-xs text-slate-600 dark:text-slate-300">
-            <input
-              type="checkbox"
-              checked={lockAspect}
-              onChange={(event) => setLockAspect(event.target.checked)}
-              className="h-4 w-4"
-            />
-            Lock aspect ratio
-          </label>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>Rotation</Label>
-              <Input
-                value={Math.round(activeElement.rotation)}
-                onChange={(event) =>
-                  updateElement(activeElement.id, { rotation: numberOr(event.target.value, activeElement.rotation) })
-                }
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Opacity (0-100)</Label>
-              <Input
-                value={Math.round(activeElement.opacity * 100)}
-                onChange={(event) => {
-                  const opacity = Math.max(0, Math.min(100, numberOr(event.target.value, activeElement.opacity * 100))) / 100;
-                  updateElement(activeElement.id, { opacity });
-                }}
-              />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>Fill</Label>
-              <Input type="color" value={activeElement.fill} onChange={(event) => updateElement(activeElement.id, { fill: event.target.value })} />
-            </div>
-            <div className="space-y-1">
-              <Label>Stroke</Label>
-              <Input type="color" value={activeElement.stroke || "#000000"} onChange={(event) => updateElement(activeElement.id, { stroke: event.target.value })} />
-            </div>
-          </div>
-
-          <div className="space-y-1">
-            <Label>Stroke Width</Label>
-            <Input
-              value={activeElement.strokeWidth}
-              onChange={(event) =>
-                updateElement(activeElement.id, {
-                  strokeWidth: Math.max(0, numberOr(event.target.value, activeElement.strokeWidth)),
-                })
-              }
-            />
-          </div>
-
-          <div className="space-y-1">
-            <Label>Blend Mode</Label>
-            <Select
-              value={activeElement.blendMode}
-              onChange={(event) =>
-                updateElement(activeElement.id, { blendMode: event.target.value as GlobalCompositeOperation })
-              }
-            >
-              <option value="source-over">Normal</option>
-              <option value="multiply">Multiply</option>
-              <option value="screen">Screen</option>
-              <option value="overlay">Overlay</option>
-              <option value="darken">Darken</option>
-              <option value="lighten">Lighten</option>
-            </Select>
-          </div>
-
-          <div className="grid grid-cols-2 gap-2">
-            <div className="space-y-1">
-              <Label>Shadow color</Label>
-              <Input
-                type="color"
-                value={activeElement.shadowColor || "#000000"}
-                onChange={(event) => updateElement(activeElement.id, { shadowColor: event.target.value })}
-              />
-            </div>
-            <div className="space-y-1">
-              <Label>Shadow blur</Label>
-              <Input
-                value={activeElement.shadowBlur}
-                onChange={(event) =>
-                  updateElement(activeElement.id, {
-                    shadowBlur: Math.max(0, numberOr(event.target.value, activeElement.shadowBlur)),
-                  })
-                }
-              />
-            </div>
-          </div>
-
-          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
-            <div className="text-xs font-semibold uppercase tracking-[0.16em] text-slate-500 dark:text-slate-400">
-              Timeline
-            </div>
-
-            <div className="space-y-1">
-              <Label>Template Duration (ms)</Label>
-              <Input
-                value={activePageDurationMs}
-                disabled
-                onChange={() => setPageDuration(activePage.id, activePageDurationMs)}
-              />
-              <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                Fixed to 15 seconds in this phase.
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label>Layer Start (ms)</Label>
-                <Input
-                  value={activeTimelineWindow.startMs}
-                  onChange={(event) =>
-                    updateElement(activeElement.id, {
-                      timelineStartMs: Math.max(0, numberOr(event.target.value, activeTimelineWindow.startMs)),
-                    })
-                  }
-                />
-              </div>
-              <div className="space-y-1">
-                <Label>Layer End (ms)</Label>
-                <Input
-                  value={activeTimelineWindow.endMs}
-                  onChange={(event) =>
-                    updateElement(activeElement.id, {
-                      timelineEndMs: Math.max(activeTimelineWindow.startMs + 100, numberOr(event.target.value, activeTimelineWindow.endMs)),
-                    })
-                  }
-                />
-              </div>
-            </div>
-          </div>
+          ) : null}
 
           {activeElement.type === "text" ? (
             <>
@@ -494,28 +362,6 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
           {activeElement.type === "image" ? (
             <>
-              <div className="space-y-1">
-                <Label>Corner Radius</Label>
-                <Input
-                  value={activeElement.cornerRadius || 0}
-                  onChange={(event) =>
-                    updateElement(activeElement.id, {
-                      cornerRadius: Math.max(0, numberOr(event.target.value, activeElement.cornerRadius || 0)),
-                    })
-                  }
-                />
-              </div>
-
-              <div className="space-y-1">
-                <Label>Filters</Label>
-                <Select>
-                  <option>None</option>
-                  <option>Grayscale (placeholder)</option>
-                  <option>Sepia (placeholder)</option>
-                  <option>Contrast (placeholder)</option>
-                </Select>
-              </div>
-
               {activeRasterSource ? (
                 <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
                   <div className="flex items-center justify-between gap-2">

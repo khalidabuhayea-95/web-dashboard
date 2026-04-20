@@ -938,7 +938,26 @@ function mapFrameShapePayload(item) {
     .trim()
     .toLowerCase();
   const points = Array.isArray(frameShape.points)
-    ? frameShape.points.map((point) => numberOr(point, 0)).filter((point) => Number.isFinite(point))
+    ? frameShape.points.length > 0 &&
+      typeof frameShape.points[0] === "object" &&
+      frameShape.points[0] !== null
+      ? frameShape.points
+          .map((point) => ({
+            x: numberOr(point?.x, Number.NaN),
+            y: numberOr(point?.y, Number.NaN),
+          }))
+          .filter((point) => Number.isFinite(point.x) && Number.isFinite(point.y))
+      : (() => {
+          const pairs = [];
+          for (let index = 0; index < frameShape.points.length - 1; index += 2) {
+            const x = numberOr(frameShape.points[index], Number.NaN);
+            const y = numberOr(frameShape.points[index + 1], Number.NaN);
+            if (Number.isFinite(x) && Number.isFinite(y)) {
+              pairs.push({ x, y });
+            }
+          }
+          return pairs;
+        })()
     : [];
   const cornerRadius = numberOr(frameShape.cornerRadius, numberOr(item?.cornerRadius, 0));
 

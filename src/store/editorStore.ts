@@ -102,6 +102,8 @@ export interface EditorElement {
   align: "left" | "center" | "right" | "justify";
   lineHeight: number;
   letterSpacing: number;
+  textCurveEnabled?: boolean;
+  textCurveAmount?: number;
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
@@ -211,6 +213,7 @@ interface StageApi {
     fps?: number;
     maxDimension?: number;
     durationMs?: number;
+    signal?: AbortSignal;
   }) => Promise<{
     blob: Blob;
     mimeType: string;
@@ -224,6 +227,10 @@ interface StageApi {
 
 interface UpdateOptions {
   recordHistory?: boolean;
+}
+
+interface ConvertMediaElementToFrameOptions extends UpdateOptions {
+  sourcePatch?: Partial<EditorElement>;
 }
 
 interface MergeSelectionPayload {
@@ -319,6 +326,7 @@ interface EditorStore {
   setFrameContent: (id: string, content: FrameContent, options?: UpdateOptions) => void;
   updateFrameContentTransform: (id: string, patch: Partial<FrameContentTransform>, options?: UpdateOptions) => void;
   clearFrameContent: (id: string, options?: UpdateOptions) => void;
+  convertMediaElementToFrame: (id: string, options?: ConvertMediaElementToFrameOptions) => boolean;
   updateSelectedElements: (patch: Partial<EditorElement>, options?: UpdateOptions) => void;
   deleteElement: (id: string) => void;
   deleteSelected: () => void;
@@ -461,6 +469,8 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     align: partial.align ?? "left",
     lineHeight: partial.lineHeight ?? 1.1,
     letterSpacing: partial.letterSpacing ?? 0,
+    textCurveEnabled: partial.textCurveEnabled ?? false,
+    textCurveAmount: partial.textCurveAmount ?? 0,
     color: partial.color ?? "#111827",
     timelineStartMs: partial.timelineStartMs ?? 0,
     timelineEndMs: partial.timelineEndMs ?? DEFAULT_PAGE_DURATION_MS,
@@ -595,12 +605,127 @@ function reconcilePageWithElements(
   const nextPageDurationMs = getPageDurationMs({
     ...page,
     elements: nextElements,
-  });
+  } as EditorPage);
   return {
     durationMs: nextPageDurationMs,
     elements: nextElements.map((element) =>
       normalizeElementForEditor(element, nextPageDurationMs, previousPageDurationMs)
     ),
+  };
+}
+
+function positiveDimension(value: unknown, fallback = 1) {
+  const next = Number(value);
+  return Number.isFinite(next) && next > 0 ? next : fallback;
+}
+
+function createFrameShapeFromMediaElement(element: EditorElement): FrameShape {
+  if (element.frameShape?.kind) {
+    return {
+      presetId: element.frameShape.presetId || "frame-alpha-mask",
+      kind: element.frameShape.kind,
+      ...(Array.isArray(element.frameShape.points) && element.frameShape.points.length >= 6
+        ? { points: [...element.frameShape.points] }
+        : {}),
+      ...(Number.isFinite(Number(element.frameShape.cornerRadius))
+        ? { cornerRadius: Number(element.frameShape.cornerRadius) }
+        : {}),
+    };
+  }
+
+  const cornerRadius = Math.max(0, Number(element.cornerRadius || 0));
+  return {
+    presetId: cornerRadius > 0 ? "frame-rounded-square" : "frame-square",
+    kind: "rect",
+    ...(cornerRadius > 0 ? { cornerRadius } : {}),
+  };
+}
+
+function createFrameContentFromMediaElement(element: EditorElement): {
+  content: FrameContent;
+  transform: FrameContentTransform;
+} | null {
+  const renderedWidth = Math.max(1, positiveDimension(element.width, 1));
+  const renderedHeight = Math.max(1, positiveDimension(element.height, 1));
+
+  if (element.type === "video") {
+    const src = String(element.src || "").trim();
+    if (!src) return null;
+    return {
+      content: {
+        kind: "video",
+        src,
+        sourceWidth: renderedWidth,
+        sourceHeight: renderedHeight,
+        videoStart: element.videoStart,
+        videoEnd: element.videoEnd,
+        videoDuration: element.videoDuration,
+      },
+      transform: {
+        fit: "manual",
+        scale: 1,
+        offsetX: 0,
+        offsetY: 0,
+      },
+    };
+  }
+
+  if (element.type !== "image") return null;
+
+  const src = String(element.src || element.rasterOriginalSrc || "").trim();
+  if (!src) return null;
+
+  const sourceWidth = Math.max(1, positiveDimension(element.sourceWidth, renderedWidth));
+  const sourceHeight = Math.max(1, positiveDimension(element.sourceHeight, renderedHeight));
+  const cropX = Math.min(Math.max(0, Number(element.cropX) || 0), sourceWidth - 1);
+  const cropY = Math.min(Math.max(0, Number(element.cropY) || 0), sourceHeight - 1);
+  const cropWidth = Math.min(
+    Math.max(1, positiveDimension(element.cropWidth, sourceWidth)),
+    sourceWidth - cropX
+  );
+  const cropHeight = Math.min(
+    Math.max(1, positiveDimension(element.cropHeight, sourceHeight)),
+    sourceHeight - cropY
+  );
+  const hasCustomCrop =
+    Math.abs(cropX) > 0.0001 ||
+    Math.abs(cropY) > 0.0001 ||
+    Math.abs(cropWidth - sourceWidth) > 0.0001 ||
+    Math.abs(cropHeight - sourceHeight) > 0.0001;
+
+  if (hasCustomCrop) {
+    const scaleX = renderedWidth / cropWidth;
+    const scaleY = renderedHeight / cropHeight;
+    const scale = Math.max(0.01, Math.min(scaleX, scaleY));
+    return {
+      content: {
+        kind: "image",
+        src,
+        sourceWidth,
+        sourceHeight,
+      },
+      transform: {
+        fit: "manual",
+        scale,
+        offsetX: -cropX * scale - (renderedWidth - sourceWidth * scale) / 2,
+        offsetY: -cropY * scale - (renderedHeight - sourceHeight * scale) / 2,
+      },
+    };
+  }
+
+  return {
+    content: {
+      kind: "image",
+      src,
+      sourceWidth: renderedWidth,
+      sourceHeight: renderedHeight,
+    },
+    transform: {
+      fit: "manual",
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+    },
   };
 }
 
@@ -1220,13 +1345,14 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       const page = findActivePage(state);
       if (!page) return state;
       const previousPageDurationMs = getPageDurationMs(page);
-      const nextElements = page.elements.map((element) => {
+      const nextElements: EditorElement[] = page.elements.map((element) => {
         if (element.id !== targetId || element.type !== "frame") return element;
+        const kind: FrameContent["kind"] = content.kind === "video" ? "video" : "image";
         return {
           ...element,
           frameContent: {
             ...content,
-            kind: content.kind === "video" ? "video" : "image",
+            kind,
             src,
           },
           frameContentTransform: normalizeFrameContentTransform(
@@ -1304,6 +1430,69 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     if (options.recordHistory !== false) {
       get().recordHistory();
     }
+  },
+
+  convertMediaElementToFrame: (id, options = {}) => {
+    const targetId = String(id || "").trim();
+    if (!targetId) return false;
+    const sourcePatch = options.sourcePatch || null;
+
+    let converted = false;
+    set((state) => {
+      const page = findActivePage(state);
+      if (!page) return state;
+      const targetElement = page.elements.find((element) => element.id === targetId);
+      if (!targetElement || (targetElement.type !== "image" && targetElement.type !== "video")) {
+        return state;
+      }
+
+      const preparedElement = {
+        ...targetElement,
+        ...(sourcePatch || {}),
+        id: targetElement.id,
+        pageId: targetElement.pageId,
+        type: targetElement.type,
+      } as EditorElement;
+
+      const framePayload = createFrameContentFromMediaElement(preparedElement);
+      if (!framePayload) return state;
+
+      const previousPageDurationMs = getPageDurationMs(page);
+      const nextElements = page.elements.map((element) => {
+        if (element.id !== targetId) return element;
+        return {
+          ...element,
+          ...(sourcePatch || {}),
+          type: "frame",
+          name: element.name || (targetElement.type === "video" ? "Video frame" : "Image frame"),
+          fill: "rgba(0,0,0,0)",
+          stroke: "rgba(0,0,0,0)",
+          strokeWidth: 0,
+          frameShape: createFrameShapeFromMediaElement(preparedElement),
+          frameContent: framePayload.content,
+          frameContentTransform: normalizeFrameContentTransform(framePayload.transform),
+          importKind: element.importKind === "video" || element.importKind === "image"
+            ? "frame"
+            : element.importKind,
+        } as EditorElement;
+      });
+      const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
+      converted = true;
+      return {
+        pages: mutateActivePage(state, (activePage) => ({
+          ...activePage,
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
+        })),
+        selectedIds: [targetId],
+      };
+    });
+
+    if (converted && options.recordHistory !== false) {
+      get().recordHistory();
+    }
+
+    return converted;
   },
 
   updateSelectedElements: (patch, options = {}) => {

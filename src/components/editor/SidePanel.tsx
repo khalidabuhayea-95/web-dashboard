@@ -1696,10 +1696,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const allVisiblePublishableSelected =
     filteredPublishableElements.length > 0 &&
     filteredPublishableElements.every((element) => publishCandidatesSet.has(element.id));
-  const visibleToolTabs = useMemo(
-    () => TOOL_TABS.filter((tab) => tab.key !== "animation" || selectedIds.length > 0),
-    [selectedIds.length]
-  );
+  const visibleToolTabs = TOOL_TABS;
   const elementSearchPlaceholder =
     elementsPanelTab === "published"
       ? "Search published elements..."
@@ -1772,12 +1769,6 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       setSidebarTab("animation");
     }
     previousSelectedCountRef.current = selectedIds.length;
-  }, [activeTab, selectedIds.length, setSidebarTab]);
-
-  useEffect(() => {
-    if (selectedIds.length === 0 && activeTab === "animation") {
-      setSidebarTab("resize");
-    }
   }, [activeTab, selectedIds.length, setSidebarTab]);
 
   useEffect(() => {
@@ -4585,136 +4576,146 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
               </section>
             ) : null}
 
-            {activeTab === "animation" && selectedElements.length > 0 ? (
+            {activeTab === "animation" ? (
               <section className="editor-animation-panel space-y-4">
                 <div className="space-y-1">
                   <div className="text-sm font-semibold text-[#202a38]">Animation</div>
                   <div className="text-[11px] text-[#64748b]">
-                    {selectedElements.length === 1
-                      ? `Editing ${primarySelectedElement?.name || "selected layer"}`
-                      : `Apply to ${selectedElements.length} selected layers`}
+                    {selectedElements.length === 0
+                      ? "Select one or more layers to edit animation."
+                      : selectedElements.length === 1
+                        ? `Editing ${primarySelectedElement?.name || "selected layer"}`
+                        : `Apply to ${selectedElements.length} selected layers`}
                   </div>
                 </div>
 
-                <div className="space-y-3">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-[#5b6472]">Animation time (ms)</Label>
-                    <div className="relative">
-                      <Input
-                        className={`!h-10 !rounded-xl !pr-12 ${
-                          selectedAnimationInfinite
-                            ? "!cursor-not-allowed !border-[#e2e8f0] !bg-[#f8fafc] !text-[#94a3b8]"
-                            : "!bg-white"
-                        }`}
-                        type="number"
-                        min={200}
-                        max={15000}
-                        step={100}
-                        value={animationDurationDraft}
-                        placeholder={selectedElements.length > 1 ? "Mixed" : String(DEFAULT_ANIMATION_DURATION_MS)}
-                        disabled={Boolean(selectedAnimationInfinite)}
-                        onChange={(event) => setAnimationDurationDraft(String(event.target.value || "").trim())}
-                        onKeyDown={(event) => {
-                          if (selectedAnimationInfinite) return;
-                          if (event.key !== "Enter") return;
-                          const nextValue = String(animationDurationDraft || "").trim();
-                          if (!nextValue) return;
-                          updateSelectedElements({
-                            mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
-                          });
-                        }}
-                      />
-                      <button
-                        type="button"
-                        aria-label="Apply animation time"
-                        title="Apply animation time"
-                        disabled={Boolean(selectedAnimationInfinite)}
-                        onClick={() => {
-                          const nextValue = String(animationDurationDraft || "").trim();
-                          if (!nextValue) return;
-                          updateSelectedElements({
-                            mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
-                          });
-                        }}
-                        className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-white shadow-sm transition ${
-                          selectedAnimationInfinite
-                            ? "cursor-not-allowed bg-[#cbd5e1]"
-                            : "bg-[#fb7185] hover:bg-[#f43f5e]"
-                        }`}
-                      >
-                        <Check size={14} />
-                      </button>
-                    </div>
-                    {selectedAnimationInfinite ? (
-                      <div className="text-[11px] text-[#94a3b8]">Animation time is ignored while infinite is enabled.</div>
-                    ) : null}
+                {selectedElements.length === 0 ? (
+                  <div className="rounded-2xl border border-dashed border-[#d6dce6] bg-white px-4 py-5 text-center text-[12px] text-[#64748b]">
+                    Pick a layer from the canvas or Layers panel to adjust its animation.
                   </div>
+                ) : (
+                  <>
+                    <div className="space-y-3">
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-[#5b6472]">Animation time (ms)</Label>
+                        <div className="relative">
+                          <Input
+                            className={`!h-10 !rounded-xl !pr-12 ${
+                              selectedAnimationInfinite
+                                ? "!cursor-not-allowed !border-[#e2e8f0] !bg-[#f8fafc] !text-[#94a3b8]"
+                                : "!bg-white"
+                            }`}
+                            type="number"
+                            min={200}
+                            max={15000}
+                            step={100}
+                            value={animationDurationDraft}
+                            placeholder={selectedElements.length > 1 ? "Mixed" : String(DEFAULT_ANIMATION_DURATION_MS)}
+                            disabled={Boolean(selectedAnimationInfinite)}
+                            onChange={(event) => setAnimationDurationDraft(String(event.target.value || "").trim())}
+                            onKeyDown={(event) => {
+                              if (selectedAnimationInfinite) return;
+                              if (event.key !== "Enter") return;
+                              const nextValue = String(animationDurationDraft || "").trim();
+                              if (!nextValue) return;
+                              updateSelectedElements({
+                                mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                              });
+                            }}
+                          />
+                          <button
+                            type="button"
+                            aria-label="Apply animation time"
+                            title="Apply animation time"
+                            disabled={Boolean(selectedAnimationInfinite)}
+                            onClick={() => {
+                              const nextValue = String(animationDurationDraft || "").trim();
+                              if (!nextValue) return;
+                              updateSelectedElements({
+                                mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                              });
+                            }}
+                            className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-white shadow-sm transition ${
+                              selectedAnimationInfinite
+                                ? "cursor-not-allowed bg-[#cbd5e1]"
+                                : "bg-[#fb7185] hover:bg-[#f43f5e]"
+                            }`}
+                          >
+                            <Check size={14} />
+                          </button>
+                        </div>
+                        {selectedAnimationInfinite ? (
+                          <div className="text-[11px] text-[#94a3b8]">Animation time is ignored while infinite is enabled.</div>
+                        ) : null}
+                      </div>
 
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold text-[#5b6472]">Infinite</Label>
-                    <button
-                      type="button"
-                      onClick={() =>
-                        updateSelectedElements({
-                          mediaAnimationInfinite: !(selectedAnimationInfinite ?? false),
-                        })
-                      }
-                      className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
-                        selectedAnimationInfinite
-                          ? "border-[#fb7185] bg-[#fff1f4] text-[#be123c]"
-                          : "border-[#d6dce6] bg-white text-[#334155] hover:border-[#c2cedd]"
-                      }`}
-                    >
-                      <span>{selectedAnimationInfinite === null ? "Mixed" : selectedAnimationInfinite ? "Yes" : "No"}</span>
-                      <span
-                        className={`relative h-5 w-9 rounded-full transition ${
-                          selectedAnimationInfinite ? "bg-[#fb7185]" : "bg-[#cbd5e1]"
-                        }`}
-                      >
-                        <span
-                          className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
-                            selectedAnimationInfinite ? "left-4.5" : "left-0.5"
+                      <div className="space-y-2">
+                        <Label className="text-xs font-semibold text-[#5b6472]">Infinite</Label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            updateSelectedElements({
+                              mediaAnimationInfinite: !(selectedAnimationInfinite ?? false),
+                            })
+                          }
+                          className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
+                            selectedAnimationInfinite
+                              ? "border-[#fb7185] bg-[#fff1f4] text-[#be123c]"
+                              : "border-[#d6dce6] bg-white text-[#334155] hover:border-[#c2cedd]"
                           }`}
-                        />
-                      </span>
-                    </button>
-                  </div>
-                </div>
+                        >
+                          <span>{selectedAnimationInfinite === null ? "Mixed" : selectedAnimationInfinite ? "Yes" : "No"}</span>
+                          <span
+                            className={`relative h-5 w-9 rounded-full transition ${
+                              selectedAnimationInfinite ? "bg-[#fb7185]" : "bg-[#cbd5e1]"
+                            }`}
+                          >
+                            <span
+                              className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
+                                selectedAnimationInfinite ? "left-4.5" : "left-0.5"
+                              }`}
+                            />
+                          </span>
+                        </button>
+                      </div>
+                    </div>
 
-                <div className="grid grid-cols-3 gap-2">
-                  {EDITOR_ANIMATION_OPTIONS.map((option) => {
-                    const active = selectedAnimationType === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() =>
-                          updateSelectedElements({
-                            mediaAnimationType: option.value as EditorAnimationType,
-                          })
-                        }
-                        className={`group rounded-2xl border p-2 text-center transition ${
-                          active
-                            ? "border-[#fb7185] bg-[#fff1f4] shadow-[inset_0_0_0_1px_rgba(251,113,133,0.12)]"
-                            : "border-[#d6dce6] bg-white hover:border-[#c2cedd] hover:bg-[#f8fbff]"
-                        }`}
-                      >
-                        <div className="flex justify-center">
-                          <AnimationSampleTile type={option.value as EditorAnimationType} />
-                        </div>
-                        <div className="mt-2 text-[11px] font-semibold leading-tight text-[#243041]">
-                          {option.label}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {EDITOR_ANIMATION_OPTIONS.map((option) => {
+                        const active = selectedAnimationType === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() =>
+                              updateSelectedElements({
+                                mediaAnimationType: option.value as EditorAnimationType,
+                              })
+                            }
+                            className={`group rounded-2xl border p-2 text-center transition ${
+                              active
+                                ? "border-[#fb7185] bg-[#fff1f4] shadow-[inset_0_0_0_1px_rgba(251,113,133,0.12)]"
+                                : "border-[#d6dce6] bg-white hover:border-[#c2cedd] hover:bg-[#f8fbff]"
+                            }`}
+                          >
+                            <div className="flex justify-center">
+                              <AnimationSampleTile type={option.value as EditorAnimationType} />
+                            </div>
+                            <div className="mt-2 text-[11px] font-semibold leading-tight text-[#243041]">
+                              {option.label}
+                            </div>
+                          </button>
+                        );
+                      })}
+                    </div>
 
-                {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim() ? (
-                  <div className="rounded-xl border border-[#d6dce6] bg-white px-3 py-2 text-[11px] text-[#64748b]">
-                    Imported animation: {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim()}
-                  </div>
-                ) : null}
+                    {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim() ? (
+                      <div className="rounded-xl border border-[#d6dce6] bg-white px-3 py-2 text-[11px] text-[#64748b]">
+                        Imported animation: {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim()}
+                      </div>
+                    ) : null}
+                  </>
+                )}
               </section>
             ) : null}
         </div>
