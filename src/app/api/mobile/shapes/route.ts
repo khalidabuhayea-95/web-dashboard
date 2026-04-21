@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { handleApiError } from "@/lib/api/errors";
 import { BUILTIN_SHAPE_ASSETS } from "@/lib/editor/builtinShapes";
 import { logger } from "@/lib/logging/logger";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import { listMobileBuiltInShapes } from "@/lib/mobile/shapesCatalog.server";
 
@@ -62,7 +63,7 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
         },
       }
     );

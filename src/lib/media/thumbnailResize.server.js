@@ -1,7 +1,9 @@
-const THUMBNAIL_RESIZE_SCALE = 0.5;
+const THUMBNAIL_MAX_DIMENSION = 480;
 const THUMBNAIL_MIN_DIMENSION = 32;
+const THUMBNAIL_WEBP_QUALITY = 78;
 
 let canvasLibPromise = null;
+let sharpLibPromise = null;
 
 function normalizeMimeType(value) {
   return String(value || "image/png")
@@ -12,7 +14,7 @@ function normalizeMimeType(value) {
 function shouldResizeMimeType(mimeType) {
   const normalized = normalizeMimeType(mimeType);
   if (!normalized.startsWith("image/")) return false;
-  if (normalized.includes("svg")) return false;
+  if (normalized.includes("gif")) return false;
   return true;
 }
 
@@ -32,6 +34,14 @@ async function getCanvasLib() {
     }))
     .catch((_error) => null);
   return canvasLibPromise;
+}
+
+async function getSharpLib() {
+  if (sharpLibPromise) return sharpLibPromise;
+  sharpLibPromise = import("sharp")
+    .then((module) => module.default || module)
+    .catch((_error) => null);
+  return sharpLibPromise;
 }
 
 function parseDataUri(dataUrl) {
@@ -54,14 +64,7 @@ function parseDataUri(dataUrl) {
   }
 }
 
-export async function resizeThumbnailBufferHalf({ bytes, mimeType }) {
-  const inputBytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
-  const inputMimeType = normalizeMimeType(mimeType);
-
-  if (inputBytes.length === 0 || !shouldResizeMimeType(inputMimeType)) {
-    return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
-  }
-
+async function resizeWithCanvasFallback(inputBytes, inputMimeType) {
   const canvasLib = await getCanvasLib();
   if (!canvasLib?.createCanvas || !canvasLib?.loadImage) {
     return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
@@ -73,8 +76,9 @@ export async function resizeThumbnailBufferHalf({ bytes, mimeType }) {
     const image = await canvasLib.loadImage(sourceDataUrl);
     const sourceWidth = Math.max(1, Math.round(Number(image?.width || 1)));
     const sourceHeight = Math.max(1, Math.round(Number(image?.height || 1)));
-    const targetWidth = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceWidth * THUMBNAIL_RESIZE_SCALE));
-    const targetHeight = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceHeight * THUMBNAIL_RESIZE_SCALE));
+    const resizeScale = Math.min(1, THUMBNAIL_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceWidth * resizeScale));
+    const targetHeight = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceHeight * resizeScale));
 
     if (targetWidth >= sourceWidth && targetHeight >= sourceHeight) {
       return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
@@ -112,6 +116,65 @@ export async function resizeThumbnailBufferHalf({ bytes, mimeType }) {
     };
   } catch (_error) {
     return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
+  }
+}
+
+export async function resizeThumbnailBufferHalf({ bytes, mimeType }) {
+  const inputBytes = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes || []);
+  const inputMimeType = normalizeMimeType(mimeType);
+
+  if (inputBytes.length === 0 || !shouldResizeMimeType(inputMimeType)) {
+    return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
+  }
+
+  const sharp = await getSharpLib();
+  try {
+    if (!sharp) {
+      return resizeWithCanvasFallback(inputBytes, inputMimeType);
+    }
+
+    const image = sharp(inputBytes, { animated: false, failOn: "none" });
+    const metadata = await image.metadata();
+    const sourceWidth = Math.max(1, Math.round(Number(metadata?.width || 1)));
+    const sourceHeight = Math.max(1, Math.round(Number(metadata?.height || 1)));
+    const resizeScale = Math.min(1, THUMBNAIL_MAX_DIMENSION / Math.max(sourceWidth, sourceHeight));
+    const targetWidth = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceWidth * resizeScale));
+    const targetHeight = Math.max(THUMBNAIL_MIN_DIMENSION, Math.round(sourceHeight * resizeScale));
+    const outputBytes = await image
+      .rotate()
+      .resize({
+        width: targetWidth,
+        height: targetHeight,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({
+        quality: THUMBNAIL_WEBP_QUALITY,
+        effort: 4,
+      })
+      .toBuffer();
+
+    if (!outputBytes || outputBytes.length === 0) {
+      return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
+    }
+
+    const resized = targetWidth < sourceWidth || targetHeight < sourceHeight;
+    const materiallySmaller = outputBytes.length < inputBytes.length * 0.95;
+    if (!resized && !materiallySmaller) {
+      return { bytes: inputBytes, mimeType: inputMimeType, resized: false };
+    }
+
+    return {
+      bytes: outputBytes,
+      mimeType: "image/webp",
+      resized: resized || outputBytes.length !== inputBytes.length,
+      sourceWidth,
+      sourceHeight,
+      width: targetWidth,
+      height: targetHeight,
+    };
+  } catch (_error) {
+    return resizeWithCanvasFallback(inputBytes, inputMimeType);
   }
 }
 

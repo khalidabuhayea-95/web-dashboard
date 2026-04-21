@@ -1,9 +1,6 @@
-import { redirect } from "next/navigation";
-
 import Button from "@/components/ui/button";
-import { createClient } from "@/lib/supabase/server";
-import { signOut } from "@/app/login/actions";
-import { Roles } from "@/lib/auth/roles";
+import SignOutButton from "@/app/login/SignOutButton";
+import { requireRole, Roles } from "@/lib/auth/roles";
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
 
 export const metadata = {
@@ -12,30 +9,15 @@ export const metadata = {
 };
 
 export default async function DashboardLayout({ children }) {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-  const { data: userData } = await supabase.auth.getUser();
-
-  if (error || !data?.claims?.sub) {
-    redirect("/login");
-  }
-
-  const role = data.claims.user_role || Roles.EDITOR;
-  const user = userData?.user || null;
-  const userMeta = user?.user_metadata || {};
-  const displayName =
-    String(
-      userMeta.full_name ||
-        userMeta.name ||
-        userMeta.display_name ||
-        user?.email ||
-        "User"
-    ).trim() || "User";
-  const displayEmail = String(user?.email || data?.claims?.email || "").trim();
+  const session = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
+  const role = session.role;
+  const displayName = String(session.user?.name || session.user?.email || "User").trim() || "User";
+  const displayEmail = String(session.user?.email || "").trim();
   const navItems = [
     { href: "/", label: "Overview", icon: "overview" },
     { href: "/templates", label: "Templates", icon: "templates" },
     { href: "/settings", label: "Settings", icon: "settings" },
+    { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
     { href: "/categories", label: "Categories", icon: "categories" },
     { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
     { href: "/editor-pro", label: "Editor", icon: "editor" },
@@ -78,11 +60,7 @@ export default async function DashboardLayout({ children }) {
                     Send push
                   </Button>
                 ) : null}
-                <form action={signOut}>
-                  <Button variant="secondary" type="submit">
-                    Sign out
-                  </Button>
-                </form>
+                <SignOutButton />
                 <div className="h-9 w-9 rounded-full bg-muted" aria-hidden="true" />
               </div>
             </div>

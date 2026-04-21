@@ -1,9 +1,21 @@
+import { randomUUID } from "node:crypto";
+
 import { NextRequest, NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
+import { findDashboardUsersByIds } from "@/lib/auth/dashboardUsers.server";
 import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  appendVersionParam,
+  deleteObjects,
+  getTemplateThumbnailBucketName,
+  parsePublicObjectKeyFromUrl,
+  restorePublicObjectUrlsFromClient,
+  restorePublicObjectUrlFromClient,
+  rewritePublicObjectUrlsForClient,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { findExternalCanvaReferences } from "@/lib/tools/importAssetSanitizer";
 import {
   buildSnapshot,
@@ -25,8 +37,7 @@ import { handleApiError, handleBadRequest, handleNotFound, handleForbidden } fro
 import { logger } from "@/lib/logging/logger";
 import { extractFabricData } from "@/lib/templates/editorData";
 
-const THUMBNAIL_BUCKET =
-  process.env.TEMPLATE_THUMBNAIL_BUCKET || process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const THUMBNAIL_BUCKET = getTemplateThumbnailBucketName();
 const MAX_THUMBNAIL_BYTES = 12 * 1024 * 1024;
 const MAX_CANVA_REFERENCE_ERRORS = 10;
 const DEFAULT_LIST_PAGE_SIZE = 20;
@@ -56,6 +67,10 @@ const TEMPLATE_LIST_SELECT: any = {
   createdAt: true,
   updatedAt: true,
 };
+
+function jsonForEditorClient(body: unknown, init?: ResponseInit): NextResponse {
+  return NextResponse.json(rewritePublicObjectUrlsForClient(body), init);
+}
 
 async function ensureUniqueSlug(baseSlug: string, excludeId?: string): Promise<string> {
   const base = normalizeSlug(baseSlug) || `template-${Date.now()}`;
@@ -96,8 +111,19 @@ async function ensureUniqueName(ownerId: string, baseName: string, excludeId?: s
 }
 
 function withTemplatePreview(template: any) {
+  const updatedAt =
+    template?.updatedAt instanceof Date
+      ? template.updatedAt.getTime()
+      : template?.updatedAt
+        ? new Date(template.updatedAt).getTime()
+        : NaN;
+
   return {
     ...template,
+    thumbnailDataUrl: appendVersionParam(
+      template?.thumbnailDataUrl,
+      Number.isFinite(updatedAt) ? String(updatedAt) : String(template?.version || "")
+    ),
     preview: mapTemplatePreview(template),
   };
 }
@@ -261,9 +287,8 @@ function applyPreviewPatchToTemplateData(data: any, input: {
 }
 
 function getUserDisplayName(user: any): string {
-  const metadata = user?.user_metadata || {};
   return (
-    String(metadata.full_name || metadata.name || metadata.display_name || "").trim() ||
+    String(user?.name || "").trim() ||
     String(user?.email || "").trim() ||
     ""
   );
@@ -419,16 +444,11 @@ async function attachTemplateOwnerNames(templates: any[]): Promise<any[]> {
   if (ownerIds.length === 0) return templates;
 
   const ownerMap = new Map<string, string>();
-  const admin = createAdminClient();
   const ownerIdsForLookup = ownerIds.slice(0, MAX_OWNER_LOOKUPS);
-
-  await Promise.all(
-    ownerIdsForLookup.map(async (ownerId: string) => {
-      const { data, error } = await admin.auth.admin.getUserById(ownerId);
-      if (error || !data?.user) return;
-      ownerMap.set(ownerId, getUserDisplayName(data.user));
-    })
-  );
+  const owners = await findDashboardUsersByIds(ownerIdsForLookup);
+  owners.forEach((owner) => {
+    ownerMap.set(owner.id, getUserDisplayName(owner));
+  });
 
   return templates.map((template) => ({
     ...template,
@@ -436,49 +456,21 @@ async function attachTemplateOwnerNames(templates: any[]): Promise<any[]> {
   }));
 }
 
-function makeTemplateThumbnailPath(ownerId: string, slug: string, mimeType: string): string {
-  const now = new Date();
-  const yyyy = now.getUTCFullYear();
-  const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(now.getUTCDate()).padStart(2, "0");
-  const safeSlug = sanitizePathSegment(slug) || "template";
-  const unique =
-    typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function"
-      ? globalThis.crypto.randomUUID()
-      : `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+function makeTemplateThumbnailPath(ownerId: string, templateId: string, mimeType: string): string {
+  const safeTemplateId = sanitizePathSegment(templateId) || "template";
   const ext = extensionFromMimeType(mimeType);
-  return `users/${ownerId}/templates/thumbnails/${yyyy}/${mm}/${dd}/${safeSlug}-${unique}.${ext}`;
-}
-
-async function ensurePublicBucket(admin: any): Promise<void> {
-  const { data, error } = await admin.storage.getBucket(THUMBNAIL_BUCKET);
-  if (error) {
-    const created = await admin.storage.createBucket(THUMBNAIL_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_THUMBNAIL_BYTES}`,
-    });
-    if (created.error && !String(created.error.message || "").toLowerCase().includes("exists")) {
-      throw created.error;
-    }
-    return;
-  }
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(THUMBNAIL_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_THUMBNAIL_BYTES}`,
-    });
-  }
+  return `users/${ownerId}/templates/thumbnails/${safeTemplateId}/thumbnail.${ext}`;
 }
 
 interface ResolveThumbnailInput {
   thumbnailValue: string;
   ownerId: string;
-  slug: string;
+  templateId: string;
   fallbackUrl?: string | null;
 }
 
 async function resolveTemplateThumbnailUrl(input: ResolveThumbnailInput): Promise<string | null> {
-  const { thumbnailValue, ownerId, slug, fallbackUrl = null } = input;
+  const { thumbnailValue, ownerId, templateId, fallbackUrl = null } = input;
   const rawValue = String(thumbnailValue || "").trim();
   if (!rawValue) return fallbackUrl || null;
 
@@ -508,23 +500,29 @@ async function resolveTemplateThumbnailUrl(input: ResolveThumbnailInput): Promis
     thumbnailMimeType = resizedThumbnail.mimeType;
   }
 
-  const admin = createAdminClient();
-  await ensurePublicBucket(admin);
-
-  const objectPath = makeTemplateThumbnailPath(ownerId, slug, thumbnailMimeType);
-  const { error: uploadError } = await admin.storage.from(THUMBNAIL_BUCKET).upload(objectPath, thumbnailBuffer, {
+  const objectPath = makeTemplateThumbnailPath(ownerId, templateId, thumbnailMimeType);
+  const uploaded = await uploadObject({
+    bucket: THUMBNAIL_BUCKET,
+    key: objectPath,
+    body: thumbnailBuffer,
     contentType: thumbnailMimeType,
-    cacheControl: "31536000",
-    upsert: false,
+    cacheControl: "public, max-age=31536000, immutable",
+    upsert: true,
   });
-  if (uploadError) {
-    throw new Error(uploadError.message || "Failed to upload template thumbnail.");
-  }
-
-  const { data: publicUrlData } = admin.storage.from(THUMBNAIL_BUCKET).getPublicUrl(objectPath);
-  const publicUrl = String(publicUrlData?.publicUrl || "").trim();
+  const publicUrl = String(uploaded.url || "").trim();
   if (!publicUrl) {
     throw new Error("Template thumbnail uploaded but URL is unavailable.");
+  }
+
+  const previousObjectPath = parsePublicObjectKeyFromUrl(fallbackUrl);
+  if (previousObjectPath && previousObjectPath !== objectPath) {
+    deleteObjects(THUMBNAIL_BUCKET, [previousObjectPath]).catch((error) => {
+      logger.warn("Failed to delete previous template thumbnail", {
+        previousObjectPath,
+        nextObjectPath: objectPath,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    });
   }
 
   return publicUrl;
@@ -610,10 +608,10 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     }
 
     if (!pagination.paginationRequested) {
-      return NextResponse.json({ templates: templatesWithOwners.map(withTemplatePreview) });
+      return jsonForEditorClient({ templates: templatesWithOwners.map(withTemplatePreview) });
     }
 
-    return NextResponse.json({
+    return jsonForEditorClient({
       templates: templatesWithOwners.map(withTemplatePreview),
       page: pagination.page,
       perPage: pagination.perPage,
@@ -639,7 +637,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const id = typeof body?.id === "string" ? body.id : "";
     const name = typeof body?.name === "string" ? body.name.trim() : "";
-    const data = body?.data;
+    const data = restorePublicObjectUrlsFromClient(body?.data);
 
     if (!name || !data) {
       return handleBadRequest("Missing template name or data");
@@ -651,7 +649,10 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const category = normalizeCategory(body?.category, taxonomySettings);
     const subCategory = normalizeSubCategory(body?.subCategory, category, taxonomySettings);
     const tags = normalizeTags(body?.tags);
-    const incomingThumbnailValue = typeof body?.thumbnailDataUrl === "string" ? body.thumbnailDataUrl : "";
+    const incomingThumbnailValue =
+      typeof body?.thumbnailDataUrl === "string"
+        ? restorePublicObjectUrlFromClient(body.thumbnailDataUrl)
+        : "";
 
     if (id) {
       // Update existing template
@@ -681,7 +682,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         thumbnailDataUrl = await resolveTemplateThumbnailUrl({
           thumbnailValue: incomingThumbnailValue,
           ownerId: existing.ownerId,
-          slug,
+          templateId: existing.id,
           fallbackUrl: existing.thumbnailDataUrl,
         });
       } catch (error) {
@@ -728,7 +729,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         return item;
       });
 
-      return NextResponse.json({ template: withTemplatePreview(updated) });
+      return jsonForEditorClient({ template: withTemplatePreview(updated) });
     }
 
     // Create new template
@@ -745,12 +746,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const slug = await ensureUniqueSlug(requestedSlug);
     const uniqueName = await ensureUniqueName(session.userId, name);
+    const newTemplateId = randomUUID();
     let thumbnailDataUrl: string | null;
     try {
       thumbnailDataUrl = await resolveTemplateThumbnailUrl({
         thumbnailValue: incomingThumbnailValue,
         ownerId: session.userId,
-        slug,
+        templateId: newTemplateId,
         fallbackUrl: null,
       });
     } catch (error) {
@@ -769,6 +771,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const created = await prisma.$transaction(async (tx: any) => {
       const item = await tx.template.create({
         data: {
+          id: newTemplateId,
           ownerId: session.userId,
           name: uniqueName,
           slug,
@@ -796,7 +799,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       return item;
     });
 
-    return NextResponse.json({ template: withTemplatePreview(created) }, { status: 201 });
+    return jsonForEditorClient({ template: withTemplatePreview(created) }, { status: 201 });
   } catch (error) {
     return handleApiError(error, "Failed to save template");
   }
@@ -830,7 +833,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
 
     if (action === "updatePreview") {
-      const previewInput = body?.preview;
+      const previewInput = restorePublicObjectUrlsFromClient(body?.preview);
       const clearPreview = previewInput === null;
       const normalizedPreview = clearPreview ? null : normalizePreviewFields(previewInput);
 
@@ -846,7 +849,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         requestedVersion > 0 &&
         requestedVersion < Number(existing.version || 0)
       ) {
-        return NextResponse.json(
+        return jsonForEditorClient(
           {
             error: "Preview update is stale for the current template version.",
             template: withTemplatePreview(existing),
@@ -898,7 +901,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
         },
       });
 
-      return NextResponse.json({ template: withTemplatePreview(updated) });
+      return jsonForEditorClient({ template: withTemplatePreview(updated) });
     }
 
     const publishData = action === "publish" ? normalizeEditorProMobileFontData(existing.data) : existing.data;
@@ -952,7 +955,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       return item;
     });
 
-    return NextResponse.json({ template: withTemplatePreview(template) });
+    return jsonForEditorClient({ template: withTemplatePreview(template) });
   } catch (error) {
     return handleApiError(error, "Failed to publish template");
   }

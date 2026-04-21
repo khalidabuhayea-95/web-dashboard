@@ -1,13 +1,13 @@
-import { updateSession } from "@/lib/supabase/proxy";
 import {
   attachRequestIdHeader,
   ensureRequestIdHeaders,
 } from "@/lib/logging/request";
 import { logger } from "@/lib/logging/logger";
+import { NextResponse } from "next/server";
 
 /**
  * Global proxy handler for Next.js
- * Handles Supabase session management, request tracing, and security headers
+ * Handles request tracing and security headers
  */
 export async function proxy(request) {
   const { requestId, requestHeaders } = ensureRequestIdHeaders(request.headers);
@@ -20,7 +20,11 @@ export async function proxy(request) {
   });
 
   try {
-    const response = await updateSession(request, requestHeaders);
+    const response = NextResponse.next({
+      request: {
+        headers: requestHeaders,
+      },
+    });
 
     // Add security headers
     response.headers.set("X-Request-ID", requestId);

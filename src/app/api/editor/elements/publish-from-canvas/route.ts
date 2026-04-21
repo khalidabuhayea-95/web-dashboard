@@ -6,14 +6,17 @@ import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { normalizePaletteForPublish, getPublishableSkipReason, inferPublishSource, tokenizeElementName } from "@/lib/editor/publishableElements";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
 import { logger } from "@/lib/logging/logger";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getPublicStorageBucketName,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { getEditorSession } from "@/lib/templates/server";
 import { translateBatchToArabic } from "@/lib/tools/arabicTranslate.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const BUCKET_NAME = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const BUCKET_NAME = getPublicStorageBucketName();
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 
 interface PublishElement {
@@ -96,26 +99,6 @@ function extensionFromMimeType(mimeType: string): string {
   return "png";
 }
 
-async function ensurePublicBucket(admin: any): Promise<void> {
-  const { data, error } = await admin.storage.getBucket(BUCKET_NAME);
-  if (error) {
-    const created = await admin.storage.createBucket(BUCKET_NAME, {
-      public: true,
-      fileSizeLimit: `${MAX_IMAGE_BYTES}`,
-    });
-    if (created.error && !String(created.error.message || "").toLowerCase().includes("exists")) {
-      throw created.error;
-    }
-    return;
-  }
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(BUCKET_NAME, {
-      public: true,
-      fileSizeLimit: `${MAX_IMAGE_BYTES}`,
-    });
-  }
-}
-
 function makeObjectPath(ownerId: string, baseName: string, mimeType: string): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
@@ -150,20 +133,17 @@ async function uploadDataUrlToStorage(dataUrl: string, ownerId: string, baseName
     throw new Error("Image is too large to publish.");
   }
 
-  const admin = createAdminClient();
-  await ensurePublicBucket(admin);
   const path = makeObjectPath(ownerId, baseName, parsed.mimeType);
-  const { error: uploadError } = await admin.storage.from(BUCKET_NAME).upload(path, parsed.buffer, {
+  const uploaded = await uploadObject({
+    bucket: BUCKET_NAME,
+    key: path,
+    body: parsed.buffer,
     contentType: parsed.mimeType,
-    cacheControl: "31536000",
+    cacheControl: "public, max-age=31536000, immutable",
     upsert: false,
+    skipExistenceCheck: true,
   });
-  if (uploadError) {
-    throw new Error(uploadError.message || "Failed to upload published element.");
-  }
-
-  const { data } = admin.storage.from(BUCKET_NAME).getPublicUrl(path);
-  const publicUrl = sanitizeText(data?.publicUrl);
+  const publicUrl = sanitizeText(uploaded.url);
   if (!publicUrl) {
     throw new Error("Published element URL is unavailable.");
   }

@@ -5,7 +5,11 @@ import {
   createRateLimitResponse,
   resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getPublicStorageBucketName,
+  rewritePublicObjectUrlForClient,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { getEditorSession } from "@/lib/templates/server";
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
@@ -13,7 +17,7 @@ import { logger } from "@/lib/logging/logger";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const BUCKET_NAME = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const BUCKET_NAME = getPublicStorageBucketName();
 const MEDIA_UPLOAD_LIMIT = {
   limit: 30,
   windowMs: 60_000,
@@ -128,26 +132,6 @@ function ensureValidUpload({
   throw new Error("Invalid upload kind.");
 }
 
-async function ensurePublicBucket(admin: any): Promise<void> {
-  const { data, error } = await admin.storage.getBucket(BUCKET_NAME);
-  if (error) {
-    const create = await admin.storage.createBucket(BUCKET_NAME, {
-      public: true,
-      fileSizeLimit: `${MAX_VIDEO_BYTES}`,
-    });
-    if (create.error && !String(create.error.message || "").toLowerCase().includes("exists")) {
-      throw create.error;
-    }
-    return;
-  }
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(BUCKET_NAME, {
-      public: true,
-      fileSizeLimit: `${MAX_VIDEO_BYTES}`,
-    });
-  }
-}
-
 function makeObjectPath({
   ownerId,
   kind,
@@ -226,25 +210,16 @@ export async function POST(request: NextRequest) {
       extension,
     });
 
-    const admin = createAdminClient();
-    try {
-      await ensurePublicBucket(admin);
-    } catch (error) {
-      return handleApiError(error, "Failed to prepare media storage bucket", 500);
-    }
-
-    const { error: uploadError } = await admin.storage.from(BUCKET_NAME).upload(path, fileEntry, {
-      cacheControl: "31536000",
+    const uploaded = await uploadObject({
+      bucket: BUCKET_NAME,
+      key: path,
+      body: fileEntry,
+      cacheControl: "public, max-age=31536000, immutable",
       contentType: resolvedMimeType || "application/octet-stream",
       upsert: false,
+      skipExistenceCheck: true,
     });
-
-    if (uploadError) {
-      return handleApiError(uploadError, "Failed to upload media", 422);
-    }
-
-    const { data: publicUrlData } = admin.storage.from(BUCKET_NAME).getPublicUrl(path);
-    const url = String(publicUrlData?.publicUrl || "").trim();
+    const url = String(uploaded.url || "").trim();
     if (!url) {
       return handleApiError(
         new Error("Media URL unavailable"),
@@ -263,7 +238,8 @@ export async function POST(request: NextRequest) {
       kind,
       bucket: BUCKET_NAME,
       path,
-      url,
+      publicUrl: url,
+      url: rewritePublicObjectUrlForClient(url),
     });
   } catch (error) {
     return handleApiError(error, "Failed to upload media");

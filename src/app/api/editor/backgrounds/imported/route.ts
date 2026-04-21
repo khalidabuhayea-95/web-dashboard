@@ -18,6 +18,10 @@ import {
 } from "@/lib/editor/backgroundPreview.server";
 import { handleApiError, handleBadRequest, handleNotFound } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import {
+  restorePublicObjectUrlFromClient,
+  rewritePublicObjectUrlsForClient,
+} from "@/lib/storage/objectStorage.server";
 
 const IMPORTED_BACKGROUNDS_RATE_LIMIT = {
   limit: 120,
@@ -72,7 +76,7 @@ export async function GET(request: NextRequest) {
       locale,
     });
 
-    return NextResponse.json(result, {
+    return NextResponse.json(rewritePublicObjectUrlsForClient(result), {
       headers: {
         "Cache-Control": "no-store",
       },
@@ -164,8 +168,8 @@ export async function POST(request: NextRequest) {
 
     const source = String(body?.source || "").trim().toLowerCase() || "background-upload";
     const sourceAssetId = String(body?.sourceAssetId || body?.source_asset_id || "").trim();
-    const assetUrl = String(body?.assetUrl || body?.asset_url || "").trim();
-    let thumbnailUrl = String(body?.thumbnailUrl || body?.thumbnail_url || assetUrl).trim();
+    const assetUrl = restorePublicObjectUrlFromClient(body?.assetUrl || body?.asset_url || "");
+    let thumbnailUrl = restorePublicObjectUrlFromClient(body?.thumbnailUrl || body?.thumbnail_url || assetUrl);
     const title = String(body?.title || body?.titleEn || body?.title_en || "").trim();
 
     if (!sourceAssetId) {
@@ -235,7 +239,7 @@ export async function POST(request: NextRequest) {
       authorName: body?.authorName,
     });
 
-    return NextResponse.json(result, {
+    return NextResponse.json(rewritePublicObjectUrlsForClient(result), {
       headers: {
         "Cache-Control": "no-store",
       },

@@ -1,25 +1,46 @@
 import { redirect } from "next/navigation";
 
-import { createClient } from "@/lib/supabase/server";
+import { auth } from "@/lib/auth/auth";
+import { ensureSystemAdmin } from "@/lib/auth/dashboardUsers.server";
+import { normalizeDashboardRole } from "@/lib/auth/utils";
 
 export const Roles = {
   ADMIN: "admin",
-  EDITOR: "editor",
+  DESIGNER: "designer",
+  EDITOR: "designer",
 };
 
-export async function requireRole(allowedRoles = []) {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
+export async function getDashboardSession() {
+  await ensureSystemAdmin();
+  const session = await auth();
+  const userId = String(session?.user?.id || "").trim();
 
-  if (error || !data?.claims?.sub) {
+  if (!userId) {
+    return null;
+  }
+
+  return {
+    userId,
+    role: normalizeDashboardRole(session?.user?.role),
+    user: {
+      id: userId,
+      email: String(session?.user?.email || ""),
+      name: String(session?.user?.name || ""),
+      isSystemAdmin: Boolean(session?.user?.isSystemAdmin),
+    },
+  };
+}
+
+export async function requireRole(allowedRoles = []) {
+  const session = await getDashboardSession();
+
+  if (!session) {
     redirect("/login");
   }
 
-  const role = data.claims.user_role || Roles.EDITOR;
-
-  if (allowedRoles.length > 0 && !allowedRoles.includes(role)) {
+  if (allowedRoles.length > 0 && !allowedRoles.includes(session.role)) {
     redirect("/");
   }
 
-  return { role, userId: data.claims.sub };
+  return session;
 }

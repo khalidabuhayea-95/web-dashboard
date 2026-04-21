@@ -479,6 +479,29 @@ const schemas = {
       error: { type: "string" },
     },
   },
+  MobileAuthUser: {
+    type: "object",
+    required: ["id", "emailVerified"],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      name: { type: "string", nullable: true },
+      email: { type: "string", nullable: true },
+      emailVerified: { type: "boolean" },
+    },
+  },
+  MobileAuthSessionResponse: {
+    type: "object",
+    required: ["tokenType", "accessToken", "refreshToken", "expiresInSeconds", "user"],
+    properties: {
+      tokenType: { type: "string", example: "Bearer" },
+      accessToken: { type: "string" },
+      refreshToken: { type: "string" },
+      expiresInSeconds: { type: "integer", minimum: 1, example: 3600 },
+      user: {
+        $ref: "#/components/schemas/MobileAuthUser",
+      },
+    },
+  },
   CategoryOption: {
     type: "object",
     required: ["id", "value", "label", "labelEn", "labelAr", "published", "subCategories"],
@@ -1345,6 +1368,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
     },
     servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
+      { name: "Mobile Auth" },
       { name: "Mobile Templates" },
       { name: "Mobile Fonts" },
       { name: "Mobile Elements" },
@@ -1352,6 +1376,259 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile Media" },
     ],
     paths: {
+      "/api/mobile/auth/google": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Sign in mobile user with Google",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["idToken"],
+                  properties: {
+                    idToken: {
+                      type: "string",
+                      description: "Google ID token returned by the mobile app SDK.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Mobile auth session",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileAuthSessionResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid Google token or provider configuration",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/auth/facebook": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Sign in mobile user with Facebook",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["accessToken"],
+                  properties: {
+                    accessToken: {
+                      type: "string",
+                      description: "Facebook access token returned by the mobile app SDK.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Mobile auth session",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileAuthSessionResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid Facebook token or provider configuration",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/auth/apple": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Sign in mobile user with Apple on iOS",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["identityToken"],
+                  properties: {
+                    identityToken: {
+                      type: "string",
+                      description: "Apple identity token returned by native Sign in with Apple.",
+                    },
+                    name: {
+                      type: "string",
+                      description: "Optional display name sent by the app on first consent.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Mobile auth session",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileAuthSessionResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid Apple token or provider configuration",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/auth/refresh": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Refresh mobile bearer session",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["refreshToken"],
+                  properties: {
+                    refreshToken: {
+                      type: "string",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Rotated mobile auth session",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileAuthSessionResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Refresh token invalid or expired",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/auth/logout": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Revoke a mobile refresh token",
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    refreshToken: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Logout result",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["ok"],
+                    properties: {
+                      ok: { type: "boolean", example: true },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/auth/me": {
+        get: {
+          tags: ["Mobile Auth"],
+          summary: "Get current mobile user from bearer token",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: "Current mobile user",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["user"],
+                    properties: {
+                      user: {
+                        $ref: "#/components/schemas/MobileAuthUser",
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/mobile/templates": {
         get: {
           tags: ["Mobile Templates"],
@@ -2054,6 +2331,13 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       },
     },
     components: {
+      securitySchemes: {
+        bearerAuth: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
       schemas,
     },
   };

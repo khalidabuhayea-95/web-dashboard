@@ -6,13 +6,17 @@ import {
   createRateLimitResponse,
   resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
-import { createAdminClient } from "@/lib/supabase/admin";
-import { createClient } from "@/lib/supabase/server";
+import { getDashboardSession, Roles } from "@/lib/auth/roles";
+import {
+  createDashboardInvite,
+  deleteDashboardUser,
+  listDashboardUsers,
+  updateDashboardUser,
+} from "@/lib/auth/dashboardUsers.server";
 import {
   handleApiError,
   handleForbidden,
   handleUnauthorized,
-  handleBadRequest,
   handleValidationError,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
@@ -26,7 +30,6 @@ const ADMIN_USERS_WRITE_LIMIT = {
   windowMs: 60_000,
 };
 
-// Validation schemas
 const adminUsersListSchema = z.object({
   page: z.coerce.number().int().positive().default(1),
   perPage: z.coerce.number().int().min(1).max(100).default(20),
@@ -34,56 +37,14 @@ const adminUsersListSchema = z.object({
 
 const inviteUserSchema = z.object({
   email: z.string().email("Invalid email address"),
-  role: z.enum(["admin", "editor"]).default("editor"),
-  redirectTo: z.string().url().optional(),
 });
 
 const updateUserSchema = z.object({
   id: z.string().min(1, "User id is required"),
   email: z.string().email().optional(),
-  password: z.string().min(6).optional(),
-  role: z.enum(["admin", "editor"]).optional(),
+  password: z.string().min(8).optional(),
   ban: z.boolean().optional(),
 });
-
-const deleteUserSchema = z.object({
-  id: z.string().min(1, "User id is required"),
-});
-
-function parseAdminEmails(value?: string): string[] | null {
-  if (!value) return null;
-  return value
-    .split(",")
-    .map((item) => item.trim().toLowerCase())
-    .filter(Boolean);
-}
-
-async function isAuthorized(user: { id: string; email?: string }) {
-  const allowEmails = parseAdminEmails(process.env.ADMIN_EMAILS);
-  const allowDomain = process.env.ADMIN_EMAIL_DOMAIN?.toLowerCase();
-
-  if (!allowEmails && !allowDomain) {
-    try {
-      const admin = createAdminClient();
-      const { data } = await admin
-        .from("user_roles")
-        .select("role")
-        .eq("user_id", user.id)
-        .maybeSingle();
-      return data?.role === "admin";
-    } catch {
-      return false;
-    }
-  }
-
-  const email = user?.email?.toLowerCase();
-  if (!email) return false;
-
-  if (allowEmails?.includes(email)) return true;
-  if (allowDomain && email.endsWith(`@${allowDomain}`)) return true;
-
-  return false;
-}
 
 function applyAdminRateLimit(
   request: NextRequest,
@@ -106,26 +67,28 @@ function applyAdminRateLimit(
   return null;
 }
 
+async function requireAdminSession(request: NextRequest, scope: string, config: { limit: number; windowMs: number }) {
+  const session = await getDashboardSession();
+  if (!session?.userId) {
+    return { error: handleUnauthorized() };
+  }
+
+  const rateLimited = applyAdminRateLimit(request, session.userId, scope, config);
+  if (rateLimited) {
+    return { error: rateLimited };
+  }
+
+  if (session.role !== Roles.ADMIN) {
+    return { error: handleForbidden("Not an admin user") };
+  }
+
+  return { session };
+}
+
 export async function GET(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data?.user) {
-      return handleUnauthorized();
-    }
-
-    const readRateLimited = applyAdminRateLimit(
-      request,
-      data.user.id,
-      "list",
-      ADMIN_USERS_READ_LIMIT
-    );
-    if (readRateLimited) return readRateLimited;
-
-    if (!(await isAuthorized(data.user))) {
-      return handleForbidden("Not an admin user");
-    }
+    const authState = await requireAdminSession(request, "list", ADMIN_USERS_READ_LIMIT);
+    if (authState.error) return authState.error;
 
     const searchParams = Object.fromEntries(request.nextUrl.searchParams);
     const parsed = adminUsersListSchema.safeParse(searchParams);
@@ -134,38 +97,10 @@ export async function GET(request: NextRequest) {
     }
 
     const { page, perPage } = parsed.data;
-
-    const admin = createAdminClient();
-    const { data: usersData, error: listError } = await admin.auth.admin.listUsers({
-      page,
-      perPage,
-    });
-
-    if (listError) {
-      return handleApiError(listError, "Failed to list users");
-    }
-
-    const userIds = usersData.users.map((user: any) => user.id);
-    const rolesMap = new Map<string, string>();
-
-    if (userIds.length > 0) {
-      const { data: rolesData } = await admin
-        .from("user_roles")
-        .select("user_id, role")
-        .in("user_id", userIds);
-
-      rolesData?.forEach((row: { user_id: string; role: string }) => {
-        rolesMap.set(row.user_id, row.role);
-      });
-    }
-
-    const users = usersData.users.map((user: any) => ({
-      ...user,
-      app_role: rolesMap.get(user.id) ?? "editor",
-    }));
+    const { total, users } = await listDashboardUsers({ page, perPage });
 
     logger.info("Admin users listed", {
-      userId: data.user.id,
+      userId: authState.session.userId,
       page,
       perPage,
       count: users.length,
@@ -175,7 +110,7 @@ export async function GET(request: NextRequest) {
       users,
       page,
       perPage,
-      total: usersData.total,
+      total,
     });
   } catch (error) {
     return handleApiError(error, "Failed to retrieve users");
@@ -184,24 +119,8 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data?.user) {
-      return handleUnauthorized();
-    }
-
-    const writeRateLimited = applyAdminRateLimit(
-      request,
-      data.user.id,
-      "create",
-      ADMIN_USERS_WRITE_LIMIT
-    );
-    if (writeRateLimited) return writeRateLimited;
-
-    if (!(await isAuthorized(data.user))) {
-      return handleForbidden("Not an admin user");
-    }
+    const authState = await requireAdminSession(request, "create", ADMIN_USERS_WRITE_LIMIT);
+    if (authState.error) return authState.error;
 
     const body = await request.json();
     const parsed = inviteUserSchema.safeParse(body);
@@ -209,62 +128,40 @@ export async function POST(request: NextRequest) {
       return handleValidationError(parsed.error.issues);
     }
 
-    const { email, role, redirectTo } = parsed.data;
-
-    const admin = createAdminClient();
-    const { data: invited, error: inviteError } =
-      await admin.auth.admin.inviteUserByEmail(email, { redirectTo });
-
-    if (inviteError) {
-      return handleApiError(inviteError, "Failed to invite user");
-    }
-
-    if (invited?.user?.id) {
-      const { error: roleError } = await admin.from("user_roles").upsert(
-        {
-          user_id: invited.user.id,
-          role,
-        },
-        { onConflict: "user_id" }
-      );
-
-      if (roleError) {
-        return handleApiError(roleError, "Failed to set user role");
-      }
-    }
-
-    logger.info("User invited", {
+    const { email } = parsed.data;
+    const { invite, token, mode, existingUserId } = await createDashboardInvite({
       email,
-      role,
-      invitedBy: data.user.id,
+      createdByUserId: authState.session.userId,
     });
 
-    return NextResponse.json({ user: invited?.user ?? null });
+    const inviteUrl = new URL("/register", request.nextUrl.origin);
+    inviteUrl.searchParams.set("token", token);
+
+    logger.info("Dashboard invite created", {
+      email,
+      invitedBy: authState.session.userId,
+    });
+
+    return NextResponse.json({
+      invite: {
+        id: invite.id,
+        email: invite.email,
+        role: invite.role,
+        mode,
+        existingUserId,
+        expiresAt: invite.expiresAt.toISOString(),
+        url: inviteUrl.toString(),
+      },
+    });
   } catch (error) {
-    return handleApiError(error, "Failed to invite user");
+    return handleApiError(error, error instanceof Error ? error.message : "Failed to invite user");
   }
 }
 
 export async function PATCH(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
-
-    if (error || !data?.user) {
-      return handleUnauthorized();
-    }
-
-    const writeRateLimited = applyAdminRateLimit(
-      request,
-      data.user.id,
-      "update",
-      ADMIN_USERS_WRITE_LIMIT
-    );
-    if (writeRateLimited) return writeRateLimited;
-
-    if (!(await isAuthorized(data.user))) {
-      return handleForbidden("Not an admin user");
-    }
+    const authState = await requireAdminSession(request, "update", ADMIN_USERS_WRITE_LIMIT);
+    if (authState.error) return authState.error;
 
     const body = await request.json();
     const parsed = updateUserSchema.safeParse(body);
@@ -272,88 +169,55 @@ export async function PATCH(request: NextRequest) {
       return handleValidationError(parsed.error.issues);
     }
 
-    const { id, email, password, role, ban } = parsed.data;
-
-    const admin = createAdminClient();
-    const { data: updated, error: updateError } =
-      await admin.auth.admin.updateUserById(id, {
-        email,
-        password,
-        ban_duration:
-          typeof ban === "boolean" ? (ban ? "876600h" : "none") : undefined,
-      });
-
-    if (updateError) {
-      return handleApiError(updateError, "Failed to update user");
-    }
-
-    if (role) {
-      const { error: roleError } = await admin.from("user_roles").upsert(
-        {
-          user_id: id,
-          role,
-        },
-        { onConflict: "user_id" }
-      );
-
-      if (roleError) {
-        return handleApiError(roleError, "Failed to update user role");
-      }
-    }
-
-    logger.info("User updated", {
-      userId: id,
-      updatedBy: data.user.id,
-      fields: Object.keys(parsed.data).filter((k) => k !== "id"),
+    const updated = await updateDashboardUser({
+      ...parsed.data,
+      actingUserId: authState.session.userId,
     });
 
-    return NextResponse.json({ user: updated.user });
+    logger.info("Dashboard user updated", {
+      targetUserId: updated.id,
+      updatedBy: authState.session.userId,
+    });
+
+    return NextResponse.json({
+      user: {
+        id: updated.id,
+        email: updated.email,
+        app_role: updated.role,
+        banned_until: updated.bannedUntil?.toISOString() || null,
+        created_at: updated.createdAt.toISOString(),
+        is_system_admin: updated.isSystemAdmin,
+      },
+    });
   } catch (error) {
-    return handleApiError(error, "Failed to update user");
+    return handleApiError(error, error instanceof Error ? error.message : "Failed to update user");
   }
 }
 
 export async function DELETE(request: NextRequest) {
   try {
-    const supabase = await createClient();
-    const { data, error } = await supabase.auth.getUser();
+    const authState = await requireAdminSession(request, "delete", ADMIN_USERS_WRITE_LIMIT);
+    if (authState.error) return authState.error;
 
-    if (error || !data?.user) {
-      return handleUnauthorized();
+    const id = String(request.nextUrl.searchParams.get("id") || "").trim();
+    if (!id) {
+      return handleValidationError([
+        { path: ["id"], message: "User id is required", code: "custom" },
+      ]);
     }
 
-    const writeRateLimited = applyAdminRateLimit(
-      request,
-      data.user.id,
-      "delete",
-      ADMIN_USERS_WRITE_LIMIT
-    );
-    if (writeRateLimited) return writeRateLimited;
-
-    if (!(await isAuthorized(data.user))) {
-      return handleForbidden("Not an admin user");
-    }
-
-    const id = request.nextUrl.searchParams.get("id");
-    const parsed = deleteUserSchema.safeParse({ id });
-    if (!parsed.success) {
-      return handleValidationError(parsed.error.issues);
-    }
-
-    const admin = createAdminClient();
-    const { error: deleteError } = await admin.auth.admin.deleteUser(parsed.data.id);
-
-    if (deleteError) {
-      return handleApiError(deleteError, "Failed to delete user");
-    }
-
-    logger.info("User deleted", {
-      userId: parsed.data.id,
-      deletedBy: data.user.id,
+    await deleteDashboardUser({
+      id,
+      actingUserId: authState.session.userId,
     });
 
-    return NextResponse.json({ success: true });
+    logger.info("Dashboard user deleted", {
+      targetUserId: id,
+      deletedBy: authState.session.userId,
+    });
+
+    return NextResponse.json({ ok: true });
   } catch (error) {
-    return handleApiError(error, "Failed to delete user");
+    return handleApiError(error, error instanceof Error ? error.message : "Failed to delete user");
   }
 }

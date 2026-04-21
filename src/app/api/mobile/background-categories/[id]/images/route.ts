@@ -5,7 +5,9 @@ import { getBackgroundCategoryOptions } from "@/lib/backgrounds/categorySettings
 import { getBackgroundCategorySettings } from "@/lib/backgrounds/categorySettings.server";
 import { listAllImportedBackgroundAssets } from "@/lib/editor/importedBackgrounds.server";
 import { logger } from "@/lib/logging/logger";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
 
@@ -46,10 +48,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
       locale,
     });
 
+    const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const images = result.items
       .map((item) => ({
-        previewUrl: String(item.thumbnailUrl || item.assetUrl || "").trim(),
-        url: String(item.assetUrl || item.thumbnailUrl || "").trim(),
+        previewUrl: mediaUrlResolver(item.thumbnailUrl || item.assetUrl),
+        url: mediaUrlResolver(item.assetUrl || item.thumbnailUrl),
       }))
       .filter((item) => item.url && item.previewUrl);
 
@@ -57,7 +60,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
       images,
       {
         headers: {
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
         },
       }
     );

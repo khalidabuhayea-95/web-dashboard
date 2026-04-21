@@ -11,6 +11,7 @@ import {
   Home,
   Pencil,
   SlidersHorizontal,
+  Smartphone,
   Tags,
   Users,
 } from "lucide-react";
@@ -20,6 +21,7 @@ const ICONS = {
   templates: Files,
   editor: Pencil,
   settings: SlidersHorizontal,
+  mobileSettings: Smartphone,
   users: Users,
   analytics: BarChart3,
   push: BellRing,

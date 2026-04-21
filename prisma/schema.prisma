@@ -14,33 +14,33 @@ datasource db {
 }
 
 model Template {
-  id              String             @id @default(uuid()) @db.Uuid
-  ownerId         String             @db.Uuid
-  name            String
-  slug            String             @unique
-  status          String             @default("draft")
-  version         Int                @default(1)
-  canvasSize      Json
-  category        String             @default("general")
-  subCategory     String             @default("general")
-  tags            Json
-  thumbnailDataUrl String?
-  previewVideoUrl String?
-  previewPosterUrl String?
-  previewStatus   String?
+  id                String             @id @default(uuid()) @db.Uuid
+  ownerId           String             @db.Uuid
+  name              String
+  slug              String             @unique
+  status            String             @default("draft")
+  version           Int                @default(1)
+  canvasSize        Json
+  category          String             @default("general")
+  subCategory       String             @default("general")
+  tags              Json
+  thumbnailDataUrl  String?
+  previewVideoUrl   String?
+  previewPosterUrl  String?
+  previewStatus     String?
   previewDurationMs Int?
-  previewVersion  Int?
-  previewError    String?
-  previewUpdatedAt DateTime?
-  data            Json
-  publishedAt DateTime?
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
-  revisions       TemplateRevision[]
+  previewVersion    Int?
+  previewError      String?
+  previewUpdatedAt  DateTime?
+  data              Json
+  publishedAt       DateTime?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  revisions         TemplateRevision[]
 
+  @@unique([ownerId, name])
   @@index([ownerId])
   @@index([status])
-  @@unique([ownerId, name])
 }
 
 model TemplateRevision {
@@ -118,4 +118,89 @@ model AppSetting {
   value     Json
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+}
+
+model DashboardUser {
+  id              String                 @id @default(uuid()) @db.Uuid
+  name            String
+  email           String
+  normalizedEmail String                 @unique
+  passwordHash    String
+  role            String                 @default("designer")
+  isSystemAdmin   Boolean                @default(false)
+  bannedUntil     DateTime?
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+  invitesCreated  DashboardInviteToken[] @relation("DashboardInviteCreator")
+
+  @@unique([email])
+  @@index([role])
+  @@index([createdAt])
+}
+
+model DashboardInviteToken {
+  id              String         @id @default(uuid()) @db.Uuid
+  email           String
+  normalizedEmail String
+  tokenHash       String         @unique
+  role            String         @default("designer")
+  expiresAt       DateTime
+  consumedAt      DateTime?
+  createdByUserId String?        @db.Uuid
+  createdAt       DateTime       @default(now())
+  createdByUser   DashboardUser? @relation("DashboardInviteCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([normalizedEmail])
+  @@index([expiresAt])
+}
+
+model MobileUser {
+  id              String               @id @default(uuid()) @db.Uuid
+  name            String?
+  email           String?
+  normalizedEmail String?
+  emailVerified   Boolean              @default(false)
+  lastLoginAt     DateTime?
+  createdAt       DateTime             @default(now())
+  updatedAt       DateTime             @updatedAt
+  identities      MobileIdentity[]
+  refreshTokens   MobileRefreshToken[]
+
+  @@index([normalizedEmail])
+  @@index([createdAt])
+}
+
+model MobileIdentity {
+  id              String     @id @default(uuid()) @db.Uuid
+  mobileUserId    String     @db.Uuid
+  provider        String
+  providerUserId  String
+  email           String?
+  normalizedEmail String?
+  emailVerified   Boolean    @default(false)
+  displayName     String?
+  profile         Json?
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  mobileUser      MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerUserId])
+  @@index([mobileUserId])
+  @@index([normalizedEmail])
+}
+
+model MobileRefreshToken {
+  id           String     @id @default(uuid()) @db.Uuid
+  mobileUserId String     @db.Uuid
+  tokenHash    String     @unique
+  userAgent    String?
+  ipAddress    String?
+  expiresAt    DateTime
+  revokedAt    DateTime?
+  lastUsedAt   DateTime?
+  createdAt    DateTime   @default(now())
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@index([mobileUserId])
+  @@index([expiresAt])
 }

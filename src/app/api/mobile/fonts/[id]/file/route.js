@@ -6,7 +6,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { createLogger } from "@/lib/logging/logger";
-import { createAdminClient } from "@/lib/supabase/admin";
+import { resolveStoredObjectUrl } from "@/lib/storage/objectStorage.server";
 import {
   getFontFamilyById,
   isMobileCompatibleFontFile,
@@ -55,10 +55,7 @@ function getStoragePublicUrl(file) {
   const bucket = String(file?.storageBucket || "").trim();
   const path = String(file?.storagePath || "").trim();
   if (!bucket || !path) return "";
-
-  const admin = createAdminClient();
-  const { data } = admin.storage.from(bucket).getPublicUrl(path);
-  return String(data?.publicUrl || "").trim();
+  return resolveStoredObjectUrl(bucket, path);
 }
 
 export async function GET(request, { params }) {

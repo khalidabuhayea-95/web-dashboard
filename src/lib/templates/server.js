@@ -1,12 +1,12 @@
 import { NextResponse } from "next/server";
 
-import { createClient } from "@/lib/supabase/server";
+import { getDashboardSession } from "@/lib/auth/roles";
 import {
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
 } from "@/lib/templates/templateSettings";
 
-const EDITOR_ROLES = new Set(["admin", "editor"]);
+const EDITOR_ROLES = new Set(["admin", "designer"]);
 
 export function normalizeSlug(value) {
   return String(value || "")
@@ -112,19 +112,16 @@ export function mapTemplatePreview(template) {
 }
 
 export async function getEditorSession() {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-
-  if (error || !data?.claims?.sub) {
+  const session = await getDashboardSession();
+  if (!session?.userId) {
     return { error: NextResponse.json({ error: "Unauthorized" }, { status: 401 }) };
   }
 
-  const role = data.claims.user_role || "editor";
-  if (!EDITOR_ROLES.has(role)) {
+  if (!EDITOR_ROLES.has(session.role)) {
     return { error: NextResponse.json({ error: "Forbidden" }, { status: 403 }) };
   }
 
-  return { userId: data.claims.sub, role };
+  return { userId: session.userId, role: session.role };
 }
 
 export function canAccessTemplate(session, template) {

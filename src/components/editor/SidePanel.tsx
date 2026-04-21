@@ -1642,7 +1642,6 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     [templateQueryKey]
   );
   const loadedTemplateSignatureRef = useRef("");
-  const previousSelectedCountRef = useRef(selectedIds.length);
 
   const updateTemplateQueryInUrl = useCallback(
     (templateId: string, updatedAt = "") => {
@@ -1762,14 +1761,6 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [animationDurationDraft, setAnimationDurationDraft] = useState("");
   const activeBackgroundColor = String(activePage?.background?.color || "#ffffff").trim();
   const activeBackgroundImageUri = String(activePage?.background?.imageUri || "").trim();
-
-  useEffect(() => {
-    const previousSelectedCount = previousSelectedCountRef.current;
-    if (previousSelectedCount === 0 && selectedIds.length > 0 && activeTab !== "animation") {
-      setSidebarTab("animation");
-    }
-    previousSelectedCountRef.current = selectedIds.length;
-  }, [activeTab, selectedIds.length, setSidebarTab]);
 
   useEffect(() => {
     setAnimationDurationDraft(selectedAnimationDurationMs === null ? "" : String(selectedAnimationDurationMs));

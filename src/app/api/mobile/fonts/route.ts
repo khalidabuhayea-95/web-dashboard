@@ -11,6 +11,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { handleApiError } from "@/lib/api/errors";
+import { MOBILE_PUBLIC_JSON_CACHE_CATALOG } from "@/lib/mobile/cacheControl";
 
 export const runtime = "nodejs";
 const logger = createLogger("api.mobile.fonts");
@@ -94,7 +95,7 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_CATALOG,
         },
       }
     );

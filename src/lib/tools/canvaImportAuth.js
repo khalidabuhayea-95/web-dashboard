@@ -20,7 +20,6 @@ function fromBase64Url(input) {
 function getTokenSecret() {
   const secret =
     process.env.CANVA_IMPORT_TOKEN_SECRET ||
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
     process.env.DATABASE_URL;
   if (!secret) {
     throw new Error("Missing token secret.");

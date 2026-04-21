@@ -5,7 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
-import { Input, Label, Select } from "@/components/ui/form";
+import { Input, Label } from "@/components/ui/form";
 import {
   Table,
   TableBody,
@@ -17,15 +17,12 @@ import {
 
 const initialForm = {
   email: "",
-  role: "editor",
-  redirectTo: "",
 };
-
-const roleOptions = ["admin", "editor"];
 
 export default function UsersPage() {
   const [users, setUsers] = useState([]);
   const [status, setStatus] = useState("Loading users...");
+  const [inviteUrl, setInviteUrl] = useState("");
   const [page, setPage] = useState(1);
   const [perPage] = useState(20);
   const [total, setTotal] = useState(0);
@@ -34,7 +31,6 @@ export default function UsersPage() {
   const [editing, setEditing] = useState({
     email: "",
     password: "",
-    role: "editor",
   });
 
   const totalPages = useMemo(() => {
@@ -45,9 +41,7 @@ export default function UsersPage() {
   const loadUsers = useCallback(async () => {
     setStatus("Loading users...");
     try {
-      const response = await fetch(
-        `/api/admin/users?page=${page}&perPage=${perPage}`
-      );
+      const response = await fetch(`/api/admin/users?page=${page}&perPage=${perPage}`);
       if (!response.ok) {
         const errorPayload = await response.json();
         throw new Error(errorPayload?.error || "Failed to load users.");
@@ -69,7 +63,7 @@ export default function UsersPage() {
       await loadUsers();
     };
 
-    run();
+    void run();
 
     return () => {
       isMounted = false;
@@ -82,7 +76,7 @@ export default function UsersPage() {
       setStatus("Email is required.");
       return;
     }
-    setStatus("Sending invite...");
+    setStatus("Creating registration link...");
     try {
       const response = await fetch("/api/admin/users", {
         method: "POST",
@@ -91,13 +85,18 @@ export default function UsersPage() {
       });
       const payload = await response.json();
       if (!response.ok) {
-        throw new Error(payload?.error || "Failed to invite user.");
+        throw new Error(payload?.error || "Failed to create registration link.");
       }
       setForm(initialForm);
-      setStatus("Invite sent.");
+      setInviteUrl(String(payload?.invite?.url || ""));
+      setStatus(
+        payload?.invite?.mode === "setup"
+          ? "Password setup link created."
+          : "Registration link created."
+      );
       await loadUsers();
     } catch (error) {
-      setStatus(error.message || "Failed to invite user.");
+      setStatus(error.message || "Failed to create registration link.");
     }
   };
 
@@ -106,13 +105,12 @@ export default function UsersPage() {
     setEditing({
       email: user.email ?? "",
       password: "",
-      role: user.app_role ?? "editor",
     });
   };
 
   const cancelEdit = () => {
     setEditingId(null);
-    setEditing({ email: "", password: "", role: "editor" });
+    setEditing({ email: "", password: "" });
   };
 
   const handleUpdate = async (event) => {
@@ -176,27 +174,34 @@ export default function UsersPage() {
     }
   };
 
+  const handleCopyInvite = async () => {
+    if (!inviteUrl) return;
+    try {
+      await navigator.clipboard.writeText(inviteUrl);
+      setStatus("Registration link copied.");
+    } catch (_error) {
+      setStatus("Unable to copy the registration link automatically.");
+    }
+  };
+
   return (
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-semibold">Users</h1>
         <p className="text-sm text-muted-foreground">
-          Manage team access, roles, and account status.
+          Manage dashboard access, invite designers, and protect the system admin account.
         </p>
       </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>Invite new editors</CardTitle>
+          <CardTitle>Invite new designers</CardTitle>
           <CardSubtitle>
-            Send secure invites and assign admin or editor access.
+            Generate a one-time registration or password-setup link for a designer account.
           </CardSubtitle>
         </CardHeader>
         <CardContent className="space-y-3">
-          <form
-            className="grid gap-3 md:grid-cols-[1fr_180px_1fr_140px]"
-            onSubmit={handleInvite}
-          >
+          <form className="grid gap-3 md:grid-cols-[1fr_140px]" onSubmit={handleInvite}>
             <div className="space-y-2">
               <Label>Email</Label>
               <Input
@@ -209,47 +214,24 @@ export default function UsersPage() {
                 required
               />
             </div>
-            <div className="space-y-2">
-              <Label>Role</Label>
-              <Select
-                value={form.role}
-                onChange={(event) =>
-                  setForm((prev) => ({ ...prev, role: event.target.value }))
-                }
-              >
-                {roleOptions.map((role) => (
-                  <option key={role} value={role}>
-                    {role}
-                  </option>
-                ))}
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Redirect URL</Label>
-              <Input
-                placeholder="Optional redirect after invite"
-                type="url"
-                value={form.redirectTo}
-                onChange={(event) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    redirectTo: event.target.value,
-                  }))
-                }
-              />
-            </div>
             <div className="flex items-end">
-              <Button type="submit">Send invite</Button>
+              <Button type="submit">Create invite</Button>
             </div>
           </form>
 
-          <div className="text-xs text-muted-foreground">
-            Invites appear in Mailpit at http://127.0.0.1:54324.
-          </div>
-
-          {status ? (
-            <div className="text-sm text-muted-foreground">{status}</div>
+          {inviteUrl ? (
+            <div className="space-y-2 rounded-xl border border-border bg-muted/20 p-3">
+              <div className="text-xs font-medium text-foreground">Registration link</div>
+              <Input value={inviteUrl} readOnly />
+              <div className="flex gap-2">
+                <Button type="button" variant="secondary" onClick={handleCopyInvite}>
+                  Copy link
+                </Button>
+              </div>
+            </div>
           ) : null}
+
+          {status ? <div className="text-sm text-muted-foreground">{status}</div> : null}
         </CardContent>
       </Card>
 
@@ -281,20 +263,19 @@ export default function UsersPage() {
                 return (
                   <TableRow key={user.id}>
                     <TableCell>
-                      <div className="font-semibold">
-                        {user.email || user.id}
-                      </div>
+                      <div className="font-semibold">{user.name || user.email || user.id}</div>
+                      <div className="text-xs text-muted-foreground">{user.email || user.id}</div>
                       <div className="text-xs text-muted-foreground">
-                        Joined {user.created_at}
+                        Joined {new Date(user.created_at).toLocaleDateString()}
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="neutral">
-                        {user.app_role || "editor"}
-                      </Badge>
+                      <Badge variant="neutral">{user.app_role || "designer"}</Badge>
                     </TableCell>
                     <TableCell>
-                      {isBanned ? (
+                      {user.is_system_admin ? (
+                        <Badge variant="neutral">System admin</Badge>
+                      ) : isBanned ? (
                         <Badge variant="destructive">Banned</Badge>
                       ) : (
                         <Badge variant="success">Active</Badge>
@@ -302,10 +283,7 @@ export default function UsersPage() {
                     </TableCell>
                     <TableCell>
                       {editingId === user.id ? (
-                        <form
-                          className="grid gap-2"
-                          onSubmit={handleUpdate}
-                        >
+                        <form className="grid gap-2" onSubmit={handleUpdate}>
                           <Input
                             placeholder="Email"
                             type="email"
@@ -328,28 +306,9 @@ export default function UsersPage() {
                               }))
                             }
                           />
-                          <Select
-                            value={editing.role}
-                            onChange={(event) =>
-                              setEditing((prev) => ({
-                                ...prev,
-                                role: event.target.value,
-                              }))
-                            }
-                          >
-                            {roleOptions.map((role) => (
-                              <option key={role} value={role}>
-                                {role}
-                              </option>
-                            ))}
-                          </Select>
                           <div className="flex flex-wrap gap-2">
                             <Button type="submit">Save</Button>
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              onClick={cancelEdit}
-                            >
+                            <Button type="button" variant="ghost" onClick={cancelEdit}>
                               Cancel
                             </Button>
                           </div>
@@ -360,6 +319,7 @@ export default function UsersPage() {
                             type="button"
                             variant="secondary"
                             onClick={() => startEdit(user)}
+                            disabled={user.is_system_admin}
                           >
                             Edit
                           </Button>
@@ -367,6 +327,7 @@ export default function UsersPage() {
                             type="button"
                             variant="ghost"
                             onClick={() => handleBanToggle(user)}
+                            disabled={user.is_system_admin}
                           >
                             {isBanned ? "Unban" : "Ban"}
                           </Button>
@@ -374,6 +335,7 @@ export default function UsersPage() {
                             type="button"
                             variant="destructive"
                             onClick={() => handleDelete(user.id)}
+                            disabled={user.is_system_admin}
                           >
                             Delete
                           </Button>
@@ -387,9 +349,7 @@ export default function UsersPage() {
           </Table>
 
           {!status && users.length === 0 ? (
-            <div className="mt-4 text-sm text-muted-foreground">
-              No users yet.
-            </div>
+            <div className="mt-4 text-sm text-muted-foreground">No users yet.</div>
           ) : null}
 
           <div className="mt-6 flex items-center justify-between text-xs text-muted-foreground">

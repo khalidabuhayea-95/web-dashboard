@@ -1,9 +1,13 @@
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getPublicStorageBucketName,
+  getStoragePublicHostnames,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
 
 export const IMPORT_ASSET_MANIFEST_VERSION = 1;
 
-const IMPORT_MEDIA_BUCKET = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const IMPORT_MEDIA_BUCKET = getPublicStorageBucketName();
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 250 * 1024 * 1024;
 const DEFAULT_FETCH_TIMEOUT_MS = 45_000;
@@ -237,22 +241,7 @@ function looksLikeAssetField(fieldName, value) {
 }
 
 function getSourceHostsFromEnv() {
-  const appUrlHost = (() => {
-    try {
-      return new URL(process.env.NEXT_PUBLIC_APP_URL).host;
-    } catch (_error) {
-      return "";
-    }
-  })();
-  const supabaseUrlHost = (() => {
-    try {
-      return new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).host;
-    } catch (_error) {
-      return "";
-    }
-  })();
-
-  return new Set([appUrlHost, supabaseUrlHost].filter(Boolean));
+  return getStoragePublicHostnames();
 }
 
 function isInternalHost(hostname, knownHosts) {
@@ -642,27 +631,6 @@ function validateAssetBytes({ kind, bytes }) {
   }
 }
 
-async function ensurePublicBucket(admin) {
-  const { data, error } = await admin.storage.getBucket(IMPORT_MEDIA_BUCKET);
-  if (error) {
-    const create = await admin.storage.createBucket(IMPORT_MEDIA_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_VIDEO_BYTES}`,
-    });
-    if (create.error && !asString(create.error.message).toLowerCase().includes("exists")) {
-      throw create.error;
-    }
-    return;
-  }
-
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(IMPORT_MEDIA_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_VIDEO_BYTES}`,
-    });
-  }
-}
-
 function cloneSerializable(value) {
   if (value == null) return value;
   return JSON.parse(JSON.stringify(value));
@@ -686,19 +654,11 @@ export async function sanitizeImportPayloadAssets({
 
   const safeSourceLabel = sanitizePathSegment(sourceLabel, "canva-import");
   const knownInternalHosts = getSourceHostsFromEnv();
-  const admin = createAdminClient();
   const uploadCache = new Map();
-  let bucketReady = false;
 
   const manifestAssets = [];
   const warnings = [];
   let changed = false;
-
-  async function ensureBucketReady() {
-    if (bucketReady) return;
-    await ensurePublicBucket(admin);
-    bucketReady = true;
-  }
 
   async function uploadSource(value, fieldPath, fieldName) {
     const source = asString(value);
@@ -808,8 +768,6 @@ export async function sanitizeImportPayloadAssets({
     const kind = detectAssetKind({ mimeType, extension, fieldName });
 
     validateAssetBytes({ kind, bytes });
-    await ensureBucketReady();
-
     const objectPath = makeObjectPath({
       ownerId: safeOwnerId,
       kind,
@@ -818,20 +776,16 @@ export async function sanitizeImportPayloadAssets({
     });
 
     const uploadMimeType = mimeType || mimeTypeFromExtension(extension) || "application/octet-stream";
-    const { error: uploadError } = await admin.storage
-      .from(IMPORT_MEDIA_BUCKET)
-      .upload(objectPath, bytes, {
-        contentType: uploadMimeType,
-        cacheControl: "31536000",
-        upsert: false,
-      });
-
-    if (uploadError) {
-      throw new Error(uploadError.message || "asset upload failed");
-    }
-
-    const { data: publicUrlData } = admin.storage.from(IMPORT_MEDIA_BUCKET).getPublicUrl(objectPath);
-    const publicUrl = asString(publicUrlData?.publicUrl);
+    const uploaded = await uploadObject({
+      bucket: IMPORT_MEDIA_BUCKET,
+      key: objectPath,
+      body: bytes,
+      contentType: uploadMimeType,
+      cacheControl: "public, max-age=31536000, immutable",
+      upsert: false,
+      skipExistenceCheck: true,
+    });
+    const publicUrl = asString(uploaded.url);
     if (!publicUrl) {
       throw new Error("uploaded asset URL is unavailable");
     }

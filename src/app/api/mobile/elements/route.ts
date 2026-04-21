@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { resolveMobileLocale } from "@/lib/mobile/locale";
-import { listImportedElementAssets } from "@/lib/editor/importedElements.server";
 import { handleApiError } from "@/lib/api/errors";
+import { listImportedElementAssets } from "@/lib/editor/importedElements.server";
 import { logger } from "@/lib/logging/logger";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
 
@@ -48,6 +50,7 @@ export async function GET(request: NextRequest) {
       locale,
     });
 
+    const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const elements = result.items.map((item: any) => ({
       id: item.id,
       source: item.source,
@@ -64,8 +67,8 @@ export async function GET(request: NextRequest) {
       labelsEn: item.labelsEn,
       labelsAr: item.labelsAr,
       slug: item.slug,
-      assetUrl: item.assetUrl,
-      thumbnailUrl: item.thumbnailUrl,
+      assetUrl: mediaUrlResolver(item.assetUrl),
+      thumbnailUrl: mediaUrlResolver(item.thumbnailUrl),
       width: item.width,
       height: item.height,
       freeSvg: item.freeSvg,
@@ -86,7 +89,7 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, max-age=60",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
         },
       }
     );

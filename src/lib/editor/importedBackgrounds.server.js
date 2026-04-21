@@ -141,6 +141,8 @@ async function ensureImportedBackgroundsSchema() {
   if (ensureSchemaPromise) return ensureSchemaPromise;
 
   ensureSchemaPromise = (async () => {
+    // Keep the runtime guard for older databases, but the canonical schema now
+    // lives in Prisma migrations so plain PostgreSQL restores are complete.
     for (const statement of IMPORTED_BACKGROUNDS_SCHEMA_STATEMENTS) {
       await prisma.$executeRawUnsafe(statement);
     }

@@ -1,6 +1,9 @@
 import { randomUUID } from "node:crypto";
 
-import { createClient } from "@supabase/supabase-js";
+import {
+  getPublicStorageBucketName,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 
 export const DEFAULT_BACKGROUND_PREVIEW_MAX_DIMENSION = 512;
 
@@ -37,7 +40,7 @@ function normalizeMimeType(value) {
 }
 
 function getDefaultBucket() {
-  return process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+  return getPublicStorageBucketName();
 }
 
 function inferContentType(url, headerValue) {
@@ -62,31 +65,6 @@ function extensionFromMimeType(mimeType) {
   if (source.includes("gif")) return "gif";
   if (source.includes("svg")) return "svg";
   return "bin";
-}
-
-function createStorageAdminClient() {
-  return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.SUPABASE_SECRET_KEY);
-}
-
-async function ensurePublicBucket(admin, bucket) {
-  const { data, error } = await admin.storage.getBucket(bucket);
-  if (error) {
-    const created = await admin.storage.createBucket(bucket, {
-      public: true,
-      fileSizeLimit: "104857600",
-    });
-    if (created.error && !String(created.error.message || "").toLowerCase().includes("exists")) {
-      throw created.error;
-    }
-    return;
-  }
-
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(bucket, {
-      public: true,
-      fileSizeLimit: "104857600",
-    });
-  }
 }
 
 function preferredPreviewMimeType({ inputMimeType = "", format = "", hasAlpha = false }) {
@@ -270,20 +248,16 @@ export async function uploadBackgroundPreviewToStorage({
   const dd = String(now.getUTCDate()).padStart(2, "0");
   const objectPath = `users/${safeOwnerId}/elements/background-previews/${yyyy}/${mm}/${dd}/${safeSourceAssetId}-${randomUUID()}.${extension}`;
 
-  const admin = createStorageAdminClient();
-  await ensurePublicBucket(admin, bucket);
-
-  const { error } = await admin.storage.from(bucket).upload(objectPath, bytes, {
+  const uploaded = await uploadObject({
+    bucket,
+    key: objectPath,
+    body: bytes,
     contentType: safeMimeType,
     upsert: false,
-    cacheControl: "31536000",
+    cacheControl: "public, max-age=31536000, immutable",
+    skipExistenceCheck: true,
   });
-  if (error) {
-    throw new Error(error.message || "Failed to upload background preview.");
-  }
-
-  const { data } = admin.storage.from(bucket).getPublicUrl(objectPath);
-  const publicUrl = sanitizeUrl(data?.publicUrl);
+  const publicUrl = sanitizeUrl(uploaded.url);
   if (!publicUrl) {
     throw new Error("Background preview URL is unavailable.");
   }

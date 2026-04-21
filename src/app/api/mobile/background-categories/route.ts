@@ -5,7 +5,9 @@ import { getBackgroundCategoryOptions } from "@/lib/backgrounds/categorySettings
 import { getBackgroundCategorySettings } from "@/lib/backgrounds/categorySettings.server";
 import { countImportedBackgroundAssetsByCategory } from "@/lib/editor/importedBackgrounds.server";
 import { logger } from "@/lib/logging/logger";
+import { MOBILE_PUBLIC_JSON_CACHE_CATALOG } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
 
@@ -24,13 +26,14 @@ export async function GET(request: NextRequest) {
       getBackgroundCategorySettings(),
       countImportedBackgroundAssetsByCategory({ source }),
     ]);
+    const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const categories = getBackgroundCategoryOptions(settings, locale)
       .filter((item) => item.published !== false)
       .map((item) => ({
         id: item.id,
         value: item.value,
         label: item.label,
-        thumbnailUrl: String(item.thumbnailUrl || "").trim(),
+        thumbnailUrl: mediaUrlResolver(item.thumbnailUrl),
         published: item.published !== false,
         backgroundCount: Number(counts[item.value] || 0),
       }));
@@ -42,7 +45,7 @@ export async function GET(request: NextRequest) {
       },
       {
         headers: {
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_CATALOG,
         },
       }
     );

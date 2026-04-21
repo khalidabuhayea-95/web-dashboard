@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
-import { createTemplateAssetResolver } from "@/lib/mobile/templateAssets";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import {
+  createMobilePublicMediaUrlResolver,
+  createTemplateAssetResolver,
+} from "@/lib/mobile/templateAssets";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import {
   localizeCategoryOptions,
@@ -102,6 +106,8 @@ export async function GET(request) {
         select: {
           id: true,
           name: true,
+          version: true,
+          updatedAt: true,
           canvasSize: true,
           thumbnailDataUrl: true,
           previewVideoUrl: true,
@@ -113,11 +119,16 @@ export async function GET(request) {
     )
   );
 
+  const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
   const subCategories = subCategoryDescriptors.map((descriptor, index) => {
     const rows = templateRowsPerSubCategory[index] || [];
     const templates = rows.map((template) => {
       const assetResolver = createTemplateAssetResolver(request, template);
-      const mobileTemplate = toMobileTemplate(template, { assetResolver, includeProject: false });
+      const mobileTemplate = toMobileTemplate(template, {
+        assetResolver,
+        mediaUrlResolver,
+        includeProject: false,
+      });
       const previewStatus = String(mobileTemplate.preview?.status || "").trim().toLowerCase();
       const preview =
         previewStatus === "ready"
@@ -161,7 +172,7 @@ export async function GET(request) {
     },
     {
       headers: {
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
       },
     }
   );

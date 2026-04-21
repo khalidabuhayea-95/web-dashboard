@@ -78,7 +78,7 @@ export default function DashboardClient({ role }) {
                 label: "Templates last 7 days",
                 value: stats?.templatesLast7Days ?? "-",
               },
-              { label: "Active editors", value: stats?.activeEditors ?? "-" },
+              { label: "Active designers", value: stats?.activeEditors ?? "-" },
               {
                 label: `Imports (${stats?.importJobs?.lookbackHours ?? 24}h)`,
                 value: stats?.importJobs?.lookbackCount ?? "-",

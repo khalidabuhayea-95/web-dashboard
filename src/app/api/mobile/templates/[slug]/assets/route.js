@@ -8,6 +8,12 @@ import {
   renderShapeLayerToPngBuffer,
 } from "@/lib/templates/shapeRaster";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
+import {
+  getObject,
+  getPublicObjectProxyUrl,
+  getPublicStorageBucketName,
+  parsePublicObjectKey,
+} from "@/lib/storage/objectStorage.server";
 
 export const runtime = "nodejs";
 
@@ -38,6 +44,22 @@ async function rasterizeSvgBytes(svgBytes) {
   const sharpModule = await import("sharp");
   const sharp = sharpModule.default || sharpModule;
   return sharp(svgBytes).png().toBuffer();
+}
+
+async function objectBodyToBuffer(body) {
+  if (!body) return null;
+  if (typeof body.transformToByteArray === "function") {
+    return Buffer.from(await body.transformToByteArray());
+  }
+  if (typeof body.arrayBuffer === "function") {
+    return Buffer.from(await body.arrayBuffer());
+  }
+
+  const chunks = [];
+  for await (const chunk of body) {
+    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+  }
+  return Buffer.concat(chunks);
 }
 
 function numberOr(value, fallback = 0) {
@@ -94,6 +116,12 @@ function resolveFramePreviewLayout(object) {
 async function readImageSourceBytes(source) {
   const raw = String(source || "").trim();
   if (!raw) return null;
+
+  const publicObjectKey = parsePublicObjectKey(raw);
+  if (publicObjectKey) {
+    const object = await getObject(getPublicStorageBucketName(), publicObjectKey);
+    return objectBodyToBuffer(object.Body);
+  }
 
   if (/^https?:\/\//i.test(raw)) {
     const response = await fetch(raw);
@@ -308,6 +336,12 @@ export async function GET(request, { params }) {
 
   if (!source) {
     return NextResponse.json({ error: "Asset not found." }, { status: 404 });
+  }
+
+  const publicObjectKey = parsePublicObjectKey(source);
+  if (publicObjectKey) {
+    const proxyUrl = new URL(getPublicObjectProxyUrl(publicObjectKey), request.url);
+    return NextResponse.redirect(proxyUrl, 307);
   }
 
   if (/^https?:\/\//i.test(source)) {

@@ -13,6 +13,10 @@ import {
 } from "@/lib/editor/importedElements.server";
 import { handleApiError, handleBadRequest, handleNotFound } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import {
+  restorePublicObjectUrlFromClient,
+  rewritePublicObjectUrlsForClient,
+} from "@/lib/storage/objectStorage.server";
 
 const IMPORTED_ELEMENTS_RATE_LIMIT = {
   limit: 120,
@@ -73,7 +77,7 @@ export async function GET(request: NextRequest) {
       locale,
     });
 
-    return NextResponse.json(result, {
+    return NextResponse.json(rewritePublicObjectUrlsForClient(result), {
       headers: {
         "Cache-Control": "no-store",
       },
@@ -165,8 +169,8 @@ export async function POST(request: NextRequest) {
 
     const source = String(body?.source || "").trim().toLowerCase() || "upload";
     const sourceAssetId = String(body?.sourceAssetId || body?.source_asset_id || "").trim();
-    const assetUrl = String(body?.assetUrl || body?.asset_url || "").trim();
-    const thumbnailUrl = String(body?.thumbnailUrl || body?.thumbnail_url || assetUrl).trim();
+    const assetUrl = restorePublicObjectUrlFromClient(body?.assetUrl || body?.asset_url || "");
+    const thumbnailUrl = restorePublicObjectUrlFromClient(body?.thumbnailUrl || body?.thumbnail_url || assetUrl);
     const title = String(body?.title || body?.titleEn || body?.title_en || "").trim();
     const kind = String(body?.kind || "vector").trim().toLowerCase() || "vector";
 
@@ -210,7 +214,7 @@ export async function POST(request: NextRequest) {
       createdSourceAt: body?.createdSourceAt || body?.created_source_at || null,
     });
 
-    return NextResponse.json(result, {
+    return NextResponse.json(rewritePublicObjectUrlsForClient(result), {
       headers: {
         "Cache-Control": "no-store",
       },

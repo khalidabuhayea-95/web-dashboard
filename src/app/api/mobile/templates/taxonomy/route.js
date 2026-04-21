@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { MOBILE_PUBLIC_JSON_CACHE_CATALOG } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import { localizeCategoryOptions, prepareMobileTaxonomy } from "@/lib/mobile/taxonomy";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
@@ -16,7 +17,7 @@ export async function GET(request) {
     categories,
   }, {
     headers: {
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_CATALOG,
     },
   });
 }

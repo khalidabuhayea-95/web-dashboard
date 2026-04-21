@@ -16,7 +16,10 @@ import {
   readEditorFontLibraryRaw,
   writeEditorFontLibraryRaw,
 } from "@/lib/editor/fontLibraryStore.server";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getPublicStorageBucketName,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { createHash, randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import path from "node:path";
@@ -57,7 +60,7 @@ const FONT_CONVERTER_SCRIPT_PATH = path.join(
   "scripts",
   "convert-font-to-mobile.mjs"
 );
-const FONT_STORAGE_BUCKET = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const FONT_STORAGE_BUCKET = getPublicStorageBucketName();
 
 function isFontConversionRuntimeSupported() {
   const runtime = String(process.env.NEXT_RUNTIME || "").toLowerCase();
@@ -625,26 +628,6 @@ export function resolveEditorCustomFontMobileVariant(font) {
   return null;
 }
 
-async function ensureFontStorageBucket(admin) {
-  const { data, error } = await admin.storage.getBucket(FONT_STORAGE_BUCKET);
-  if (error) {
-    const create = await admin.storage.createBucket(FONT_STORAGE_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_CUSTOM_FONT_BYTES}`,
-    });
-    if (create.error && !String(create.error.message || "").toLowerCase().includes("exists")) {
-      throw create.error;
-    }
-    return;
-  }
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(FONT_STORAGE_BUCKET, {
-      public: true,
-      fileSizeLimit: `${MAX_CUSTOM_FONT_BYTES}`,
-    });
-  }
-}
-
 function sanitizeStorageFileName(value, fallback = "font.ttf") {
   const source = String(value || fallback).trim() || fallback;
   return source
@@ -676,18 +659,15 @@ async function uploadFontVariantDataUrl({ fontId, family, kind, variant }) {
     `${family || "font"}.${extensionForFormat(variant.format || "ttf")}`
   );
   const objectPath = `fonts/${fontId}/${kind}/${checksum.slice(0, 16)}-${safeFileName}`;
-  const admin = createAdminClient();
-  await ensureFontStorageBucket(admin);
-  const { error } = await admin.storage.from(FONT_STORAGE_BUCKET).upload(objectPath, parsed.bytes, {
-    cacheControl: "31536000",
+  const uploaded = await uploadObject({
+    bucket: FONT_STORAGE_BUCKET,
+    key: objectPath,
+    body: parsed.bytes,
+    cacheControl: "public, max-age=31536000, immutable",
     contentType: variant.mimeType || parsed.mimeType || "application/octet-stream",
     upsert: true,
   });
-  if (error) {
-    throw error;
-  }
-  const { data } = admin.storage.from(FONT_STORAGE_BUCKET).getPublicUrl(objectPath);
-  const publicUrl = String(data?.publicUrl || "").trim();
+  const publicUrl = String(uploaded.url || "").trim();
   if (!publicUrl) {
     throw new Error("Uploaded font URL is unavailable.");
   }

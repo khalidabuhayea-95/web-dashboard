@@ -1,16 +1,20 @@
 import { createLogger } from "@/lib/logging/logger";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  createSignedDownloadUrl,
+  deleteObjects,
+  getObjectRemovalOutputBucketName,
+  getPrivateStorageBucketName,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 
 import {
   createProcessingFailedError,
   createProviderUnavailableError,
 } from "./errors";
 
-const INPUT_BUCKET = process.env.OBJECT_REMOVE_INPUT_BUCKET || "mobile-media-processing";
-const OUTPUT_BUCKET =
-  process.env.OBJECT_REMOVE_OUTPUT_BUCKET || process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const INPUT_BUCKET = getPrivateStorageBucketName();
+const OUTPUT_BUCKET = getObjectRemovalOutputBucketName();
 const DEFAULT_INPUT_URL_EXPIRY_SECONDS = 15 * 60;
-const DEFAULT_FILE_SIZE_LIMIT = `${50 * 1024 * 1024}`;
 
 const logger = createLogger("media.object-remove.storage");
 
@@ -65,46 +69,24 @@ function makeObjectPath(jobId: string, kind: string, fileName: string, mimeType:
   return `object-remove/jobs/${year}/${month}/${day}/${safeJobId}/${kind}-${safeBase}.${extension}`;
 }
 
-async function ensureBucket(bucket: string, isPublic: boolean) {
-  const admin = createAdminClient();
-  const { data, error } = await admin.storage.getBucket(bucket);
-  if (error) {
-    const created = await admin.storage.createBucket(bucket, {
-      public: isPublic,
-      fileSizeLimit: DEFAULT_FILE_SIZE_LIMIT,
-    });
-    if (created.error && !String(created.error.message || "").toLowerCase().includes("exists")) {
-      throw createProviderUnavailableError(created.error.message || "Failed to prepare storage bucket.");
-    }
-    return;
-  }
-
-  if (data && data.public !== isPublic) {
-    const updated = await admin.storage.updateBucket(bucket, {
-      public: isPublic,
-      fileSizeLimit: DEFAULT_FILE_SIZE_LIMIT,
-    });
-    if (updated.error) {
-      throw createProviderUnavailableError(updated.error.message || "Failed to update storage bucket.");
-    }
-  }
-}
-
 async function uploadBytesToBucket(bucket: string, objectPath: string, bytes: Buffer, mimeType: string) {
-  const admin = createAdminClient();
-  const { error } = await admin.storage.from(bucket).upload(objectPath, bytes, {
-    contentType: mimeType || "application/octet-stream",
-    cacheControl: "3600",
-    upsert: false,
-  });
-
-  if (error) {
-    throw createProcessingFailedError(error.message || "Failed to upload object removal asset.");
+  try {
+    return await uploadObject({
+      bucket,
+      key: objectPath,
+      body: bytes,
+      contentType: mimeType || "application/octet-stream",
+      cacheControl: "public, max-age=3600",
+      upsert: false,
+    });
+  } catch (error) {
+    throw createProcessingFailedError(
+      error instanceof Error ? error.message : "Failed to upload object removal asset."
+    );
   }
 }
 
 export async function uploadObjectRemovalInputAsset(input: UploadStoredAssetInput) {
-  await ensureBucket(INPUT_BUCKET, false);
   const path = makeObjectPath(input.jobId, input.kind, input.fileName, input.mimeType);
   await uploadBytesToBucket(INPUT_BUCKET, path, input.bytes, input.mimeType);
 
@@ -123,26 +105,23 @@ export async function createObjectRemovalSignedInputUrl(
   asset: StoredObject,
   expiresInSeconds = DEFAULT_INPUT_URL_EXPIRY_SECONDS
 ) {
-  const admin = createAdminClient();
-  const { data, error } = await admin.storage
-    .from(asset.bucket)
-    .createSignedUrl(asset.path, Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_INPUT_URL_EXPIRY_SECONDS)));
-
-  if (error || !data?.signedUrl) {
-    throw createProviderUnavailableError(error?.message || "Failed to create signed input URL.");
+  try {
+    return await createSignedDownloadUrl(
+      asset.bucket,
+      asset.path,
+      Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_INPUT_URL_EXPIRY_SECONDS))
+    );
+  } catch (error) {
+    throw createProviderUnavailableError(
+      error instanceof Error ? error.message : "Failed to create signed input URL."
+    );
   }
-
-  return String(data.signedUrl || "").trim();
 }
 
 export async function uploadObjectRemovalOutputAsset(input: UploadStoredAssetInput) {
-  await ensureBucket(OUTPUT_BUCKET, true);
   const path = makeObjectPath(input.jobId, input.kind, input.fileName, input.mimeType);
-  await uploadBytesToBucket(OUTPUT_BUCKET, path, input.bytes, input.mimeType);
-
-  const admin = createAdminClient();
-  const { data } = admin.storage.from(OUTPUT_BUCKET).getPublicUrl(path);
-  const assetUrl = String(data?.publicUrl || "").trim();
+  const uploaded = await uploadBytesToBucket(OUTPUT_BUCKET, path, input.bytes, input.mimeType);
+  const assetUrl = String(uploaded.url || "").trim();
   if (!assetUrl) {
     throw createProcessingFailedError("Object removal output URL is unavailable.");
   }
@@ -160,7 +139,6 @@ export async function uploadObjectRemovalOutputAsset(input: UploadStoredAssetInp
 }
 
 export async function deleteObjectRemovalStoredObjects(items: StoredObject[] = []) {
-  const admin = createAdminClient();
   const grouped = new Map<string, string[]>();
 
   for (const item of items) {
@@ -174,12 +152,13 @@ export async function deleteObjectRemovalStoredObjects(items: StoredObject[] = [
 
   await Promise.all(
     Array.from(grouped.entries()).map(async ([bucket, paths]) => {
-      const { error } = await admin.storage.from(bucket).remove(paths);
-      if (error) {
+      try {
+        await deleteObjects(bucket, paths);
+      } catch (error) {
         logger.warn("Failed to delete object removal temp assets", {
           bucket,
           paths,
-          error: error.message,
+          error: error instanceof Error ? error.message : String(error || ""),
         });
       }
     })

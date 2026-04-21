@@ -8,6 +8,6 @@ export const metadata = {
 };
 
 export default async function SettingsPage() {
-  await requireRole([Roles.ADMIN, Roles.EDITOR]);
+  await requireRole([Roles.ADMIN, Roles.DESIGNER]);
   return <FeatureSettingsClient />;
 }

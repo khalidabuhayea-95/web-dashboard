@@ -6,8 +6,12 @@ import {
   getRequestLogContext,
   resolveRequestId,
 } from "@/lib/logging/request";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import prisma from "@/lib/prisma";
-import { createTemplateAssetResolver } from "@/lib/mobile/templateAssets";
+import {
+  createMobilePublicMediaUrlResolver,
+  createTemplateAssetResolver,
+} from "@/lib/mobile/templateAssets";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import {
   buildPublishedTemplateScopeWhere,
@@ -90,7 +94,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         buildEmptyPayload({ locale, categories, page, pageSize }),
         {
           headers: {
-            "Cache-Control": "public, max-age=30",
+            "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
           },
         }
       );
@@ -103,7 +107,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
         buildEmptyPayload({ locale, categories, page, pageSize }),
         {
           headers: {
-            "Cache-Control": "public, max-age=30",
+            "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
           },
         }
       );
@@ -148,11 +152,12 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       prisma.template.count({ where }),
     ]);
 
+    const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const templates = rows.map((template: any) => {
       const localized = localizeTemplateTaxonomy(template, taxonomy, locale);
       const assetResolver = createTemplateAssetResolver(request, template);
       return {
-        ...toMobileTemplate(template, { assetResolver, includeProject: false }),
+        ...toMobileTemplate(template, { assetResolver, mediaUrlResolver, includeProject: false }),
         category: localized.categoryLabel,
         subCategory: localized.subCategoryLabel,
         categoryId: localized.categoryId,
@@ -238,7 +243,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       hasPrevPage,
     }, {
       headers: {
-        "Cache-Control": "public, max-age=30",
+        "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
       },
     });
     return attachRequestIdHeader(response, requestId);

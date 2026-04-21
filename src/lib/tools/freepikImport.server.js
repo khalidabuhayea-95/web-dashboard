@@ -6,7 +6,10 @@ import { basename, join } from "node:path";
 import { promisify } from "node:util";
 
 import prisma from "@/lib/prisma";
-import { createAdminClient } from "@/lib/supabase/admin";
+import {
+  getPublicStorageBucketName,
+  uploadObject,
+} from "@/lib/storage/objectStorage.server";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
 import { upsertImportedBackgroundAsset } from "@/lib/editor/importedBackgrounds.server";
 import {
@@ -23,7 +26,7 @@ import { normalizeBackgroundCategory } from "@/lib/backgrounds/categorySettings"
 const FREEPIK_SETTINGS_KEY = "freepik_import_settings_v1";
 const FREEPIK_ICONS_API_URL = "https://api.freepik.com/v1/icons";
 const FREEPIK_RESOURCES_API_URL = "https://api.freepik.com/v1/resources";
-const DEFAULT_BUCKET = process.env.EDITOR_MEDIA_BUCKET || "editor-media";
+const DEFAULT_BUCKET = getPublicStorageBucketName();
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const PREVIEW_PAGE_SIZE_MAX = 100;
 const IMPORT_BATCH_LIMIT = 300;
@@ -754,27 +757,6 @@ async function extractPrimaryImageFromZip(bytes) {
   }
 }
 
-async function ensurePublicBucket(admin) {
-  const { data, error } = await admin.storage.getBucket(DEFAULT_BUCKET);
-  if (error) {
-    const created = await admin.storage.createBucket(DEFAULT_BUCKET, {
-      public: true,
-      fileSizeLimit: "104857600",
-    });
-    if (created.error && !String(created.error.message || "").toLowerCase().includes("exists")) {
-      throw created.error;
-    }
-    return;
-  }
-
-  if (data && data.public === false) {
-    await admin.storage.updateBucket(DEFAULT_BUCKET, {
-      public: true,
-      fileSizeLimit: "104857600",
-    });
-  }
-}
-
 async function downloadAsset(url) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), DOWNLOAD_TIMEOUT_MS);
@@ -970,20 +952,16 @@ async function uploadAssetToStorage({ ownerId, sourceAssetId, bytes, mimeType })
     `${sanitizeText(sourceAssetId) || randomUUID()}-${randomUUID()}.${extension}`,
   ].join("/");
 
-  const admin = createAdminClient();
-  await ensurePublicBucket(admin);
-
-  const { error } = await admin.storage.from(DEFAULT_BUCKET).upload(objectPath, bytes, {
+  const uploaded = await uploadObject({
+    bucket: DEFAULT_BUCKET,
+    key: objectPath,
+    body: bytes,
     contentType: mimeType || "application/octet-stream",
     upsert: false,
-    cacheControl: "31536000",
+    cacheControl: "public, max-age=31536000, immutable",
+    skipExistenceCheck: true,
   });
-  if (error) {
-    throw new Error(error.message || "Failed to upload imported asset.");
-  }
-
-  const { data } = admin.storage.from(DEFAULT_BUCKET).getPublicUrl(objectPath);
-  const publicUrl = sanitizeUrl(data?.publicUrl);
+  const publicUrl = sanitizeUrl(uploaded.url);
   if (!publicUrl) {
     throw new Error("Imported asset URL is unavailable.");
   }

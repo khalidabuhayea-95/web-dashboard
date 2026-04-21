@@ -1,3 +1,8 @@
+import {
+  getPublicObjectProxyUrl,
+  parsePublicObjectKey,
+} from "@/lib/storage/objectStorage.server";
+
 export function createTemplateAssetResolver(request, template) {
   const templateId = String(template?.id || "").trim();
   if (!templateId) return null;
@@ -16,6 +21,29 @@ export function createTemplateAssetResolver(request, template) {
     }
     if (field) url.searchParams.set("field", String(field));
     return url.toString();
+  };
+}
+
+export function createMobilePublicMediaUrlResolver(request) {
+  const origin = new URL(request.url).origin;
+
+  return (value) => {
+    const source = String(value || "").trim();
+    if (!source) return "";
+
+    const key = parsePublicObjectKey(source);
+    if (!key) return source;
+
+    let search = "";
+    try {
+      search = new URL(source, origin).search;
+    } catch {
+      search = "";
+    }
+
+    const resolved = new URL(getPublicObjectProxyUrl(key), origin);
+    if (search) resolved.search = search;
+    return resolved.toString();
   };
 }
 

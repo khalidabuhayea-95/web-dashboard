@@ -10,7 +10,11 @@ import {
   getRequestLogContext,
   resolveRequestId,
 } from "@/lib/logging/request";
-import { createTemplateAssetResolver } from "@/lib/mobile/templateAssets";
+import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import {
+  createMobilePublicMediaUrlResolver,
+  createTemplateAssetResolver,
+} from "@/lib/mobile/templateAssets";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
 import {
   isTemplateAllowedByTaxonomy,
@@ -97,6 +101,8 @@ export async function GET(request, { params }) {
       select: {
         id: true,
         name: true,
+        version: true,
+        updatedAt: true,
         category: true,
         subCategory: true,
         canvasSize: true,
@@ -176,10 +182,12 @@ export async function GET(request, { params }) {
     fontLookupDetails.lookupSize = fontLookup.size;
 
     const assetResolver = createTemplateAssetResolver(request, template);
+    const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const layerMappingStartedAt = performance.now();
     const mobileTemplate = measureSync(layerMappingDetails, "toMobileTemplateDetailSlimMs", () =>
       toMobileTemplateDetailSlim(template, {
         assetResolver,
+        mediaUrlResolver,
         categoryLabel: localized.categoryLabel,
         categoryValue: localized.categoryValue,
         subCategoryLabel: localized.subCategoryLabel,
@@ -212,7 +220,7 @@ export async function GET(request, { params }) {
       },
       {
         headers: {
-          "Cache-Control": "public, max-age=30",
+          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
         },
       }
     );

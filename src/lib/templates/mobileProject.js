@@ -1,5 +1,6 @@
 import { performance } from "node:perf_hooks";
 
+import { appendVersionParam } from "@/lib/storage/objectStorage.server";
 import { extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
 import { DEFAULT_ANIMATION_DURATION_MS, DEFAULT_PAGE_DURATION_MS } from "@/lib/editor/animationTimeline";
@@ -279,10 +280,18 @@ function isDataUri(value) {
   return /^data:[^,]+,/i.test(String(value || "").trim());
 }
 
+function resolveClientMediaUri(value, options) {
+  const source = String(value || "").trim();
+  if (!source) return "";
+  if (typeof options?.mediaUrlResolver !== "function") return source;
+  const resolved = String(options.mediaUrlResolver(source) || "").trim();
+  return resolved || source;
+}
+
 function resolveMediaUri(rawUri, options) {
   const value = String(rawUri || "").trim();
   if (!value) return "";
-  if (!isDataUri(value)) return value;
+  if (!isDataUri(value)) return resolveClientMediaUri(value, options);
   if (typeof options?.assetResolver !== "function") return value;
   const resolved = String(
     options.assetResolver({
@@ -893,6 +902,7 @@ function mapImageLayer(item, index, canvasSize, options) {
       : {};
   const rasterUri = resolveMediaUri(rasterSourceRaw || item.src || item.imageUri || "", {
     assetResolver: options?.assetResolver,
+    mediaUrlResolver: options?.mediaUrlResolver,
     scope: "layer",
     elementId: item.id || item.layerId || "",
     index,
@@ -914,6 +924,7 @@ function mapImageLayer(item, index, canvasSize, options) {
     type: "IMAGE",
     imageUri: resolveMediaUri(item.src || item.imageUri || "", {
       assetResolver: options?.assetResolver,
+      mediaUrlResolver: options?.mediaUrlResolver,
       scope: "layer",
       elementId: item.id || item.layerId || "",
       index,
@@ -960,6 +971,7 @@ function mapVideoLayer(item, index, canvasSize, options) {
     type: "VIDEO_CLIP",
     videoUri: resolveMediaUri(item.videoUri || item.src || "", {
       assetResolver: options?.assetResolver,
+      mediaUrlResolver: options?.mediaUrlResolver,
       scope: "layer",
       elementId: item.id || item.layerId || "",
       index,
@@ -969,6 +981,7 @@ function mapVideoLayer(item, index, canvasSize, options) {
     frameHeight: layerBaseHeight,
     thumbnailUri: resolveMediaUri(item.thumbnailUri || item.src || "", {
       assetResolver: options?.assetResolver,
+      mediaUrlResolver: options?.mediaUrlResolver,
       scope: "layer",
       elementId: item.id || item.layerId || "",
       index,
@@ -1038,13 +1051,15 @@ function mapFrameShapePayload(item) {
 }
 
 function resolveFramePreviewContentUri(item, index, options) {
-  return resolveMediaUri("frame-preview", {
-    assetResolver: options?.assetResolver,
-    scope: "layer",
-    elementId: item.id || item.layerId || "",
-    index,
-    field: "frameContent.preview",
-  });
+  if (typeof options?.assetResolver !== "function") return "";
+  return String(
+    options.assetResolver({
+      scope: "layer",
+      elementId: item.id || item.layerId || "",
+      index,
+      field: "frameContent.preview",
+    }) || ""
+  ).trim();
 }
 
 function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
@@ -1058,6 +1073,7 @@ function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
   const sourceHeight = Math.max(Math.round(numberOr(content.sourceHeight, item.height || 1)), 1);
   const contentUri = resolveMediaUri(content.src || "", {
     assetResolver: options?.assetResolver,
+    mediaUrlResolver: options?.mediaUrlResolver,
     scope: "layer",
     elementId: item.id || item.layerId || "",
     index,
@@ -1083,6 +1099,7 @@ function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
       videoUri: contentUri,
       thumbnailUri: resolveMediaUri(content.posterSrc || content.src || "", {
         assetResolver: options?.assetResolver,
+        mediaUrlResolver: options?.mediaUrlResolver,
         scope: "layer",
         elementId: item.id || item.layerId || "",
         index,
@@ -1259,6 +1276,7 @@ function mapBackground(value, options) {
   if (isDataUri(value)) {
     const imageUri = resolveMediaUri(value, {
       assetResolver: options?.assetResolver,
+      mediaUrlResolver: options?.mediaUrlResolver,
       scope: "background",
       field: "background",
     });
@@ -1275,6 +1293,7 @@ function mapBackground(value, options) {
         type: "image",
         imageUri: resolveMediaUri(value.imageUri, {
           assetResolver: options?.assetResolver,
+          mediaUrlResolver: options?.mediaUrlResolver,
           scope: "background",
           field: "imageUri",
         }),
@@ -1413,10 +1432,10 @@ function buildMobileCompatibilityWarnings(frameInfo) {
   return warnings;
 }
 
-function mapTemplatePreview(template) {
+function mapTemplatePreview(template, options = {}) {
   const status = String(template?.previewStatus || "").trim();
-  const url = String(template?.previewVideoUrl || "").trim();
-  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const url = resolveClientMediaUri(template?.previewVideoUrl || "", options);
+  const posterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
   const durationMs = numberOr(template?.previewDurationMs, NaN);
   const updatedAtRaw = template?.previewUpdatedAt;
   const updatedAt =
@@ -1443,10 +1462,10 @@ function mapTemplatePreview(template) {
   };
 }
 
-function mapTemplatePreviewSlim(template) {
+function mapTemplatePreviewSlim(template, options = {}) {
   const status = String(template?.previewStatus || "").trim();
-  const url = String(template?.previewVideoUrl || "").trim();
-  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const url = resolveClientMediaUri(template?.previewVideoUrl || "", options);
+  const posterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
   const durationMs = numberOr(template?.previewDurationMs, NaN);
 
   if (!status && !url && !posterUrl && !Number.isFinite(durationMs)) {
@@ -1465,13 +1484,24 @@ function resolveTemplateThumbnailUrl(template, options = {}) {
   const rawThumbnail = String(
     template?.thumbnailDataUrl || template?.thumbnailUrl || template?.thumbnail || ""
   );
+  const updatedAt =
+    template?.updatedAt instanceof Date
+      ? template.updatedAt.getTime()
+      : template?.updatedAt
+        ? new Date(template.updatedAt).getTime()
+        : NaN;
+  const versionToken = Number.isFinite(updatedAt)
+    ? String(updatedAt)
+    : String(template?.version || "").trim();
+  const versionedThumbnail = appendVersionParam(rawThumbnail, versionToken);
   return isDataUri(rawThumbnail)
-    ? resolveMediaUri(rawThumbnail, {
+    ? resolveMediaUri(versionedThumbnail, {
         assetResolver: options?.assetResolver,
+        mediaUrlResolver: options?.mediaUrlResolver,
         scope: "thumbnail",
         field: "thumbnailDataUrl",
       })
-    : rawThumbnail;
+    : resolveClientMediaUri(versionedThumbnail, options);
 }
 
 function slimLayerFont(font) {
@@ -1669,7 +1699,7 @@ export function toMobileProject(template, options = {}) {
 export function toMobileTemplate(template, options = {}) {
   const includeProject = options.includeProject !== false;
   const canvasSize = resolveCanvasSize(template);
-  const preview = mapTemplatePreview(template);
+  const preview = mapTemplatePreview(template, options);
   const resolvedThumbnail = resolveTemplateThumbnailUrl(template, options);
   const frameInfo = getMobileTemplateFrameInfo(template);
   const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
@@ -1737,7 +1767,7 @@ export function toMobileTemplateDetailSlim(template, options = {}) {
       ? options.telemetry
       : null;
   const previewStartedAt = performance.now();
-  const preview = mapTemplatePreviewSlim(template);
+  const preview = mapTemplatePreviewSlim(template, options);
   addTiming(telemetry, "mapPreviewMs", performance.now() - previewStartedAt);
   const thumbnailStartedAt = performance.now();
   const thumbnailUrl = resolveTemplateThumbnailUrl(template, options);

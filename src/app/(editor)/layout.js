@@ -1,21 +1,9 @@
-import { redirect } from "next/navigation";
-
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
-import { Roles } from "@/lib/auth/roles";
-import { createClient } from "@/lib/supabase/server";
+import { requireRole, Roles } from "@/lib/auth/roles";
 
 export default async function EditorLayout({ children }) {
-  const supabase = await createClient();
-  const { data, error } = await supabase.auth.getClaims();
-
-  if (error || !data?.claims?.sub) {
-    redirect("/login");
-  }
-
-  const role = data.claims.user_role || Roles.EDITOR;
-  if (role !== Roles.ADMIN && role !== Roles.EDITOR) {
-    redirect("/");
-  }
+  const session = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
+  const role = session.role;
 
   const navItems = [
     { href: "/", label: "Overview", icon: "overview" },

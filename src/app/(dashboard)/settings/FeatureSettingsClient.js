@@ -21,6 +21,46 @@ function formatErrorMessage(payload, fallback = "Request failed.") {
   return details.length > 0 ? details.join(" ") : fallback;
 }
 
+function TextAreaField({
+  id,
+  label,
+  value,
+  onChange,
+  placeholder,
+  disabled = false,
+}) {
+  return (
+    <div className="space-y-2">
+      <Label htmlFor={id}>{label}</Label>
+      <textarea
+        id={id}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        disabled={disabled}
+        rows={4}
+        className="w-full rounded-md border border-border bg-background px-3 py-2 text-sm"
+      />
+    </div>
+  );
+}
+
+function ToggleField({ id, label, checked, onChange, disabled = false }) {
+  return (
+    <label className="flex items-center gap-3 text-sm font-medium text-foreground" htmlFor={id}>
+      <input
+        id={id}
+        type="checkbox"
+        checked={checked}
+        onChange={onChange}
+        disabled={disabled}
+        className="h-4 w-4 rounded border border-border"
+      />
+      <span>{label}</span>
+    </label>
+  );
+}
+
 function FreepikSettingsCard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -126,6 +166,337 @@ function FreepikSettingsCard() {
           >
             Open Freepik import
           </a>
+        </div>
+
+        {status ? <div className="text-sm text-muted-foreground">{status}</div> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
+export function MobileAuthSettingsCard() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [status, setStatus] = useState("Loading mobile auth settings...");
+  const [form, setForm] = useState({
+    googleEnabled: false,
+    googleAndroidClientIds: "",
+    googleIosClientIds: "",
+    facebookEnabled: false,
+    facebookAppId: "",
+    facebookAppSecret: "",
+    facebookAppSecretMasked: "",
+    facebookAppSecretConfigured: false,
+    appleEnabled: false,
+    appleIosBundleIds: "",
+    accessTokenSecret: "",
+    accessTokenSecretMasked: "",
+    accessTokenSecretConfigured: false,
+    accessTokenTtlMinutes: "60",
+    refreshTokenSecret: "",
+    refreshTokenSecretMasked: "",
+    refreshTokenSecretConfigured: false,
+    refreshTokenTtlDays: "30",
+  });
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSettings = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/settings/mobile-auth", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(formatErrorMessage(payload, "Failed to load mobile auth settings."));
+        }
+
+        if (!mounted) return;
+        const settings = payload?.settings || {};
+        setCanEdit(Boolean(payload?.canEdit));
+        setForm({
+          googleEnabled: Boolean(settings?.google?.enabled),
+          googleAndroidClientIds: (settings?.google?.androidClientIds || []).join("\n"),
+          googleIosClientIds: (settings?.google?.iosClientIds || []).join("\n"),
+          facebookEnabled: Boolean(settings?.facebook?.enabled),
+          facebookAppId: String(settings?.facebook?.appId || ""),
+          facebookAppSecret: "",
+          facebookAppSecretMasked: String(settings?.facebook?.appSecretMasked || ""),
+          facebookAppSecretConfigured: Boolean(settings?.facebook?.appSecretConfigured),
+          appleEnabled: Boolean(settings?.apple?.enabled),
+          appleIosBundleIds: (settings?.apple?.iosBundleIds || []).join("\n"),
+          accessTokenSecret: "",
+          accessTokenSecretMasked: String(settings?.bearer?.accessTokenSecretMasked || ""),
+          accessTokenSecretConfigured: Boolean(settings?.bearer?.accessTokenSecretConfigured),
+          accessTokenTtlMinutes: String(settings?.bearer?.accessTokenTtlMinutes || "60"),
+          refreshTokenSecret: "",
+          refreshTokenSecretMasked: String(settings?.bearer?.refreshTokenSecretMasked || ""),
+          refreshTokenSecretConfigured: Boolean(settings?.bearer?.refreshTokenSecretConfigured),
+          refreshTokenTtlDays: String(settings?.bearer?.refreshTokenTtlDays || "30"),
+        });
+        setStatus("");
+      } catch (error) {
+        if (!mounted) return;
+        setStatus(error?.message || "Failed to load mobile auth settings.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    void loadSettings();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus("Saving mobile auth settings...");
+    try {
+      const response = await fetch("/api/settings/mobile-auth", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          google: {
+            enabled: form.googleEnabled,
+            androidClientIds: form.googleAndroidClientIds,
+            iosClientIds: form.googleIosClientIds,
+          },
+          facebook: {
+            enabled: form.facebookEnabled,
+            appId: form.facebookAppId,
+            appSecret: form.facebookAppSecret,
+          },
+          apple: {
+            enabled: form.appleEnabled,
+            iosBundleIds: form.appleIosBundleIds,
+          },
+          bearer: {
+            accessTokenSecret: form.accessTokenSecret,
+            accessTokenTtlMinutes: form.accessTokenTtlMinutes,
+            refreshTokenSecret: form.refreshTokenSecret,
+            refreshTokenTtlDays: form.refreshTokenTtlDays,
+          },
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(formatErrorMessage(payload, "Failed to save mobile auth settings."));
+      }
+
+      const settings = payload?.settings || {};
+      setForm((current) => ({
+        ...current,
+        facebookAppSecret: "",
+        facebookAppSecretMasked: String(settings?.facebook?.appSecretMasked || ""),
+        facebookAppSecretConfigured: Boolean(settings?.facebook?.appSecretConfigured),
+        accessTokenSecret: "",
+        accessTokenSecretMasked: String(settings?.bearer?.accessTokenSecretMasked || ""),
+        accessTokenSecretConfigured: Boolean(settings?.bearer?.accessTokenSecretConfigured),
+        refreshTokenSecret: "",
+        refreshTokenSecretMasked: String(settings?.bearer?.refreshTokenSecretMasked || ""),
+        refreshTokenSecretConfigured: Boolean(settings?.bearer?.refreshTokenSecretConfigured),
+      }));
+      setStatus("Mobile auth settings saved.");
+    } catch (error) {
+      setStatus(error?.message || "Failed to save mobile auth settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const disabled = loading || !canEdit;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Mobile Auth Settings</CardTitle>
+        <CardSubtitle>
+          Store Google, Facebook, Apple, and bearer-token settings for the mobile login flows.
+        </CardSubtitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <ToggleField
+            id="settings-mobile-google-enabled"
+            label="Enable Google mobile login"
+            checked={form.googleEnabled}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, googleEnabled: event.target.checked }))
+            }
+            disabled={disabled}
+          />
+          <TextAreaField
+            id="settings-mobile-google-android"
+            label="Google Android client IDs"
+            value={form.googleAndroidClientIds}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, googleAndroidClientIds: event.target.value }))
+            }
+            placeholder="One client ID per line"
+            disabled={disabled}
+          />
+          <TextAreaField
+            id="settings-mobile-google-ios"
+            label="Google iOS client IDs"
+            value={form.googleIosClientIds}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, googleIosClientIds: event.target.value }))
+            }
+            placeholder="One client ID per line"
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <ToggleField
+            id="settings-mobile-facebook-enabled"
+            label="Enable Facebook mobile login"
+            checked={form.facebookEnabled}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, facebookEnabled: event.target.checked }))
+            }
+            disabled={disabled}
+          />
+          <div className="space-y-2">
+            <Label htmlFor="settings-mobile-facebook-app-id">Facebook App ID</Label>
+            <Input
+              id="settings-mobile-facebook-app-id"
+              value={form.facebookAppId}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, facebookAppId: event.target.value }))
+              }
+              disabled={disabled}
+              placeholder="Enter Facebook App ID"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-mobile-facebook-secret">Facebook App Secret</Label>
+            <Input
+              id="settings-mobile-facebook-secret"
+              type="password"
+              value={form.facebookAppSecret}
+              onChange={(event) =>
+                setForm((prev) => ({ ...prev, facebookAppSecret: event.target.value }))
+              }
+              disabled={disabled}
+              placeholder={
+                form.facebookAppSecretConfigured
+                  ? "Enter new secret to replace existing"
+                  : "Enter Facebook App Secret"
+              }
+            />
+            {form.facebookAppSecretConfigured ? (
+              <p className="text-xs text-muted-foreground">
+                Configured secret: {form.facebookAppSecretMasked || "********"}
+              </p>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <ToggleField
+            id="settings-mobile-apple-enabled"
+            label="Enable Apple login on iOS"
+            checked={form.appleEnabled}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, appleEnabled: event.target.checked }))
+            }
+            disabled={disabled}
+          />
+          <TextAreaField
+            id="settings-mobile-apple-bundles"
+            label="Allowed Apple iOS bundle IDs"
+            value={form.appleIosBundleIds}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, appleIosBundleIds: event.target.value }))
+            }
+            placeholder="One bundle ID per line"
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <div className="text-sm font-medium">Mobile bearer tokens</div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <Label htmlFor="settings-mobile-access-secret">Access token secret</Label>
+              <Input
+                id="settings-mobile-access-secret"
+                type="password"
+                value={form.accessTokenSecret}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, accessTokenSecret: event.target.value }))
+                }
+                disabled={disabled}
+                placeholder={
+                  form.accessTokenSecretConfigured
+                    ? "Enter new secret to replace existing"
+                    : "Enter access token secret"
+                }
+              />
+              {form.accessTokenSecretConfigured ? (
+                <p className="text-xs text-muted-foreground">
+                  Configured secret: {form.accessTokenSecretMasked || "********"}
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-mobile-access-ttl">Access token TTL (minutes)</Label>
+              <Input
+                id="settings-mobile-access-ttl"
+                type="number"
+                min="1"
+                value={form.accessTokenTtlMinutes}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, accessTokenTtlMinutes: event.target.value }))
+                }
+                disabled={disabled}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-mobile-refresh-secret">Refresh token secret</Label>
+              <Input
+                id="settings-mobile-refresh-secret"
+                type="password"
+                value={form.refreshTokenSecret}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, refreshTokenSecret: event.target.value }))
+                }
+                disabled={disabled}
+                placeholder={
+                  form.refreshTokenSecretConfigured
+                    ? "Enter new secret to replace existing"
+                    : "Enter refresh token secret"
+                }
+              />
+              {form.refreshTokenSecretConfigured ? (
+                <p className="text-xs text-muted-foreground">
+                  Configured secret: {form.refreshTokenSecretMasked || "********"}
+                </p>
+              ) : null}
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="settings-mobile-refresh-ttl">Refresh token TTL (days)</Label>
+              <Input
+                id="settings-mobile-refresh-ttl"
+                type="number"
+                min="1"
+                value={form.refreshTokenTtlDays}
+                onChange={(event) =>
+                  setForm((prev) => ({ ...prev, refreshTokenTtlDays: event.target.value }))
+                }
+                disabled={disabled}
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={handleSave} disabled={saving || disabled}>
+            {saving ? "Saving..." : "Save mobile auth settings"}
+          </Button>
         </div>
 
         {status ? <div className="text-sm text-muted-foreground">{status}</div> : null}

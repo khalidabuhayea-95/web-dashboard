@@ -67,7 +67,7 @@ export function inferPublishSource(element: EditorElement): PublishableElementSo
     return "canva";
   }
   if (/freepik|flaticon/.test(src)) return "freepik";
-  if (/supabase|editor-media/.test(src)) return "upload";
+  if (/r2\.dev|cloudflarestorage|editor-media/.test(src)) return "upload";
   return "editor";
 }
 

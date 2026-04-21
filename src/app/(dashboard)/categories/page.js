@@ -7,6 +7,6 @@ export const metadata = {
 };
 
 export default async function CategoriesPage() {
-  const { role } = await requireRole([Roles.ADMIN, Roles.EDITOR]);
+  const { role } = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
   return <SettingsClient canEdit={role === Roles.ADMIN} />;
 }
