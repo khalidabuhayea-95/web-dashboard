@@ -9,6 +9,7 @@ export default async function EditorLayout({ children }) {
     { href: "/", label: "Overview", icon: "overview" },
     { href: "/templates", label: "Templates", icon: "templates" },
     { href: "/settings", label: "Settings", icon: "settings" },
+    { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
     { href: "/categories", label: "Categories", icon: "categories" },
     { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
     { href: "/editor-pro", label: "Editor", icon: "editor" },

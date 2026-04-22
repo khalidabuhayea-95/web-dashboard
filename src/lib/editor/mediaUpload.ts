@@ -13,11 +13,21 @@ export type EditorMediaUploadResult = {
 export async function uploadEditorMediaFile(
   file: File,
   kind: EditorMediaKind,
-  options?: { signal?: AbortSignal }
+  options?: {
+    signal?: AbortSignal;
+    variant?: "template-preview-video" | "template-preview-poster";
+    templateId?: string;
+  }
 ): Promise<EditorMediaUploadResult> {
   const formData = new FormData();
   formData.set("kind", kind);
   formData.set("file", file);
+  if (options?.variant) {
+    formData.set("variant", options.variant);
+  }
+  if (options?.templateId) {
+    formData.set("templateId", options.templateId);
+  }
 
   const response = await fetch("/api/editor/media", {
     method: "POST",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { getDashboardSession } from "@/lib/auth/roles";
+import { appendVersionParam } from "@/lib/storage/objectStorage.server";
 import {
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
@@ -82,14 +83,14 @@ export function buildSnapshot(template) {
 
 export function mapTemplatePreview(template) {
   const status = String(template?.previewStatus || "").trim();
-  const url = String(template?.previewVideoUrl || "").trim();
-  const posterUrl = String(template?.previewPosterUrl || "").trim();
+  const rawUrl = String(template?.previewVideoUrl || "").trim();
+  const rawPosterUrl = String(template?.previewPosterUrl || "").trim();
   const durationMs = Number(template?.previewDurationMs);
   const version = Number(template?.previewVersion);
   const updatedAtRaw = template?.previewUpdatedAt;
   const error = String(template?.previewError || "").trim();
 
-  if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(version) && !updatedAtRaw && !error) {
+  if (!status && !rawUrl && !rawPosterUrl && !Number.isFinite(durationMs) && !Number.isFinite(version) && !updatedAtRaw && !error) {
     return null;
   }
 
@@ -99,6 +100,13 @@ export function mapTemplatePreview(template) {
       : updatedAtRaw
         ? new Date(updatedAtRaw).getTime()
         : null;
+  const versionToken = Number.isFinite(updatedAt)
+    ? String(updatedAt)
+    : Number.isFinite(version)
+      ? String(version)
+      : "";
+  const url = appendVersionParam(rawUrl, versionToken);
+  const posterUrl = appendVersionParam(rawPosterUrl, versionToken);
 
   return {
     status: status || "not_requested",

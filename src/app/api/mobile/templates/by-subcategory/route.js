@@ -114,6 +114,8 @@ export async function GET(request) {
           previewPosterUrl: true,
           previewStatus: true,
           previewDurationMs: true,
+          previewVersion: true,
+          previewUpdatedAt: true,
         },
       })
     )

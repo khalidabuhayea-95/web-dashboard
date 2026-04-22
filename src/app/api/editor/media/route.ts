@@ -5,14 +5,20 @@ import {
   createRateLimitResponse,
   resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
+import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
+import { resizeVideoPreviewBuffer } from "@/lib/media/videoPreviewResize.server";
 import {
   getPublicStorageBucketName,
+  parsePublicObjectKeyFromUrl,
   rewritePublicObjectUrlForClient,
+  deleteObjects,
+  listObjectKeys,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
 import { getEditorSession } from "@/lib/templates/server";
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import prisma from "@/lib/prisma";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -25,6 +31,7 @@ const MEDIA_UPLOAD_LIMIT = {
 const MAX_IMAGE_BYTES = 25 * 1024 * 1024;
 const MAX_VIDEO_BYTES = 250 * 1024 * 1024;
 const MAX_FONT_BYTES = 10 * 1024 * 1024;
+const OVERWRITABLE_MEDIA_CACHE_CONTROL = "no-store, no-cache, must-revalidate, max-age=0";
 const ALLOWED_FONT_MIME_TYPES = new Set([
   "font/ttf",
   "font/otf",
@@ -36,11 +43,38 @@ const ALLOWED_FONT_MIME_TYPES = new Set([
   "application/vnd.ms-fontobject",
 ]);
 const ALLOWED_FONT_EXTENSIONS = new Set(["ttf", "otf", "woff", "woff2", "eot"]);
+const TEMPLATE_PREVIEW_VIDEO_EXTENSIONS = ["mp4", "webm", "mov", "m4v", "mkv", "avi"];
+const TEMPLATE_PREVIEW_IMAGE_EXTENSIONS = [
+  "png",
+  "jpg",
+  "jpeg",
+  "webp",
+  "gif",
+  "svg",
+  "avif",
+];
 
 function sanitizeKind(value: unknown): "image" | "video" | "font" | "" {
   const kind = String(value || "").trim().toLowerCase();
   if (kind === "image" || kind === "video" || kind === "font") return kind;
   return "";
+}
+
+function sanitizeVariant(
+  value: unknown
+): "template-preview-video" | "template-preview-poster" | "" {
+  const variant = String(value || "").trim().toLowerCase();
+  if (variant === "template-preview-video") return "template-preview-video";
+  if (variant === "template-preview-poster") return "template-preview-poster";
+  return "";
+}
+
+function sanitizeTemplateId(value: unknown): string {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "")
+    .slice(0, 80);
 }
 
 function sanitizeFileName(value: unknown): string {
@@ -156,6 +190,93 @@ function makeObjectPath({
   return `users/${ownerId}/${kind}/${yyyy}/${mm}/${dd}/${safeBase}-${uniqueId}.${ext}`;
 }
 
+function makeTemplatePreviewObjectPath({
+  ownerId,
+  templateId,
+  variant,
+  extension,
+}: {
+  ownerId: string;
+  templateId: string;
+  variant: "template-preview-video" | "template-preview-poster";
+  extension: string;
+}): string {
+  const safeTemplateId = sanitizeTemplateId(templateId) || "template";
+  const safeExtension = String(extension || "").trim().toLowerCase() || "bin";
+  const baseName = variant === "template-preview-video" ? "preview" : "poster";
+  return `users/${ownerId}/templates/previews/${safeTemplateId}/${baseName}.${safeExtension}`;
+}
+
+function makeTemplatePreviewObjectPrefix({
+  ownerId,
+  templateId,
+}: {
+  ownerId: string;
+  templateId: string;
+}): string {
+  const safeTemplateId = sanitizeTemplateId(templateId) || "template";
+  return `users/${ownerId}/templates/previews/${safeTemplateId}/`;
+}
+
+function isTemplatePreviewVariantKey(
+  key: string,
+  variant: "template-preview-video" | "template-preview-poster"
+): boolean {
+  const fileName = String(key || "").split("/").pop()?.trim().toLowerCase() || "";
+  if (!fileName) return false;
+  if (variant === "template-preview-video") {
+    return fileName.startsWith("preview.") || fileName.startsWith("preview-");
+  }
+  return fileName.startsWith("poster.") || fileName.startsWith("poster-");
+}
+
+function collectTemplatePreviewCleanupKeys({
+  ownerId,
+  templateId,
+  variant,
+  keepKey,
+  previousUrl,
+  siblingKeys,
+}: {
+  ownerId: string;
+  templateId: string;
+  variant: "template-preview-video" | "template-preview-poster";
+  keepKey: string;
+  previousUrl?: string | null;
+  siblingKeys?: string[];
+}): string[] {
+  const extensions =
+    variant === "template-preview-video"
+      ? TEMPLATE_PREVIEW_VIDEO_EXTENSIONS
+      : TEMPLATE_PREVIEW_IMAGE_EXTENSIONS;
+  const keys = new Set<string>();
+
+  for (const extension of extensions) {
+    keys.add(
+      makeTemplatePreviewObjectPath({
+        ownerId,
+        templateId,
+        variant,
+        extension,
+      })
+    );
+  }
+
+  const previousKey = parsePublicObjectKeyFromUrl(previousUrl);
+  if (previousKey) {
+    keys.add(previousKey);
+  }
+
+  for (const siblingKey of Array.isArray(siblingKeys) ? siblingKeys : []) {
+    if (isTemplatePreviewVariantKey(siblingKey, variant)) {
+      keys.add(String(siblingKey || "").trim());
+    }
+  }
+
+  keys.delete(keepKey);
+  return Array.from(keys);
+}
+
 export async function POST(request: NextRequest) {
   try {
     const session = await getEditorSession();
@@ -180,6 +301,8 @@ export async function POST(request: NextRequest) {
     }
 
     const kind = sanitizeKind(formData.get("kind"));
+    const variant = sanitizeVariant(formData.get("variant"));
+    const templateId = sanitizeTemplateId(formData.get("templateId"));
     const fileEntry = formData.get("file");
     if (!(fileEntry instanceof File)) {
       return handleBadRequest("Missing file upload");
@@ -192,32 +315,108 @@ export async function POST(request: NextRequest) {
     }
 
     const fileName = sanitizeFileName(fileEntry.name) || `${kind}.bin`;
-    const extension = extensionFromMimeType(mimeType) || extensionFromFileName(fileName);
-    const resolvedMimeType = mimeType || mimeTypeFromExtension(extension);
+    const sourceExtension = extensionFromMimeType(mimeType) || extensionFromFileName(fileName);
+    const resolvedMimeType = mimeType || mimeTypeFromExtension(sourceExtension);
 
     try {
-      ensureValidUpload({ kind, mimeType: resolvedMimeType, size: fileSize, extension });
+      ensureValidUpload({
+        kind,
+        mimeType: resolvedMimeType,
+        size: fileSize,
+        extension: sourceExtension,
+      });
     } catch (error) {
       return handleBadRequest(
         error instanceof Error ? error.message : "Invalid upload"
       );
     }
 
-    const path = makeObjectPath({
-      ownerId: session.userId,
-      kind,
-      fileName,
-      extension,
-    });
+    let uploadBody: Buffer | File = fileEntry;
+    let uploadMimeType = resolvedMimeType || "application/octet-stream";
+    let uploadSize = fileSize;
+    let templatePreviewContext:
+      | null
+      | {
+          ownerId: string;
+          previousUrl: string | null;
+        } = null;
+
+    if (variant === "template-preview-video" || variant === "template-preview-poster") {
+      if (!templateId) {
+        return handleBadRequest("Missing templateId for preview upload");
+      }
+
+      const template = await prisma.template.findUnique({
+        where: { id: templateId },
+        select: {
+          id: true,
+          ownerId: true,
+          previewVideoUrl: true,
+          previewPosterUrl: true,
+        },
+      });
+      if (!template) {
+        return handleBadRequest("Template not found for preview upload");
+      }
+      if (session.role !== "admin" && template.ownerId !== session.userId) {
+        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+      }
+
+      templatePreviewContext = {
+        ownerId: String(template.ownerId || "").trim() || session.userId,
+        previousUrl:
+          variant === "template-preview-video"
+            ? String(template.previewVideoUrl || "").trim() || null
+            : String(template.previewPosterUrl || "").trim() || null,
+      };
+
+      const sourceBytes = Buffer.from(await fileEntry.arrayBuffer());
+      if (variant === "template-preview-video" && kind === "video") {
+        const optimized = await resizeVideoPreviewBuffer({
+          bytes: sourceBytes,
+          mimeType: uploadMimeType,
+        });
+        uploadBody = optimized.bytes;
+        uploadMimeType = optimized.mimeType || uploadMimeType;
+        uploadSize = Buffer.byteLength(optimized.bytes);
+      } else if (variant === "template-preview-poster" && kind === "image") {
+        const resized = await resizeThumbnailBufferHalf({
+          bytes: sourceBytes,
+          mimeType: uploadMimeType,
+        });
+        uploadBody = resized.bytes;
+        uploadMimeType = resized.mimeType || uploadMimeType;
+        uploadSize = Buffer.byteLength(resized.bytes);
+      }
+    }
+
+    const extension =
+      extensionFromMimeType(uploadMimeType) || sourceExtension || extensionFromFileName(fileName);
+
+    const path = templatePreviewContext
+      ? makeTemplatePreviewObjectPath({
+          ownerId: templatePreviewContext.ownerId,
+          templateId,
+          variant,
+          extension,
+        })
+      : makeObjectPath({
+          ownerId: session.userId,
+          kind,
+          fileName,
+          extension,
+        });
 
     const uploaded = await uploadObject({
       bucket: BUCKET_NAME,
       key: path,
-      body: fileEntry,
-      cacheControl: "public, max-age=31536000, immutable",
-      contentType: resolvedMimeType || "application/octet-stream",
-      upsert: false,
-      skipExistenceCheck: true,
+      body: uploadBody,
+      cacheControl: templatePreviewContext
+        ? OVERWRITABLE_MEDIA_CACHE_CONTROL
+        : "public, max-age=31536000, immutable",
+      contentType: uploadMimeType || "application/octet-stream",
+      upsert: Boolean(templatePreviewContext),
+      skipExistenceCheck: !templatePreviewContext,
     });
     const url = String(uploaded.url || "").trim();
     if (!url) {
@@ -231,8 +430,39 @@ export async function POST(request: NextRequest) {
     logger.info("Media uploaded", {
       userId: session.userId,
       kind,
-      size: fileSize,
+      size: uploadSize,
+      variant: variant || null,
     });
+
+    if (templatePreviewContext && variant) {
+      const previewPrefix = makeTemplatePreviewObjectPrefix({
+        ownerId: templatePreviewContext.ownerId,
+        templateId,
+      });
+      listObjectKeys(BUCKET_NAME, { prefix: previewPrefix })
+        .then((siblingKeys) =>
+          collectTemplatePreviewCleanupKeys({
+            ownerId: templatePreviewContext.ownerId,
+            templateId,
+            variant,
+            keepKey: path,
+            previousUrl: templatePreviewContext.previousUrl,
+            siblingKeys,
+          })
+        )
+        .then((cleanupKeys) => {
+          if (cleanupKeys.length === 0) return;
+          return deleteObjects(BUCKET_NAME, cleanupKeys);
+        })
+        .catch((error) => {
+          logger.warn("Failed to clean up previous template preview media", {
+            userId: session.userId,
+            templateId,
+            variant,
+            error: error instanceof Error ? error.message : String(error || ""),
+          });
+        });
+    }
 
     return NextResponse.json({
       kind,
@@ -240,6 +470,9 @@ export async function POST(request: NextRequest) {
       path,
       publicUrl: url,
       url: rewritePublicObjectUrlForClient(url),
+      mimeType: uploadMimeType,
+      size: uploadSize,
+      fileName,
     });
   } catch (error) {
     return handleApiError(error, "Failed to upload media");

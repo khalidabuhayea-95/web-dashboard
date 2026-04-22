@@ -42,6 +42,7 @@ import {
   RASTER_PALETTE_VERSION,
 } from "@/lib/editor/imagePalette";
 import { formatTimelineTime, hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
+import { PREVIEW_RENDER_FPS } from "@/lib/editor/previewRuntime";
 import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/editorStore";
 
 interface ToolbarProps {
@@ -923,6 +924,25 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         if (previewGenerationIdRef.current !== jobId) return;
         setPreviewToast({ tone, message });
       };
+      const appendPreviewVersion = (url: string, token: string) => {
+        const safeUrl = String(url || "").trim();
+        const safeToken = String(token || "").trim();
+        if (!safeUrl || !safeToken) return safeUrl;
+        try {
+          const parsed = new URL(
+            safeUrl,
+            typeof window !== "undefined" ? window.location.origin : "http://localhost"
+          );
+          parsed.searchParams.set("v", safeToken);
+          if (/^https?:\/\//i.test(safeUrl)) {
+            return parsed.toString();
+          }
+          return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+        } catch {
+          const separator = safeUrl.includes("?") ? "&" : "?";
+          return `${safeUrl}${separator}v=${encodeURIComponent(safeToken)}`;
+        }
+      };
       const setLocalPreviewState = (patch: {
         status?: string | null;
         url?: string | null;
@@ -967,8 +987,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
 
         setTimelinePlaying(false);
         const recorded = await stageRecorder({
-          fps: Math.min(24, Math.max(12, designTimeline.fps || 20)),
-          maxDimension: 1080,
+          fps: PREVIEW_RENDER_FPS,
+          maxDimension: 360,
           durationMs: previewTimelineDurationMs,
           signal: controller.signal,
         });
@@ -988,6 +1008,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         });
         const uploadedVideo = await uploadEditorMediaFile(videoFile, "video", {
           signal: controller.signal,
+          variant: "template-preview-video",
+          templateId,
         });
 
         let posterUrl = fallbackPosterDataUrl || designTimeline.preview.posterUrl || "";
@@ -995,6 +1017,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           const posterFile = dataUrlToFile(recorded.posterDataUrl, `template-preview-${templateId}.png`);
           const uploadedPoster = await uploadEditorMediaFile(posterFile, "image", {
             signal: controller.signal,
+            variant: "template-preview-poster",
+            templateId,
           });
           posterUrl = uploadedPoster.url;
         }
@@ -1016,16 +1040,24 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         if (activePreviewCancelRef.current?.controller === controller) {
           activePreviewCancelRef.current = null;
         }
+        const previewVersionToken =
+          String(template?.preview?.updatedAt || "").trim() ||
+          String(template?.preview?.version || "").trim() ||
+          String(Date.parse(nextGeneratedAt) || Date.now());
+        const resolvedPreviewUrl = String(template?.preview?.url || "").trim()
+          || appendPreviewVersion(uploadedVideo.url, previewVersionToken);
+        const resolvedPosterUrl = String(template?.preview?.posterUrl || "").trim()
+          || appendPreviewVersion(posterUrl || "", previewVersionToken);
 
         setLocalPreviewState({
           status: "ready",
-          url: String(template?.preview?.url || uploadedVideo.url || "").trim() || null,
-          posterUrl: String(template?.preview?.posterUrl || posterUrl || "").trim() || null,
+          url: resolvedPreviewUrl || null,
+          posterUrl: resolvedPosterUrl || null,
           generatedAt: nextGeneratedAt,
           error: null,
         });
         announce("success", "Template preview is ready.", {
-          url: String(template?.preview?.url || uploadedVideo.url || "").trim() || null,
+          url: resolvedPreviewUrl || null,
         });
       } catch (error) {
         if (isAbortError(error)) {
@@ -1080,7 +1112,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
       }
     },
     [
-      designTimeline.fps,
       designTimeline.preview,
       patchTemplatePreview,
       previewTimelineDurationMs,

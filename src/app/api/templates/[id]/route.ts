@@ -157,6 +157,15 @@ export async function GET(
         : template?.updatedAt
           ? new Date(template.updatedAt).getTime()
           : NaN;
+    const previewUpdatedAt =
+      template?.previewUpdatedAt instanceof Date
+        ? template.previewUpdatedAt.getTime()
+        : template?.previewUpdatedAt
+          ? new Date(template.previewUpdatedAt).getTime()
+          : NaN;
+    const previewVersionToken = Number.isFinite(previewUpdatedAt)
+      ? String(previewUpdatedAt)
+      : String(template?.previewVersion || "").trim();
 
     return NextResponse.json(
       rewritePublicObjectUrlsForClient({
@@ -166,6 +175,8 @@ export async function GET(
             template?.thumbnailDataUrl,
             Number.isFinite(updatedAt) ? String(updatedAt) : String(template?.version || "")
           ),
+          previewVideoUrl: appendVersionParam(template?.previewVideoUrl, previewVersionToken),
+          previewPosterUrl: appendVersionParam(template?.previewPosterUrl, previewVersionToken),
         },
       })
     );

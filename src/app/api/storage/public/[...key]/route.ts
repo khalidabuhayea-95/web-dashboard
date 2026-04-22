@@ -34,17 +34,24 @@ function normalizeCacheControl(value: unknown) {
   return source;
 }
 
+function isPreviewObjectKey(value: unknown) {
+  const key = String(value || "").trim().toLowerCase();
+  return key.includes("/templates/previews/") && (key.endsWith("/preview.mp4") || key.endsWith("/poster.webp"));
+}
+
 function buildHeaders(object: {
   CacheControl?: unknown;
   ContentType?: unknown;
   ContentLength?: unknown;
   ETag?: unknown;
-}, options: { versioned?: boolean } = {}) {
+}, options: { versioned?: boolean; objectKey?: string } = {}) {
   const headers = new Headers();
   headers.set(
     "Cache-Control",
     options.versioned
       ? "public, max-age=31536000, immutable"
+      : isPreviewObjectKey(options.objectKey)
+        ? "no-store, no-cache, must-revalidate, max-age=0"
       : normalizeCacheControl(object.CacheControl)
   );
   if (object.ContentType) headers.set("Content-Type", String(object.ContentType));
@@ -70,6 +77,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       status: 200,
       headers: buildHeaders(object, {
         versioned: request.nextUrl.searchParams.has("v"),
+        objectKey,
       }),
     });
   } catch (error) {
@@ -93,6 +101,7 @@ export async function HEAD(request: NextRequest, { params }: { params: Promise<{
       status: 200,
       headers: buildHeaders(object, {
         versioned: request.nextUrl.searchParams.has("v"),
+        objectKey,
       }),
     });
   } catch (error) {

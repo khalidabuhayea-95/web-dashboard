@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import Konva from "konva";
 import useImage from "use-image";
 import { Copy, Minus, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
@@ -24,7 +25,9 @@ import {
   createElementFromAsset,
   useEditorStore,
   type EditorElement,
+  type EditorPage,
   type ShapeType,
+  type ToolMode,
 } from "@/store/editorStore";
 import {
   DEFAULT_FRAME_CONTENT_TRANSFORM,
@@ -41,40 +44,34 @@ import {
 } from "@/lib/editor/imagePalette";
 import { rasterizeSvgDataUrlToPngDataUrl } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
+import {
+  frameToSampleTimeMs,
+  getDurationFrames,
+  getFrameAlignedPlayheadFrame,
+  getPlayheadMsForFrame,
+  resolveAnimatedElementPoseAtFrame,
+  resolvePreviewRenderFps,
+  resolveVideoSourceTimeAtFrame,
+  type ElementRenderPose,
+} from "@/lib/editor/previewRuntime";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 import {
-  getAnimationPreset,
   getPageDurationMs,
   getTimelinePageEntries,
   isElementVisibleAtPlayhead,
-  normalizeAnimationDelayMs,
-  normalizeAnimationDirection,
-  normalizeAnimationDurationMs,
-  normalizeAnimationEasing,
-  normalizeAnimationInfinite,
-  normalizeAnimationIntensity,
-  normalizeAnimationMode,
-  normalizeAnimationType,
   resolveTimelineWindow,
-  type EditorAnimationDirection,
-  type EditorAnimationEasing,
-  type EditorAnimationPreset,
 } from "@/lib/editor/animationTimeline";
 
-interface ElementRenderPose {
-  x: number;
-  y: number;
-  rotation: number;
-  scaleX: number;
-  scaleY: number;
-  opacity: number;
+interface PreviewMediaController {
+  syncToFrame: (frame: number, fps: number) => Promise<void>;
 }
 
 interface ImageNodeProps {
   element: EditorElement;
   pose: ElementRenderPose;
   canTransform: boolean;
-  playheadMs?: number;
+  playheadFrame?: number;
+  previewFps?: number;
   pageDurationMs?: number;
   forceTimelineSync?: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
@@ -83,6 +80,7 @@ interface ImageNodeProps {
   onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => void;
   onTransformEnd: (event: Konva.KonvaEventObject<Event>) => void;
   registerRef: (id: string, node: Konva.Node | null) => void;
+  registerPreviewMediaController?: (id: string, controller: PreviewMediaController | null) => void;
   onImageMetadata?: (meta: { width: number; height: number }) => void;
   onVideoMetadata?: (meta: { duration: number }) => void;
 }
@@ -103,6 +101,28 @@ function waitForAnimationFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+function getPreviewRenderSpec(page: EditorPage | null | undefined, maxDimension = 720) {
+  const pageWidth = Math.max(1, Number(page?.width) || 1);
+  const pageHeight = Math.max(1, Number(page?.height) || 1);
+  const safeMaxDimension = Math.max(240, Math.round(Number(maxDimension) || 720));
+  const scale = Math.min(1, safeMaxDimension / Math.max(pageWidth, pageHeight));
+  return {
+    width: Math.max(1, Math.round(pageWidth * scale)),
+    height: Math.max(1, Math.round(pageHeight * scale)),
+    scale,
+  };
+}
+
+function getSupportedPreviewRecorderMimeType() {
+  if (typeof MediaRecorder === "undefined") return "";
+  const candidates = [
+    "video/webm;codecs=vp9",
+    "video/webm;codecs=vp8",
+    "video/webm",
+  ];
+  return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
+}
+
 function createAbortError(message: string) {
   if (typeof DOMException !== "undefined") {
     return new DOMException(message, "AbortError");
@@ -112,38 +132,92 @@ function createAbortError(message: string) {
   return error;
 }
 
-function sleep(ms: number) {
-  return new Promise<void>((resolve) => window.setTimeout(resolve, ms));
+function isDrawableMediaReady(media: unknown) {
+  if (typeof HTMLImageElement !== "undefined" && media instanceof HTMLImageElement) {
+    return media.complete && media.naturalWidth > 0 && media.naturalHeight > 0;
+  }
+  if (typeof HTMLVideoElement !== "undefined" && media instanceof HTMLVideoElement) {
+    return media.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA && media.videoWidth > 0 && media.videoHeight > 0;
+  }
+  if (typeof HTMLCanvasElement !== "undefined" && media instanceof HTMLCanvasElement) {
+    return media.width > 0 && media.height > 0;
+  }
+  return Boolean(media);
 }
 
-function resolveLoopingVideoTargetTime({
-  playheadMs,
-  layerStartMs,
-  sourceStart,
-  sourceEnd,
-}: {
-  playheadMs: number;
-  layerStartMs: number;
-  sourceStart: number;
-  sourceEnd: number;
-}) {
-  const sourceSpan = Math.max(0.01, sourceEnd - sourceStart);
-  const localSeconds = Math.max(0, (playheadMs - layerStartMs) / 1000);
-  const loopSeconds = localSeconds % sourceSpan;
-  return clamp(sourceStart + loopSeconds, sourceStart, Math.max(sourceStart, sourceEnd - 0.01));
+async function waitForStageDrawableMedia(stage: Konva.Stage, timeoutMs = 3000) {
+  const startedAt = performance.now();
+  while (performance.now() - startedAt < timeoutMs) {
+    const media = stage
+      .find("Image")
+      .map((node) => {
+        const imageGetter = (node as { image?: () => unknown }).image;
+        return typeof imageGetter === "function" ? imageGetter.call(node) : null;
+      });
+
+    if (media.length === 0 || media.every(isDrawableMediaReady)) {
+      const drawableMedia = media.filter(Boolean);
+      await Promise.all(
+        drawableMedia.map((item) =>
+          typeof HTMLImageElement !== "undefined" &&
+          item instanceof HTMLImageElement &&
+          typeof item.decode === "function"
+            ? item.decode().catch(() => undefined)
+            : Promise.resolve()
+        )
+      );
+      return;
+    }
+
+    await waitForAnimationFrame();
+  }
 }
 
-function getPreviewRecorderMimeType() {
-  if (typeof MediaRecorder === "undefined") return "";
-  const preferred = [
-    "video/mp4;codecs=h264,aac",
-    "video/mp4;codecs=avc1.42E01E,mp4a.40.2",
-    "video/mp4",
-    "video/webm;codecs=vp9,opus",
-    "video/webm;codecs=vp8,opus",
-    "video/webm",
-  ];
-  return preferred.find((value) => MediaRecorder.isTypeSupported?.(value)) || "";
+async function syncVideoElementToTime(
+  media: HTMLVideoElement,
+  targetTime: number,
+  tolerance = 0.02
+) {
+  const safeTargetTime = Math.max(0, Number(targetTime) || 0);
+  if (Math.abs(media.currentTime - safeTargetTime) <= tolerance) {
+    media.pause();
+    return;
+  }
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    let timeoutId = 0;
+    const cleanup = () => {
+      if (timeoutId) window.clearTimeout(timeoutId);
+      media.removeEventListener("seeked", handleSettled);
+      media.removeEventListener("canplay", handleSettled);
+      media.removeEventListener("loadeddata", handleSettled);
+      media.removeEventListener("error", handleSettled);
+    };
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      resolve();
+    };
+    const handleSettled = () => finish();
+
+    timeoutId = window.setTimeout(finish, 180);
+    media.addEventListener("seeked", handleSettled);
+    media.addEventListener("canplay", handleSettled);
+    media.addEventListener("loadeddata", handleSettled);
+    media.addEventListener("error", handleSettled);
+
+    try {
+      media.pause();
+      media.currentTime = safeTargetTime;
+      if (Math.abs(media.currentTime - safeTargetTime) <= tolerance) {
+        finish();
+      }
+    } catch {
+      finish();
+    }
+  });
 }
 
 function resolveKonvaImageCrop(
@@ -506,7 +580,8 @@ function CanvasVideoNode({
   element,
   pose,
   canTransform,
-  playheadMs = 0,
+  playheadFrame = 0,
+  previewFps = 60,
   pageDurationMs = 0,
   forceTimelineSync = false,
   onSelect,
@@ -515,12 +590,18 @@ function CanvasVideoNode({
   onDragEnd,
   onTransformEnd,
   registerRef,
+  registerPreviewMediaController,
   onVideoMetadata,
 }: ImageNodeProps) {
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaRef = useRef<Konva.Shape | null>(null);
   const onMetadataRef = useRef(onVideoMetadata);
+  const forceTimelineSyncRef = useRef(forceTimelineSync);
+
+  useEffect(() => {
+    forceTimelineSyncRef.current = forceTimelineSync;
+  }, [forceTimelineSync]);
 
   useEffect(() => {
     onMetadataRef.current = onVideoMetadata;
@@ -559,7 +640,9 @@ function CanvasVideoNode({
       if (!mounted) return;
       videoRef.current = htmlVideo;
       setVideo(htmlVideo);
-      void htmlVideo.play().catch(() => undefined);
+      if (!forceTimelineSyncRef.current) {
+        void htmlVideo.play().catch(() => undefined);
+      }
     };
 
     htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -578,41 +661,49 @@ function CanvasVideoNode({
     };
   }, [element.src, element.videoEnd, element.videoStart]);
 
+  const syncVideoToFrame = useCallback(
+    async (frame: number, fps: number) => {
+      const media = videoRef.current;
+      if (!media) return;
+      const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+      const sourceStart = Math.max(0, Number(element.videoStart) || 0);
+      const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+      const rawVideoEnd = Number(element.videoEnd);
+      const sourceEnd = Math.max(
+        sourceStart + 0.01,
+        duration > 0
+          ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+          : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+            ? rawVideoEnd
+            : fallbackEnd
+      );
+      const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+      const targetTime = resolveVideoSourceTimeAtFrame({
+        frame,
+        fps,
+        layerStartMs: layerWindow.startMs,
+        sourceStart,
+        sourceEnd,
+      });
+      await syncVideoElementToTime(media, targetTime, Math.max(0.012, 1 / Math.max(12, fps)));
+      media.pause();
+      mediaRef.current?.getLayer()?.batchDraw();
+    },
+    [element, pageDurationMs]
+  );
+
   useEffect(() => {
-    const media = videoRef.current;
-    if (!media || !forceTimelineSync) return;
-    const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
-    const sourceStart = Math.max(0, Number(element.videoStart) || 0);
-    const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
-    const rawVideoEnd = Number(element.videoEnd);
-    const sourceEnd = Math.max(
-      sourceStart + 0.01,
-      duration > 0
-        ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
-        : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
-          ? rawVideoEnd
-          : fallbackEnd
-    );
-    const layerWindow = resolveTimelineWindow(element, pageDurationMs);
-    const targetTime = resolveLoopingVideoTargetTime({
-      playheadMs,
-      layerStartMs: layerWindow.startMs,
-      sourceStart,
-      sourceEnd,
+    if (!registerPreviewMediaController) return undefined;
+    registerPreviewMediaController(element.id, {
+      syncToFrame: syncVideoToFrame,
     });
+    return () => registerPreviewMediaController(element.id, null);
+  }, [element.id, registerPreviewMediaController, syncVideoToFrame]);
 
-    if (Math.abs(media.currentTime - targetTime) <= 0.02) {
-      media.pause();
-      return;
-    }
-
-    try {
-      media.pause();
-      media.currentTime = targetTime;
-    } catch {
-      // Ignore sync failures until metadata and keyframes are ready.
-    }
-  }, [element, forceTimelineSync, pageDurationMs, playheadMs, video]);
+  useEffect(() => {
+    if (!forceTimelineSync) return;
+    void syncVideoToFrame(playheadFrame, previewFps);
+  }, [forceTimelineSync, playheadFrame, previewFps, syncVideoToFrame]);
 
   useEffect(() => {
     const media = videoRef.current;
@@ -701,7 +792,8 @@ interface FrameNodeProps {
   canTransform: boolean;
   isDropTarget: boolean;
   isContentEditing: boolean;
-  playheadMs: number;
+  playheadFrame: number;
+  previewFps: number;
   pageDurationMs: number;
   forceTimelineSync: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
@@ -713,6 +805,7 @@ interface FrameNodeProps {
   onContentTransform: (patch: { scale?: number; offsetX?: number; offsetY?: number }) => void;
   onContentMetadata: (patch: Partial<FrameContent>) => void;
   registerRef: (id: string, node: Konva.Node | null) => void;
+  registerPreviewMediaController: (id: string, controller: PreviewMediaController | null) => void;
 }
 
 function drawFramePath(
@@ -814,7 +907,8 @@ function CanvasFrameNode({
   canTransform,
   isDropTarget,
   isContentEditing,
-  playheadMs,
+  playheadFrame,
+  previewFps,
   pageDurationMs,
   forceTimelineSync,
   onSelect,
@@ -826,6 +920,7 @@ function CanvasFrameNode({
   onContentTransform,
   onContentMetadata,
   registerRef,
+  registerPreviewMediaController,
 }: FrameNodeProps) {
   const frameContent = element.frameContent || null;
   const preset = useMemo(() => {
@@ -851,6 +946,11 @@ function CanvasFrameNode({
   const mediaRef = useRef<Konva.Image | null>(null);
   const dropFeedbackRef = useRef<Konva.Group | null>(null);
   const metadataRef = useRef(onContentMetadata);
+  const forceTimelineSyncRef = useRef(forceTimelineSync);
+
+  useEffect(() => {
+    forceTimelineSyncRef.current = forceTimelineSync;
+  }, [forceTimelineSync]);
 
   useEffect(() => {
     metadataRef.current = onContentMetadata;
@@ -915,7 +1015,9 @@ function CanvasFrameNode({
       if (!mounted) return;
       videoRef.current = htmlVideo;
       setVideo(htmlVideo);
-      void htmlVideo.play().catch(() => undefined);
+      if (!forceTimelineSyncRef.current) {
+        void htmlVideo.play().catch(() => undefined);
+      }
     };
 
     htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
@@ -934,41 +1036,64 @@ function CanvasFrameNode({
     };
   }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, frameContent?.videoStart, transform.fit]);
 
+  const syncFrameContentVideoToFrame = useCallback(
+    async (frame: number, fps: number) => {
+      const media = videoRef.current;
+      if (!media || frameContent?.kind !== "video") return;
+      const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+      const sourceStart = Math.max(0, Number(frameContent.videoStart) || 0);
+      const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+      const rawVideoEnd = Number(frameContent.videoEnd);
+      const sourceEnd = Math.max(
+        sourceStart + 0.01,
+        duration > 0
+          ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+          : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+            ? rawVideoEnd
+            : fallbackEnd
+      );
+      const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+      const targetTime = resolveVideoSourceTimeAtFrame({
+        frame,
+        fps,
+        layerStartMs: layerWindow.startMs,
+        sourceStart,
+        sourceEnd,
+      });
+      await syncVideoElementToTime(media, targetTime, Math.max(0.012, 1 / Math.max(12, fps)));
+      media.pause();
+      mediaRef.current?.getLayer()?.batchDraw();
+    },
+    [element, frameContent, pageDurationMs]
+  );
+
   useEffect(() => {
-    const media = videoRef.current;
-    if (!media || frameContent?.kind !== "video" || !forceTimelineSync) return;
-    const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
-    const sourceStart = Math.max(0, Number(frameContent.videoStart) || 0);
-    const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
-    const rawVideoEnd = Number(frameContent.videoEnd);
-    const sourceEnd = Math.max(
-      sourceStart + 0.01,
-      duration > 0
-        ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
-        : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
-          ? rawVideoEnd
-          : fallbackEnd
-    );
-    const layerWindow = resolveTimelineWindow(element, pageDurationMs);
-    const targetTime = resolveLoopingVideoTargetTime({
-      playheadMs,
-      layerStartMs: layerWindow.startMs,
-      sourceStart,
-      sourceEnd,
+    if (!registerPreviewMediaController) return undefined;
+    if (frameContent?.kind !== "video") {
+      registerPreviewMediaController(element.id, null);
+      return undefined;
+    }
+    registerPreviewMediaController(element.id, {
+      syncToFrame: syncFrameContentVideoToFrame,
     });
+    return () => registerPreviewMediaController(element.id, null);
+  }, [
+    element.id,
+    frameContent?.kind,
+    registerPreviewMediaController,
+    syncFrameContentVideoToFrame,
+  ]);
 
-    if (Math.abs(media.currentTime - targetTime) <= 0.02) {
-      media.pause();
-      return;
-    }
-
-    try {
-      media.pause();
-      media.currentTime = targetTime;
-    } catch {
-      // Ignore sync failures until metadata and keyframes are ready.
-    }
-  }, [element, forceTimelineSync, frameContent, pageDurationMs, playheadMs, video]);
+  useEffect(() => {
+    if (!forceTimelineSync || frameContent?.kind !== "video") return;
+    void syncFrameContentVideoToFrame(playheadFrame, previewFps);
+  }, [
+    forceTimelineSync,
+    frameContent?.kind,
+    playheadFrame,
+    previewFps,
+    syncFrameContentVideoToFrame,
+  ]);
 
   useEffect(() => {
     const media = videoRef.current;
@@ -1202,6 +1327,412 @@ function CanvasFrameNode({
   );
 }
 
+interface CanvasPageSceneProps {
+  page: EditorPage;
+  elements: EditorElement[];
+  pageDurationMs: number;
+  playheadMs: number;
+  playheadFrame: number;
+  previewFps: number;
+  forceTimelineSync: boolean;
+  interactive: boolean;
+  toolMode: ToolMode;
+  frameDropTargetId?: string;
+  frameContentEditId?: string;
+  includePageOutline?: boolean;
+  registerRef?: (id: string, node: Konva.Node | null) => void;
+  registerPreviewMediaController?: (id: string, controller: PreviewMediaController | null) => void;
+  onSelectNode?: (
+    event: Konva.KonvaEventObject<MouseEvent | TouchEvent>,
+    id: string
+  ) => void;
+  onOpenContextMenu?: (
+    event: Konva.KonvaEventObject<PointerEvent>,
+    id: string
+  ) => void;
+  onNodeDragMove?: (
+    event: Konva.KonvaEventObject<DragEvent>,
+    element: EditorElement
+  ) => void;
+  onNodeDragEnd?: (
+    event: Konva.KonvaEventObject<DragEvent>,
+    element: EditorElement
+  ) => void;
+  onNodeTransform?: () => void;
+  onNodeTransformEnd?: (
+    event: Konva.KonvaEventObject<Event>,
+    element: EditorElement
+  ) => void;
+  onEnterFrameContentEdit?: (element: EditorElement) => void;
+  onUpdateFrameContentTransform?: (
+    element: EditorElement,
+    patch: { scale?: number; offsetX?: number; offsetY?: number }
+  ) => void;
+  onUpdateFrameContentMetadata?: (element: EditorElement, patch: Partial<FrameContent>) => void;
+  onUpdateImageMetadata?: (element: EditorElement, meta: { width: number; height: number }) => void;
+  onUpdateVideoMetadata?: (element: EditorElement, meta: { duration: number }) => void;
+  onBeginInlineTextEdit?: (node: Konva.Node, element: EditorElement) => void;
+}
+
+function CanvasPageScene({
+  page,
+  elements,
+  pageDurationMs,
+  playheadMs,
+  playheadFrame,
+  previewFps,
+  forceTimelineSync,
+  interactive,
+  toolMode,
+  frameDropTargetId = "",
+  frameContentEditId = "",
+  includePageOutline = true,
+  registerRef,
+  registerPreviewMediaController,
+  onSelectNode,
+  onOpenContextMenu,
+  onNodeDragMove,
+  onNodeDragEnd,
+  onNodeTransform,
+  onNodeTransformEnd,
+  onEnterFrameContentEdit,
+  onUpdateFrameContentTransform,
+  onUpdateFrameContentMetadata,
+  onUpdateImageMetadata,
+  onUpdateVideoMetadata,
+  onBeginInlineTextEdit,
+}: CanvasPageSceneProps) {
+  const safeRegisterRef = useCallback(
+    (id: string, node: Konva.Node | null) => {
+      registerRef?.(id, node);
+    },
+    [registerRef]
+  );
+  const safeRegisterPreviewMediaController = useCallback(
+    (id: string, controller: PreviewMediaController | null) => {
+      registerPreviewMediaController?.(id, controller);
+    },
+    [registerPreviewMediaController]
+  );
+
+  return (
+    <>
+      <Group clipX={0} clipY={0} clipWidth={page.width} clipHeight={page.height} listening={false}>
+        <Rect
+          x={0}
+          y={0}
+          width={page.width}
+          height={page.height}
+          fill={page.background.type === "gradient" ? undefined : page.background.color}
+          fillLinearGradientStartPoint={page.background.type === "gradient" ? { x: 0, y: 0 } : undefined}
+          fillLinearGradientEndPoint={
+            page.background.type === "gradient"
+              ? { x: page.width, y: page.height }
+              : undefined
+          }
+          fillLinearGradientColorStops={
+            page.background.type === "gradient"
+              ? [0, page.background.gradientFrom, 1, page.background.gradientTo]
+              : undefined
+          }
+          listening={false}
+        />
+        {page.background.type === "image" && String(page.background.imageUri || "").trim() ? (
+          <CanvasBackgroundImage
+            src={String(page.background.imageUri || "").trim()}
+            pageWidth={page.width}
+            pageHeight={page.height}
+          />
+        ) : null}
+      </Group>
+
+      {includePageOutline ? (
+        <Rect
+          x={0}
+          y={0}
+          width={page.width}
+          height={page.height}
+          stroke="#d8dde5"
+          strokeWidth={1}
+          fillEnabled={false}
+          listening={false}
+        />
+      ) : null}
+
+      <Group clipX={0} clipY={0} clipWidth={page.width} clipHeight={page.height}>
+        {elements.map((element) => {
+          if (!isElementVisibleAtPlayhead(element, playheadMs, pageDurationMs)) {
+            return null;
+          }
+
+          const pose = resolveAnimatedElementPoseAtFrame(
+            element,
+            playheadFrame,
+            previewFps,
+            pageDurationMs
+          );
+          const isEditingFrameContent = interactive && frameContentEditId === element.id;
+          const canTransform = interactive && !element.locked && toolMode !== "draw" && !isEditingFrameContent;
+          const commonProps = {
+            ref: (node: Konva.Node | null) => safeRegisterRef(element.id, node),
+            id: element.id,
+            x: pose.x,
+            y: pose.y,
+            rotation: pose.rotation,
+            scaleX: pose.scaleX,
+            scaleY: pose.scaleY,
+            opacity: pose.opacity,
+            draggable: canTransform,
+            listening: canTransform,
+            globalCompositeOperation: element.blendMode,
+            shadowColor: element.shadowColor,
+            shadowBlur: element.shadowBlur,
+            shadowOffsetX: element.shadowOffsetX,
+            shadowOffsetY: element.shadowOffsetY,
+            onClick: interactive
+              ? (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) =>
+                  onSelectNode?.(event, element.id)
+              : undefined,
+            onContextMenu: interactive
+              ? (event: Konva.KonvaEventObject<PointerEvent>) =>
+                  onOpenContextMenu?.(event, element.id)
+              : undefined,
+            onDragMove: interactive
+              ? (event: Konva.KonvaEventObject<DragEvent>) =>
+                  onNodeDragMove?.(event, element)
+              : undefined,
+            onDragEnd: interactive
+              ? (event: Konva.KonvaEventObject<DragEvent>) =>
+                  onNodeDragEnd?.(event, element)
+              : undefined,
+            onTransform: interactive ? onNodeTransform : undefined,
+            onTransformEnd: interactive
+              ? (event: Konva.KonvaEventObject<Event>) =>
+                  onNodeTransformEnd?.(event, element)
+              : undefined,
+          };
+
+          if (element.type === "frame") {
+            return (
+              <CanvasFrameNode
+                key={element.id}
+                element={element}
+                pose={pose}
+                canTransform={canTransform}
+                isDropTarget={interactive && frameDropTargetId === element.id}
+                isContentEditing={isEditingFrameContent}
+                playheadFrame={playheadFrame}
+                previewFps={previewFps}
+                pageDurationMs={pageDurationMs}
+                forceTimelineSync={forceTimelineSync}
+                registerRef={safeRegisterRef}
+                registerPreviewMediaController={safeRegisterPreviewMediaController}
+                onSelect={(event) => onSelectNode?.(event, element.id)}
+                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
+                onDragMove={(event) => onNodeDragMove?.(event, element)}
+                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
+                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
+                onEnterContentEdit={() => onEnterFrameContentEdit?.(element)}
+                onContentTransform={(patch) => onUpdateFrameContentTransform?.(element, patch)}
+                onContentMetadata={(patch) => onUpdateFrameContentMetadata?.(element, patch)}
+              />
+            );
+          }
+
+          if (element.type === "image") {
+            return (
+              <CanvasImageNode
+                key={element.id}
+                element={element}
+                pose={pose}
+                canTransform={canTransform}
+                playheadFrame={playheadFrame}
+                previewFps={previewFps}
+                pageDurationMs={pageDurationMs}
+                forceTimelineSync={forceTimelineSync}
+                registerRef={safeRegisterRef}
+                onSelect={(event) => onSelectNode?.(event, element.id)}
+                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
+                onDragMove={(event) => onNodeDragMove?.(event, element)}
+                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
+                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
+                onImageMetadata={(meta) => onUpdateImageMetadata?.(element, meta)}
+              />
+            );
+          }
+
+          if (element.type === "video") {
+            return (
+              <CanvasVideoNode
+                key={element.id}
+                element={element}
+                pose={pose}
+                canTransform={canTransform}
+                playheadFrame={playheadFrame}
+                previewFps={previewFps}
+                pageDurationMs={pageDurationMs}
+                forceTimelineSync={forceTimelineSync}
+                registerRef={safeRegisterRef}
+                registerPreviewMediaController={safeRegisterPreviewMediaController}
+                onSelect={(event) => onSelectNode?.(event, element.id)}
+                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
+                onDragMove={(event) => onNodeDragMove?.(event, element)}
+                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
+                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
+                onVideoMetadata={(meta) => onUpdateVideoMetadata?.(element, meta)}
+              />
+            );
+          }
+
+          if (element.type === "text") {
+            const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
+            const direction = resolveTextDirection(element.text);
+            const hasTextCurve =
+              Boolean(element.textCurveEnabled) &&
+              Math.abs(Number(element.textCurveAmount || 0)) > 0.5;
+
+            if (hasTextCurve) {
+              return (
+                <Group
+                  key={element.id}
+                  {...commonProps}
+                  onDblClick={
+                    interactive
+                      ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                      : undefined
+                  }
+                  onDblTap={
+                    interactive
+                      ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                      : undefined
+                  }
+                >
+                  <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
+                  <TextPath
+                    data={resolveTextCurvePath(element)}
+                    text={element.text}
+                    fill={element.color || element.fill}
+                    fontSize={element.fontSize}
+                    fontFamily={resolveCssFontFamily(element.fontFamily)}
+                    fontStyle={konvaFontStyle}
+                    fontVariant="normal"
+                    align={element.align}
+                    letterSpacing={element.letterSpacing}
+                    textDecoration={element.textDecoration}
+                    textBaseline="middle"
+                    listening={false}
+                  />
+                </Group>
+              );
+            }
+
+            return (
+              <Text
+                key={element.id}
+                {...commonProps}
+                width={element.width}
+                height={element.height}
+                text={element.text}
+                fill={element.color || element.fill}
+                fontSize={element.fontSize}
+                fontFamily={resolveCssFontFamily(element.fontFamily)}
+                fontStyle={konvaFontStyle}
+                fontVariant="normal"
+                lineHeight={element.lineHeight}
+                align={element.align}
+                direction={direction}
+                letterSpacing={element.letterSpacing}
+                textDecoration={element.textDecoration}
+                onDblClick={
+                  interactive
+                    ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
+                    : undefined
+                }
+                onDblTap={
+                  interactive
+                    ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
+                    : undefined
+                }
+              />
+            );
+          }
+
+          if (element.type === "circle") {
+            return (
+              <Circle
+                key={element.id}
+                {...commonProps}
+                radius={Math.max(4, Math.min(element.width, element.height) / 2)}
+                fill={element.fill}
+                stroke={element.stroke}
+                strokeWidth={element.strokeWidth}
+              />
+            );
+          }
+
+          if (element.type === "line") {
+            return (
+              <Line
+                key={element.id}
+                {...commonProps}
+                points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
+                stroke={element.stroke || element.fill}
+                strokeWidth={Math.max(1, element.strokeWidth || 4)}
+                lineCap="round"
+                lineJoin="round"
+                tension={0.2}
+              />
+            );
+          }
+
+          if (element.type === "arrow") {
+            return (
+              <Arrow
+                key={element.id}
+                {...commonProps}
+                points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
+                fill={element.fill}
+                stroke={element.stroke || element.fill}
+                strokeWidth={Math.max(1, element.strokeWidth || 5)}
+                pointerLength={14}
+                pointerWidth={14}
+              />
+            );
+          }
+
+          if (element.type === "star") {
+            return (
+              <Star
+                key={element.id}
+                {...commonProps}
+                numPoints={5}
+                innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
+                outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}
+                fill={element.fill}
+                stroke={element.stroke}
+                strokeWidth={element.strokeWidth}
+              />
+            );
+          }
+
+          return (
+            <Rect
+              key={element.id}
+              {...commonProps}
+              width={element.width}
+              height={element.height}
+              fill={element.fill}
+              stroke={element.stroke}
+              strokeWidth={element.strokeWidth}
+              cornerRadius={element.cornerRadius || 0}
+            />
+          );
+        })}
+      </Group>
+    </>
+  );
+}
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -1233,312 +1764,6 @@ function toKonvaFontStyle(fontStyle: EditorElement["fontStyle"], fontWeight: Edi
   return "normal";
 }
 
-function resolveEffectiveAnimationType(element: EditorElement) {
-  const normalizedType = normalizeAnimationType(element.mediaAnimationType);
-  return normalizedType === "RANDOM"
-    ? (["FADE", "PAN", "POP", "BASELINE", "WIGGLE", "PULSE"][
-        Array.from(String(element.id || "random")).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6
-      ] as ReturnType<typeof normalizeAnimationType>)
-    : normalizedType;
-}
-
-function applyAnimationEasing(progress: number, easing: EditorAnimationEasing) {
-  const value = clamp(progress, 0, 1);
-  switch (easing) {
-    case "LINEAR":
-      return value;
-    case "EASE_OUT":
-      return 1 - Math.pow(1 - value, 3);
-    case "EASE_IN_OUT":
-      return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
-    case "SOFT_OUT":
-      return 1 - Math.pow(1 - value, 4);
-    case "SOFT_IN_OUT":
-      return 0.5 - Math.cos(Math.PI * value) / 2;
-    default:
-      return value;
-  }
-}
-
-function getDirectionalVector(direction: EditorAnimationDirection) {
-  switch (direction) {
-    case "LEFT":
-      return { x: -1, y: 0, spin: -1 };
-    case "RIGHT":
-      return { x: 1, y: 0, spin: 1 };
-    case "UP":
-      return { x: 0, y: -1, spin: -1 };
-    case "DOWN":
-      return { x: 0, y: 1, spin: 1 };
-    case "COUNTERCLOCKWISE":
-      return { x: 0, y: 0, spin: -1 };
-    case "CLOCKWISE":
-      return { x: 0, y: 0, spin: 1 };
-    default:
-      return { x: 0, y: 0, spin: 1 };
-  }
-}
-
-function pingPong(progress: number) {
-  const normalized = ((progress % 1) + 1) % 1;
-  return 0.5 - Math.cos(normalized * Math.PI * 2) / 2;
-}
-
-interface AnimationState {
-  preset: EditorAnimationPreset;
-  progress: number;
-  cycleProgress: number;
-  cycleWave: number;
-  direction: EditorAnimationDirection;
-  intensity: number;
-  isInfinite: boolean;
-}
-
-function resolveAnimationState(
-  element: EditorElement,
-  playheadMs: number,
-  pageDurationMs: number
-): AnimationState | null {
-  const type = resolveEffectiveAnimationType(element);
-  const preset = getAnimationPreset(type);
-  if (type === "NONE") return null;
-
-  const legacyMode = normalizeAnimationMode(element.mediaAnimationMode);
-  const direction = normalizeAnimationDirection(element.mediaAnimationDirection, type);
-  const easing = normalizeAnimationEasing(element.mediaAnimationEasing, type);
-  const intensity = normalizeAnimationIntensity(element.mediaAnimationIntensity);
-  const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
-  const layerDurationMs = Math.max(1, timelineWindow.endMs - timelineWindow.startMs);
-  const delayMs = Math.min(layerDurationMs - 1, normalizeAnimationDelayMs(element.mediaAnimationDelayMs));
-  const durationMs = Math.max(
-    1,
-    Math.min(
-      layerDurationMs,
-      normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode) && preset.supportsInfinite
-        ? preset.defaultDurationMs
-        : normalizeAnimationDurationMs(element.mediaAnimationDurationMs || preset.defaultDurationMs)
-    )
-  );
-  const localMs = playheadMs - timelineWindow.startMs;
-  const activeMs = Math.max(0, localMs - delayMs);
-  const isInfinite =
-    normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode) &&
-    preset.supportsInfinite;
-  const cycleProgress =
-    activeMs <= 0
-      ? 0
-      : isInfinite
-        ? (activeMs % durationMs) / durationMs
-        : clamp(activeMs / durationMs, 0, 1);
-  const cycleWave = applyAnimationEasing(pingPong(cycleProgress), easing);
-
-  if (preset.category === "loop") {
-    const oneShot = applyAnimationEasing(clamp(activeMs / durationMs, 0, 1), easing);
-    return {
-      preset,
-      progress: isInfinite ? cycleWave : oneShot,
-      cycleProgress,
-      cycleWave,
-      direction,
-      intensity,
-      isInfinite,
-    };
-  }
-
-  if (isInfinite || legacyMode === "LOOP") {
-    return {
-      preset,
-      progress: cycleWave,
-      cycleProgress,
-      cycleWave,
-      direction,
-      intensity,
-      isInfinite: true,
-    };
-  }
-
-  const introProgress = applyAnimationEasing(clamp(activeMs / durationMs, 0, 1), easing);
-  const outroStartMs = Math.max(0, layerDurationMs - durationMs - delayMs);
-  const outroProgress = applyAnimationEasing(
-    clamp((timelineWindow.endMs - playheadMs - delayMs) / durationMs, 0, 1),
-    easing
-  );
-  const progress =
-    legacyMode === "OUT"
-      ? outroProgress
-      : localMs >= outroStartMs + delayMs
-        ? outroProgress
-        : introProgress;
-
-  return {
-    preset,
-    progress,
-    cycleProgress,
-    cycleWave,
-    direction,
-    intensity,
-    isInfinite: false,
-  };
-}
-
-function resolveAnimatedElementPose(
-  element: EditorElement,
-  playheadMs: number,
-  pageDurationMs: number
-): ElementRenderPose {
-  const base: ElementRenderPose = {
-    x: element.x,
-    y: element.y,
-    rotation: element.rotation,
-    scaleX: element.scaleX,
-    scaleY: element.scaleY,
-    opacity: element.opacity,
-  };
-
-  const state = resolveAnimationState(element, playheadMs, pageDurationMs);
-  const type = resolveEffectiveAnimationType(element);
-  if (!state) return base;
-
-  const vector = getDirectionalVector(state.direction);
-  const progress = clamp(state.progress, 0, 1);
-  const intensity = state.intensity;
-  const amplitudeX = Math.max(12, element.width * 0.18) * intensity;
-  const amplitudeY = Math.max(12, element.height * 0.18) * intensity;
-
-  let opacityFactor = 1;
-  let scaleXFactor = 1;
-  let scaleYFactor = 1;
-  let offsetX = 0;
-  let offsetY = 0;
-  let rotationOffset = 0;
-
-  switch (type) {
-    case "FADE":
-      opacityFactor = 0.04 + progress * 0.96;
-      break;
-    case "BLUR":
-      opacityFactor = 0.05 + progress * 0.95;
-      scaleXFactor = 0.92 + progress * 0.08;
-      scaleYFactor = 0.92 + progress * 0.08;
-      break;
-    case "RISE":
-      offsetY = Math.max(16, element.height * 0.22) * (1 - progress) * intensity;
-      opacityFactor = 0.12 + progress * 0.88;
-      break;
-    case "PAN":
-      offsetX = vector.x * (1 - progress) * Math.max(22, element.width * 0.28) * intensity;
-      opacityFactor = 0.16 + progress * 0.84;
-      break;
-    case "DRIFT":
-      offsetX = vector.x * (1 - progress) * Math.max(14, element.width * 0.18) * intensity;
-      offsetY = vector.y * (1 - progress) * Math.max(8, element.height * 0.12) * intensity;
-      opacityFactor = 0.1 + progress * 0.9;
-      break;
-    case "TECTONIC":
-      offsetX = vector.x * (1 - progress) * Math.max(28, element.width * 0.34) * intensity;
-      scaleXFactor = 0.9 + progress * 0.1;
-      opacityFactor = 0.08 + progress * 0.92;
-      break;
-    case "WIPE":
-      if (Math.abs(vector.x) > 0) {
-        scaleXFactor = Math.max(0.001, progress);
-        offsetX = vector.x < 0 ? element.width * (1 - progress) : 0;
-      } else {
-        scaleYFactor = Math.max(0.001, progress);
-        offsetY = vector.y < 0 ? element.height * (1 - progress) : 0;
-      }
-      break;
-    case "POP":
-      scaleXFactor = 0.7 + progress * 0.3;
-      scaleYFactor = 0.7 + progress * 0.3;
-      opacityFactor = 0.12 + progress * 0.88;
-      break;
-    case "SUCCESSION":
-      scaleXFactor = 0.82 + progress * 0.18;
-      scaleYFactor = 0.82 + progress * 0.18;
-      opacityFactor = 0.06 + progress * 0.94;
-      break;
-    case "STOMP":
-      scaleXFactor = 0.78 + progress * 0.22;
-      scaleYFactor = 0.78 + progress * 0.22;
-      rotationOffset = (1 - progress) * 18 * vector.spin * intensity;
-      opacityFactor = 0.1 + progress * 0.9;
-      break;
-    case "BREATHE": {
-      const breathWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + breathWave * 0.06 * intensity;
-      scaleYFactor = 1 + breathWave * 0.06 * intensity;
-      opacityFactor = 0.86 + breathWave * 0.14;
-      break;
-    }
-    case "BASELINE": {
-      const bounceWave = Math.abs(Math.sin(state.cycleProgress * Math.PI * 2));
-      offsetY = -bounceWave * Math.max(10, element.height * 0.1) * intensity;
-      scaleYFactor = 1 - bounceWave * 0.06 * intensity;
-      scaleXFactor = 1 + bounceWave * 0.04 * intensity;
-      break;
-    }
-    case "TUMBLE":
-      rotationOffset = (1 - progress) * 26 * vector.spin * intensity;
-      offsetX = vector.spin * (1 - progress) * Math.max(18, element.width * 0.18) * intensity;
-      offsetY = -(1 - progress) * Math.max(18, element.height * 0.22) * intensity;
-      opacityFactor = 0.08 + progress * 0.92;
-      break;
-    case "NEON": {
-      const pulseWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + pulseWave * 0.05 * intensity;
-      scaleYFactor = 1 + pulseWave * 0.05 * intensity;
-      opacityFactor = clamp(0.8 + pulseWave * 0.2 + Math.sin(state.cycleProgress * Math.PI * 6) * 0.04, 0.72, 1);
-      break;
-    }
-    case "SCRAPBOOK": {
-      const scrapbookWave = Math.sin(state.cycleProgress * Math.PI * 2);
-      rotationOffset = scrapbookWave * 6.5 * intensity;
-      offsetX = scrapbookWave * Math.max(5, element.width * 0.024) * intensity;
-      offsetY = Math.cos(state.cycleProgress * Math.PI * 2) * Math.max(3, element.height * 0.018) * intensity;
-      break;
-    }
-    case "ROTATE":
-      rotationOffset = state.cycleProgress * 360 * vector.spin * intensity;
-      break;
-    case "FLICKER": {
-      const irregular =
-        0.4 +
-        0.34 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 9.2)) +
-        0.22 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 23.6));
-      opacityFactor = clamp(
-        state.isInfinite ? irregular : 1 - state.progress + irregular * state.progress,
-        0.16,
-        1
-      );
-      break;
-    }
-    case "PULSE": {
-      const pulseWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + pulseWave * 0.12 * intensity;
-      scaleYFactor = 1 + pulseWave * 0.12 * intensity;
-      break;
-    }
-    case "WIGGLE": {
-      const wiggleWave = Math.sin(state.cycleProgress * Math.PI * 2);
-      rotationOffset = wiggleWave * 4.5 * intensity;
-      offsetX = wiggleWave * Math.max(3, element.width * 0.018) * intensity;
-      break;
-    }
-    default:
-      break;
-  }
-
-  return {
-    x: base.x + offsetX,
-    y: base.y + offsetY,
-    rotation: base.rotation + rotationOffset,
-    scaleX: base.scaleX * scaleXFactor,
-    scaleY: base.scaleY * scaleYFactor,
-    opacity: clamp(base.opacity * opacityFactor, 0, 1),
-  };
-}
-
 function rectsIntersect(
   a: { x: number; y: number; width: number; height: number },
   b: { x: number; y: number; width: number; height: number }
@@ -1565,7 +1790,9 @@ const MAX_SCALE = 4;
 
 export default function CanvasEditor() {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const exportStageHostRef = useRef<HTMLDivElement | null>(null);
   const stageRef = useRef<Konva.Stage | null>(null);
+  const exportStageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
   const nodeRefs = useRef<Record<string, Konva.Node | null>>({});
 
@@ -1585,8 +1812,8 @@ export default function CanvasEditor() {
 
   const setStageApi = useEditorStore((state) => state.setStageApi);
   const setZoomPercent = useEditorStore((state) => state.setZoomPercent);
-  const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
   const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
+  const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
   const setSelectedIds = useEditorStore((state) => state.setSelectedIds);
   const setShowRightSidebar = useEditorStore((state) => state.setShowRightSidebar);
   const clearSelection = useEditorStore((state) => state.clearSelection);
@@ -1618,22 +1845,34 @@ export default function CanvasEditor() {
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string } | null>(null);
   const [frameDropTargetId, setFrameDropTargetId] = useState("");
   const [frameContentEditId, setFrameContentEditId] = useState("");
-  const [capturePlayheadOverrideMs, setCapturePlayheadOverrideMs] = useState<number | null>(null);
+  const [captureFrameOverride, setCaptureFrameOverride] = useState<number | null>(null);
+  const [exportFrameOverride, setExportFrameOverride] = useState(0);
+  const [exportMaxDimension, setExportMaxDimension] = useState(720);
 
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
   const expiredFrameDropTargetRef = useRef("");
-  const timelinePlayheadRef = useRef(0);
-  const activePagePlayheadRef = useRef(0);
   const autoFitPageIdRef = useRef("");
+  const previewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
+  const exportPreviewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
+  const timelinePlayheadMsRef = useRef(timelinePlayheadMs);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
     [activePageId, pages]
   );
 
+  useEffect(() => {
+    timelinePlayheadMsRef.current = timelinePlayheadMs;
+  }, [timelinePlayheadMs]);
+
   const elements = useMemo(() => activePage?.elements ?? [], [activePage]);
   const activePageDurationMs = useMemo(() => getPageDurationMs(activePage), [activePage]);
+  const previewRenderFps = useMemo(() => resolvePreviewRenderFps(), []);
+  const exportCanvasSpec = useMemo(
+    () => getPreviewRenderSpec(activePage, exportMaxDimension),
+    [activePage, exportMaxDimension]
+  );
   const activePageTimelineStartMs = useMemo(() => {
     const entry = getTimelinePageEntries(pages).find((item) => item.page.id === activePage?.id);
     return entry?.startMs || 0;
@@ -1642,17 +1881,68 @@ export default function CanvasEditor() {
     () => Math.max(0, Math.min(activePageDurationMs, timelinePlayheadMs - activePageTimelineStartMs)),
     [activePageDurationMs, activePageTimelineStartMs, timelinePlayheadMs]
   );
+  const activePagePlayheadFrame = useMemo(
+    () => getFrameAlignedPlayheadFrame(activePagePlayheadMs, previewRenderFps, activePageDurationMs),
+    [activePageDurationMs, activePagePlayheadMs, previewRenderFps]
+  );
+  const effectiveActivePageFrame =
+    captureFrameOverride === null ? activePagePlayheadFrame : captureFrameOverride;
   const effectiveActivePagePlayheadMs =
-    capturePlayheadOverrideMs === null ? activePagePlayheadMs : capturePlayheadOverrideMs;
-  const forceTimelineMediaSync = capturePlayheadOverrideMs !== null || previewGenerationActive;
+    captureFrameOverride === null
+      ? activePagePlayheadMs
+      : Math.min(activePageDurationMs, frameToSampleTimeMs(captureFrameOverride, previewRenderFps));
+  const effectiveExportPlayheadMs = Math.min(
+    activePageDurationMs,
+    previewGenerationActive
+      ? activePagePlayheadMs
+      : frameToSampleTimeMs(exportFrameOverride, previewRenderFps)
+  );
+  const effectiveExportPlayheadFrame = previewGenerationActive
+    ? activePagePlayheadFrame
+    : exportFrameOverride;
+  const isRenderingPreview = previewGenerationActive || captureFrameOverride !== null;
+  const showBlockingPreviewOverlay = captureFrameOverride !== null;
+  const forceTimelineMediaSync = Boolean(designTimeline.enabled) || captureFrameOverride !== null || previewGenerationActive;
 
-  useEffect(() => {
-    timelinePlayheadRef.current = timelinePlayheadMs;
-  }, [timelinePlayheadMs]);
+  const registerPreviewMediaController = useCallback(
+    (id: string, controller: PreviewMediaController | null) => {
+      const targetId = String(id || "").trim();
+      if (!targetId) return;
+      if (!controller) {
+        previewMediaControllersRef.current.delete(targetId);
+        return;
+      }
+      previewMediaControllersRef.current.set(targetId, controller);
+    },
+    []
+  );
 
-  useEffect(() => {
-    activePagePlayheadRef.current = activePagePlayheadMs;
-  }, [activePagePlayheadMs]);
+  const syncPreviewMediaControllers = useCallback(async (frame: number, fps: number) => {
+    const controllers = Array.from(previewMediaControllersRef.current.values());
+    if (controllers.length === 0) return;
+    await Promise.all(controllers.map((controller) => controller.syncToFrame(frame, fps)));
+  }, []);
+
+  const registerExportPreviewMediaController = useCallback(
+    (id: string, controller: PreviewMediaController | null) => {
+      const targetId = String(id || "").trim();
+      if (!targetId) return;
+      if (!controller) {
+        exportPreviewMediaControllersRef.current.delete(targetId);
+        return;
+      }
+      exportPreviewMediaControllersRef.current.set(targetId, controller);
+    },
+    []
+  );
+
+  const syncExportPreviewMediaControllers = useCallback(async (frame: number, fps: number) => {
+    const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
+    if (controllers.length === 0) return;
+    await Promise.all(controllers.map((controller) => controller.syncToFrame(frame, fps)));
+  }, []);
+
+  const registerExportNodeRef = useCallback((_id: string, _node: Konva.Node | null) => {}, []);
 
   useEffect(() => {
     if (!frameContentEditId) return;
@@ -1775,8 +2065,7 @@ export default function CanvasEditor() {
       const y = viewport.y;
       const width = activePage.width * viewport.scale;
       const height = activePage.height * viewport.scale;
-      const safeMaxDimension = Math.max(240, Math.round(Number(maxDimension) || 720));
-      const previewScale = Math.min(1, safeMaxDimension / Math.max(activePage.width, activePage.height));
+      const { scale: previewScale } = getPreviewRenderSpec(activePage, maxDimension);
       const pixelRatio = Math.max(0.1, previewScale / Math.max(viewport.scale, 0.1));
 
       try {
@@ -1799,10 +2088,34 @@ export default function CanvasEditor() {
     [activePage, viewport.scale, viewport.x, viewport.y]
   );
 
+  const renderExportPageToCanvas = useCallback(
+    () => {
+      const stage = exportStageRef.current;
+      if (!stage || !activePage) return null;
+
+      try {
+        const canvas = stage.toCanvas({
+          x: 0,
+          y: 0,
+          width: exportCanvasSpec.width,
+          height: exportCanvasSpec.height,
+          pixelRatio: 1,
+        });
+        return {
+          canvas,
+          width: exportCanvasSpec.width,
+          height: exportCanvasSpec.height,
+        };
+      } catch {
+        return null;
+      }
+    },
+    [activePage, exportCanvasSpec.height, exportCanvasSpec.width]
+  );
+
   const recordTimelinePreviewVideo = useCallback(
     async (options?: { fps?: number; maxDimension?: number; durationMs?: number; signal?: AbortSignal }) => {
-      const stage = stageRef.current;
-      const transformer = transformerRef.current;
+      const stage = exportStageRef.current;
       if (!stage || !activePage) return null;
       const ensureNotAborted = () => {
         if (options?.signal?.aborted) {
@@ -1810,25 +2123,7 @@ export default function CanvasEditor() {
         }
       };
       ensureNotAborted();
-      if (typeof MediaRecorder === "undefined") {
-        throw new Error("Preview recording is not supported in this browser.");
-      }
-
-      const mimeType = getPreviewRecorderMimeType();
-      if (!mimeType) {
-        throw new Error("No supported video recorder format is available in this browser.");
-      }
-
-      const output = renderCurrentPageToCanvas(options?.maxDimension ?? 720);
-      if (!output) {
-        throw new Error("Unable to capture the current template preview.");
-      }
-
-      const fps = clamp(
-        Math.round(Number(options?.fps) || designTimeline.fps || 20),
-        12,
-        24
-      );
+      const fps = resolvePreviewRenderFps(options?.fps ?? designTimeline.fps);
       const durationMs = Math.max(
         300,
         Math.round(
@@ -1838,162 +2133,305 @@ export default function CanvasEditor() {
             0
         )
       );
-      const recordingCanvas = document.createElement("canvas");
-      recordingCanvas.width = output.width;
-      recordingCanvas.height = output.height;
-      const recordingContext = recordingCanvas.getContext("2d");
-      if (!recordingContext) {
-        throw new Error("Preview recorder canvas is unavailable.");
-      }
-
-      let stream = recordingCanvas.captureStream(fps);
-      let canvasTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
-      const supportsManualFrameCapture = Boolean(
-        canvasTrack && typeof canvasTrack.requestFrame === "function"
-      );
-      if (supportsManualFrameCapture) {
-        stream.getTracks().forEach((track) => track.stop());
-        stream = recordingCanvas.captureStream(0);
-        canvasTrack = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack | undefined;
-      }
-      const tracks = stream.getTracks();
-      const recorder = new MediaRecorder(stream, {
-        mimeType,
-        videoBitsPerSecond: Math.max(6_000_000, Math.round(output.width * output.height * 5)),
-      });
-      const chunks: Blob[] = [];
-      const previousNodes = transformer?.nodes() || [];
-      let recorderStopResolve: ((blob: Blob) => void) | null = null;
-      let recorderStopReject: ((error: Error) => void) | null = null;
-      const recorderStopped = new Promise<Blob>((resolve, reject) => {
-        recorderStopResolve = resolve;
-        recorderStopReject = reject;
-      });
-
-      recorder.addEventListener("dataavailable", (event) => {
-        if (event.data && event.data.size > 0) {
-          chunks.push(event.data);
-        }
-      });
-      recorder.addEventListener("stop", () => {
-        recorderStopResolve?.(new Blob(chunks, { type: mimeType }));
-      });
-      recorder.addEventListener("error", () => {
-        recorderStopReject?.(new Error("Preview recorder failed while encoding the video."));
-      });
-
+      const requestedMaxDimension = Math.max(240, Math.round(Number(options?.maxDimension) || 720));
       let posterDataUrl = "";
-      const previousAbsolutePlayheadMs = timelinePlayheadRef.current;
-      const captureCurrentFrame = async () => {
-        ensureNotAborted();
-        stage.batchDraw();
-        await waitForAnimationFrame();
-        ensureNotAborted();
-        const captured = renderCurrentPageToCanvas(options?.maxDimension ?? 720);
-        if (!captured) return;
-        recordingContext.clearRect(0, 0, recordingCanvas.width, recordingCanvas.height);
-        recordingContext.drawImage(captured.canvas, 0, 0, recordingCanvas.width, recordingCanvas.height);
-
-        if (!posterDataUrl) {
-          try {
-            posterDataUrl = recordingCanvas.toDataURL("image/png");
-          } catch {
-            posterDataUrl = "";
-          }
-        }
-
-        if (supportsManualFrameCapture && canvasTrack && typeof canvasTrack.requestFrame === "function") {
-          canvasTrack.requestFrame();
-        }
+      const frameDurationMs = 1000 / Math.max(1, fps);
+      const recorderMimeType = getSupportedPreviewRecorderMimeType();
+      const getRecordedExtension = (mimeType: string) => {
+        const normalized = String(mimeType || "").trim().toLowerCase();
+        if (normalized.includes("mp4")) return "mp4";
+        if (normalized.includes("ogg")) return "ogv";
+        return "webm";
       };
+
+      let recordingStream: MediaStream | null = null;
+      let recorder: MediaRecorder | null = null;
+      let abortListener: (() => void) | null = null;
+      let restoreTimelinePlayheadMs = timelinePlayheadMsRef.current;
 
       try {
-        transformer?.nodes([]);
-        transformer?.forceUpdate();
-        transformer?.getLayer()?.batchDraw();
-
+        restoreTimelinePlayheadMs = timelinePlayheadMsRef.current;
         setTimelinePlaying(false);
-        setTimelinePlayheadMs(activePageTimelineStartMs);
+        setTimelinePlayheadMs(0);
+        flushSync(() => {
+          setExportMaxDimension(requestedMaxDimension);
+          setExportFrameOverride(0);
+        });
         await waitForAnimationFrame();
-        await captureCurrentFrame();
+        await waitForStageDrawableMedia(stage);
+        await syncExportPreviewMediaControllers(0, fps);
+        stage.getLayers().forEach((layer) => layer.draw());
+        await waitForAnimationFrame();
+        ensureNotAborted();
+
+        const initialCapture = renderExportPageToCanvas();
+        if (!initialCapture) {
+          throw new Error("Unable to capture the current template preview.");
+        }
+
+        try {
+          posterDataUrl = initialCapture.canvas.toDataURL("image/png");
+        } catch {
+          posterDataUrl = "";
+        }
+
+        const exportLayer = stage.getLayers()[0];
+        if (!exportLayer || typeof exportLayer.getNativeCanvasElement !== "function") {
+          throw new Error("Preview export canvas is unavailable.");
+        }
+        const exportCanvas = exportLayer.getNativeCanvasElement();
+        if (!exportCanvas || typeof exportCanvas.captureStream !== "function") {
+          throw new Error("Canvas stream recording is not supported in this browser.");
+        }
+
+        recordingStream = exportCanvas.captureStream(0);
+        let requestCapturedFrame: (() => void) | null = null;
+        const initialTrack = recordingStream.getVideoTracks()[0] as MediaStreamTrack & {
+          requestFrame?: () => void;
+        };
+        if (initialTrack && typeof initialTrack.requestFrame === "function") {
+          requestCapturedFrame = () => initialTrack.requestFrame?.();
+        } else {
+          recordingStream.getTracks().forEach((track) => track.stop());
+          recordingStream = exportCanvas.captureStream(fps);
+        }
+        const mediaRecorderOptions =
+          recorderMimeType && recorderMimeType.length > 0
+            ? ({
+                mimeType: recorderMimeType,
+                videoBitsPerSecond: 2_500_000,
+              } satisfies MediaRecorderOptions)
+            : ({
+                videoBitsPerSecond: 2_500_000,
+              } satisfies MediaRecorderOptions);
+        recorder = new MediaRecorder(recordingStream, mediaRecorderOptions);
+        const activeRecorder = recorder;
+
+        const recordedSource = await new Promise<{ blob: Blob; mimeType: string }>((resolve, reject) => {
+          const chunks: Blob[] = [];
+          let settled = false;
+          let aborted = false;
+
+          const cleanup = () => {
+            if (abortListener && options?.signal) {
+              options.signal.removeEventListener("abort", abortListener);
+            }
+          };
+          const rejectOnce = (error: unknown) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            reject(error instanceof Error ? error : new Error(String(error || "Preview recording failed.")));
+          };
+          const resolveOnce = (value: { blob: Blob; mimeType: string }) => {
+            if (settled) return;
+            settled = true;
+            cleanup();
+            resolve(value);
+          };
+
+          activeRecorder.addEventListener(
+            "dataavailable",
+            (event) => {
+              if (event.data && event.data.size > 0) {
+                chunks.push(event.data);
+              }
+            },
+            { passive: true }
+          );
+          activeRecorder.addEventListener(
+            "error",
+            (event) => {
+              const recorderError = (event as Event & { error?: Error }).error;
+              rejectOnce(recorderError || new Error("Preview recorder failed."));
+            },
+            { once: true }
+          );
+          activeRecorder.addEventListener(
+            "stop",
+            () => {
+              if (aborted) {
+                rejectOnce(createAbortError("Preview generation was canceled."));
+                return;
+              }
+              const mimeType =
+                String(activeRecorder.mimeType || recorderMimeType || "video/webm").trim() || "video/webm";
+              const blob = new Blob(chunks, { type: mimeType });
+              if (blob.size <= 0) {
+                rejectOnce(new Error("Preview recorder did not produce a video."));
+                return;
+              }
+              resolveOnce({ blob, mimeType });
+            },
+            { once: true }
+          );
+          const started = new Promise<void>((resolveStart, rejectStart) => {
+            activeRecorder.addEventListener("start", () => resolveStart(), { once: true });
+            activeRecorder.addEventListener(
+              "error",
+              (event) => {
+                const recorderError = (event as Event & { error?: Error }).error;
+                rejectStart(recorderError || new Error("Preview recorder failed to start."));
+              },
+              { once: true }
+            );
+          });
+          abortListener = () => {
+            aborted = true;
+            if (recorder && recorder.state !== "inactive") {
+              try {
+                recorder.stop();
+              } catch {
+                rejectOnce(createAbortError("Preview generation was canceled."));
+              }
+              return;
+            }
+            rejectOnce(createAbortError("Preview generation was canceled."));
+          };
+          if (options?.signal) {
+            options.signal.addEventListener("abort", abortListener, { once: true });
+          }
+
+          const runPlayback = async () => {
+            activeRecorder.start(250);
+            await started;
+            ensureNotAborted();
+
+            setTimelinePlayheadMs(0);
+            await syncExportPreviewMediaControllers(0, fps);
+            stage.getLayers().forEach((layer) => layer.draw());
+            requestCapturedFrame?.();
+            await waitForAnimationFrame();
+            setTimelinePlaying(true);
+
+            const startedAt = performance.now();
+            let lastCapturedFrame = 0;
+
+            while (true) {
+              ensureNotAborted();
+              const elapsedMs = Math.max(0, performance.now() - startedAt);
+              const playheadMs = Math.max(
+                0,
+                Math.min(
+                  durationMs,
+                  timelinePlayheadMsRef.current - activePageTimelineStartMs
+                )
+              );
+              const livePlayheadFrame = getFrameAlignedPlayheadFrame(
+                playheadMs,
+                previewRenderFps,
+                activePageDurationMs
+              );
+
+              if (livePlayheadFrame !== lastCapturedFrame) {
+                await syncExportPreviewMediaControllers(livePlayheadFrame, fps);
+                lastCapturedFrame = livePlayheadFrame;
+              }
+
+              stage.getLayers().forEach((layer) => layer.draw());
+              requestCapturedFrame?.();
+
+              if (playheadMs >= durationMs || elapsedMs >= durationMs + frameDurationMs) {
+                break;
+              }
+              await waitForAnimationFrame();
+            }
+
+            setTimelinePlaying(false);
+            await syncExportPreviewMediaControllers(
+              getFrameAlignedPlayheadFrame(durationMs, previewRenderFps, activePageDurationMs),
+              fps
+            );
+            await waitForAnimationFrame();
+            stage.getLayers().forEach((layer) => layer.draw());
+            requestCapturedFrame?.();
+            if (activeRecorder.state === "recording") {
+              try {
+                activeRecorder.requestData();
+              } catch {
+                // Ignore browsers that do not support requestData mid-recording.
+              }
+              activeRecorder.stop();
+            }
+          };
+
+          void runPlayback().catch((error) => {
+            rejectOnce(error);
+            if (recorder && recorder.state !== "inactive") {
+              try {
+                recorder.stop();
+              } catch {
+                // Ignore recorder shutdown errors after a playback failure.
+              }
+            }
+          });
+        });
 
         ensureNotAborted();
-        recorder.start();
+        const formData = new FormData();
+        formData.set("fps", String(fps));
+        formData.set("expectedDurationMs", String(durationMs));
+        formData.set("mimeType", recordedSource.mimeType);
+        formData.set(
+          "sourceVideo",
+          new File(
+            [recordedSource.blob],
+            `preview-source.${getRecordedExtension(recordedSource.mimeType)}`,
+            { type: recordedSource.mimeType || "video/webm" }
+          )
+        );
 
-        // Start the same shared timeline playback the user sees from the play button,
-        // then sample the canvas from the actual playhead progression instead of a
-        // separate recording timer. That keeps recording aligned with visible playback.
-        setTimelinePlaying(true);
-
-        const startedAt = performance.now();
-        const frameStepMs = Math.max(1, Math.round(1000 / fps));
-        let nextCapturePlayheadMs = frameStepMs;
-
-        while (true) {
-          ensureNotAborted();
-          await waitForAnimationFrame();
-          ensureNotAborted();
-          const now = performance.now();
-          const currentPlayheadMs = activePagePlayheadRef.current;
-          const reachedEnd = currentPlayheadMs >= durationMs || now - startedAt >= durationMs + 500;
-
-          while (currentPlayheadMs >= nextCapturePlayheadMs && nextCapturePlayheadMs <= durationMs) {
-            await captureCurrentFrame();
-            nextCapturePlayheadMs += frameStepMs;
-          }
-
-          if (reachedEnd) {
-            if (currentPlayheadMs < nextCapturePlayheadMs) {
-              await captureCurrentFrame();
-            }
-            break;
-          }
+        const response = await fetch("/api/editor/media/encode-preview", {
+          method: "POST",
+          body: formData,
+          signal: options?.signal,
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({} as { error?: string }));
+          throw new Error(payload?.error || "Preview encoder failed to create the video.");
         }
+        const mimeType =
+          String(response.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
+        const encodedBytes = await response.arrayBuffer();
+        const blob = new Blob([encodedBytes], { type: mimeType });
 
-        setTimelinePlaying(false);
-        setTimelinePlayheadMs(activePageTimelineStartMs + durationMs);
-        await waitForAnimationFrame();
-        await captureCurrentFrame();
+        return {
+          blob,
+          mimeType,
+          durationMs,
+          posterDataUrl,
+          width: exportCanvas.width,
+          height: exportCanvas.height,
+        };
       } finally {
-        setTimelinePlaying(false);
-        setTimelinePlayheadMs(previousAbsolutePlayheadMs);
-        transformer?.nodes(previousNodes);
-        transformer?.forceUpdate();
-        transformer?.getLayer()?.batchDraw();
-        stage.batchDraw();
-        if (options?.signal?.aborted) {
-          try {
-            if (recorder.state !== "inactive") {
-              recorder.stop();
-            }
-          } catch {
-            // Ignore recorder shutdown errors during cancellation.
-          }
-          tracks.forEach((track) => track.stop());
+        if (abortListener && options?.signal) {
+          options.signal.removeEventListener("abort", abortListener);
         }
+        if (recorder && recorder.state !== "inactive") {
+          try {
+            recorder.stop();
+          } catch {
+            // Ignore recorder shutdown errors during cleanup.
+          }
+        }
+        recordingStream?.getTracks().forEach((track) => track.stop());
+        setTimelinePlaying(false);
+        setTimelinePlayheadMs(restoreTimelinePlayheadMs);
+        flushSync(() => {
+          setExportFrameOverride(0);
+        });
+        stage.getLayers().forEach((layer) => layer.draw());
       }
-
-      ensureNotAborted();
-      recorder.stop();
-      const blob = await recorderStopped;
-      tracks.forEach((track) => track.stop());
-
-      return {
-        blob,
-        mimeType,
-        durationMs,
-        posterDataUrl,
-        width: recordingCanvas.width,
-        height: recordingCanvas.height,
-      };
     },
     [
       activePage,
       activePageDurationMs,
-      activePageTimelineStartMs,
       designTimeline.fps,
       designTimeline.totalDurationMs,
-      renderCurrentPageToCanvas,
+      activePageTimelineStartMs,
+      previewRenderFps,
+      renderExportPageToCanvas,
+      syncExportPreviewMediaControllers,
       setTimelinePlayheadMs,
       setTimelinePlaying,
     ]
@@ -2024,7 +2462,13 @@ export default function CanvasEditor() {
       const captures: string[] = [];
       try {
         for (const playhead of playheadsMs) {
-          setCapturePlayheadOverrideMs(clamp(Number(playhead) || 0, 0, activePageDurationMs));
+          setCaptureFrameOverride(
+            getFrameAlignedPlayheadFrame(
+              clamp(Number(playhead) || 0, 0, activePageDurationMs),
+              previewRenderFps,
+              activePageDurationMs
+            )
+          );
           await waitForCanvasFrame();
           stage.batchDraw();
           await waitForCanvasFrame();
@@ -2034,12 +2478,12 @@ export default function CanvasEditor() {
           }
         }
       } finally {
-        setCapturePlayheadOverrideMs(null);
+        setCaptureFrameOverride(null);
       }
 
       return captures;
     },
-    [activePage, activePageDurationMs, captureThumbnailDataUrl]
+    [activePage, activePageDurationMs, captureThumbnailDataUrl, previewRenderFps]
   );
 
   const mergeSelectedLayers = useCallback(async () => {
@@ -2286,7 +2730,7 @@ export default function CanvasEditor() {
   }, [availableFontFamilies, elements]);
 
   const selectionMenuPos = useMemo(() => {
-    if (capturePlayheadOverrideMs !== null || previewGenerationActive) return null;
+    if (isRenderingPreview) return null;
     if (selectedIds.length === 0) return null;
 
     const active = elements.find((element) => element.id === selectedIds[0]);
@@ -2298,8 +2742,7 @@ export default function CanvasEditor() {
       y: viewport.y + active.y * viewport.scale - 40,
     };
   }, [
-    capturePlayheadOverrideMs,
-    previewGenerationActive,
+    isRenderingPreview,
     activePageDurationMs,
     effectiveActivePagePlayheadMs,
     elements,
@@ -3139,362 +3582,104 @@ export default function CanvasEditor() {
         onTouchEnd={handleStageMouseUp}
       >
         <Layer>
-          <Group
-            clipX={0}
-            clipY={0}
-            clipWidth={activePage.width}
-            clipHeight={activePage.height}
-            listening={false}
-          >
-            <Rect
-              x={0}
-              y={0}
-              width={activePage.width}
-              height={activePage.height}
-              fill={
-                activePage.background.type === "gradient"
-                  ? undefined
-                  : activePage.background.color
-              }
-              fillLinearGradientStartPoint={
-                activePage.background.type === "gradient" ? { x: 0, y: 0 } : undefined
-              }
-              fillLinearGradientEndPoint={
-                activePage.background.type === "gradient"
-                  ? { x: activePage.width, y: activePage.height }
-                  : undefined
-              }
-              fillLinearGradientColorStops={
-                activePage.background.type === "gradient"
-                  ? [0, activePage.background.gradientFrom, 1, activePage.background.gradientTo]
-                  : undefined
-              }
-              listening={false}
-            />
-            {activePage.background.type === "image" && String(activePage.background.imageUri || "").trim() ? (
-              <CanvasBackgroundImage
-                src={String(activePage.background.imageUri || "").trim()}
-                pageWidth={activePage.width}
-                pageHeight={activePage.height}
-              />
-            ) : null}
-          </Group>
-          <Rect
-            x={0}
-            y={0}
-            width={activePage.width}
-            height={activePage.height}
-            stroke="#d8dde5"
-            strokeWidth={1}
-            fillEnabled={false}
-            listening={false}
-          />
-
-          <Group
-            clipX={0}
-            clipY={0}
-            clipWidth={activePage.width}
-            clipHeight={activePage.height}
-          >
-            {elements.map((element) => {
-              if (!isElementVisibleAtPlayhead(element, effectiveActivePagePlayheadMs, activePageDurationMs)) {
-                return null;
-              }
-              const pose = resolveAnimatedElementPose(
-                element,
-                effectiveActivePagePlayheadMs,
-                activePageDurationMs
-              );
-              const isEditingFrameContent = frameContentEditId === element.id;
-              const canTransform = !element.locked && toolMode !== "draw" && !isEditingFrameContent;
-
-              const commonProps = {
-                ref: (node: Konva.Node | null) => setNodeRef(element.id, node),
-                id: element.id,
-                x: pose.x,
-                y: pose.y,
-                rotation: pose.rotation,
-                scaleX: pose.scaleX,
-                scaleY: pose.scaleY,
-                opacity: pose.opacity,
-                draggable: canTransform,
-                listening: canTransform,
-                globalCompositeOperation: element.blendMode,
-                shadowColor: element.shadowColor,
-                shadowBlur: element.shadowBlur,
-                shadowOffsetX: element.shadowOffsetX,
-                shadowOffsetY: element.shadowOffsetY,
-                onClick: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) =>
-                  selectNode(event, element.id),
-                onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => openContextMenu(event, element.id),
-                onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => updateNodeDrag(event, element),
-                onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => finishNodeDrag(event, element),
-                onTransform: syncTransformerVisuals,
-                onTransformEnd: (event: Konva.KonvaEventObject<Event>) => updateNodeTransform(event, element),
+          <CanvasPageScene
+            page={activePage}
+            elements={elements}
+            pageDurationMs={activePageDurationMs}
+            playheadMs={effectiveActivePagePlayheadMs}
+            playheadFrame={effectiveActivePageFrame}
+            previewFps={previewRenderFps}
+            forceTimelineSync={forceTimelineMediaSync}
+            interactive
+            toolMode={toolMode}
+            frameDropTargetId={frameDropTargetId}
+            frameContentEditId={frameContentEditId}
+            includePageOutline
+            registerRef={setNodeRef}
+            registerPreviewMediaController={registerPreviewMediaController}
+            onSelectNode={selectNode}
+            onOpenContextMenu={openContextMenu}
+            onNodeDragMove={updateNodeDrag}
+            onNodeDragEnd={finishNodeDrag}
+            onNodeTransform={syncTransformerVisuals}
+            onNodeTransformEnd={updateNodeTransform}
+            onEnterFrameContentEdit={(element) => {
+              if (!element.frameContent) return;
+              setSelectedIds([element.id]);
+              setFrameContentEditId(element.id);
+            }}
+            onUpdateFrameContentTransform={(element, patch) =>
+              updateFrameContentTransform(element.id, patch, { recordHistory: true })
+            }
+            onUpdateFrameContentMetadata={(element, patch) => {
+              if (!element.frameContent) return;
+              const nextContent = {
+                ...element.frameContent,
+                ...patch,
               };
-
-              if (element.type === "frame") {
-                return (
-                  <CanvasFrameNode
-                    key={element.id}
-                    element={element}
-                    pose={pose}
-                    canTransform={canTransform}
-                    isDropTarget={frameDropTargetId === element.id}
-                    isContentEditing={isEditingFrameContent}
-                    playheadMs={effectiveActivePagePlayheadMs}
-                    pageDurationMs={activePageDurationMs}
-                    forceTimelineSync={forceTimelineMediaSync}
-                    registerRef={setNodeRef}
-                    onSelect={(event) => selectNode(event, element.id)}
-                    onContextMenu={(event) => openContextMenu(event, element.id)}
-                    onDragMove={(event) => updateNodeDrag(event, element)}
-                    onDragEnd={(event) => finishNodeDrag(event, element)}
-                    onTransformEnd={(event) => updateNodeTransform(event, element)}
-                    onEnterContentEdit={() => {
-                      if (!element.frameContent) return;
-                      setSelectedIds([element.id]);
-                      setFrameContentEditId(element.id);
-                    }}
-                    onContentTransform={(patch) =>
-                      updateFrameContentTransform(element.id, patch, { recordHistory: true })
-                    }
-                    onContentMetadata={(patch) => {
-                      if (!element.frameContent) return;
-                      const nextContent = {
-                        ...element.frameContent,
-                        ...patch,
-                      };
-                      const sameSourceSize =
-                        Math.round(Number(element.frameContent.sourceWidth || 0)) ===
-                          Math.round(Number(nextContent.sourceWidth || 0)) &&
-                        Math.round(Number(element.frameContent.sourceHeight || 0)) ===
-                          Math.round(Number(nextContent.sourceHeight || 0));
-                      const sameVideoDuration =
-                        Math.round(Number(element.frameContent.videoDuration || 0) * 1000) ===
-                        Math.round(Number(nextContent.videoDuration || 0) * 1000);
-                      if (sameSourceSize && sameVideoDuration) return;
-                      setFrameContent(element.id, nextContent, { recordHistory: false });
-                    }}
-                  />
-                );
-              }
-
-              if (element.type === "image") {
-                return (
-                  <CanvasImageNode
-                    key={element.id}
-                    element={element}
-                    pose={pose}
-                    canTransform={canTransform}
-                    playheadMs={effectiveActivePagePlayheadMs}
-                    pageDurationMs={activePageDurationMs}
-                    forceTimelineSync={forceTimelineMediaSync}
-                    registerRef={setNodeRef}
-                    onSelect={(event) => selectNode(event, element.id)}
-                    onContextMenu={(event) => openContextMenu(event, element.id)}
-                    onDragMove={(event) => updateNodeDrag(event, element)}
-                    onDragEnd={(event) => finishNodeDrag(event, element)}
-                    onTransformEnd={(event) => updateNodeTransform(event, element)}
-                    onImageMetadata={({ width, height }) => {
-                      if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-                      const nextWidth = Math.max(1, Math.round(width));
-                      const nextHeight = Math.max(1, Math.round(height));
-                      const currentWidth = Math.max(0, Math.round(Number(element.sourceWidth || 0)));
-                      const currentHeight = Math.max(0, Math.round(Number(element.sourceHeight || 0)));
-                      if (currentWidth === nextWidth && currentHeight === nextHeight) return;
-                      updateElement(
-                        element.id,
-                        {
-                          sourceWidth: nextWidth,
-                          sourceHeight: nextHeight,
-                          cropX: Number.isFinite(Number(element.cropX)) ? element.cropX : 0,
-                          cropY: Number.isFinite(Number(element.cropY)) ? element.cropY : 0,
-                          cropWidth:
-                            Number.isFinite(Number(element.cropWidth)) && Number(element.cropWidth) > 0
-                              ? element.cropWidth
-                              : nextWidth,
-                          cropHeight:
-                            Number.isFinite(Number(element.cropHeight)) && Number(element.cropHeight) > 0
-                              ? element.cropHeight
-                              : nextHeight,
-                        },
-                        { recordHistory: false }
-                      );
-                    }}
-                  />
-                );
-              }
-
-              if (element.type === "video") {
-                return (
-                  <CanvasVideoNode
-                    key={element.id}
-                    element={element}
-                    pose={pose}
-                    canTransform={canTransform}
-                    playheadMs={effectiveActivePagePlayheadMs}
-                    pageDurationMs={activePageDurationMs}
-                    forceTimelineSync={forceTimelineMediaSync}
-                    registerRef={setNodeRef}
-                    onSelect={(event) => selectNode(event, element.id)}
-                    onContextMenu={(event) => openContextMenu(event, element.id)}
-                    onDragMove={(event) => updateNodeDrag(event, element)}
-                    onDragEnd={(event) => finishNodeDrag(event, element)}
-                    onTransformEnd={(event) => updateNodeTransform(event, element)}
-                    onVideoMetadata={({ duration }) => {
-                      if (!Number.isFinite(duration) || duration <= 0) return;
-                      const nextDuration = Math.round(duration * 1000) / 1000;
-                      const currentDuration = Math.round((element.videoDuration || 0) * 1000) / 1000;
-                      if (currentDuration === nextDuration) return;
-                      const rawVideoEnd = Number(element.videoEnd);
-                      updateElement(
-                        element.id,
-                        {
-                          videoDuration: nextDuration,
-                          videoEnd:
-                            Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
-                              ? Math.min(rawVideoEnd, nextDuration)
-                              : nextDuration,
-                        },
-                        { recordHistory: false }
-                      );
-                    }}
-                  />
-                );
-              }
-
-              if (element.type === "text") {
-                const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
-                const direction = resolveTextDirection(element.text);
-                const hasTextCurve =
-                  Boolean(element.textCurveEnabled) &&
-                  Math.abs(Number(element.textCurveAmount || 0)) > 0.5;
-                if (hasTextCurve) {
-                  return (
-                    <Group
-                      key={element.id}
-                      {...commonProps}
-                      onDblClick={(event) => beginInlineTextEdit(event.target, element)}
-                      onDblTap={(event) => beginInlineTextEdit(event.target, element)}
-                    >
-                      <Rect
-                        width={element.width}
-                        height={element.height}
-                        fill="rgba(0,0,0,0)"
-                      />
-                      <TextPath
-                        data={resolveTextCurvePath(element)}
-                        text={element.text}
-                        fill={element.color || element.fill}
-                        fontSize={element.fontSize}
-                        fontFamily={resolveCssFontFamily(element.fontFamily)}
-                        fontStyle={konvaFontStyle}
-                        fontVariant="normal"
-                        align={element.align}
-                        letterSpacing={element.letterSpacing}
-                        textDecoration={element.textDecoration}
-                        textBaseline="middle"
-                        listening={false}
-                      />
-                    </Group>
-                  );
-                }
-                return (
-                  <Text
-                    key={element.id}
-                    {...commonProps}
-                    width={element.width}
-                    height={element.height}
-                    text={element.text}
-                    fill={element.color || element.fill}
-                    fontSize={element.fontSize}
-                    fontFamily={resolveCssFontFamily(element.fontFamily)}
-                    fontStyle={konvaFontStyle}
-                    fontVariant="normal"
-                    lineHeight={element.lineHeight}
-                    align={element.align}
-                    direction={direction}
-                    letterSpacing={element.letterSpacing}
-                    textDecoration={element.textDecoration}
-                    onDblClick={(event) => beginInlineTextEdit(event.target as Konva.Text, element)}
-                    onDblTap={(event) => beginInlineTextEdit(event.target as Konva.Text, element)}
-                  />
-                );
-              }
-
-              if (element.type === "circle") {
-                return (
-                  <Circle
-                    key={element.id}
-                    {...commonProps}
-                    radius={Math.max(4, Math.min(element.width, element.height) / 2)}
-                    fill={element.fill}
-                    stroke={element.stroke}
-                    strokeWidth={element.strokeWidth}
-                  />
-                );
-              }
-
-              if (element.type === "line") {
-                return (
-                  <Line
-                    key={element.id}
-                    {...commonProps}
-                    points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
-                    stroke={element.stroke || element.fill}
-                    strokeWidth={Math.max(1, element.strokeWidth || 4)}
-                    lineCap="round"
-                    lineJoin="round"
-                    tension={0.2}
-                  />
-                );
-              }
-
-              if (element.type === "arrow") {
-                return (
-                  <Arrow
-                    key={element.id}
-                    {...commonProps}
-                    points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
-                    fill={element.fill}
-                    stroke={element.stroke || element.fill}
-                    strokeWidth={Math.max(1, element.strokeWidth || 5)}
-                    pointerLength={14}
-                    pointerWidth={14}
-                  />
-                );
-              }
-
-              if (element.type === "star") {
-                return (
-                  <Star
-                    key={element.id}
-                    {...commonProps}
-                    numPoints={5}
-                    innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
-                    outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}
-                    fill={element.fill}
-                    stroke={element.stroke}
-                    strokeWidth={element.strokeWidth}
-                  />
-                );
-              }
-
-              return (
-                <Rect
-                  key={element.id}
-                  {...commonProps}
-                  width={element.width}
-                  height={element.height}
-                  fill={element.fill}
-                  stroke={element.stroke}
-                  strokeWidth={element.strokeWidth}
-                  cornerRadius={element.cornerRadius || 0}
-                />
+              const sameSourceSize =
+                Math.round(Number(element.frameContent.sourceWidth || 0)) ===
+                  Math.round(Number(nextContent.sourceWidth || 0)) &&
+                Math.round(Number(element.frameContent.sourceHeight || 0)) ===
+                  Math.round(Number(nextContent.sourceHeight || 0));
+              const sameVideoDuration =
+                Math.round(Number(element.frameContent.videoDuration || 0) * 1000) ===
+                  Math.round(Number(nextContent.videoDuration || 0) * 1000);
+              if (sameSourceSize && sameVideoDuration) return;
+              setFrameContent(element.id, nextContent, { recordHistory: false });
+            }}
+            onUpdateImageMetadata={(element, { width, height }) => {
+              if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+              const nextWidth = Math.max(1, Math.round(width));
+              const nextHeight = Math.max(1, Math.round(height));
+              const currentWidth = Math.max(0, Math.round(Number(element.sourceWidth || 0)));
+              const currentHeight = Math.max(0, Math.round(Number(element.sourceHeight || 0)));
+              if (currentWidth === nextWidth && currentHeight === nextHeight) return;
+              updateElement(
+                element.id,
+                {
+                  sourceWidth: nextWidth,
+                  sourceHeight: nextHeight,
+                  cropX: Number.isFinite(Number(element.cropX)) ? element.cropX : 0,
+                  cropY: Number.isFinite(Number(element.cropY)) ? element.cropY : 0,
+                  cropWidth:
+                    Number.isFinite(Number(element.cropWidth)) && Number(element.cropWidth) > 0
+                      ? element.cropWidth
+                      : nextWidth,
+                  cropHeight:
+                    Number.isFinite(Number(element.cropHeight)) && Number(element.cropHeight) > 0
+                      ? element.cropHeight
+                      : nextHeight,
+                },
+                { recordHistory: false }
               );
-            })}
-
+            }}
+            onUpdateVideoMetadata={(element, { duration }) => {
+              if (!Number.isFinite(duration) || duration <= 0) return;
+              const nextDuration = Math.round(duration * 1000) / 1000;
+              const currentDuration = Math.round((element.videoDuration || 0) * 1000) / 1000;
+              if (currentDuration === nextDuration) return;
+              const rawVideoEnd = Number(element.videoEnd);
+              updateElement(
+                element.id,
+                {
+                  videoDuration: nextDuration,
+                  videoEnd:
+                    Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+                      ? Math.min(rawVideoEnd, nextDuration)
+                      : nextDuration,
+                },
+                { recordHistory: false }
+              );
+            }}
+            onBeginInlineTextEdit={(node, element) => beginInlineTextEdit(node, element)}
+          />
+          <Group
+            clipX={0}
+            clipY={0}
+            clipWidth={activePage.width}
+            clipHeight={activePage.height}
+          >
             {drawPoints && drawPoints.length > 2 ? (
               <Line
                 points={drawPoints}
@@ -3567,13 +3752,58 @@ export default function CanvasEditor() {
           />
         </Layer>
       </Stage>
+      <div
+        ref={exportStageHostRef}
+        aria-hidden="true"
+        className="pointer-events-none fixed opacity-0"
+        style={{
+          left: -100000,
+          top: 0,
+          width: exportCanvasSpec.width,
+          height: exportCanvasSpec.height,
+          overflow: "hidden",
+        }}
+      >
+        <Stage
+          ref={(node) => {
+            exportStageRef.current = node;
+          }}
+          width={exportCanvasSpec.width}
+          height={exportCanvasSpec.height}
+        >
+          <Layer listening={false}>
+            <Group scaleX={exportCanvasSpec.scale} scaleY={exportCanvasSpec.scale}>
+              <CanvasPageScene
+                page={activePage}
+                elements={elements}
+                pageDurationMs={activePageDurationMs}
+                playheadMs={effectiveExportPlayheadMs}
+                playheadFrame={effectiveExportPlayheadFrame}
+                previewFps={previewRenderFps}
+                forceTimelineSync
+                interactive={false}
+                toolMode={toolMode}
+                includePageOutline={false}
+                registerRef={registerExportNodeRef}
+                registerPreviewMediaController={registerExportPreviewMediaController}
+              />
+            </Group>
+          </Layer>
+        </Stage>
+      </div>
 
-      {previewGenerationActive || capturePlayheadOverrideMs !== null ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7d7d9]/78 backdrop-blur-[1px]">
+      {showBlockingPreviewOverlay ? (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7d7d9]">
           <div className="rounded-2xl border border-white/80 bg-white/92 px-5 py-3 text-center shadow-lg">
             <div className="text-sm font-semibold text-[#111827]">Generating preview</div>
             <div className="mt-1 text-xs text-[#6b7280]">Please wait while the template preview is rendered.</div>
           </div>
+        </div>
+      ) : null}
+
+      {previewGenerationActive ? (
+        <div className="pointer-events-none absolute right-5 top-5 z-10 rounded-full border border-white/80 bg-white/92 px-3 py-1.5 text-xs font-medium text-[#111827] shadow-md">
+          Recording timeline preview...
         </div>
       ) : null}
 

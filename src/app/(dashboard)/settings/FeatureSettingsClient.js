@@ -174,6 +174,190 @@ function FreepikSettingsCard() {
   );
 }
 
+export function MobileAppSettingsCard() {
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [canEdit, setCanEdit] = useState(false);
+  const [status, setStatus] = useState("Loading mobile app settings...");
+  const [form, setForm] = useState({
+    androidMinimumSupportedVersion: "",
+    androidEnableCache: false,
+    iosMinimumSupportedVersion: "",
+    iosEnableCache: false,
+  });
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadSettings = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch("/api/settings/mobile-app", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(formatErrorMessage(payload, "Failed to load mobile app settings."));
+        }
+
+        if (!mounted) return;
+        const settings = payload?.settings || {};
+        setCanEdit(Boolean(payload?.canEdit));
+        setForm({
+          androidMinimumSupportedVersion: String(
+            settings?.android?.minimumSupportedVersion ?? ""
+          ),
+          androidEnableCache: Boolean(settings?.android?.enableCache),
+          iosMinimumSupportedVersion: String(
+            settings?.ios?.minimumSupportedVersion ?? ""
+          ),
+          iosEnableCache: Boolean(settings?.ios?.enableCache),
+        });
+        setStatus("");
+      } catch (error) {
+        if (!mounted) return;
+        setStatus(error?.message || "Failed to load mobile app settings.");
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    };
+
+    void loadSettings();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    setSaving(true);
+    setStatus("Saving mobile app settings...");
+    try {
+      const response = await fetch("/api/settings/mobile-app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          android: {
+            minimumSupportedVersion: form.androidMinimumSupportedVersion,
+            enableCache: form.androidEnableCache,
+          },
+          ios: {
+            minimumSupportedVersion: form.iosMinimumSupportedVersion,
+            enableCache: form.iosEnableCache,
+          },
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(formatErrorMessage(payload, "Failed to save mobile app settings."));
+      }
+
+      const settings = payload?.settings || {};
+      setForm({
+        androidMinimumSupportedVersion: String(
+          settings?.android?.minimumSupportedVersion ?? ""
+        ),
+        androidEnableCache: Boolean(settings?.android?.enableCache),
+        iosMinimumSupportedVersion: String(
+          settings?.ios?.minimumSupportedVersion ?? ""
+        ),
+        iosEnableCache: Boolean(settings?.ios?.enableCache),
+      });
+      setStatus("Mobile app settings saved.");
+    } catch (error) {
+      setStatus(error?.message || "Failed to save mobile app settings.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const disabled = loading || !canEdit;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Mobile App Settings</CardTitle>
+        <CardSubtitle>
+          Configure force-update thresholds and cache behavior for Android and iOS.
+        </CardSubtitle>
+      </CardHeader>
+      <CardContent className="space-y-6">
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <div className="text-sm font-medium">Android</div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-mobile-app-android-version">
+              Minimum supported version code
+            </Label>
+            <Input
+              id="settings-mobile-app-android-version"
+              type="number"
+              min="0"
+              value={form.androidMinimumSupportedVersion}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  androidMinimumSupportedVersion: event.target.value,
+                }))
+              }
+              disabled={disabled}
+              placeholder="Leave blank to disable force update"
+            />
+          </div>
+          <ToggleField
+            id="settings-mobile-app-android-cache"
+            label="Enable cache on Android"
+            checked={form.androidEnableCache}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, androidEnableCache: event.target.checked }))
+            }
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="space-y-4 rounded-xl border border-border p-4">
+          <div className="text-sm font-medium">iOS</div>
+          <div className="space-y-2">
+            <Label htmlFor="settings-mobile-app-ios-version">
+              Minimum supported version code
+            </Label>
+            <Input
+              id="settings-mobile-app-ios-version"
+              type="number"
+              min="0"
+              value={form.iosMinimumSupportedVersion}
+              onChange={(event) =>
+                setForm((prev) => ({
+                  ...prev,
+                  iosMinimumSupportedVersion: event.target.value,
+                }))
+              }
+              disabled={disabled}
+              placeholder="Leave blank to disable force update"
+            />
+          </div>
+          <ToggleField
+            id="settings-mobile-app-ios-cache"
+            label="Enable cache on iOS"
+            checked={form.iosEnableCache}
+            onChange={(event) =>
+              setForm((prev) => ({ ...prev, iosEnableCache: event.target.checked }))
+            }
+            disabled={disabled}
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2">
+          <Button type="button" onClick={handleSave} disabled={saving || disabled}>
+            {saving ? "Saving..." : "Save mobile app settings"}
+          </Button>
+        </div>
+
+        <p className="text-xs text-muted-foreground">
+          Force update is enabled when the app version code is lower than the configured minimum.
+        </p>
+        {status ? <div className="text-sm text-muted-foreground">{status}</div> : null}
+      </CardContent>
+    </Card>
+  );
+}
+
 export function MobileAuthSettingsCard() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);

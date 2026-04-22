@@ -64,6 +64,8 @@ import {
   DEFAULT_ANIMATION_DURATION_MS,
   DEFAULT_PAGE_DURATION_MS,
   EDITOR_ANIMATION_OPTIONS,
+  getAnimationPreset,
+  isAnimationInfiniteActive,
   type EditorAnimationType,
   normalizeAnimationDelayMs,
   normalizeAnimationDirection,
@@ -1745,11 +1747,19 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     if (selectedElements.length === 0) return null;
     const values = new Set(
       selectedElements.map((element) =>
-        normalizeAnimationInfinite(element.mediaAnimationInfinite, element.mediaAnimationMode)
+        isAnimationInfiniteActive(
+          element.mediaAnimationType,
+          element.mediaAnimationInfinite,
+          element.mediaAnimationMode
+        )
       )
     );
     return values.size === 1 ? Array.from(values)[0] : null;
   }, [selectedElements]);
+  const selectedAnimationCanLoop = useMemo(() => {
+    if (!selectedAnimationType) return false;
+    return getAnimationPreset(selectedAnimationType).category === "loop";
+  }, [selectedAnimationType]);
   const selectedAnimationDurationMs = useMemo(() => {
     if (selectedElements.length === 0) return null;
     const values = new Set(
@@ -4647,30 +4657,48 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         <Label className="text-xs font-semibold text-[#5b6472]">Infinite</Label>
                         <button
                           type="button"
+                          disabled={!selectedAnimationCanLoop}
                           onClick={() =>
+                            selectedAnimationCanLoop &&
                             updateSelectedElements({
                               mediaAnimationInfinite: !(selectedAnimationInfinite ?? false),
+                              mediaAnimationMode: selectedAnimationInfinite ? "IN" : "LOOP",
                             })
                           }
                           className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
-                            selectedAnimationInfinite
+                            !selectedAnimationCanLoop
+                              ? "cursor-not-allowed border-[#e2e8f0] bg-[#f8fafc] text-[#94a3b8]"
+                              : selectedAnimationInfinite
                               ? "border-[#fb7185] bg-[#fff1f4] text-[#be123c]"
                               : "border-[#d6dce6] bg-white text-[#334155] hover:border-[#c2cedd]"
                           }`}
                         >
-                          <span>{selectedAnimationInfinite === null ? "Mixed" : selectedAnimationInfinite ? "Yes" : "No"}</span>
+                          <span>
+                            {!selectedAnimationCanLoop
+                              ? "Not available"
+                              : selectedAnimationInfinite === null
+                                ? "Mixed"
+                                : selectedAnimationInfinite
+                                  ? "Yes"
+                                  : "No"}
+                          </span>
                           <span
                             className={`relative h-5 w-9 rounded-full transition ${
-                              selectedAnimationInfinite ? "bg-[#fb7185]" : "bg-[#cbd5e1]"
+                              selectedAnimationCanLoop && selectedAnimationInfinite ? "bg-[#fb7185]" : "bg-[#cbd5e1]"
                             }`}
                           >
                             <span
                               className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow-sm transition ${
-                                selectedAnimationInfinite ? "left-4.5" : "left-0.5"
+                                selectedAnimationCanLoop && selectedAnimationInfinite ? "left-4.5" : "left-0.5"
                               }`}
                             />
                           </span>
                         </button>
+                        {!selectedAnimationCanLoop ? (
+                          <div className="text-[11px] text-[#94a3b8]">
+                            Infinite is only available for loop animations.
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 

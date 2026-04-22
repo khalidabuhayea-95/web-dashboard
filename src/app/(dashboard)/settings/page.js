@@ -1,6 +1,6 @@
 import { requireRole, Roles } from "@/lib/auth/roles";
 
-import FeatureSettingsClient from "./FeatureSettingsClient";
+import SettingsWorkspaceClient from "./SettingsWorkspaceClient";
 
 export const metadata = {
   title: "Settings",
@@ -9,5 +9,5 @@ export const metadata = {
 
 export default async function SettingsPage() {
   await requireRole([Roles.ADMIN, Roles.DESIGNER]);
-  return <FeatureSettingsClient />;
+  return <SettingsWorkspaceClient />;
 }

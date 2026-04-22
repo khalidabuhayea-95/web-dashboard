@@ -22,6 +22,23 @@ The write-heavy media routes may require mobile signing headers when `MOBILE_API
 
 ## Endpoints
 
+### `GET /api/mobile/app-settings`
+
+Query params:
+- `deviceType` (required): `android` or `ios`
+- `appVersion` (required): integer app version code such as `205`
+
+Response:
+- `deviceType`
+- `appVersion`
+- `forceUpdate`: `true` when the request version code is lower than the configured minimum supported version code for that platform
+- `enableCache`: platform-level cache toggle from dashboard settings
+- `redirectLink`: platform-level redirect destination from dashboard mobile settings, or `null` when unset
+
+Notes:
+- Returns `400` when `deviceType` or `appVersion` is missing/invalid.
+- Returns `Cache-Control: no-store` so force-update decisions are not cached by clients or proxies.
+
 ### `GET /api/mobile/templates`
 
 Query params:

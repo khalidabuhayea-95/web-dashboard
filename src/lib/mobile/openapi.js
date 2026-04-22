@@ -469,6 +469,28 @@ const reusableParameters = {
       format: "uuid",
     },
   },
+  appSettingsDeviceType: {
+    name: "deviceType",
+    in: "query",
+    required: true,
+    description: "Mobile device type to evaluate (`android` or `ios`).",
+    schema: {
+      type: "string",
+      enum: ["android", "ios"],
+      example: "android",
+    },
+  },
+  appSettingsAppVersion: {
+    name: "appVersion",
+    in: "query",
+    required: true,
+    description: "Mobile app integer version code (for example `205`).",
+    schema: {
+      type: "integer",
+      minimum: 0,
+      example: 205,
+    },
+  },
 };
 
 const schemas = {
@@ -477,6 +499,24 @@ const schemas = {
     required: ["error"],
     properties: {
       error: { type: "string" },
+    },
+  },
+  MobileAppSettingsResponse: {
+    type: "object",
+    required: ["deviceType", "appVersion", "forceUpdate", "enableCache", "redirectLink"],
+    properties: {
+      deviceType: {
+        type: "string",
+        enum: ["android", "ios"],
+      },
+      appVersion: {
+        type: "integer",
+        minimum: 0,
+        example: 205,
+      },
+      forceUpdate: { type: "boolean" },
+      enableCache: { type: "boolean" },
+      redirectLink: { type: "string", nullable: true, example: "https://play.google.com/store/apps/details?id=com.example.app" },
     },
   },
   MobileAuthUser: {
@@ -1368,6 +1408,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
     },
     servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
+      { name: "Mobile App Settings" },
       { name: "Mobile Auth" },
       { name: "Mobile Templates" },
       { name: "Mobile Fonts" },
@@ -1618,6 +1659,40 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             401: {
               description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/app-settings": {
+        get: {
+          tags: ["Mobile App Settings"],
+          summary: "Resolve force-update, cache flags, and redirect link for a mobile app version",
+          description:
+            "Evaluates the incoming device type and integer app version code against dashboard-managed mobile app settings.",
+          parameters: [
+            reusableParameters.appSettingsDeviceType,
+            reusableParameters.appSettingsAppVersion,
+          ],
+          responses: {
+            200: {
+              description: "Resolved mobile app settings decision",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileAppSettingsResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Missing or invalid deviceType/appVersion",
               content: {
                 "application/json": {
                   schema: {

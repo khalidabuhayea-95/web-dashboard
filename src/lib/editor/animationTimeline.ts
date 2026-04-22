@@ -72,7 +72,7 @@ export interface EditorAnimationPreset extends EditorAnimationOption {
 
 export const DEFAULT_PAGE_DURATION_MS = 15000;
 export const MIN_LAYER_DURATION_MS = 100;
-export const DEFAULT_TIMELINE_FPS = 30;
+export const DEFAULT_TIMELINE_FPS = 60;
 export const DEFAULT_ANIMATION_DURATION_MS = 1200;
 export const MIN_ANIMATION_DURATION_MS = 200;
 export const MAX_ANIMATION_DURATION_MS = DEFAULT_PAGE_DURATION_MS;
@@ -419,6 +419,23 @@ export function normalizeAnimationInfinite(value: unknown, fallbackMode?: unknow
   if (normalized === "true" || normalized === "1" || normalized === "yes") return true;
   if (normalized === "false" || normalized === "0" || normalized === "no") return false;
   return normalizeAnimationMode(fallbackMode) === "LOOP";
+}
+
+export function isAnimationInfiniteActive(
+  typeValue: unknown,
+  infiniteValue: unknown,
+  modeValue?: unknown
+) {
+  const type = normalizeAnimationType(typeValue);
+  const preset = getAnimationPreset(type);
+  if (type === "NONE" || !preset.supportsInfinite) return false;
+  if (preset.category !== "loop") return false;
+
+  const mode = normalizeAnimationMode(modeValue);
+  if (mode === "LOOP") return true;
+
+  const explicitInfinite = normalizeAnimationInfinite(infiniteValue, mode);
+  return explicitInfinite;
 }
 
 export function normalizeAnimationDurationMs(value: unknown) {

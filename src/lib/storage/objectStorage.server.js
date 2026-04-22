@@ -2,6 +2,7 @@ import {
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
+  ListObjectsV2Command,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -394,6 +395,39 @@ export async function deleteObjects(bucket, keys = []) {
       },
     })
   );
+}
+
+export async function listObjectKeys(bucket, options = {}) {
+  const safeBucket = String(bucket || "").trim();
+  const prefix = String(options?.prefix || "").trim();
+  const maxKeys = Math.max(1, Math.min(1000, Number(options?.maxKeys || 1000)));
+  if (!safeBucket) {
+    throw new Error("Bucket is required for object listing.");
+  }
+
+  const client = createStorageClient();
+  const keys = [];
+  let continuationToken = undefined;
+
+  do {
+    const response = await client.send(
+      new ListObjectsV2Command({
+        Bucket: safeBucket,
+        Prefix: prefix || undefined,
+        MaxKeys: maxKeys,
+        ContinuationToken: continuationToken,
+      })
+    );
+
+    for (const entry of Array.isArray(response?.Contents) ? response.Contents : []) {
+      const key = String(entry?.Key || "").trim();
+      if (key) keys.push(key);
+    }
+
+    continuationToken = response?.IsTruncated ? response?.NextContinuationToken : undefined;
+  } while (continuationToken);
+
+  return keys;
 }
 
 export async function createSignedDownloadUrl(

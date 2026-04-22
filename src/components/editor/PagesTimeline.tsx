@@ -21,6 +21,14 @@ import {
   normalizeAnimationType,
   resolveTimelineWindow,
 } from "@/lib/editor/animationTimeline";
+import {
+  alignPlayheadMsToFrame,
+  elapsedMsToFrame,
+  frameToMs,
+  getDurationFrames,
+  msToOffsetFrames,
+  resolvePreviewRenderFps,
+} from "@/lib/editor/previewRuntime";
 import { useEditorStore } from "@/store/editorStore";
 
 function clamp(value: number, min: number, max: number) {
@@ -240,9 +248,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     return (Number.isFinite(cores) && cores > 0 && cores <= 4) || (Number.isFinite(memory) && memory > 0 && memory <= 4);
   }, []);
   const timelineFps = useMemo(() => {
-    const raw = Number(designTimeline.fps);
-    if (!Number.isFinite(raw) || raw <= 0) return 30;
-    return Math.min(60, Math.max(12, Math.round(raw)));
+    return resolvePreviewRenderFps(designTimeline.fps);
   }, [designTimeline.fps]);
   const scrubFrameStepMs = useMemo(() => {
     const baseStep = Math.max(8, Math.round(1000 / timelineFps));
@@ -444,16 +450,19 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     if (!timelineIsPlaying || totalDurationMs <= 0) return;
 
     let frame = 0;
-    let lastTs = performance.now();
+    const playStartTimestamp = performance.now();
+    const startFrame = msToOffsetFrames(playheadRef.current, timelineFps);
+    const totalFrames = getDurationFrames(totalDurationMs, timelineFps);
 
     const tick = (ts: number) => {
-      const delta = ts - lastTs;
-      lastTs = ts;
-      const nextPlayheadMs = Math.min(totalDurationMs, playheadRef.current + delta);
+      const elapsedFrames = elapsedMsToFrame(ts - playStartTimestamp, timelineFps);
+      const nextFrame = Math.min(totalFrames, startFrame + elapsedFrames);
+      const nextPlayheadMs =
+        nextFrame >= totalFrames ? totalDurationMs : frameToMs(nextFrame, timelineFps);
       playheadRef.current = nextPlayheadMs;
       setTimelinePlayheadMs(nextPlayheadMs);
 
-      if (nextPlayheadMs >= totalDurationMs) {
+      if (nextFrame >= totalFrames) {
         setTimelinePlaying(false);
         return;
       }
@@ -463,7 +472,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
 
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [setTimelinePlayheadMs, setTimelinePlaying, timelineIsPlaying, totalDurationMs]);
+  }, [setTimelinePlayheadMs, setTimelinePlaying, timelineFps, timelineIsPlaying, totalDurationMs]);
 
   useEffect(
     () => () => {
@@ -528,8 +537,9 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       getBounds: () => timelineTrackBoundsRef.current || measureTimelineTrackBounds(),
       getCurrentTime: () => playheadRef.current,
       onCommit: (time) => {
-        playheadRef.current = time;
-        setTimelinePlayheadMs(time);
+        const aligned = alignPlayheadMsToFrame(time, timelineFps, totalDurationMs);
+        playheadRef.current = aligned;
+        setTimelinePlayheadMs(aligned);
       },
       onStart: () => {
         setTimelinePlaying(false);
@@ -610,7 +620,8 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     video.muted = true;
     video.volume = 0;
 
-    const targetTimeSeconds = Math.max(0, timelinePlayheadMs / 1000);
+    const alignedPlayheadMs = alignPlayheadMsToFrame(timelinePlayheadMs, timelineFps, totalDurationMs);
+    const targetTimeSeconds = Math.max(0, alignedPlayheadMs / 1000);
     const boundedTarget = Number.isFinite(video.duration)
       ? Math.min(video.duration, targetTimeSeconds)
       : targetTimeSeconds;
@@ -645,7 +656,15 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     } else {
       video.pause();
     }
-  }, [previewUrl, scrubFrameStepMs, timelineIsPlaying, timelineIsScrubbing, timelinePlayheadMs]);
+  }, [
+    previewUrl,
+    scrubFrameStepMs,
+    totalDurationMs,
+    timelineFps,
+    timelineIsPlaying,
+    timelineIsScrubbing,
+    timelinePlayheadMs,
+  ]);
 
   useEffect(() => {
     if (!timelineIsScrubbing) return;

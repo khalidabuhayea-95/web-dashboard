@@ -3,7 +3,11 @@ import { performance } from "node:perf_hooks";
 import { appendVersionParam } from "@/lib/storage/objectStorage.server";
 import { extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
-import { DEFAULT_ANIMATION_DURATION_MS, DEFAULT_PAGE_DURATION_MS } from "@/lib/editor/animationTimeline";
+import {
+  DEFAULT_ANIMATION_DURATION_MS,
+  DEFAULT_PAGE_DURATION_MS,
+  isAnimationInfiniteActive,
+} from "@/lib/editor/animationTimeline";
 import {
   getShapeRasterFrame,
   isRasterizableShapeLayer,
@@ -464,7 +468,11 @@ function mapLayerTimelineWindow(item) {
 function mapLayerAnimation(item) {
   return {
     type: mapLayerAnimationType(item?.mediaAnimationType),
-    infinite: parseBoolean(item?.mediaAnimationInfinite, false),
+    infinite: isAnimationInfiniteActive(
+      item?.mediaAnimationType,
+      item?.mediaAnimationInfinite,
+      item?.mediaAnimationMode
+    ),
     durationMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDurationMs, DEFAULT_ANIMATION_DURATION_MS))),
     delayMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDelayMs, 0))),
     direction: mapLayerAnimationDirection(item?.mediaAnimationDirection),
@@ -1432,27 +1440,51 @@ function buildMobileCompatibilityWarnings(frameInfo) {
   return warnings;
 }
 
+function toTimestampMs(value) {
+  if (value instanceof Date) return value.getTime();
+  if (!value) return NaN;
+  const timestamp = new Date(value).getTime();
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+function isPreviewReadyStatus(value) {
+  return String(value || "").trim().toLowerCase() === "ready";
+}
+
+function isTemplatePreviewStale(template, previewUpdatedAtMs) {
+  if (!Number.isFinite(previewUpdatedAtMs)) return false;
+  const templateUpdatedAtMs = toTimestampMs(template?.updatedAt);
+  if (!Number.isFinite(templateUpdatedAtMs)) return false;
+
+  // Prisma's @updatedAt can be a few milliseconds after previewUpdatedAt in the
+  // same save. Only suppress previews when the template clearly changed later.
+  return templateUpdatedAtMs - previewUpdatedAtMs > 1000;
+}
+
 function mapTemplatePreview(template, options = {}) {
   const status = String(template?.previewStatus || "").trim();
-  const url = resolveClientMediaUri(template?.previewVideoUrl || "", options);
-  const posterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
+  const rawUrl = resolveClientMediaUri(template?.previewVideoUrl || "", options);
+  const rawPosterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
   const durationMs = numberOr(template?.previewDurationMs, NaN);
-  const updatedAtRaw = template?.previewUpdatedAt;
-  const updatedAt =
-    updatedAtRaw instanceof Date
-      ? updatedAtRaw.getTime()
-      : updatedAtRaw
-        ? new Date(updatedAtRaw).getTime()
-        : NaN;
+  const updatedAt = toTimestampMs(template?.previewUpdatedAt);
   const version = numberOr(template?.previewVersion, NaN);
   const error = String(template?.previewError || "").trim();
+  const previewIsStale = isPreviewReadyStatus(status) && isTemplatePreviewStale(template, updatedAt);
+  const versionToken = Number.isFinite(updatedAt)
+    ? String(updatedAt)
+    : Number.isFinite(version)
+      ? String(version)
+      : "";
+  const url = previewIsStale ? "" : appendVersionParam(rawUrl, versionToken);
+  const posterUrl = previewIsStale ? "" : appendVersionParam(rawPosterUrl, versionToken);
+  const effectiveStatus = previewIsStale ? "not_requested" : status;
 
   if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(updatedAt) && !Number.isFinite(version) && !error) {
     return null;
   }
 
   return {
-    status: status || "not_requested",
+    status: effectiveStatus || "not_requested",
     url: url || null,
     posterUrl: posterUrl || null,
     durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
@@ -1464,16 +1496,27 @@ function mapTemplatePreview(template, options = {}) {
 
 function mapTemplatePreviewSlim(template, options = {}) {
   const status = String(template?.previewStatus || "").trim();
-  const url = resolveClientMediaUri(template?.previewVideoUrl || "", options);
-  const posterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
+  const rawUrl = resolveClientMediaUri(template?.previewVideoUrl || "", options);
+  const rawPosterUrl = resolveClientMediaUri(template?.previewPosterUrl || "", options);
   const durationMs = numberOr(template?.previewDurationMs, NaN);
+  const updatedAt = toTimestampMs(template?.previewUpdatedAt);
+  const version = numberOr(template?.previewVersion, NaN);
+  const previewIsStale = isPreviewReadyStatus(status) && isTemplatePreviewStale(template, updatedAt);
+  const versionToken = Number.isFinite(updatedAt)
+    ? String(updatedAt)
+    : Number.isFinite(version)
+      ? String(version)
+      : "";
+  const url = previewIsStale ? "" : appendVersionParam(rawUrl, versionToken);
+  const posterUrl = previewIsStale ? "" : appendVersionParam(rawPosterUrl, versionToken);
+  const effectiveStatus = previewIsStale ? "not_requested" : status;
 
   if (!status && !url && !posterUrl && !Number.isFinite(durationMs)) {
     return null;
   }
 
   return {
-    status: status || "not_requested",
+    status: effectiveStatus || "not_requested",
     ...(url ? { url } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     ...(Number.isFinite(durationMs) ? { durationMs: Math.max(0, Math.round(durationMs)) } : {}),

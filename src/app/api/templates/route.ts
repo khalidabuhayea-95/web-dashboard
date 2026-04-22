@@ -44,6 +44,7 @@ const DEFAULT_LIST_PAGE_SIZE = 20;
 const MAX_LIST_PAGE_SIZE = 100;
 const MAX_OWNER_LOOKUPS = 50;
 const PREVIEW_STATUS_VALUES = new Set(["not_requested", "queued", "processing", "ready", "failed"]);
+const OVERWRITABLE_TEMPLATE_MEDIA_CACHE_CONTROL = "public, max-age=60, must-revalidate";
 
 const TEMPLATE_LIST_SELECT: any = {
   id: true,
@@ -117,6 +118,15 @@ function withTemplatePreview(template: any) {
       : template?.updatedAt
         ? new Date(template.updatedAt).getTime()
         : NaN;
+  const previewUpdatedAt =
+    template?.previewUpdatedAt instanceof Date
+      ? template.previewUpdatedAt.getTime()
+      : template?.previewUpdatedAt
+        ? new Date(template.previewUpdatedAt).getTime()
+        : NaN;
+  const previewVersionToken = Number.isFinite(previewUpdatedAt)
+    ? String(previewUpdatedAt)
+    : String(template?.previewVersion || "").trim();
 
   return {
     ...template,
@@ -124,6 +134,8 @@ function withTemplatePreview(template: any) {
       template?.thumbnailDataUrl,
       Number.isFinite(updatedAt) ? String(updatedAt) : String(template?.version || "")
     ),
+    previewVideoUrl: appendVersionParam(template?.previewVideoUrl, previewVersionToken),
+    previewPosterUrl: appendVersionParam(template?.previewPosterUrl, previewVersionToken),
     preview: mapTemplatePreview(template),
   };
 }
@@ -506,7 +518,7 @@ async function resolveTemplateThumbnailUrl(input: ResolveThumbnailInput): Promis
     key: objectPath,
     body: thumbnailBuffer,
     contentType: thumbnailMimeType,
-    cacheControl: "public, max-age=31536000, immutable",
+    cacheControl: OVERWRITABLE_TEMPLATE_MEDIA_CACHE_CONTROL,
     upsert: true,
   });
   const publicUrl = String(uploaded.url || "").trim();
