@@ -104,7 +104,7 @@ function waitForAnimationFrame() {
 function getPreviewRenderSpec(page: EditorPage | null | undefined, maxDimension = 720) {
   const pageWidth = Math.max(1, Number(page?.width) || 1);
   const pageHeight = Math.max(1, Number(page?.height) || 1);
-  const safeMaxDimension = Math.max(240, Math.round(Number(maxDimension) || 720));
+  const safeMaxDimension = Math.max(120, Math.round(Number(maxDimension) || 720));
   const scale = Math.min(1, safeMaxDimension / Math.max(pageWidth, pageHeight));
   return {
     width: Math.max(1, Math.round(pageWidth * scale)),
@@ -2133,7 +2133,7 @@ export default function CanvasEditor() {
             0
         )
       );
-      const requestedMaxDimension = Math.max(240, Math.round(Number(options?.maxDimension) || 720));
+      const requestedMaxDimension = Math.max(120, Math.round(Number(options?.maxDimension) || 720));
       let posterDataUrl = "";
       const frameDurationMs = 1000 / Math.max(1, fps);
       const recorderMimeType = getSupportedPreviewRecorderMimeType();

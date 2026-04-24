@@ -61,6 +61,8 @@ type TrimRange = {
   end: number;
 };
 
+const TEMPLATE_PREVIEW_VIDEO_MAX_DIMENSION = 240;
+
 function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -988,7 +990,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
         setTimelinePlaying(false);
         const recorded = await stageRecorder({
           fps: PREVIEW_RENDER_FPS,
-          maxDimension: 360,
+          maxDimension: TEMPLATE_PREVIEW_VIDEO_MAX_DIMENSION,
           durationMs: previewTimelineDurationMs,
           signal: controller.signal,
         });
