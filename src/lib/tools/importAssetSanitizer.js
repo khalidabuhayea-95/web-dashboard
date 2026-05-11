@@ -3,6 +3,7 @@ import {
   getStoragePublicHostnames,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
+import { trimTransparentPaddingForImportedFrameObject } from "@/lib/tools/canvaFrameTrim.server";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
 
 export const IMPORT_ASSET_MANIFEST_VERSION = 1;
@@ -882,6 +883,31 @@ export async function sanitizeImportPayloadAssets({
 
   if (sanitizedFabricData && typeof sanitizedFabricData === "object") {
     await rewriteNodeAssets(sanitizedFabricData, ["fabricData"]);
+
+    const objects = Array.isArray(sanitizedFabricData.objects) ? sanitizedFabricData.objects : [];
+    let trimmedFrameCount = 0;
+    for (let index = 0; index < objects.length; index += 1) {
+      const item = objects[index];
+      if (!item || typeof item !== "object" || Array.isArray(item)) continue;
+      try {
+        const trimmed = await trimTransparentPaddingForImportedFrameObject(item, {
+          bucket: IMPORT_MEDIA_BUCKET,
+        });
+        if (trimmed?.changed && trimmed.object) {
+          objects[index] = trimmed.object;
+          changed = true;
+          trimmedFrameCount += 1;
+        }
+      } catch (_error) {
+        // Transparent-padding trim is best-effort and should not block imports.
+      }
+    }
+
+    if (trimmedFrameCount > 0) {
+      warnings.push(
+        `Trimmed transparent padding for ${trimmedFrameCount} imported Canva frame image layer${trimmedFrameCount === 1 ? "" : "s"}.`
+      );
+    }
   }
 
   const remainingCanvaReferences = findExternalCanvaReferences(

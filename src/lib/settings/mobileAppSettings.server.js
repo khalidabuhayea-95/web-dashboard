@@ -8,6 +8,8 @@ import {
   normalizeMobileDeviceType,
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
+  resolveMobileAiExpandModel,
+  resolveMobileObjectRemovalModel,
 } from "./mobileAppSettings";
 
 const MOBILE_APP_SETTINGS_KEY = "mobile_app_settings_v1";
@@ -54,4 +56,6 @@ export {
   normalizeMobileDeviceType,
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
+  resolveMobileAiExpandModel,
+  resolveMobileObjectRemovalModel,
 };

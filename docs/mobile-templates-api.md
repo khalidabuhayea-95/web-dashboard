@@ -257,7 +257,7 @@ Behavior:
 - Requires mobile signing headers when mobile signing is enabled
 - Normalizes JPEG orientation before validating the mask dimensions
 - Rejects unsupported image types, mismatched dimensions, empty masks, and oversized uploads
-- Resizes image and mask together so the long edge is at most `2048`
+- Resizes image and mask together so the long edge is at most `1440`
 - Stores staged inputs privately, calls Replicate `allenhooo/lama`, and returns the processed image body
 - Returns `Cache-Control: no-store`
 - Returns `X-Output-Width`, `X-Output-Height`, `X-Object-Removal-Provider`, and `X-Object-Removal-Model` headers
@@ -271,6 +271,37 @@ Status codes:
 - `422` image or mask could not be processed safely
 - `429` rate limit exceeded
 - `503` Replicate object removal is not configured or unavailable
+
+### `POST /api/mobile/media/ai-expand`
+
+Accepts one image plus target output dimensions and returns the expanded image directly.
+
+Request:
+- `Content-Type: multipart/form-data`
+- `image` (required): `png` or `jpg`/`jpeg`
+- `targetWidth` (required): integer
+- `targetHeight` (required): integer
+
+Behavior:
+- Requires mobile signing headers when mobile signing is enabled
+- Normalizes JPEG orientation before expansion
+- Rejects unsupported image types, empty uploads, invalid target sizes, and oversized uploads
+- Accepts no mask and no client prompt
+- Automatically places the original image inside the requested target canvas on the server
+- Automatically generates any required mask/canvas inputs for the selected Replicate model
+- Uses the shared mobile AI Expand model setting
+- Returns `Cache-Control: no-store`
+- Returns `X-Output-Width`, `X-Output-Height`, `X-AI-Expand-Provider`, and `X-AI-Expand-Model` headers
+
+Status codes:
+- `200` image expanded successfully
+- `400` invalid multipart payload, missing fields, or invalid target size
+- `401` invalid or missing mobile signing headers when signing is enabled
+- `413` uploaded image is too large
+- `415` unsupported image type
+- `422` image could not be processed safely
+- `429` rate limit exceeded
+- `503` Replicate AI Expand is not configured or unavailable
 
 ## Notes
 

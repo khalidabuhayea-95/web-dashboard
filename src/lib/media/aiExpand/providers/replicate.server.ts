@@ -4,17 +4,19 @@ import {
   createUnprocessableImageError,
 } from "../errors";
 import {
-  DEFAULT_OBJECT_REMOVAL_MODEL_ID,
-  getObjectRemovalModelDefinition,
-  normalizeObjectRemovalModelId,
-  normalizeObjectRemovalModelOrder,
+  DEFAULT_AI_EXPAND_MODEL_ID,
+  getAiExpandModelDefinition,
+  normalizeAiExpandModelId,
 } from "../models.js";
 
 const REPLICATE_API_BASE = "https://api.replicate.com/v1";
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_WAIT_TIMEOUT_MS = 150_000;
+const DEFAULT_WAIT_TIMEOUT_MS = 180_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const DEFAULT_CANCEL_AFTER = "2m";
+const DEFAULT_CANCEL_AFTER = "4m";
+const DEFAULT_FLUX_PROMPT =
+  "Extend the image naturally into the empty canvas while preserving the original photo and continuing the scene realistically.";
+const SUPPORTED_LUMA_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "9:16", "16:9", "9:21", "21:9"] as const;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 const JPEG_SIGNATURE = [0xff, 0xd8];
 const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46];
@@ -34,30 +36,24 @@ function normalizeText(value: unknown): string {
 
 function getLegacyDefaultModelId() {
   return (
-    normalizeObjectRemovalModelId(process.env.OBJECT_REMOVE_REPLICATE_MODEL) ||
-    DEFAULT_OBJECT_REMOVAL_MODEL_ID
+    normalizeAiExpandModelId(process.env.AI_EXPAND_REPLICATE_MODEL) ||
+    DEFAULT_AI_EXPAND_MODEL_ID
   );
 }
 
-export function getReplicateDefaultObjectRemovalModelOrder() {
-  return normalizeObjectRemovalModelOrder([getLegacyDefaultModelId()], {
-    allowEmpty: false,
-  });
-}
-
-export function getReplicateDefaultObjectRemovalModelId() {
-  return getReplicateDefaultObjectRemovalModelOrder()[0];
+export function getReplicateDefaultAiExpandModelId() {
+  return getLegacyDefaultModelId();
 }
 
 function resolveModelRuntimeConfig(modelId?: string) {
-  const normalizedModelId = normalizeObjectRemovalModelId(modelId) || getLegacyDefaultModelId();
-  const definition = getObjectRemovalModelDefinition(normalizedModelId);
+  const normalizedModelId = normalizeAiExpandModelId(modelId) || getLegacyDefaultModelId();
+  const definition = getAiExpandModelDefinition(normalizedModelId);
   if (!definition) {
-    throw createProviderUnavailableError(`Unsupported object removal model: ${normalizedModelId}`);
+    throw createProviderUnavailableError(`Unsupported AI Expand model: ${normalizedModelId}`);
   }
 
   const legacyDefaultModelId = getLegacyDefaultModelId();
-  const legacyVersionOverride = normalizeText(process.env.OBJECT_REMOVE_REPLICATE_VERSION);
+  const legacyVersionOverride = normalizeText(process.env.AI_EXPAND_REPLICATE_VERSION);
 
   return {
     apiToken: normalizeText(process.env.REPLICATE_API_TOKEN),
@@ -66,12 +62,11 @@ function resolveModelRuntimeConfig(modelId?: string) {
       normalizedModelId === legacyDefaultModelId && legacyVersionOverride
         ? legacyVersionOverride
         : definition.defaultVersion,
-    inputImageKey: definition.inputImageKey,
-    inputMaskKey: definition.inputMaskKey,
+    kind: definition.kind,
   };
 }
 
-export function getReplicateObjectRemovalMetadata(modelId?: string) {
+export function getReplicateAiExpandMetadata(modelId?: string) {
   const config = resolveModelRuntimeConfig(modelId);
   return {
     provider: "replicate",
@@ -80,10 +75,10 @@ export function getReplicateObjectRemovalMetadata(modelId?: string) {
   };
 }
 
-export function assertReplicateObjectRemovalConfigured(modelId?: string) {
+export function assertReplicateAiExpandConfigured(modelId?: string) {
   const config = resolveModelRuntimeConfig(modelId);
   if (!config.apiToken || !config.version) {
-    throw createProviderUnavailableError("Replicate object removal is not configured.");
+    throw createProviderUnavailableError("Replicate AI Expand is not configured.");
   }
   return config;
 }
@@ -144,7 +139,7 @@ async function replicateRequest<T = any>(
     retryTransient?: boolean;
   } = {}
 ): Promise<T> {
-  const config = assertReplicateObjectRemovalConfigured();
+  const config = assertReplicateAiExpandConfigured();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -157,7 +152,7 @@ async function replicateRequest<T = any>(
         Authorization: `Bearer ${config.apiToken}`,
         Accept: "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "web-dashboard/object-remove",
+        "User-Agent": "web-dashboard/ai-expand",
         ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -238,16 +233,84 @@ function outputUrlFromPredictionOutput(output: unknown): string {
   return "";
 }
 
-export async function createReplicateObjectRemovalPrediction({
+function parseAspectRatio(value: string) {
+  const [width, height] = String(value || "")
+    .split(":")
+    .map((part) => Number.parseFloat(part));
+  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
+    return 1;
+  }
+  return width / height;
+}
+
+function resolveLumaAspectRatio(width: number, height: number) {
+  const targetRatio = Math.max(1, Number(width) || 1) / Math.max(1, Number(height) || 1);
+  let best = SUPPORTED_LUMA_ASPECT_RATIOS[0];
+  let bestDistance = Math.abs(parseAspectRatio(best) - targetRatio);
+
+  for (const candidate of SUPPORTED_LUMA_ASPECT_RATIOS.slice(1)) {
+    const distance = Math.abs(parseAspectRatio(candidate) - targetRatio);
+    if (distance < bestDistance) {
+      best = candidate;
+      bestDistance = distance;
+    }
+  }
+
+  return best;
+}
+
+export async function createReplicateAiExpandPrediction({
   imageUrl,
+  canvasImageUrl,
   maskUrl,
+  targetWidth,
+  targetHeight,
+  placedImageX,
+  placedImageY,
+  placedImageWidth,
+  placedImageHeight,
   modelId,
 }: {
   imageUrl: string;
+  canvasImageUrl: string;
   maskUrl: string;
+  targetWidth: number;
+  targetHeight: number;
+  placedImageX: number;
+  placedImageY: number;
+  placedImageWidth: number;
+  placedImageHeight: number;
   modelId?: string;
 }): Promise<ReplicatePrediction> {
-  const config = assertReplicateObjectRemovalConfigured(modelId);
+  const config = assertReplicateAiExpandConfigured(modelId);
+
+  let input: Record<string, unknown>;
+  if (config.kind === "bria-expand") {
+    input = {
+      image_url: imageUrl,
+      canvas_size: [targetWidth, targetHeight],
+      original_image_size: [placedImageWidth, placedImageHeight],
+      original_image_location: [placedImageX, placedImageY],
+    };
+  } else if (config.kind === "luma-reframe") {
+    input = {
+      image: imageUrl,
+      aspect_ratio: resolveLumaAspectRatio(targetWidth, targetHeight),
+    };
+  } else if (config.kind === "flux-fill") {
+    input = {
+      image: canvasImageUrl,
+      mask: maskUrl,
+      prompt: DEFAULT_FLUX_PROMPT,
+      output_format: "png",
+    };
+  } else {
+    input = {
+      image: canvasImageUrl,
+      mask: maskUrl,
+    };
+  }
+
   const prediction = await replicateRequest<ReplicatePrediction>("/predictions", {
     method: "POST",
     headers: {
@@ -255,10 +318,7 @@ export async function createReplicateObjectRemovalPrediction({
     },
     body: {
       version: config.version,
-      input: {
-        [config.inputImageKey]: imageUrl,
-        [config.inputMaskKey]: maskUrl,
-      },
+      input,
     },
   });
 
@@ -283,26 +343,20 @@ export async function waitForReplicatePrediction({
   predictionId,
   timeoutMs = DEFAULT_WAIT_TIMEOUT_MS,
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
-  onStatus,
 }: {
   predictionId: string;
   timeoutMs?: number;
   pollIntervalMs?: number;
-  onStatus?: (prediction: ReplicatePrediction) => Promise<void> | void;
 }) {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt <= timeoutMs) {
     const prediction = await getReplicatePrediction(predictionId);
-    if (onStatus) {
-      await onStatus(prediction);
-    }
-
     const status = normalizePredictionStatus(prediction?.status);
     if (isTerminalStatus(status)) {
       if (!isSuccessStatus(status)) {
         throw createProcessingFailedError(
-          normalizeText(prediction?.error) || "Replicate object removal failed."
+          normalizeText(prediction?.error) || "Replicate AI Expand failed."
         );
       }
 
@@ -320,7 +374,7 @@ export async function waitForReplicatePrediction({
     await delay(Math.max(500, Math.round(Number(pollIntervalMs) || DEFAULT_POLL_INTERVAL_MS)));
   }
 
-  throw createProviderUnavailableError("Replicate object removal timed out.");
+  throw createProviderUnavailableError("Replicate AI Expand timed out.");
 }
 
 function matchesSignature(bytes: Uint8Array, signature: number[], offset = 0) {
@@ -356,7 +410,7 @@ function sanitizeOutputFileName(value: string, mimeType: string) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 120);
-  return `${safeBase || "object-removed"}.${extensionFromMimeType(mimeType)}`;
+  return `${safeBase || "expanded-image"}.${extensionFromMimeType(mimeType)}`;
 }
 
 function readPngDimensions(bytes: Buffer) {
@@ -386,7 +440,7 @@ export async function downloadReplicateOutput({
       cache: "no-store",
       headers: {
         Accept: "image/*,application/octet-stream,*/*",
-        "User-Agent": "web-dashboard/object-remove",
+        "User-Agent": "web-dashboard/ai-expand",
       },
     });
 

@@ -17,6 +17,9 @@ const MAX_DECODE_PIXELS = 36_000_000;
 const MASK_ACTIVE_ALPHA_THRESHOLD = 16;
 const MASK_ACTIVE_LUMA_THRESHOLD = 16;
 const MASK_ACTIVE_CHANNEL_THRESHOLD = 24;
+const MASK_DILATE_RADIUS_X = 10;
+const MASK_DILATE_RADIUS_Y = 10;
+const MASK_DILATE_EXTRA_BOTTOM = 18;
 
 let canvasLibPromise: Promise<{ createCanvas: any; loadImage: any } | null> | null = null;
 
@@ -44,9 +47,19 @@ export type NormalizedObjectRemovalAsset = {
   size: number;
 };
 
+export type ObjectRemovalCropRegion = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 export type NormalizedObjectRemovalInput = {
   image: NormalizedObjectRemovalAsset;
   mask: NormalizedObjectRemovalAsset;
+  providerImage: NormalizedObjectRemovalAsset;
+  providerMask: NormalizedObjectRemovalAsset;
+  cropRegion: ObjectRemovalCropRegion | null;
   outputFileName: string;
 };
 
@@ -439,7 +452,7 @@ async function renderNormalizedMaskAsset(
   fileName: string,
   width: number,
   height: number
-): Promise<NormalizedObjectRemovalAsset> {
+): Promise<NormalizedObjectRemovalAsset & { activeBounds: ObjectRemovalCropRegion | null }> {
   const outputCanvas =
     sourceCanvas.width === width && sourceCanvas.height === height
       ? sourceCanvas
@@ -447,7 +460,12 @@ async function renderNormalizedMaskAsset(
   const context = outputCanvas.getContext("2d");
   const imageData = context.getImageData(0, 0, width, height);
   const pixels = imageData.data;
-  let activePixels = 0;
+  const activeMap = new Uint8Array(width * height);
+  let detectedActivePixels = 0;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
 
   for (let index = 0; index < pixels.length; index += 4) {
     const r = pixels[index];
@@ -461,11 +479,61 @@ async function renderNormalizedMaskAsset(
         Math.max(r, g, b) >= MASK_ACTIVE_CHANNEL_THRESHOLD);
 
     if (isActive) {
+      const pixelIndex = index / 4;
+      const x = pixelIndex % width;
+      const y = Math.floor(pixelIndex / width);
+      activeMap[pixelIndex] = 1;
+      detectedActivePixels += 1;
+      if (x < minX) minX = x;
+      if (y < minY) minY = y;
+      if (x > maxX) maxX = x;
+      if (y > maxY) maxY = y;
+    }
+  }
+
+  if (detectedActivePixels === 0) {
+    throw createInvalidInputError("Removal mask must contain at least one selected pixel.");
+  }
+
+  const dilatedMap = new Uint8Array(width * height);
+  let activePixels = 0;
+  let dilatedMinX = width;
+  let dilatedMinY = height;
+  let dilatedMaxX = -1;
+  let dilatedMaxY = -1;
+
+  for (let y = minY; y <= maxY; y += 1) {
+    for (let x = minX; x <= maxX; x += 1) {
+      const pixelIndex = y * width + x;
+      if (!activeMap[pixelIndex]) continue;
+
+      const startX = Math.max(0, x - MASK_DILATE_RADIUS_X);
+      const endX = Math.min(width - 1, x + MASK_DILATE_RADIUS_X);
+      const startY = Math.max(0, y - MASK_DILATE_RADIUS_Y);
+      const endY = Math.min(height - 1, y + MASK_DILATE_RADIUS_Y + MASK_DILATE_EXTRA_BOTTOM);
+
+      for (let ny = startY; ny <= endY; ny += 1) {
+        for (let nx = startX; nx <= endX; nx += 1) {
+          const dilatedIndex = ny * width + nx;
+          if (dilatedMap[dilatedIndex]) continue;
+          dilatedMap[dilatedIndex] = 1;
+          activePixels += 1;
+          if (nx < dilatedMinX) dilatedMinX = nx;
+          if (ny < dilatedMinY) dilatedMinY = ny;
+          if (nx > dilatedMaxX) dilatedMaxX = nx;
+          if (ny > dilatedMaxY) dilatedMaxY = ny;
+        }
+      }
+    }
+  }
+
+  for (let pixelIndex = 0; pixelIndex < dilatedMap.length; pixelIndex += 1) {
+    const index = pixelIndex * 4;
+    if (dilatedMap[pixelIndex]) {
       pixels[index] = 255;
       pixels[index + 1] = 255;
       pixels[index + 2] = 255;
       pixels[index + 3] = 255;
-      activePixels += 1;
     } else {
       pixels[index] = 0;
       pixels[index + 1] = 0;
@@ -474,12 +542,17 @@ async function renderNormalizedMaskAsset(
     }
   }
 
-  if (activePixels === 0) {
-    throw createInvalidInputError("Removal mask must contain at least one selected pixel.");
-  }
-
   context.putImageData(imageData, 0, 0);
   const outputBytes = outputCanvas.toBuffer("image/png");
+  const activeBounds =
+    dilatedMaxX >= dilatedMinX && dilatedMaxY >= dilatedMinY
+      ? {
+          x: dilatedMinX,
+          y: dilatedMinY,
+          width: dilatedMaxX - dilatedMinX + 1,
+          height: dilatedMaxY - dilatedMinY + 1,
+        }
+      : null;
 
   return {
     bytes: outputBytes,
@@ -488,7 +561,58 @@ async function renderNormalizedMaskAsset(
     width,
     height,
     size: outputBytes.length,
+    activeBounds,
   };
+}
+
+function expandCropRegion(
+  region: ObjectRemovalCropRegion,
+  imageWidth: number,
+  imageHeight: number
+): ObjectRemovalCropRegion {
+  const leftPadding = Math.max(72, Math.round(region.width * 0.45));
+  const rightPadding = Math.max(72, Math.round(region.width * 0.45));
+  const topPadding = Math.max(72, Math.round(region.height * 0.38));
+  const bottomPadding = Math.max(140, Math.round(region.height * 0.72));
+
+  const x = Math.max(0, region.x - leftPadding);
+  const y = Math.max(0, region.y - topPadding);
+  const right = Math.min(imageWidth, region.x + region.width + rightPadding);
+  const bottom = Math.min(imageHeight, region.y + region.height + bottomPadding);
+
+  return {
+    x,
+    y,
+    width: Math.max(1, right - x),
+    height: Math.max(1, bottom - y),
+  };
+}
+
+async function cropCanvasRegion(
+  sourceCanvas: CanvasLike,
+  region: ObjectRemovalCropRegion
+): Promise<CanvasLike> {
+  const canvasLib = await getCanvasLib();
+  if (!canvasLib?.createCanvas) {
+    throw createProviderUnavailableError("Image normalization runtime is unavailable.");
+  }
+
+  const canvas = canvasLib.createCanvas(region.width, region.height) as CanvasLike;
+  const context = canvas.getContext("2d");
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(
+    sourceCanvas as any,
+    region.x,
+    region.y,
+    region.width,
+    region.height,
+    0,
+    0,
+    region.width,
+    region.height
+  );
+  return canvas;
 }
 
 export async function normalizeObjectRemovalInput({
@@ -532,24 +656,63 @@ export async function normalizeObjectRemovalInput({
     decodedImage.height,
     Math.max(256, Math.round(Number(maxLongEdge) || DEFAULT_MAX_LONG_EDGE))
   );
+  const normalizedImageCanvas = await renderScaledCanvas(
+    decodedImage.canvas,
+    targetSize.width,
+    targetSize.height
+  );
+  const normalizedMaskCanvas = await renderScaledCanvas(
+    decodedMask.canvas,
+    targetSize.width,
+    targetSize.height
+  );
 
   const image = await renderNormalizedImageAsset(
-    decodedImage.canvas,
+    normalizedImageCanvas,
     decodedImage.mimeType,
     decodedImage.fileName,
     targetSize.width,
     targetSize.height
   );
   const mask = await renderNormalizedMaskAsset(
-    decodedMask.canvas,
+    normalizedMaskCanvas,
     decodedMask.fileName,
     targetSize.width,
     targetSize.height
+  );
+  const cropRegion = mask.activeBounds
+    ? expandCropRegion(mask.activeBounds, image.width, image.height)
+    : null;
+  const providerImageCanvas = cropRegion
+    ? await cropCanvasRegion(normalizedImageCanvas, cropRegion)
+    : normalizedImageCanvas;
+  const providerMaskCanvas = cropRegion
+    ? await cropCanvasRegion(normalizedMaskCanvas, cropRegion)
+    : normalizedMaskCanvas;
+  const providerImageTargetSize = cropRegion
+    ? fitInside(cropRegion.width, cropRegion.height, Math.max(256, Math.round(Number(maxLongEdge) || DEFAULT_MAX_LONG_EDGE)))
+    : targetSize;
+  const providerMaskTargetSize = providerImageTargetSize;
+  const providerImage = await renderNormalizedImageAsset(
+    providerImageCanvas,
+    decodedImage.mimeType,
+    decodedImage.fileName,
+    providerImageTargetSize.width,
+    providerImageTargetSize.height
+  );
+  const providerMask = await renderNormalizedMaskAsset(
+    providerMaskCanvas,
+    decodedMask.fileName,
+    providerMaskTargetSize.width,
+    providerMaskTargetSize.height
   );
 
   return {
     image,
     mask,
+    providerImage,
+    providerMask,
+    cropRegion,
     outputFileName: `${fileBaseName(decodedImage.fileName, "image")}-object-removed.png`,
   };
 }

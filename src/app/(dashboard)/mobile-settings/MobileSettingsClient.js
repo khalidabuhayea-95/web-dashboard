@@ -14,15 +14,23 @@ import {
 } from "lucide-react";
 
 import Button from "@/components/ui/button";
-import { Input, Label, Textarea } from "@/components/ui/form";
+import { Input, Label, Select, Textarea } from "@/components/ui/form";
 
-const MOBILE_APP_INITIAL_FORM = {
+const MOBILE_RELEASE_INITIAL_FORM = {
   androidMinimumSupportedVersion: "",
   androidEnableCache: false,
   androidRedirectLink: "",
   iosMinimumSupportedVersion: "",
   iosEnableCache: false,
   iosRedirectLink: "",
+};
+
+const MOBILE_OBJECT_REMOVAL_INITIAL_FORM = {
+  objectRemovalModel: "allenhooo/lama",
+};
+
+const MOBILE_AI_EXPAND_INITIAL_FORM = {
+  aiExpandModel: "bria/expand-image",
 };
 
 const MOBILE_AUTH_INITIAL_FORM = {
@@ -45,6 +53,18 @@ const MOBILE_AUTH_INITIAL_FORM = {
   refreshTokenSecretConfigured: false,
   refreshTokenTtlDays: "30",
 };
+
+const OBJECT_REMOVAL_MODEL_OPTIONS = [
+  { value: "allenhooo/lama", label: "allenhooo/lama", detail: "Fast baseline" },
+  { value: "zylim0702/remove-object", label: "zylim0702/remove-object", detail: "Best value" },
+  { value: "bria/eraser", label: "bria/eraser", detail: "Highest quality" },
+];
+
+const AI_EXPAND_MODEL_OPTIONS = [
+  { value: "allenhooo/lama", label: "allenhooo/lama", detail: "Budget" },
+  { value: "luma/reframe-image", label: "luma/reframe-image", detail: "Recommended" },
+  { value: "bria/expand-image", label: "bria/expand-image", detail: "Premium" },
+];
 
 function formatErrorMessage(payload, fallback = "Request failed.") {
   const details = [];
@@ -72,7 +92,7 @@ function formatSavedAt(value) {
   return parsed.toLocaleString();
 }
 
-function mapMobileAppSettings(settings) {
+function mapMobileReleaseSettings(settings) {
   return {
     androidMinimumSupportedVersion: String(
       settings?.android?.minimumSupportedVersion ?? ""
@@ -82,6 +102,18 @@ function mapMobileAppSettings(settings) {
     iosMinimumSupportedVersion: String(settings?.ios?.minimumSupportedVersion ?? ""),
     iosEnableCache: Boolean(settings?.ios?.enableCache),
     iosRedirectLink: String(settings?.ios?.redirectLink ?? ""),
+  };
+}
+
+function mapMobileObjectRemovalSettings(settings) {
+  return {
+    objectRemovalModel: String(settings?.objectRemovalModel || "allenhooo/lama"),
+  };
+}
+
+function mapMobileAiExpandSettings(settings) {
+  return {
+    aiExpandModel: String(settings?.aiExpandModel || "bria/expand-image"),
   };
 }
 
@@ -500,6 +532,59 @@ function PlatformCard({
   );
 }
 
+function ModelSelect({
+  id,
+  label,
+  description,
+  value,
+  onChange,
+  disabled,
+  options,
+}) {
+  return (
+    <FieldBlock id={id} label={label} description={description}>
+      <Select id={id} value={value} onChange={onChange} disabled={disabled}>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label} · {option.detail}
+          </option>
+        ))}
+      </Select>
+    </FieldBlock>
+  );
+}
+
+function SharedModelCard({
+  icon,
+  title,
+  description,
+  modelId,
+  modelLabel,
+  modelDescription,
+  modelValue,
+  onModelChange,
+  disabled,
+  options,
+}) {
+  return (
+    <SurfaceCard
+      icon={icon}
+      title={title}
+      description={description}
+    >
+      <ModelSelect
+        id={modelId}
+        label={modelLabel}
+        description={modelDescription}
+        value={modelValue}
+        onChange={onModelChange}
+        disabled={disabled}
+        options={options}
+      />
+    </SurfaceCard>
+  );
+}
+
 function ProviderCard({
   icon,
   title,
@@ -530,13 +615,13 @@ function ProviderCard({
 }
 
 function MobileSettingsClient() {
-  const mobileApp = useSettingsForm({
+  const releaseControls = useSettingsForm({
     endpoint: "/api/settings/mobile-app",
-    initialForm: MOBILE_APP_INITIAL_FORM,
+    initialForm: MOBILE_RELEASE_INITIAL_FORM,
     loadingMessage: "Loading release controls...",
     savingMessage: "Saving release controls...",
     successMessage: "Release controls saved.",
-    mapSettings: mapMobileAppSettings,
+    mapSettings: mapMobileReleaseSettings,
     buildPayload: (form) => ({
       android: {
         minimumSupportedVersion: form.androidMinimumSupportedVersion,
@@ -548,6 +633,30 @@ function MobileSettingsClient() {
         enableCache: form.iosEnableCache,
         redirectLink: form.iosRedirectLink,
       },
+    }),
+  });
+
+  const objectRemovalSettings = useSettingsForm({
+    endpoint: "/api/settings/mobile-app",
+    initialForm: MOBILE_OBJECT_REMOVAL_INITIAL_FORM,
+    loadingMessage: "Loading object removal settings...",
+    savingMessage: "Saving object removal settings...",
+    successMessage: "Object removal settings saved.",
+    mapSettings: mapMobileObjectRemovalSettings,
+    buildPayload: (form) => ({
+      objectRemovalModel: form.objectRemovalModel,
+    }),
+  });
+
+  const aiExpandSettings = useSettingsForm({
+    endpoint: "/api/settings/mobile-app",
+    initialForm: MOBILE_AI_EXPAND_INITIAL_FORM,
+    loadingMessage: "Loading AI Expand settings...",
+    savingMessage: "Saving AI Expand settings...",
+    successMessage: "AI Expand settings saved.",
+    mapSettings: mapMobileAiExpandSettings,
+    buildPayload: (form) => ({
+      aiExpandModel: form.aiExpandModel,
     }),
   });
 
@@ -582,7 +691,11 @@ function MobileSettingsClient() {
     }),
   });
 
-  const pageCanEdit = mobileApp.canEdit || mobileAuth.canEdit;
+  const pageCanEdit =
+    releaseControls.canEdit ||
+    objectRemovalSettings.canEdit ||
+    aiExpandSettings.canEdit ||
+    mobileAuth.canEdit;
 
   return (
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 sm:px-6 lg:px-8">
@@ -593,17 +706,17 @@ function MobileSettingsClient() {
           description="Set platform-specific version gates and cache behavior without making the screen feel like a low-level admin form. The structure is intentionally split by platform so release managers can scan Android and iOS independently."
           icon={ShieldCheck}
           badges={[
-            { tone: mobileApp.hasChanges ? "warning" : "success", label: mobileApp.hasChanges ? "Unsaved edits" : "Synced" },
+            { tone: releaseControls.hasChanges ? "warning" : "success", label: releaseControls.hasChanges ? "Unsaved edits" : "Synced" },
             { tone: pageCanEdit ? "neutral" : "warning", label: pageCanEdit ? "Admin controls" : "Read only" },
           ]}
           footer={
             <SectionFooter
-              status={mobileApp.status}
-              updatedAt={mobileApp.updatedAt}
-              canEdit={mobileApp.canEdit}
-              saving={mobileApp.saving}
-              hasChanges={mobileApp.hasChanges}
-              onSave={mobileApp.save}
+              status={releaseControls.status}
+              updatedAt={releaseControls.updatedAt}
+              canEdit={releaseControls.canEdit}
+              saving={releaseControls.saving}
+              hasChanges={releaseControls.hasChanges}
+              onSave={releaseControls.save}
               saveLabel="Save release controls"
             />
           }
@@ -614,56 +727,56 @@ function MobileSettingsClient() {
               versionId="mobile-android-version-code"
               toggleId="mobile-android-enable-cache"
               redirectId="mobile-android-redirect-link"
-              versionValue={mobileApp.form.androidMinimumSupportedVersion}
+              versionValue={releaseControls.form.androidMinimumSupportedVersion}
               onVersionChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   androidMinimumSupportedVersion: event.target.value,
                 }))
               }
-              cacheEnabled={mobileApp.form.androidEnableCache}
+              cacheEnabled={releaseControls.form.androidEnableCache}
               onCacheChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   androidEnableCache: event.target.checked,
                 }))
               }
-              redirectValue={mobileApp.form.androidRedirectLink}
+              redirectValue={releaseControls.form.androidRedirectLink}
               onRedirectChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   androidRedirectLink: event.target.value,
                 }))
               }
-              disabled={mobileApp.disabled}
+              disabled={releaseControls.disabled}
             />
             <PlatformCard
               platform="iOS"
               versionId="mobile-ios-version-code"
               toggleId="mobile-ios-enable-cache"
               redirectId="mobile-ios-redirect-link"
-              versionValue={mobileApp.form.iosMinimumSupportedVersion}
+              versionValue={releaseControls.form.iosMinimumSupportedVersion}
               onVersionChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   iosMinimumSupportedVersion: event.target.value,
                 }))
               }
-              cacheEnabled={mobileApp.form.iosEnableCache}
+              cacheEnabled={releaseControls.form.iosEnableCache}
               onCacheChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   iosEnableCache: event.target.checked,
                 }))
               }
-              redirectValue={mobileApp.form.iosRedirectLink}
+              redirectValue={releaseControls.form.iosRedirectLink}
               onRedirectChange={(event) =>
-                mobileApp.setForm((current) => ({
+                releaseControls.setForm((current) => ({
                   ...current,
                   iosRedirectLink: event.target.value,
                 }))
               }
-              disabled={mobileApp.disabled}
+              disabled={releaseControls.disabled}
             />
           </div>
 
@@ -679,6 +792,120 @@ function MobileSettingsClient() {
                 <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
                   `forceUpdate` depends on version code only. `enableCache` and
                   `redirectLink` are platform preferences and do not vary by version code.
+                </p>
+              </div>
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          eyebrow="Media"
+          title="Object removal model routing"
+          description="Choose one shared Replicate model for both Android and iOS. This keeps object-removal behavior aligned across platforms."
+          icon={ShieldEllipsis}
+          badges={[
+            { tone: objectRemovalSettings.hasChanges ? "warning" : "success", label: objectRemovalSettings.hasChanges ? "Unsaved edits" : "Synced" },
+            { tone: "neutral", label: "Shared across platforms" },
+          ]}
+          footer={
+            <SectionFooter
+              status={objectRemovalSettings.status}
+              updatedAt={objectRemovalSettings.updatedAt}
+              canEdit={objectRemovalSettings.canEdit}
+              saving={objectRemovalSettings.saving}
+              hasChanges={objectRemovalSettings.hasChanges}
+              onSave={objectRemovalSettings.save}
+              saveLabel="Save object removal routing"
+            />
+          }
+        >
+          <SharedModelCard
+            icon={ShieldEllipsis}
+            title="Object removal model"
+            description="Choose one shared Replicate model for both Android and iOS so mobile behavior stays consistent."
+            modelId="mobile-object-remove-model"
+            modelLabel="Shared model"
+            modelDescription="The server uses this same model for Android and iOS object-removal requests."
+            modelValue={objectRemovalSettings.form.objectRemovalModel}
+            onModelChange={(event) =>
+              objectRemovalSettings.setForm((current) => ({
+                ...current,
+                objectRemovalModel: event.target.value,
+              }))
+            }
+            disabled={objectRemovalSettings.disabled}
+            options={OBJECT_REMOVAL_MODEL_OPTIONS}
+          />
+
+          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
+                  Runtime behavior
+                </div>
+                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
+                  The server uses the selected model directly for all mobile object-removal requests.
+                  Android and iOS now share the same model choice, which makes QA and cost tracking simpler.
+                </p>
+              </div>
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          eyebrow="Media"
+          title="AI Expand model"
+          description="Choose one shared Replicate model for AI Expand. Mobile sends only the original image and target size, and the server handles canvas placement and model-specific preprocessing."
+          icon={ShieldEllipsis}
+          badges={[
+            { tone: aiExpandSettings.hasChanges ? "warning" : "success", label: aiExpandSettings.hasChanges ? "Unsaved edits" : "Synced" },
+            { tone: "neutral", label: "Shared across platforms" },
+          ]}
+          footer={
+            <SectionFooter
+              status={aiExpandSettings.status}
+              updatedAt={aiExpandSettings.updatedAt}
+              canEdit={aiExpandSettings.canEdit}
+              saving={aiExpandSettings.saving}
+              hasChanges={aiExpandSettings.hasChanges}
+              onSave={aiExpandSettings.save}
+              saveLabel="Save AI Expand settings"
+            />
+          }
+        >
+          <SharedModelCard
+            icon={ShieldEllipsis}
+            title="AI Expand model"
+            description="Choose one shared AI Expand tier for both Android and iOS: Budget, Recommended, or Premium."
+            modelId="mobile-ai-expand-model"
+            modelLabel="Shared model"
+            modelDescription="Recommended uses `luma/reframe-image`, with `allenhooo/lama` as Budget and `bria/expand-image` as Premium."
+            modelValue={aiExpandSettings.form.aiExpandModel}
+            onModelChange={(event) =>
+              aiExpandSettings.setForm((current) => ({
+                ...current,
+                aiExpandModel: event.target.value,
+              }))
+            }
+            disabled={aiExpandSettings.disabled}
+            options={AI_EXPAND_MODEL_OPTIONS}
+          />
+
+          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
+                  Runtime behavior
+                </div>
+                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
+                  Mobile does not send a mask or prompt. The server creates the expansion canvas automatically
+                  from the original image and target dimensions, then calls the selected AI Expand model.
                 </p>
               </div>
             </div>

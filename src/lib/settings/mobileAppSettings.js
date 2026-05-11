@@ -1,3 +1,13 @@
+import {
+  DEFAULT_AI_EXPAND_MODEL_ID,
+  normalizeAiExpandModelId,
+} from "../media/aiExpand/models.js";
+import {
+  DEFAULT_OBJECT_REMOVAL_MODEL_ID,
+  normalizeObjectRemovalModelId,
+  normalizeObjectRemovalModelOrder,
+} from "../media/objectRemoval/models.js";
+
 export const SUPPORTED_MOBILE_DEVICE_TYPES = ["android", "ios"];
 
 const APP_VERSION_CODE_PATTERN = /^\d+$/;
@@ -6,7 +16,13 @@ const PLATFORM_SETTING_KEYS = new Set([
   "enableCache",
   "redirectLink",
 ]);
-const ROOT_SETTING_KEYS = new Set(["android", "ios", "updatedAt"]);
+const ROOT_SETTING_KEYS = new Set([
+  "android",
+  "ios",
+  "objectRemovalModel",
+  "aiExpandModel",
+  "updatedAt",
+]);
 
 export class MobileAppSettingsValidationError extends Error {}
 
@@ -25,6 +41,16 @@ function sanitizeStoredVersion(value) {
 
 function sanitizeOptionalLink(value) {
   const normalized = sanitizeString(value);
+  return normalized || null;
+}
+
+function sanitizeObjectRemovalModel(value) {
+  const normalized = normalizeObjectRemovalModelId(value);
+  return normalized || null;
+}
+
+function sanitizeAiExpandModel(value) {
+  const normalized = normalizeAiExpandModelId(value);
   return normalized || null;
 }
 
@@ -75,6 +101,24 @@ function mergePlatformSettings(currentSettings, input, platformLabel) {
   };
 }
 
+function resolveLegacyPlatformObjectRemovalModel(source) {
+  const androidOrder = normalizeObjectRemovalModelOrder(source?.android?.objectRemovalModelOrder, {
+    allowEmpty: true,
+  });
+  if (androidOrder.length > 0) {
+    return androidOrder[0];
+  }
+
+  const iosOrder = normalizeObjectRemovalModelOrder(source?.ios?.objectRemovalModelOrder, {
+    allowEmpty: true,
+  });
+  if (iosOrder.length > 0) {
+    return iosOrder[0];
+  }
+
+  return null;
+}
+
 export function normalizeMobileDeviceType(value) {
   const normalized = sanitizeString(value).toLowerCase();
   return SUPPORTED_MOBILE_DEVICE_TYPES.includes(normalized) ? normalized : "";
@@ -120,9 +164,15 @@ export function compareMobileAppVersions(leftVersion, rightVersion) {
 
 export function normalizeStoredMobileAppSettings(value = {}) {
   const source = isPlainObject(value) ? value : {};
+  const objectRemovalModel =
+    sanitizeObjectRemovalModel(source.objectRemovalModel) ||
+    resolveLegacyPlatformObjectRemovalModel(source);
+  const aiExpandModel = sanitizeAiExpandModel(source.aiExpandModel);
   return {
     android: normalizeStoredPlatformSettings(source.android),
     ios: normalizeStoredPlatformSettings(source.ios),
+    objectRemovalModel,
+    aiExpandModel,
     updatedAt: sanitizeString(source.updatedAt) || new Date().toISOString(),
   };
 }
@@ -135,11 +185,27 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
   return {
     android: mergePlatformSettings(current.android, input.android, "android"),
     ios: mergePlatformSettings(current.ios, input.ios, "ios"),
+    objectRemovalModel:
+      "objectRemovalModel" in input
+        ? sanitizeObjectRemovalModel(input.objectRemovalModel)
+        : current.objectRemovalModel,
+    aiExpandModel:
+      "aiExpandModel" in input
+        ? sanitizeAiExpandModel(input.aiExpandModel)
+        : current.aiExpandModel,
     updatedAt: new Date().toISOString(),
   };
 }
 
-export function resolveMobileAppSettingsDecision(settings, { deviceType, appVersion } = {}) {
+export function resolveMobileAppSettingsDecision(
+  settings,
+  {
+    deviceType,
+    appVersion,
+    defaultObjectRemovalModel = DEFAULT_OBJECT_REMOVAL_MODEL_ID,
+    defaultAiExpandModel = DEFAULT_AI_EXPAND_MODEL_ID,
+  } = {}
+) {
   const normalizedDeviceType = normalizeMobileDeviceType(deviceType);
   if (!normalizedDeviceType) {
     throw new MobileAppSettingsValidationError(
@@ -167,5 +233,35 @@ export function resolveMobileAppSettingsDecision(settings, { deviceType, appVers
     forceUpdate,
     enableCache: Boolean(platformSettings?.enableCache),
     redirectLink: sanitizeOptionalLink(platformSettings?.redirectLink),
+    objectRemovalModel: resolveMobileObjectRemovalModel(settings, {
+      defaultObjectRemovalModel,
+    }),
+    aiExpandModel: resolveMobileAiExpandModel(settings, {
+      defaultAiExpandModel,
+    }),
   };
+}
+
+export function resolveMobileObjectRemovalModel(
+  settings,
+  { defaultObjectRemovalModel = DEFAULT_OBJECT_REMOVAL_MODEL_ID } = {}
+) {
+  const normalizedSettings = normalizeStoredMobileAppSettings(settings);
+  return (
+    sanitizeObjectRemovalModel(normalizedSettings.objectRemovalModel) ||
+    sanitizeObjectRemovalModel(defaultObjectRemovalModel) ||
+    DEFAULT_OBJECT_REMOVAL_MODEL_ID
+  );
+}
+
+export function resolveMobileAiExpandModel(
+  settings,
+  { defaultAiExpandModel = DEFAULT_AI_EXPAND_MODEL_ID } = {}
+) {
+  const normalizedSettings = normalizeStoredMobileAppSettings(settings);
+  return (
+    sanitizeAiExpandModel(normalizedSettings.aiExpandModel) ||
+    sanitizeAiExpandModel(defaultAiExpandModel) ||
+    DEFAULT_AI_EXPAND_MODEL_ID
+  );
 }

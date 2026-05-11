@@ -7,18 +7,19 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { verifyMobileRequest } from "@/lib/mobile/auth";
-import { removeObjectFromImage } from "@/lib/media/objectRemoval/index.server";
+import { expandImageWithAi } from "@/lib/media/aiExpand/index.server";
 import {
   createFileTooLargeError,
-  isObjectRemovalError,
-} from "@/lib/media/objectRemoval/errors";
+  createInvalidInputError,
+  isAiExpandError,
+} from "@/lib/media/aiExpand/errors";
 import {
-  assertReplicateObjectRemovalConfigured,
-  getReplicateDefaultObjectRemovalModelId,
-} from "@/lib/media/objectRemoval/providers/replicate.server";
+  assertReplicateAiExpandConfigured,
+  getReplicateDefaultAiExpandModelId,
+} from "@/lib/media/aiExpand/providers/replicate.server";
 import {
   getMobileAppSettings,
-  resolveMobileObjectRemovalModel,
+  resolveMobileAiExpandModel,
 } from "@/lib/settings/mobileAppSettings.server";
 import {
   checkRateLimit,
@@ -29,13 +30,12 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const logger = createLogger("api.mobile.media.object-remove");
-const OBJECT_REMOVE_LIMIT = {
+const logger = createLogger("api.mobile.media.ai-expand");
+const AI_EXPAND_LIMIT = {
   limit: 6,
   windowMs: 5 * 60_000,
 };
 const MAX_IMAGE_UPLOAD_BYTES = 15 * 1024 * 1024;
-const MAX_MASK_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function jsonResponse(
   requestId: string,
@@ -50,6 +50,14 @@ function jsonResponse(
     }),
     requestId
   );
+}
+
+function parseTargetDimension(value: FormDataEntryValue | null, label: string) {
+  const parsed = Number.parseInt(String(value || "").trim(), 10);
+  if (!Number.isSafeInteger(parsed)) {
+    throw createInvalidInputError(`${label} must be an integer.`);
+  }
+  return parsed;
 }
 
 export async function POST(request: NextRequest) {
@@ -69,15 +77,15 @@ export async function POST(request: NextRequest) {
     }
 
     const rateLimitState = checkRateLimit({
-      scope: "api:mobile:media:object-remove",
+      scope: "api:mobile:media:ai-expand",
       identifier: resolveRequestIp(request) || "anonymous",
-      limit: OBJECT_REMOVE_LIMIT.limit,
-      windowMs: OBJECT_REMOVE_LIMIT.windowMs,
+      limit: AI_EXPAND_LIMIT.limit,
+      windowMs: AI_EXPAND_LIMIT.windowMs,
     });
     if (!rateLimitState.allowed) {
       return attachRequestIdHeader(
         createRateLimitResponse(
-          "Too many object removal requests. Please retry shortly.",
+          "Too many AI Expand requests. Please retry shortly.",
           rateLimitState
         ),
         requestId
@@ -91,60 +99,48 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const defaultModelId = getReplicateDefaultObjectRemovalModelId();
-    const configuredModel = resolveMobileObjectRemovalModel(await getMobileAppSettings(), {
-      defaultObjectRemovalModel: defaultModelId,
+    const defaultModelId = getReplicateDefaultAiExpandModelId();
+    const configuredModel = resolveMobileAiExpandModel(await getMobileAppSettings(), {
+      defaultAiExpandModel: defaultModelId,
     });
 
-    assertReplicateObjectRemovalConfigured(configuredModel);
+    assertReplicateAiExpandConfigured(configuredModel);
 
     const imageFile = formData.get("image");
-    const maskFile = formData.get("mask");
     if (!(imageFile instanceof File)) {
       return jsonResponse(requestId, { error: "Missing image upload." }, 400, {
         "Cache-Control": "no-store",
       });
     }
-    if (!(maskFile instanceof File)) {
-      return jsonResponse(requestId, { error: "Missing mask upload." }, 400, {
+
+    if (Number(imageFile.size || 0) <= 0) {
+      return jsonResponse(requestId, { error: "Image upload must not be empty." }, 400, {
         "Cache-Control": "no-store",
       });
     }
 
-    if (Number(imageFile.size || 0) <= 0 || Number(maskFile.size || 0) <= 0) {
-      return jsonResponse(
-        requestId,
-        { error: "Image and mask uploads must not be empty." },
-        400,
-        { "Cache-Control": "no-store" }
-      );
-    }
     if (Number(imageFile.size || 0) > MAX_IMAGE_UPLOAD_BYTES) {
       throw createFileTooLargeError("Image upload is too large.");
     }
-    if (Number(maskFile.size || 0) > MAX_MASK_UPLOAD_BYTES) {
-      throw createFileTooLargeError("Mask upload is too large.");
-    }
 
-    const [imageBytes, maskBytes] = await Promise.all([
-      imageFile.arrayBuffer().then((value) => Buffer.from(value)),
-      maskFile.arrayBuffer().then((value) => Buffer.from(value)),
-    ]);
+    const targetWidth = parseTargetDimension(formData.get("targetWidth"), "targetWidth");
+    const targetHeight = parseTargetDimension(formData.get("targetHeight"), "targetHeight");
+    const imageBytes = await imageFile.arrayBuffer().then((value) => Buffer.from(value));
 
-    const result = await removeObjectFromImage({
+    const result = await expandImageWithAi({
       imageBytes,
       imageMimeType: imageFile.type,
       imageFileName: imageFile.name,
-      maskBytes,
-      maskMimeType: maskFile.type,
-      maskFileName: maskFile.name,
+      targetWidth,
+      targetHeight,
       modelId: configuredModel,
     });
 
-    requestLogger.info("Object removal completed", {
+    requestLogger.info("AI Expand completed", {
       inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
       inputBytes: imageBytes.length,
-      maskBytes: maskBytes.length,
+      targetWidth,
+      targetHeight,
       outputBytes: result.bytes.length,
       width: result.width || null,
       height: result.height || null,
@@ -158,26 +154,27 @@ export async function POST(request: NextRequest) {
         status: 200,
         headers: {
           "Content-Type": result.mimeType || "image/png",
-          "Content-Disposition": `inline; filename="${result.fileName || "object-removed.png"}"`,
+          "Content-Disposition": `inline; filename="${result.fileName || "expanded-image.png"}"`,
           "Cache-Control": "no-store",
           "X-Output-Width": String(result.width || ""),
           "X-Output-Height": String(result.height || ""),
-          "X-Object-Removal-Provider": String(result.provider || ""),
-          "X-Object-Removal-Model": String(result.model || ""),
+          "X-AI-Expand-Provider": String(result.provider || ""),
+          "X-AI-Expand-Model": String(result.model || ""),
         },
       }),
       requestId
     );
   } catch (error) {
     const statusCode =
-      isObjectRemovalError(error) && Number.isFinite(Number(error.statusCode))
+      isAiExpandError(error) && Number.isFinite(Number(error.statusCode))
         ? Number(error.statusCode)
         : 500;
     const message =
-      isObjectRemovalError(error) && error.expose !== false
+      isAiExpandError(error) && error.expose !== false
         ? error.message
-        : "Failed to remove the selected object.";
-    requestLogger.error("Object removal failed", error, {
+        : "Failed to expand the selected image.";
+
+    requestLogger.error("AI Expand failed", error, {
       statusCode,
       durationMs: Date.now() - startedAt,
     });

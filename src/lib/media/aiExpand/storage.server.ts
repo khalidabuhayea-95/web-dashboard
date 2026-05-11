@@ -2,7 +2,6 @@ import { createLogger } from "@/lib/logging/logger";
 import {
   createSignedDownloadUrl,
   deleteObjects,
-  getObjectRemovalOutputBucketName,
   getPrivateStorageBucketName,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
@@ -13,10 +12,9 @@ import {
 } from "./errors";
 
 const INPUT_BUCKET = getPrivateStorageBucketName();
-const OUTPUT_BUCKET = getObjectRemovalOutputBucketName();
 const DEFAULT_INPUT_URL_EXPIRY_SECONDS = 15 * 60;
 
-const logger = createLogger("media.object-remove.storage");
+const logger = createLogger("media.ai-expand.storage");
 
 type StoredObject = {
   bucket: string;
@@ -25,7 +23,7 @@ type StoredObject = {
 
 type UploadStoredAssetInput = {
   jobId: string;
-  kind: "image" | "image-rgb" | "mask" | "output";
+  kind: "image" | "canvas" | "mask";
   bytes: Buffer;
   mimeType: string;
   fileName: string;
@@ -66,7 +64,7 @@ function makeObjectPath(jobId: string, kind: string, fileName: string, mimeType:
   const safeJobId = sanitizePathSegment(jobId, "job");
   const safeBase = sanitizePathSegment(fileName.replace(/\.[^.]+$/, ""), kind);
   const extension = extensionFromMimeType(mimeType);
-  return `object-remove/jobs/${year}/${month}/${day}/${safeJobId}/${kind}-${safeBase}.${extension}`;
+  return `ai-expand/jobs/${year}/${month}/${day}/${safeJobId}/${kind}-${safeBase}.${extension}`;
 }
 
 async function uploadBytesToBucket(bucket: string, objectPath: string, bytes: Buffer, mimeType: string) {
@@ -81,12 +79,12 @@ async function uploadBytesToBucket(bucket: string, objectPath: string, bytes: Bu
     });
   } catch (error) {
     throw createProcessingFailedError(
-      error instanceof Error ? error.message : "Failed to upload object removal asset."
+      error instanceof Error ? error.message : "Failed to upload AI Expand asset."
     );
   }
 }
 
-export async function uploadObjectRemovalInputAsset(input: UploadStoredAssetInput) {
+export async function uploadAiExpandInputAsset(input: UploadStoredAssetInput) {
   const path = makeObjectPath(input.jobId, input.kind, input.fileName, input.mimeType);
   await uploadBytesToBucket(INPUT_BUCKET, path, input.bytes, input.mimeType);
 
@@ -101,7 +99,7 @@ export async function uploadObjectRemovalInputAsset(input: UploadStoredAssetInpu
   };
 }
 
-export async function createObjectRemovalSignedInputUrl(
+export async function createAiExpandSignedInputUrl(
   asset: StoredObject,
   expiresInSeconds = DEFAULT_INPUT_URL_EXPIRY_SECONDS
 ) {
@@ -118,27 +116,7 @@ export async function createObjectRemovalSignedInputUrl(
   }
 }
 
-export async function uploadObjectRemovalOutputAsset(input: UploadStoredAssetInput) {
-  const path = makeObjectPath(input.jobId, input.kind, input.fileName, input.mimeType);
-  const uploaded = await uploadBytesToBucket(OUTPUT_BUCKET, path, input.bytes, input.mimeType);
-  const assetUrl = String(uploaded.url || "").trim();
-  if (!assetUrl) {
-    throw createProcessingFailedError("Object removal output URL is unavailable.");
-  }
-
-  return {
-    bucket: OUTPUT_BUCKET,
-    path,
-    assetUrl,
-    mimeType: input.mimeType,
-    fileName: input.fileName,
-    width: Number(input.width || 0),
-    height: Number(input.height || 0),
-    size: input.bytes.length,
-  };
-}
-
-export async function deleteObjectRemovalStoredObjects(items: StoredObject[] = []) {
+export async function deleteAiExpandStoredObjects(items: StoredObject[] = []) {
   const grouped = new Map<string, string[]>();
 
   for (const item of items) {
@@ -155,7 +133,7 @@ export async function deleteObjectRemovalStoredObjects(items: StoredObject[] = [
       try {
         await deleteObjects(bucket, paths);
       } catch (error) {
-        logger.warn("Failed to delete object removal temp assets", {
+        logger.warn("Failed to delete AI Expand temp assets", {
           bucket,
           paths,
           error: error instanceof Error ? error.message : String(error || ""),

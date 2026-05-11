@@ -451,7 +451,7 @@ export async function createSignedDownloadUrl(
     credentials: config.credentials,
     region: config.region,
     service: "s3",
-    sha256: Hash,
+    sha256: Hash.bind(null, "sha256"),
     uriEscapePath: false,
   });
 
@@ -463,11 +463,14 @@ export async function createSignedDownloadUrl(
     path: `/${safeBucket}/${encodeObjectKey(safeKey)}`,
     headers: {
       host: endpoint.host,
+      // R2 expects S3-style presigned GET requests to use UNSIGNED-PAYLOAD.
+      "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
     },
   });
 
   const presigned = await signer.presign(request, {
     expiresIn: Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_SIGNED_URL_TTL_SECONDS)),
+    unsignableHeaders: new Set(["x-amz-content-sha256"]),
   });
 
   return formatHttpRequestUrl(presigned);

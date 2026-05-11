@@ -5,8 +5,10 @@ import {
   MobileAppSettingsValidationError,
   compareMobileAppVersions,
   mergeMobileAppSettingsInput,
+  resolveMobileAiExpandModel,
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
+  resolveMobileObjectRemovalModel,
 } from "./mobileAppSettings.js";
 
 test("normalizeStoredMobileAppSettings returns safe defaults when no settings exist", () => {
@@ -22,6 +24,8 @@ test("normalizeStoredMobileAppSettings returns safe defaults when no settings ex
     enableCache: false,
     redirectLink: null,
   });
+  assert.equal(settings.objectRemovalModel, null);
+  assert.equal(settings.aiExpandModel, null);
   assert.ok(settings.updatedAt);
 });
 
@@ -38,12 +42,15 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
       enableCache: true,
       redirectLink: "https://play.google.com/store/apps/details?id=com.example",
     },
+    objectRemovalModel: "zylim0702/remove-object",
+    aiExpandModel: "luma/reframe-image",
   });
 
   assert.deepEqual(
     resolveMobileAppSettingsDecision(settings, {
       deviceType: "ANDROID",
       appVersion: "204",
+      defaultObjectRemovalModel: "allenhooo/lama",
     }),
     {
       deviceType: "android",
@@ -51,6 +58,8 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
       forceUpdate: true,
       enableCache: true,
       redirectLink: "https://play.google.com/store/apps/details?id=com.example",
+      objectRemovalModel: "zylim0702/remove-object",
+      aiExpandModel: "luma/reframe-image",
     }
   );
 
@@ -58,6 +67,7 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
     resolveMobileAppSettingsDecision(settings, {
       deviceType: "android",
       appVersion: "205",
+      defaultObjectRemovalModel: "allenhooo/lama",
     }),
     {
       deviceType: "android",
@@ -65,6 +75,8 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
       forceUpdate: false,
       enableCache: true,
       redirectLink: "https://play.google.com/store/apps/details?id=com.example",
+      objectRemovalModel: "zylim0702/remove-object",
+      aiExpandModel: "luma/reframe-image",
     }
   );
 });
@@ -81,6 +93,8 @@ test("mergeMobileAppSettingsInput preserves untouched values and updates changed
       enableCache: true,
       redirectLink: null,
     },
+    objectRemovalModel: "allenhooo/lama",
+    aiExpandModel: "bria/expand-image",
   });
 
   const next = mergeMobileAppSettingsInput(current, {
@@ -89,6 +103,8 @@ test("mergeMobileAppSettingsInput preserves untouched values and updates changed
       enableCache: true,
       redirectLink: "  https://example.com/android-update  ",
     },
+    objectRemovalModel: "zylim0702/remove-object",
+    aiExpandModel: "bria/expand-image",
   });
 
   assert.deepEqual(next.android, {
@@ -97,7 +113,36 @@ test("mergeMobileAppSettingsInput preserves untouched values and updates changed
     redirectLink: "https://example.com/android-update",
   });
   assert.deepEqual(next.ios, current.ios);
+  assert.equal(next.objectRemovalModel, "zylim0702/remove-object");
+  assert.equal(next.aiExpandModel, "bria/expand-image");
   assert.ok(next.updatedAt);
+});
+
+test("resolveMobileObjectRemovalModel falls back to the provided default model", () => {
+  const settings = normalizeStoredMobileAppSettings({
+    android: {
+      minimumSupportedVersion: 100,
+      enableCache: true,
+    },
+  });
+
+  assert.equal(
+    resolveMobileObjectRemovalModel(settings, {
+      defaultObjectRemovalModel: "bria/eraser",
+    }),
+    "bria/eraser"
+  );
+});
+
+test("resolveMobileAiExpandModel falls back to the provided default model", () => {
+  const settings = normalizeStoredMobileAppSettings();
+
+  assert.equal(
+    resolveMobileAiExpandModel(settings, {
+      defaultAiExpandModel: "bria/expand-image",
+    }),
+    "bria/expand-image"
+  );
 });
 
 test("invalid versions are rejected during save/evaluation flows", () => {

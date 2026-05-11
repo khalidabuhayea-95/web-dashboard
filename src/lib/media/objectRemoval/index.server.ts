@@ -16,6 +16,123 @@ import {
 } from "./storage.server";
 
 const logger = createLogger("media.object-remove");
+const REPLICATE_OBJECT_REMOVE_MAX_LONG_EDGE = 1440;
+const RGB_ONLY_OBJECT_REMOVAL_MODEL_IDS = new Set(["zylim0702/remove-object"]);
+
+let canvasLibPromise: Promise<{ createCanvas: any; loadImage: any } | null> | null = null;
+
+function createDataUrl(bytes: Buffer, mimeType: string) {
+  return `data:${mimeType};base64,${bytes.toString("base64")}`;
+}
+
+async function getCanvasLib() {
+  if (canvasLibPromise) return canvasLibPromise;
+  canvasLibPromise = import("canvas")
+    .then((module) => ({
+      createCanvas: module.createCanvas,
+      loadImage: module.loadImage,
+    }))
+    .catch((_error) => null);
+  return canvasLibPromise;
+}
+
+async function compositeObjectRemovalOutput({
+  baseImage,
+  editedCrop,
+  cropRegion,
+  outputFileName,
+}: {
+  baseImage: {
+    bytes: Buffer;
+    mimeType: string;
+    width: number;
+    height: number;
+  };
+  editedCrop: {
+    bytes: Buffer;
+    mimeType: string;
+  };
+  cropRegion: {
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+  };
+  outputFileName: string;
+}) {
+  const canvasLib = await getCanvasLib();
+  if (!canvasLib?.createCanvas || !canvasLib?.loadImage) {
+    return {
+      bytes: editedCrop.bytes,
+      mimeType: editedCrop.mimeType || "image/png",
+      fileName: outputFileName,
+      width: cropRegion.width,
+      height: cropRegion.height,
+    };
+  }
+
+  const [base, overlay] = await Promise.all([
+    canvasLib.loadImage(createDataUrl(baseImage.bytes, baseImage.mimeType || "image/png")),
+    canvasLib.loadImage(createDataUrl(editedCrop.bytes, editedCrop.mimeType || "image/png")),
+  ]);
+
+  const canvas = canvasLib.createCanvas(baseImage.width, baseImage.height);
+  const context = canvas.getContext("2d");
+  context.imageSmoothingEnabled = true;
+  context.imageSmoothingQuality = "high";
+  context.drawImage(base, 0, 0, baseImage.width, baseImage.height);
+  context.drawImage(
+    overlay,
+    cropRegion.x,
+    cropRegion.y,
+    cropRegion.width,
+    cropRegion.height
+  );
+
+  const bytes = canvas.toBuffer("image/png");
+  return {
+    bytes,
+    mimeType: "image/png",
+    fileName: outputFileName,
+    width: baseImage.width,
+    height: baseImage.height,
+  };
+}
+
+async function encodeProviderImageAsJpeg(image: {
+  bytes: Buffer;
+  mimeType: string;
+  fileName: string;
+  width: number;
+  height: number;
+}) {
+  const canvasLib = await getCanvasLib();
+  if (!canvasLib?.createCanvas || !canvasLib?.loadImage) {
+    return {
+      ...image,
+      mimeType: "image/jpeg",
+      fileName: image.fileName.replace(/\.[a-z0-9]+$/i, ".jpg"),
+    };
+  }
+
+  const decoded = await canvasLib.loadImage(
+    createDataUrl(image.bytes, image.mimeType || "image/png")
+  );
+  const canvas = canvasLib.createCanvas(image.width, image.height);
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, image.width, image.height);
+  context.drawImage(decoded, 0, 0, image.width, image.height);
+
+  return {
+    bytes: canvas.toBuffer("image/jpeg", { quality: 0.92 }),
+    mimeType: "image/jpeg",
+    fileName: image.fileName.replace(/\.[a-z0-9]+$/i, ".jpg"),
+    width: image.width,
+    height: image.height,
+    size: 0,
+  };
+}
 
 export async function removeObjectFromImage({
   imageBytes,
@@ -24,6 +141,7 @@ export async function removeObjectFromImage({
   maskBytes,
   maskMimeType,
   maskFileName,
+  modelId,
 }: {
   imageBytes: Buffer;
   imageMimeType?: string;
@@ -31,6 +149,7 @@ export async function removeObjectFromImage({
   maskBytes: Buffer;
   maskMimeType?: string;
   maskFileName?: string;
+  modelId?: string;
 }) {
   const normalized = await normalizeObjectRemovalInput({
     imageBytes,
@@ -39,6 +158,7 @@ export async function removeObjectFromImage({
     maskBytes,
     maskMimeType,
     maskFileName,
+    maxLongEdge: REPLICATE_OBJECT_REMOVE_MAX_LONG_EDGE,
   });
 
   const requestId =
@@ -48,29 +168,49 @@ export async function removeObjectFromImage({
 
   const stagedInputs: Array<{ bucket: string; path: string }> = [];
   try {
+    const selectedModelId = String(modelId || "").trim();
     const stagedImage = await uploadObjectRemovalInputAsset({
       jobId: requestId,
       kind: "image",
-      bytes: normalized.image.bytes,
-      mimeType: normalized.image.mimeType,
-      fileName: normalized.image.fileName,
-      width: normalized.image.width,
-      height: normalized.image.height,
+      bytes: normalized.providerImage.bytes,
+      mimeType: normalized.providerImage.mimeType,
+      fileName: normalized.providerImage.fileName,
+      width: normalized.providerImage.width,
+      height: normalized.providerImage.height,
     });
     stagedInputs.push({ bucket: stagedImage.bucket, path: stagedImage.path });
 
     const stagedMask = await uploadObjectRemovalInputAsset({
       jobId: requestId,
       kind: "mask",
-      bytes: normalized.mask.bytes,
-      mimeType: normalized.mask.mimeType,
-      fileName: normalized.mask.fileName,
-      width: normalized.mask.width,
-      height: normalized.mask.height,
+      bytes: normalized.providerMask.bytes,
+      mimeType: normalized.providerMask.mimeType,
+      fileName: normalized.providerMask.fileName,
+      width: normalized.providerMask.width,
+      height: normalized.providerMask.height,
     });
     stagedInputs.push({ bucket: stagedMask.bucket, path: stagedMask.path });
 
-    const [imageUrl, maskUrl] = await Promise.all([
+    const needsRgbProviderImage = RGB_ONLY_OBJECT_REMOVAL_MODEL_IDS.has(selectedModelId);
+    const rgbProviderImage = needsRgbProviderImage
+      ? await encodeProviderImageAsJpeg(normalized.providerImage)
+      : null;
+    const stagedRgbImage = rgbProviderImage
+      ? await uploadObjectRemovalInputAsset({
+          jobId: requestId,
+          kind: "image-rgb",
+          bytes: rgbProviderImage.bytes,
+          mimeType: rgbProviderImage.mimeType,
+          fileName: rgbProviderImage.fileName,
+          width: rgbProviderImage.width,
+          height: rgbProviderImage.height,
+        })
+      : null;
+    if (stagedRgbImage) {
+      stagedInputs.push({ bucket: stagedRgbImage.bucket, path: stagedRgbImage.path });
+    }
+
+    const [imageUrl, maskUrl, rgbImageUrl] = await Promise.all([
       createObjectRemovalSignedInputUrl({
         bucket: stagedImage.bucket,
         path: stagedImage.path,
@@ -79,11 +219,19 @@ export async function removeObjectFromImage({
         bucket: stagedMask.bucket,
         path: stagedMask.path,
       }),
+      stagedRgbImage
+        ? createObjectRemovalSignedInputUrl({
+            bucket: stagedRgbImage.bucket,
+            path: stagedRgbImage.path,
+          })
+        : Promise.resolve(""),
     ]);
 
+    const providerMeta = getReplicateObjectRemovalMetadata(selectedModelId);
     const prediction = await createReplicateObjectRemovalPrediction({
-      imageUrl,
+      imageUrl: needsRgbProviderImage && rgbImageUrl ? rgbImageUrl : imageUrl,
       maskUrl,
+      modelId: selectedModelId,
     });
     const completedPrediction = await waitForReplicatePrediction({
       predictionId: prediction.id,
@@ -92,14 +240,34 @@ export async function removeObjectFromImage({
       outputUrl: completedPrediction.outputUrl,
       fileName: normalized.outputFileName,
     });
-    const providerMeta = getReplicateObjectRemovalMetadata();
-
+    const compositedOutput = normalized.cropRegion
+      ? await compositeObjectRemovalOutput({
+          baseImage: {
+            bytes: normalized.image.bytes,
+            mimeType: normalized.image.mimeType,
+            width: normalized.image.width,
+            height: normalized.image.height,
+          },
+          editedCrop: {
+            bytes: downloadedOutput.bytes,
+            mimeType: downloadedOutput.mimeType,
+          },
+          cropRegion: normalized.cropRegion,
+          outputFileName: normalized.outputFileName,
+        })
+      : {
+          bytes: downloadedOutput.bytes,
+          mimeType: downloadedOutput.mimeType,
+          fileName: downloadedOutput.fileName,
+          width: downloadedOutput.width || normalized.image.width,
+          height: downloadedOutput.height || normalized.image.height,
+        };
     return {
-      bytes: downloadedOutput.bytes,
-      mimeType: downloadedOutput.mimeType,
-      fileName: downloadedOutput.fileName,
-      width: downloadedOutput.width || normalized.image.width,
-      height: downloadedOutput.height || normalized.image.height,
+      bytes: compositedOutput.bytes,
+      mimeType: compositedOutput.mimeType,
+      fileName: compositedOutput.fileName,
+      width: compositedOutput.width,
+      height: compositedOutput.height,
       provider: providerMeta.provider,
       model: providerMeta.model,
       version: providerMeta.version,

@@ -12,6 +12,8 @@ import {
   MobileAppSettingsValidationError,
   resolveMobileAppSettingsDecision,
 } from "@/lib/settings/mobileAppSettings.server";
+import { getReplicateDefaultAiExpandModelId } from "@/lib/media/aiExpand/providers/replicate.server";
+import { getReplicateDefaultObjectRemovalModelId } from "@/lib/media/objectRemoval/providers/replicate.server";
 
 const logger = createLogger("api.mobile.app-settings");
 
@@ -44,6 +46,8 @@ export async function GET(request: NextRequest) {
     const responsePayload = resolveMobileAppSettingsDecision(settings, {
       deviceType,
       appVersion,
+      defaultObjectRemovalModel: getReplicateDefaultObjectRemovalModelId(),
+      defaultAiExpandModel: getReplicateDefaultAiExpandModelId(),
     });
 
     requestLogger.info("Resolved mobile app settings", responsePayload);

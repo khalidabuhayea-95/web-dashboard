@@ -4,7 +4,7 @@ Last updated: 2026-04-06
 
 ## Objective
 
-Add a synchronous mobile object-removal capability that accepts an image plus a user-painted mask, runs Replicate `allenhooo/lama`, and returns the processed image directly in the response.
+Add a synchronous mobile object-removal capability that accepts an image plus a user-painted mask, runs the configured Replicate object-removal model, and returns the processed image directly in the response.
 
 ## Backend Contract
 
@@ -27,7 +27,7 @@ Validation and normalization:
 - normalize JPEG EXIF orientation before checking mask dimensions
 - require identical image and mask dimensions
 - require the mask to contain at least one selected pixel
-- resize both image and mask together so the long edge is at most `2048`
+- resize both image and mask together so the long edge is at most `1440`
 
 Storage flow:
 - store normalized image and mask in a private input bucket
@@ -38,8 +38,11 @@ Storage flow:
 ## Provider Behavior
 
 - Provider: Replicate
-- Model: `allenhooo/lama`
-- Version: `cdac78a1bec5b23c07fd29692fb70baa513ea403a39e643c48ec5edadb15fe72`
+- Model: resolved from one shared mobile setting used by both Android and iOS
+- Supported models:
+  - `allenhooo/lama`
+  - `zylim0702/remove-object`
+  - `bria/eraser`
 - Inputs:
   - signed image URL
   - signed mask URL
