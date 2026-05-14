@@ -4,6 +4,7 @@ import { buildMobileTemplatesListResponse } from "@/lib/mobile/templateList";
 
 export async function GET(request: NextRequest): Promise<NextResponse> {
   return buildMobileTemplatesListResponse(request, {
-    routeName: "Fetched mobile templates",
+    routeName: "Searched mobile templates",
+    searchMode: "queryOnly",
   });
 }

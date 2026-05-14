@@ -38,6 +38,26 @@ function normalizeDashboardUrl(raw) {
   return parsed.toString().replace(/\/$/, "");
 }
 
+function toOriginPattern(rawUrl) {
+  const normalized = normalizeDashboardUrl(rawUrl);
+  const parsed = new URL(normalized);
+  return `${parsed.protocol}//${parsed.hostname}/*`;
+}
+
+async function ensureDashboardPermission(rawUrl) {
+  const originPattern = toOriginPattern(rawUrl);
+  if (!chrome?.permissions?.contains || !chrome?.permissions?.request) {
+    return true;
+  }
+  const granted = await new Promise((resolve) => {
+    chrome.permissions.contains({ origins: [originPattern] }, (value) => resolve(Boolean(value)));
+  });
+  if (granted) return true;
+  return new Promise((resolve) => {
+    chrome.permissions.request({ origins: [originPattern] }, (value) => resolve(Boolean(value)));
+  });
+}
+
 function collectSettings() {
   return {
     dashboardUrl: $("dashboardUrl").value.trim(),
@@ -92,6 +112,11 @@ async function importActiveTab() {
   if (!settings.importToken) {
     throw new Error("Import token is required.");
   }
+  setStatus("Checking dashboard permission...");
+  const hasPermission = await ensureDashboardPermission(settings.dashboardUrl);
+  if (!hasPermission) {
+    throw new Error("Dashboard host permission is required to complete the import.");
+  }
 
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   const activeTab = tabs[0];
@@ -106,39 +131,65 @@ async function importActiveTab() {
     tabId: Number(activeTab.id || 0),
     dashboardUrl: settings.dashboardUrl,
   });
+  setStatus("Connecting to importer...");
 
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      {
-        type: "IMPORT_ACTIVE_CANVA_TAB",
-        tabId: activeTab.id,
-        dashboardUrl: settings.dashboardUrl,
-        token: settings.importToken,
-        name: settings.templateName,
-        slug: settings.templateSlug,
-        captureMetadata: false,
-      },
-      (response) => {
-        const runtimeError = chrome.runtime.lastError;
-        if (runtimeError) {
-          logger.error("chrome.runtime.sendMessage failed", {}, runtimeError);
-          reject(new Error(runtimeError.message));
-          return;
-        }
-        if (!response?.ok) {
-          logger.warn("Import response indicates failure", {
-            error: String(response?.error || ""),
-          });
-          reject(new Error(response?.error || "Import request failed."));
-          return;
-        }
-        logger.info("Import response succeeded", {
-          templateId: String(response?.template?.id || ""),
-          importedCustomFonts: Number(response?.importedCustomFonts || 0),
-        });
-        resolve(response);
+    const port = chrome.runtime.connect({ name: "canva-import" });
+    let settled = false;
+    const settle = (callback) => {
+      if (settled) return;
+      settled = true;
+      try {
+        port.disconnect();
+      } catch (_error) {
+        // Ignore best-effort disconnect failures.
       }
-    );
+      callback();
+    };
+
+    port.onMessage.addListener((message) => {
+      const type = String(message?.type || "");
+      if (type === "IMPORT_PROGRESS") {
+        const progressMessage = String(message?.message || "").trim();
+        if (progressMessage) {
+          setStatus(progressMessage);
+        }
+        return;
+      }
+      if (type === "IMPORT_SUCCESS") {
+        logger.info("Import response succeeded", {
+          templateId: String(message?.template?.id || ""),
+          importedCustomFonts: Number(message?.importedCustomFonts || 0),
+        });
+        settle(() => resolve(message));
+        return;
+      }
+      if (type === "IMPORT_ERROR") {
+        logger.warn("Import response indicates failure", {
+          error: String(message?.error || ""),
+        });
+        settle(() => reject(new Error(message?.error || "Import request failed.")));
+      }
+    });
+
+    port.onDisconnect.addListener(() => {
+      if (settled) return;
+      const runtimeError = chrome.runtime.lastError;
+      logger.error("Import port disconnected unexpectedly", {}, runtimeError || null);
+      settle(() =>
+        reject(new Error(runtimeError?.message || "Importer connection closed unexpectedly."))
+      );
+    });
+
+    port.postMessage({
+      type: "IMPORT_ACTIVE_CANVA_TAB",
+      tabId: activeTab.id,
+      dashboardUrl: settings.dashboardUrl,
+      token: settings.importToken,
+      name: settings.templateName,
+      slug: settings.templateSlug,
+      captureMetadata: false,
+    });
   });
 }
 

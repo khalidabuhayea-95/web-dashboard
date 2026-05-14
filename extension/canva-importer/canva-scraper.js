@@ -1,0 +1,3470 @@
+(() => {
+  async function canvaImporterGetCaptureMeta(runtimeOptions = {}) {
+      const shouldCollectLayerMetadata = Boolean(runtimeOptions?.captureMetadata);
+      const viewportCenter = {
+        x: window.innerWidth / 2,
+        y: window.innerHeight / 2,
+      };
+
+      const isVisible = (element, rect) => {
+        if (!element || !rect) return false;
+        if (rect.width < 80 || rect.height < 80) return false;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0.01
+        );
+      };
+
+      const scoreRect = (rect) => {
+        const area = rect.width * rect.height;
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const distance = Math.hypot(centerX - viewportCenter.x, centerY - viewportCenter.y);
+        const normalizedDistance = distance / Math.max(window.innerWidth, window.innerHeight, 1);
+        const centerBias = 1 - Math.min(normalizedDistance, 1) * 0.55;
+        return area * centerBias;
+      };
+
+      const parsePx = (value) => {
+        const match = String(value || "").match(/([0-9.]+)px/i);
+        const numeric = Number(match?.[1]);
+        return Number.isFinite(numeric) ? numeric : 0;
+      };
+
+      const parseStyleDimension = (styleText, key) => {
+        const match = String(styleText || "").match(
+          new RegExp(`${key}\\s*:\\s*([0-9.]+)px`, "i")
+        );
+        const numeric = Number(match?.[1]);
+        return Number.isFinite(numeric) ? numeric : 0;
+      };
+
+      const sleep = (ms) =>
+        new Promise((resolve) => {
+          window.setTimeout(resolve, Math.max(0, Number(ms) || 0));
+        });
+
+      const sanitizeMetadataText = (value) =>
+        String(value || "").replace(/\s+/g, " ").trim();
+
+      const uniqueMetadataStrings = (values) =>
+        Array.from(
+          new Set(
+            (Array.isArray(values) ? values : [])
+              .map((value) => sanitizeMetadataText(value))
+              .filter(Boolean)
+          )
+        );
+
+      const parseCssTimeToMs = (value) => {
+        const firstToken = String(value || "")
+          .split(",")
+          .map((token) => token.trim())
+          .find(Boolean);
+        if (!firstToken) return 0;
+        if (/ms$/i.test(firstToken)) {
+          const numeric = Number.parseFloat(firstToken);
+          return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+        }
+        if (/s$/i.test(firstToken)) {
+          const numeric = Number.parseFloat(firstToken);
+          return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric * 1000)) : 0;
+        }
+        const numeric = Number.parseFloat(firstToken);
+        return Number.isFinite(numeric) ? Math.max(0, Math.round(numeric)) : 0;
+      };
+
+      const normalizeAnimationLabel = (value) =>
+        sanitizeMetadataText(String(value || "").replace(/[_-]+/g, " "));
+
+      const mapAnimationHintToType = (rawValue) => {
+        const value = normalizeAnimationLabel(rawValue).toLowerCase();
+        if (!value) return null;
+        const matchers = [
+          { type: "NONE", label: "None", regex: /\b(none|no animation|instant|instant show|instant hide|hard cut|show hide)\b|بدون|بدون حركة/ },
+          { type: "FADE", label: "Fade", regex: /\b(static|fade|fade in|fade out|dissolve|soft dissolve)\b|ثابت|تلاشي/ },
+          { type: "RISE", label: "Rise", regex: /\b(rise)\b|ارتفاع/ },
+          { type: "PAN", label: "Pan", regex: /\b(pan)\b|تأرجح|ترنح/ },
+          { type: "POP", label: "Pop", regex: /\b(pop|zoom|zoom in|zoom out)\b|انبثاق/ },
+          { type: "WIPE", label: "Wipe", regex: /\b(directional wipe|wipe)\b|المسح/ },
+          { type: "BLUR", label: "Blur", regex: /\b(blur|soft blur)\b|تمويه/ },
+          { type: "SUCCESSION", label: "Succession", regex: /\b(succession|zoom fade)\b|التتابع/ },
+          { type: "BREATHE", label: "Breathe", regex: /\b(breathe|slow reveal)\b|ظهور بطيء/ },
+          { type: "BASELINE", label: "Baseline", regex: /\b(baseline|bounce)\b|baseline|خط الأساس/ },
+          { type: "DRIFT", label: "Drift", regex: /\b(drift|slide|slide in|slide out)\b|انجراف/ },
+          { type: "TECTONIC", label: "Tectonic", regex: /\b(soft gradient wipe|wipe gradient|gradient wipe|tectonic)\b|حركة تكتونية/ },
+          { type: "TUMBLE", label: "Tumble", regex: /\b(tumble|turn|radial sweep reveal|radial sweep|radial)\b|دوران/ },
+          { type: "NEON", label: "Neon", regex: /\b(neon|soft circular reveal|circular fade)\b|نيون/ },
+          { type: "SCRAPBOOK", label: "Scrapbook", regex: /\b(scrapbook)\b|سجل قصاصات/ },
+          { type: "STOMP", label: "Stomp", regex: /\b(stomp|circular reveal|circular|aerial)\b|سقوط هوائي/ },
+          { type: "ROTATE", label: "Rotate", regex: /\b(continuous rotation|rotation|spin|rotate)\b|تدوير/ },
+          { type: "FLICKER", label: "Flicker", regex: /\bflicker\b|ومض/ },
+          { type: "PULSE", label: "Pulse", regex: /\b(pulse|pulse zoom|squash and stretch|heart beat|heartbeat)\b|تقلص العنصر وتمدد|نبض/ },
+          { type: "WIGGLE", label: "Wiggle", regex: /\b(wiggle|directional shake|shake)\b|اهتزاز سريع|اهتزاز سريع بالاتجاه/ },
+        ];
+        return matchers.find((entry) => entry.regex.test(value)) || null;
+      };
+
+      const inferAnimationDirection = (values) => {
+        const text = uniqueMetadataStrings(values).join(" ").toLowerCase();
+        if (!text) return "";
+        if (/\b(left|leftward)\b|يسار/.test(text)) return "LEFT";
+        if (/\b(right|rightward)\b|يمين/.test(text)) return "RIGHT";
+        if (/\b(top|up|upward)\b|أعلى|فوق/.test(text)) return "UP";
+        if (/\b(bottom|down|downward)\b|أسفل|تحت/.test(text)) return "DOWN";
+        if (/\b(counterclockwise|anti clockwise|anticlockwise)\b/.test(text)) return "COUNTERCLOCKWISE";
+        if (/\b(clockwise)\b/.test(text)) return "CLOCKWISE";
+        return "";
+      };
+
+      const inferAnimationMode = (values, isInfinite) => {
+        if (isInfinite) return "LOOP";
+        const text = uniqueMetadataStrings(values).join(" ").toLowerCase();
+        if (/\b(out|exit|leave|disappear|hide|closing|close)\b/.test(text)) return "OUT";
+        return "IN";
+      };
+
+      const collectAnimationHintStrings = (node, supplementalNodes = []) => {
+        const results = [];
+        const push = (value) => {
+          const normalized = normalizeAnimationLabel(value);
+          if (!normalized || normalized.length > 400) return;
+          results.push(normalized);
+        };
+        const addNodeSignals = (candidate) => {
+          if (!candidate) return;
+          push(candidate.getAttribute?.("aria-label"));
+          push(candidate.getAttribute?.("title"));
+          push(candidate.getAttribute?.("data-element-name"));
+          push(candidate.className);
+          push(candidate.getAttribute?.("style"));
+          if (candidate.attributes) {
+            Array.from(candidate.attributes).forEach((attribute) => {
+              const name = String(attribute?.name || "");
+              if (!/(anim|motion|transition|enter|exit)/i.test(name)) return;
+              push(`${name}:${attribute?.value || ""}`);
+            });
+          }
+          if (candidate.dataset) {
+            Object.entries(candidate.dataset).forEach(([key, value]) => {
+              if (!/(anim|motion|transition|enter|exit)/i.test(key)) return;
+              push(`${key}:${value || ""}`);
+            });
+          }
+          try {
+            const style = window.getComputedStyle(candidate);
+            push(style.animationName);
+            push(style.animationTimingFunction);
+            push(style.transitionProperty);
+          } catch (_error) {
+            // Ignore style inspection failures on detached nodes.
+          }
+        };
+
+        addNodeSignals(node);
+        (Array.isArray(supplementalNodes) ? supplementalNodes : []).forEach((candidate) =>
+          addNodeSignals(candidate)
+        );
+        let ancestor = node?.parentElement || null;
+        let depth = 0;
+        while (ancestor && depth < 2) {
+          addNodeSignals(ancestor);
+          ancestor = ancestor.parentElement;
+          depth += 1;
+        }
+        return uniqueMetadataStrings(results);
+      };
+
+      const extractLayerAnimationMeta = (node, supplementalNodes = []) => {
+        const inspectionNodes = [node, ...(Array.isArray(supplementalNodes) ? supplementalNodes : [])].filter(Boolean);
+        const hintStrings = collectAnimationHintStrings(node, inspectionNodes);
+        let matched = null;
+        for (let index = 0; index < hintStrings.length; index += 1) {
+          matched = mapAnimationHintToType(hintStrings[index]);
+          if (matched) break;
+        }
+
+        let computedDurationMs = 0;
+        let computedDelayMs = 0;
+        let computedInfinite = false;
+        let computedRawName = "";
+        for (let index = 0; index < inspectionNodes.length; index += 1) {
+          const candidate = inspectionNodes[index];
+          try {
+            const style = window.getComputedStyle(candidate);
+            const animationName = String(style.animationName || "")
+              .split(",")
+              .map((token) => normalizeAnimationLabel(token))
+              .find((token) => token && token.toLowerCase() !== "none");
+            if (!computedRawName && animationName) {
+              computedRawName = animationName;
+            }
+            if (!computedDurationMs) {
+              computedDurationMs = parseCssTimeToMs(style.animationDuration);
+            }
+            if (!computedDelayMs) {
+              computedDelayMs = parseCssTimeToMs(style.animationDelay);
+            }
+            if (!computedInfinite) {
+              const iterationCount = String(style.animationIterationCount || "")
+                .split(",")
+                .map((token) => token.trim().toLowerCase())
+                .find(Boolean);
+              computedInfinite =
+                iterationCount === "infinite" ||
+                (Number.isFinite(Number(iterationCount)) && Number(iterationCount) > 1);
+            }
+            if (!matched && animationName) {
+              matched = mapAnimationHintToType(animationName);
+            }
+          } catch (_error) {
+            // Ignore computed-style failures.
+          }
+        }
+
+        if (!matched && !computedRawName) {
+          return null;
+        }
+
+        const rawAnimationName = computedRawName || hintStrings.find(Boolean) || "";
+        const animationDirection = inferAnimationDirection([rawAnimationName, ...hintStrings]);
+        return {
+          animationType: matched?.type || "",
+          animationLabel: matched?.label || normalizeAnimationLabel(rawAnimationName),
+          rawAnimationName: normalizeAnimationLabel(rawAnimationName),
+          animationMode: inferAnimationMode([rawAnimationName, ...hintStrings], computedInfinite),
+          animationInfinite: computedInfinite,
+          animationDurationMs: computedDurationMs > 0 ? computedDurationMs : undefined,
+          animationDelayMs: computedDelayMs > 0 ? computedDelayMs : undefined,
+          animationDirection: animationDirection || undefined,
+        };
+      };
+
+      const normalizeMetadataKey = (value) =>
+        sanitizeMetadataText(value)
+          .toLowerCase()
+          .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+          .replace(/\s+/g, " ")
+          .trim();
+
+      const tokenizeMetadataLabel = (value) =>
+        uniqueMetadataStrings(
+          normalizeMetadataKey(value)
+            .split(/\s+/)
+            .filter((token) => token.length >= 2)
+        );
+
+      const getImageElementTitleHint = (element) => {
+        if (!element) return "";
+        return sanitizeMetadataText(
+          element.getAttribute?.("alt") ||
+            element.getAttribute?.("aria-label") ||
+            element.getAttribute?.("title") ||
+            ""
+        );
+      };
+
+      const looksLikeDecorativeFrameLabel = (value) =>
+        /\b(frame|border)\b/.test(
+          sanitizeMetadataText(value)
+            .toLowerCase()
+        );
+
+      const isVisibleDomElement = (element) => {
+        if (!element || typeof element.getBoundingClientRect !== "function") return false;
+        const rect = element.getBoundingClientRect();
+        if (!rect || rect.width < 2 || rect.height < 2) return false;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0.01
+        );
+      };
+
+      const isKeywordChipButton = (element) => {
+        if (!element) return false;
+        const text = sanitizeMetadataText(element.textContent || "");
+        if (!text || text.length < 2 || text.length > 40) return false;
+        const aria = sanitizeMetadataText(
+          element.getAttribute?.("aria-label") ||
+            element.getAttribute?.("title") ||
+            ""
+        ).toLowerCase();
+        const className = sanitizeMetadataText(element.className || "").toLowerCase();
+        return (
+          aria.includes("الكلمة الرئيسية") ||
+          aria.includes("keyword") ||
+          className.includes("chip") ||
+          className.includes("tag")
+        );
+      };
+
+      const isKeywordExpandToggle = (element) => {
+        if (!element) return false;
+        const text = sanitizeMetadataText(
+          element.textContent || element.getAttribute?.("aria-label") || element.getAttribute?.("title") || ""
+        ).toLowerCase();
+        if (!text) return false;
+        const mentionsKeywords =
+          text.includes("keyword") ||
+          text.includes("keywords") ||
+          text.includes("كلمات رئيسية") ||
+          text.includes("الكلمات الرئيسية");
+        const wantsMore =
+          text.includes(" more") ||
+          text.startsWith("more") ||
+          text.includes("show all") ||
+          text.includes("all keywords") ||
+          text.includes("عرض كل") ||
+          text.includes("كل الكلمات") ||
+          text.includes("المزيد") ||
+          text.includes("أكثر");
+        const wantsLess =
+          text.includes(" less") ||
+          text.includes("fewer") ||
+          text.includes("show fewer") ||
+          text.includes("show less") ||
+          text.includes("عرض أقل") ||
+          text.includes("أقل");
+        return mentionsKeywords && wantsMore && !wantsLess;
+      };
+
+      const expandVisibleCanvaKeywordList = async () => {
+        const toggle = Array.from(document.querySelectorAll("button,[role='button']")).find(
+          (candidate) => isVisibleDomElement(candidate) && isKeywordExpandToggle(candidate)
+        );
+        if (!toggle) return false;
+        toggle.dispatchEvent(
+          new MouseEvent("click", {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            view: window,
+          })
+        );
+        await sleep(180);
+        return true;
+      };
+
+      const findMetadataContainerForChip = (element) => {
+        let current = element?.parentElement || null;
+        let depth = 0;
+        let best = null;
+        let bestCount = 0;
+        while (current && depth < 8) {
+          const visibleKeywordButtons = Array.from(
+            current.querySelectorAll("button,[role='button']")
+          ).filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+          const hasHeading = Array.from(current.querySelectorAll("h1,h2,h3,h4")).some(
+            (heading) =>
+              isVisibleDomElement(heading) &&
+              sanitizeMetadataText(heading.textContent).length >= 3
+          );
+          if (visibleKeywordButtons.length >= 2 && hasHeading) {
+            if (visibleKeywordButtons.length >= bestCount) {
+              best = current;
+              bestCount = visibleKeywordButtons.length;
+            }
+          }
+          current = current.parentElement;
+          depth += 1;
+        }
+        return best;
+      };
+
+      const scrapeVisibleCanvaAssetMetadata = () => {
+        const keywordButtons = Array.from(document.querySelectorAll("button,[role='button']"))
+          .filter((candidate) => isVisibleDomElement(candidate) && isKeywordChipButton(candidate));
+        if (keywordButtons.length === 0) return null;
+
+        const containers = new Map();
+        keywordButtons.forEach((button) => {
+          const container = findMetadataContainerForChip(button);
+          if (!container) return;
+          const existing = containers.get(container) || [];
+          existing.push(button);
+          containers.set(container, existing);
+        });
+
+        const selected =
+          Array.from(containers.entries())
+            .map(([container, buttons]) => ({ container, buttons }))
+            .sort((left, right) => right.buttons.length - left.buttons.length)[0] || null;
+        if (!selected) return null;
+
+        const titleNode = Array.from(selected.container.querySelectorAll("h1,h2,h3,h4")).find(
+          (heading) =>
+            isVisibleDomElement(heading) &&
+            sanitizeMetadataText(heading.textContent).length >= 3
+        );
+        const titleEn = sanitizeMetadataText(titleNode?.textContent || "");
+        const tagsEn = uniqueMetadataStrings(
+          selected.buttons
+            .map((button) => sanitizeMetadataText(button.textContent || ""))
+            .filter((value) => value.length >= 2)
+        );
+
+        if (!titleEn && tagsEn.length === 0) return null;
+
+        return {
+          titleEn,
+          tagsEn,
+          labelsEn: uniqueMetadataStrings([titleEn, ...tagsEn, ...tokenizeMetadataLabel(titleEn)]),
+        };
+      };
+
+      const dispatchSyntheticLayerClick = (node) => {
+        if (!node || typeof node.dispatchEvent !== "function") return;
+        const rect = node.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const pointTarget = document.elementFromPoint?.(clientX, clientY);
+        const target =
+          (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+          node.querySelector?.("img,image,canvas") ||
+          node;
+        ["pointerdown", "mousedown", "pointerup", "mouseup", "click"].forEach((type) => {
+          target.dispatchEvent(
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX,
+              clientY,
+            })
+          );
+        });
+      };
+
+      const dispatchSyntheticContextMenu = (node) => {
+        if (!node || typeof node.dispatchEvent !== "function") return;
+        const rect = node.getBoundingClientRect();
+        const clientX = rect.left + rect.width / 2;
+        const clientY = rect.top + rect.height / 2;
+        const pointTarget = document.elementFromPoint?.(clientX, clientY);
+        const target =
+          (pointTarget && node.contains(pointTarget) ? pointTarget : null) ||
+          node.querySelector?.("img,image,canvas") ||
+          node;
+        ["pointerdown", "mousedown", "contextmenu", "mouseup"].forEach((type) => {
+          target.dispatchEvent(
+            new MouseEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+              clientX,
+              clientY,
+              button: 2,
+              buttons: type === "mouseup" ? 0 : 2,
+            })
+          );
+        });
+      };
+
+      const findVisibleEditorActionButtonNearNode = (node) => {
+        if (!node || typeof node.getBoundingClientRect !== "function") return null;
+        const rect = node.getBoundingClientRect();
+        let best = null;
+        let bestScore = Number.POSITIVE_INFINITY;
+        Array.from(document.querySelectorAll("button,[role='button']")).forEach((candidate) => {
+          if (!isVisibleDomElement(candidate)) return;
+          if (candidate === node || node.contains(candidate) || candidate.contains(node)) return;
+          const candidateRect = candidate.getBoundingClientRect?.();
+          if (!candidateRect || candidateRect.width <= 0 || candidateRect.height <= 0) return;
+          if (candidateRect.width < 18 || candidateRect.width > 80) return;
+          if (candidateRect.height < 18 || candidateRect.height > 80) return;
+          const verticalDistance =
+            candidateRect.bottom < rect.top
+              ? rect.top - candidateRect.bottom
+              : candidateRect.top > rect.bottom
+                ? candidateRect.top - rect.bottom
+                : 0;
+          const horizontalDistance =
+            candidateRect.right < rect.left
+              ? rect.left - candidateRect.right
+              : candidateRect.left > rect.right
+                ? candidateRect.left - rect.right
+                : 0;
+          if (verticalDistance > 180 || horizontalDistance > 180) return;
+          const iconLike =
+            sanitizeMetadataText(candidate.textContent || "").length <= 2 ||
+            Boolean(candidate.querySelector?.("svg"));
+          if (!iconLike) return;
+          const score = verticalDistance * 4 + horizontalDistance;
+          if (score < bestScore) {
+            best = candidate;
+            bestScore = score;
+          }
+        });
+        return best;
+      };
+
+      const openVisibleCanvaMetadataForNode = async (node) => {
+        if (!node) return false;
+        if (scrapeVisibleCanvaAssetMetadata()) return true;
+        dispatchSyntheticContextMenu(node);
+        await sleep(220);
+        await expandVisibleCanvaKeywordList();
+        if (scrapeVisibleCanvaAssetMetadata()) return true;
+        const actionButton = findVisibleEditorActionButtonNearNode(node);
+        if (actionButton) {
+          if (typeof actionButton.click === "function") {
+            actionButton.click();
+          }
+          actionButton.dispatchEvent(
+            new MouseEvent("click", {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              view: window,
+            })
+          );
+          await sleep(320);
+          for (let attempt = 0; attempt < 3; attempt += 1) {
+            await expandVisibleCanvaKeywordList();
+            if (scrapeVisibleCanvaAssetMetadata()) return true;
+            await sleep(200);
+          }
+        }
+        return false;
+      };
+
+      const isBackgroundLikeMetadataCandidate = (candidate, pageWidth, pageHeight) => {
+        if (!candidate) return true;
+        if (candidate.isBackgroundNode || candidate.isFullPageBackground) return true;
+        const width = Math.max(1, Number(candidate.width || 0));
+        const height = Math.max(1, Number(candidate.height || 0));
+        const pageArea = Math.max(1, Number(pageWidth || 0) * Number(pageHeight || 0));
+        const areaRatio = (width * height) / pageArea;
+        return areaRatio >= 0.8 || (width >= pageWidth * 0.9 && height >= pageHeight * 0.9);
+      };
+
+      const metadataMatchesCandidate = (metadata, candidate) => {
+        if (!metadata || !candidate) return false;
+        const metadataTitle = normalizeMetadataKey(metadata.titleEn);
+        const candidateName = normalizeMetadataKey(candidate.name);
+        if (!metadataTitle || !candidateName) return false;
+        if (metadataTitle === candidateName) return true;
+        if (metadataTitle.includes(candidateName) || candidateName.includes(metadataTitle)) return true;
+        const metadataTokens = new Set(tokenizeMetadataLabel(metadataTitle));
+        const candidateTokens = tokenizeMetadataLabel(candidateName);
+        if (metadataTokens.size === 0 || candidateTokens.length === 0) return false;
+        const shared = candidateTokens.filter((token) => metadataTokens.has(token)).length;
+        return shared >= Math.max(1, Math.min(metadataTokens.size, candidateTokens.length) - 1);
+      };
+
+      const collectCanvaLayerMetadata = async (candidates, pageWidth, pageHeight) => {
+        const byId = new Map();
+        const pending = (Array.isArray(candidates) ? candidates : []).filter(
+          (candidate) =>
+            candidate &&
+            candidate.kind === "image" &&
+            candidate.node &&
+            !isBackgroundLikeMetadataCandidate(candidate, pageWidth, pageHeight)
+        );
+        if (pending.length === 0) return byId;
+
+        await expandVisibleCanvaKeywordList();
+        const visibleMetadata = scrapeVisibleCanvaAssetMetadata();
+        if (visibleMetadata) {
+          const matchedCandidate = pending.find((candidate) =>
+            metadataMatchesCandidate(visibleMetadata, candidate)
+          );
+          if (matchedCandidate) {
+            byId.set(matchedCandidate.id, visibleMetadata);
+          }
+        }
+
+        const maxMetadataScrapes = Math.min(18, pending.length);
+        for (let index = 0; index < maxMetadataScrapes; index += 1) {
+          const candidate = pending[index];
+          if (byId.has(candidate.id)) continue;
+          dispatchSyntheticLayerClick(candidate.node);
+          await sleep(180);
+          await openVisibleCanvaMetadataForNode(candidate.node);
+          await expandVisibleCanvaKeywordList();
+          let scraped = null;
+          for (let attempt = 0; attempt < 4; attempt += 1) {
+            scraped = scrapeVisibleCanvaAssetMetadata();
+            if (scraped && (scraped.tagsEn.length > 0 || scraped.titleEn)) break;
+            await sleep(120);
+          }
+          if (!scraped) continue;
+          if (!metadataMatchesCandidate(scraped, candidate) && scraped.tagsEn.length === 0) continue;
+          byId.set(candidate.id, scraped);
+        }
+
+        return byId;
+      };
+
+      const parseComputedTransform = (transformText = "") => {
+        const value = String(transformText || "").trim();
+        if (!value || value === "none") {
+          return { angle: 0, scaleX: 1, scaleY: 1, flipX: false, flipY: false, hasReflection: false };
+        }
+        try {
+          const matrix = new DOMMatrixReadOnly(value);
+          const a = Number(matrix.a) || 0;
+          const b = Number(matrix.b) || 0;
+          const c = Number(matrix.c) || 0;
+          const d = Number(matrix.d) || 0;
+          const magnitudeX = Math.hypot(a, b);
+          const safeScaleX = magnitudeX > 0.000001 ? magnitudeX : 1;
+          const determinant = a * d - b * c;
+          let signedScaleY = determinant / safeScaleX;
+          if (!Number.isFinite(signedScaleY) || Math.abs(signedScaleY) < 0.000001) {
+            const magnitudeY = Math.hypot(c, d);
+            signedScaleY = magnitudeY > 0.000001 ? magnitudeY : 1;
+          }
+          const angle = (Math.atan2(b, a) * 180) / Math.PI;
+          const flipX = false;
+          const flipY = signedScaleY < 0;
+          return {
+            angle,
+            scaleX: Math.max(0.001, safeScaleX),
+            scaleY: Math.max(0.001, Math.abs(signedScaleY)),
+            flipX,
+            flipY,
+            hasReflection: flipX !== flipY,
+          };
+        } catch (_error) {
+          return { angle: 0, scaleX: 1, scaleY: 1, flipX: false, flipY: false, hasReflection: false };
+        }
+      };
+
+      const parseStyleTransform = (styleText = "") => {
+        const source = String(styleText || "");
+        const translateMatch = source.match(
+          /translate\(\s*([-0-9.e]+)px\s*,\s*([-0-9.e]+)px\s*\)/i
+        );
+        const rotateMatch = source.match(/rotate\(\s*([-0-9.e]+)deg\s*\)/i);
+        return {
+          hasTranslate: Boolean(translateMatch),
+          x: Number.isFinite(Number(translateMatch?.[1])) ? Number(translateMatch[1]) : 0,
+          y: Number.isFinite(Number(translateMatch?.[2])) ? Number(translateMatch[2]) : 0,
+          hasAngle: Boolean(rotateMatch),
+          angle: Number.isFinite(Number(rotateMatch?.[1])) ? Number(rotateMatch[1]) : 0,
+        };
+      };
+
+      const rectArea = (rect) => Math.max(0, Number(rect?.width || 0)) * Math.max(0, Number(rect?.height || 0));
+
+      const intersectRects = (a, b) => {
+        if (!a || !b) return null;
+        const left = Math.max(Number(a.left ?? a.x ?? 0), Number(b.left ?? b.x ?? 0));
+        const top = Math.max(Number(a.top ?? a.y ?? 0), Number(b.top ?? b.y ?? 0));
+        const right = Math.min(
+          Number((a.left ?? a.x ?? 0) + (a.width ?? 0)),
+          Number((b.left ?? b.x ?? 0) + (b.width ?? 0))
+        );
+        const bottom = Math.min(
+          Number((a.top ?? a.y ?? 0) + (a.height ?? 0)),
+          Number((b.top ?? b.y ?? 0) + (b.height ?? 0))
+        );
+        const width = Math.max(0, right - left);
+        const height = Math.max(0, bottom - top);
+        if (width < 1 || height < 1) return null;
+        return {
+          x: left,
+          y: top,
+          left,
+          top,
+          width,
+          height,
+          right,
+          bottom,
+        };
+      };
+
+      const getTransformedViewportRect = (element, frameRect) => {
+        if (!element || !frameRect) return null;
+        const rawRect = element.getBoundingClientRect();
+        const intersection = intersectRects(rawRect, {
+          left: frameRect.x,
+          top: frameRect.y,
+          width: frameRect.width,
+          height: frameRect.height,
+        });
+        if (!intersection) return null;
+        const rawArea = rectArea(rawRect);
+        const visibleArea = rectArea(intersection);
+        const coverage = rawArea > 0 ? visibleArea / rawArea : 0;
+        return {
+          x: intersection.x,
+          y: intersection.y,
+          width: intersection.width,
+          height: intersection.height,
+          rawRect,
+          rawArea,
+          visibleArea,
+          coverage,
+        };
+      };
+
+      const getEffectiveOpacity = (element, stopAtNode) => {
+        let opacity = 1;
+        let node = element;
+        let depth = 0;
+        const currentLayerNode = element?.closest?.('[id^="LB"]') || null;
+        while (node && node !== stopAtNode && depth < 12) {
+          const style = window.getComputedStyle(node);
+          const localOpacity = Number(style.opacity);
+          if (Number.isFinite(localOpacity)) {
+            opacity *= localOpacity;
+          }
+          node = node.parentElement;
+          if (
+            node &&
+            currentLayerNode &&
+            node !== currentLayerNode &&
+            String(node.id || "").trim().startsWith("LB")
+          ) {
+            break;
+          }
+          depth += 1;
+        }
+        return Math.max(0, Math.min(opacity, 1));
+      };
+
+      const getCompositeScaleToAncestor = (element, stopAtNode) => {
+        let scaleX = 1;
+        let scaleY = 1;
+        let node = element;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 16) {
+          const style = window.getComputedStyle(node);
+          const parsed = parseComputedTransform(style.transform);
+          scaleX *= Number(parsed?.scaleX || 1);
+          scaleY *= Number(parsed?.scaleY || 1);
+          node = node.parentElement;
+          depth += 1;
+        }
+        return {
+          x: Math.max(0.01, scaleX),
+          y: Math.max(0.01, scaleY),
+        };
+      };
+
+      const hasMeaningfulTransformBetween = (element, stopAtNode) => {
+        let node = element?.parentElement || null;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 12) {
+          const styleText = node.getAttribute?.("style") || "";
+          const computedStyle = window.getComputedStyle(node);
+          const computedTransform = parseComputedTransform(computedStyle.transform || styleText);
+          const inlineTransform = parseStyleTransform(styleText);
+          const hasMeaningfulScale =
+            Math.abs(Number(computedTransform.scaleX || 1) - 1) > 0.02 ||
+            Math.abs(Number(computedTransform.scaleY || 1) - 1) > 0.02;
+          const hasMeaningfulAngle =
+            Math.abs(Number(computedTransform.angle || 0)) > 0.2 ||
+            inlineTransform.hasAngle;
+          if (
+            hasMeaningfulScale ||
+            hasMeaningfulAngle ||
+            Boolean(computedTransform.flipX) ||
+            Boolean(computedTransform.flipY) ||
+            Boolean(computedTransform.hasReflection)
+          ) {
+            return true;
+          }
+          node = node.parentElement;
+          depth += 1;
+        }
+        return false;
+      };
+
+      const getNumericZIndex = (element, stopAtNode) => {
+        let best = null;
+        let node = element;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 12) {
+          const style = window.getComputedStyle(node);
+          const numeric = Number(style.zIndex);
+          if (Number.isFinite(numeric)) {
+            best = best === null ? numeric : Math.max(best, numeric);
+          }
+          node = node.parentElement;
+          depth += 1;
+        }
+        return best;
+      };
+
+      const getImageElementSource = (imageElement) => {
+        if (!imageElement) return "";
+        const xlinkNs = "http://www.w3.org/1999/xlink";
+        const candidates = [
+          imageElement.currentSrc,
+          imageElement.src,
+          imageElement.getAttribute?.("src"),
+          imageElement.getAttribute?.("href"),
+          imageElement.getAttribute?.("xlink:href"),
+          imageElement.getAttributeNS?.(xlinkNs, "href"),
+          imageElement.href?.baseVal,
+          imageElement.href?.animVal,
+        ];
+        for (let index = 0; index < candidates.length; index += 1) {
+          const normalized = normalizeAssetUrl(candidates[index]);
+          if (normalized) return normalized;
+        }
+        return "";
+      };
+
+      const dedupeTextLines = (value) => {
+        const lines = String(value || "")
+          .split("\n")
+          .map((line) => line.replace(/\s+/g, " ").trim())
+          .filter(Boolean);
+        if (lines.length === 0) return "";
+
+        const shortLineCount = lines.filter((line) => line.length <= 2).length;
+        const isCharacterStack =
+          lines.length >= 4 && shortLineCount / Math.max(1, lines.length) >= 0.7;
+        if (isCharacterStack) {
+          return lines.join("");
+        }
+
+        const deduped = [];
+        lines.forEach((line) => {
+          if (deduped[deduped.length - 1] !== line) {
+            deduped.push(line);
+          }
+        });
+        return deduped.join("\n");
+      };
+
+      const parseFontWeight = (value) => {
+        const numeric = Number(String(value || "").replace(/[^\d]/g, ""));
+        if (Number.isFinite(numeric) && numeric > 0) return numeric;
+        return String(value || "").toLowerCase().includes("bold") ? 700 : 400;
+      };
+
+      const normalizeFontStyle = (value) => {
+        const source = String(value || "").trim().toLowerCase();
+        if (!source) return "normal";
+        if (source.includes("italic") || source.includes("oblique") || source.includes("slant")) {
+          return "italic";
+        }
+        return "normal";
+      };
+
+      const parseFontFaceWeightRange = (value) => {
+        const source = String(value || "").trim().toLowerCase();
+        if (!source) return { min: 400, max: 400 };
+        if (source === "normal") return { min: 400, max: 400 };
+        if (source === "bold") return { min: 700, max: 700 };
+        const numericParts = source
+          .split(/[\s,]+/)
+          .map((part) => Number.parseInt(part.replace(/[^\d]/g, ""), 10))
+          .filter((part) => Number.isFinite(part) && part > 0);
+        if (numericParts.length === 1) {
+          const valueWeight = numericParts[0];
+          return { min: valueWeight, max: valueWeight };
+        }
+        if (numericParts.length >= 2) {
+          const first = numericParts[0];
+          const second = numericParts[1];
+          return first <= second ? { min: first, max: second } : { min: second, max: first };
+        }
+        return { min: 400, max: 400 };
+      };
+
+      const GENERIC_FONT_FAMILIES = new Set([
+        "sans-serif",
+        "serif",
+        "monospace",
+        "cursive",
+        "fantasy",
+        "system-ui",
+        "ui-sans-serif",
+        "ui-serif",
+        "ui-monospace",
+        "emoji",
+        "math",
+        "fangsong",
+      ]);
+
+      const normalizeFontFamilyName = (value) => {
+        const input = String(value || "").trim();
+        if (!input) return "";
+        const primary = input.split(",")[0]?.replace(/^['"]+|['"]+$/g, "").trim() || "";
+        if (!primary) return "";
+        if (GENERIC_FONT_FAMILIES.has(primary.toLowerCase())) return "";
+        return primary.replace(/\s+/g, " ").trim();
+      };
+
+      const normalizeAssetUrl = (value) => {
+        const raw = String(value || "").trim();
+        if (!raw) return "";
+        if (raw.startsWith("data:image/")) return raw;
+        if (raw.startsWith("data:font/")) return raw;
+        if (raw.startsWith("data:application/font-")) return raw;
+        if (raw.startsWith("data:application/x-font-")) return raw;
+        if (raw.startsWith("data:application/vnd.ms-fontobject")) return raw;
+        if (raw.startsWith("blob:")) return raw;
+        try {
+          return new URL(raw, location.href).toString();
+        } catch (_error) {
+          return raw;
+        }
+      };
+
+      const guessFontMimeType = (sourceUrl, formatHint) => {
+        const format = String(formatHint || "").toLowerCase();
+        if (format.includes("truetype") || format.includes("ttf")) return "font/ttf";
+        if (format.includes("opentype") || format.includes("otf")) return "font/otf";
+        if (format.includes("ttc") || format.includes("collection")) return "font/ttc";
+        if (format.includes("woff2")) return "font/woff2";
+        if (format.includes("woff")) return "font/woff";
+        if (format.includes("embedded-opentype") || format.includes("eot")) {
+          return "application/vnd.ms-fontobject";
+        }
+        const url = String(sourceUrl || "").toLowerCase();
+        if (url.includes(".ttf")) return "font/ttf";
+        if (url.includes(".otf")) return "font/otf";
+        if (url.includes(".ttc")) return "font/ttc";
+        if (url.includes(".woff2")) return "font/woff2";
+        if (url.includes(".woff")) return "font/woff";
+        if (url.includes(".eot")) return "application/vnd.ms-fontobject";
+        return "";
+      };
+
+      const parseFontMimeTypeFromDataUrl = (value) => {
+        const source = String(value || "").trim();
+        const match = source.match(/^data:([^;,]+);base64,/i);
+        return String(match?.[1] || "").trim().toLowerCase();
+      };
+
+      const toDataUrlFromBlob = (blob) =>
+        new Promise((resolve) => {
+          const reader = new FileReader();
+          reader.onloadend = () => resolve(typeof reader.result === "string" ? reader.result : "");
+          reader.onerror = () => resolve("");
+          reader.readAsDataURL(blob);
+        });
+
+      // Hosts where the user's Canva session cookies are appropriate to send.
+      // For any other origin, fetch with `credentials: "omit"` to avoid leaking
+      // Canva session cookies to third-party CDNs that designs may reference.
+      const CANVA_CREDENTIALED_HOST_SUFFIXES = [
+        "canva.com",
+        "canvacdn.com",
+        "canva-apps.com",
+      ];
+
+      const shouldSendCredentialsForUrl = (urlString) => {
+        try {
+          const host = new URL(urlString, location.href).hostname.toLowerCase();
+          return CANVA_CREDENTIALED_HOST_SUFFIXES.some(
+            (suffix) => host === suffix || host.endsWith(`.${suffix}`)
+          );
+        } catch (_error) {
+          return false;
+        }
+      };
+
+      const readRemoteImageAssetAsDataUrl = async (sourceUrl, maxBytes = 8_000_000) => {
+        const normalizedUrl = normalizeAssetUrl(sourceUrl);
+        if (!normalizedUrl) return "";
+        if (/^data:/i.test(normalizedUrl) || /^blob:/i.test(normalizedUrl)) return "";
+        try {
+          const response = await fetch(normalizedUrl, {
+            credentials: shouldSendCredentialsForUrl(normalizedUrl) ? "include" : "omit",
+            cache: "force-cache",
+          });
+          if (!response.ok) return "";
+          const blob = await response.blob();
+          if (!blob || blob.size <= 0 || blob.size > maxBytes) return "";
+          const mimeType = String(blob.type || "").trim().toLowerCase();
+          if (mimeType && !mimeType.startsWith("image/")) return "";
+          const dataUrl = await toDataUrlFromBlob(blob);
+          return String(dataUrl).startsWith("data:image/") ? dataUrl : "";
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      // Acquire an image for a given <img>/<image> element by trying strategies
+      // in correctness-priority order: original-bytes paths first, lossy raster
+      // last. Returns { src, dataUrl, provenance } where provenance is:
+      //   "data" | "blob" | "fetch" | "fetch-fit" | "raster" | ""  (empty = nothing worked)
+      const acquireImageForElement = async (element, targetWidth, targetHeight, options = {}) => {
+        if (!element) return { src: "", dataUrl: "", provenance: "" };
+        const initialSrc = getImageElementSource(element);
+        const fitFetchedToTarget = Boolean(options?.fitFetchedToTarget);
+        const cropRegion = options?.cropRegion || null;
+
+        // (1) Already a data: URL — done.
+        if (String(initialSrc).startsWith("data:image/")) {
+          return { src: initialSrc, dataUrl: initialSrc, provenance: "data" };
+        }
+
+        // (2) blob: URL - fetch through FileReader while the blob is still live.
+        if (String(initialSrc).startsWith("blob:")) {
+          const blobDataUrl = await blobUrlToDataUrl(initialSrc);
+          if (blobDataUrl) {
+            return { src: blobDataUrl, dataUrl: blobDataUrl, provenance: "blob" };
+          }
+          // fall through to raster
+        }
+
+        // (3) HTTPS/HTTP - fetch the ORIGINAL encoded bytes BEFORE rasterizing.
+        // Best fidelity, smallest payload (JPEG/WebP preserved). For canva.com
+        // hosts the user's session cookies are sent automatically (see Diff 1).
+        if (/^https?:\/\//i.test(String(initialSrc))) {
+          const fetched = await readRemoteImageAssetAsDataUrl(initialSrc);
+          if (fetched) {
+            if (fitFetchedToTarget) {
+              const fitted = await fitDataUrlToDisplayedBox(
+                fetched,
+                targetWidth,
+                targetHeight,
+                cropRegion
+              );
+              if (fitted) {
+                return {
+                  src: fitted,
+                  dataUrl: fitted,
+                  provenance: "fetch-fit",
+                  sourceWidth: Math.max(1, Math.round(targetWidth || 1)),
+                  sourceHeight: Math.max(1, Math.round(targetHeight || 1)),
+                };
+              }
+            }
+            return { src: fetched, dataUrl: fetched, provenance: "fetch" };
+          }
+          // fall through to raster
+        }
+
+        // (4) Last resort - rasterize the decoded <img> into a canvas. Lossy
+        // (re-encodes to PNG and scales to the target box) and can throw on
+        // CORS-tainted images, but works when (3) is blocked or unavailable.
+        const rasterDataUrl = renderElementToDataUrl(element, targetWidth, targetHeight);
+        if (rasterDataUrl) {
+          return {
+            src: initialSrc || rasterDataUrl,
+            dataUrl: rasterDataUrl,
+            provenance: "raster",
+          };
+        }
+
+        // Nothing worked - return what we have so the SW can decide whether to
+        // run the hide-layer screenshot-diff fallback.
+        return { src: initialSrc, dataUrl: "", provenance: "" };
+      };
+
+      // Run async tasks with a concurrency cap. Returns results in input order.
+      // Worker errors are swallowed (result becomes undefined) because image
+      // acquisition is best-effort and callers handle missing results.
+      const runWithConcurrency = async (items, limit, worker) => {
+        const results = new Array(items.length);
+        let cursor = 0;
+        const runnerCount = Math.max(1, Math.min(limit, items.length));
+        const runners = Array.from({ length: runnerCount }, async () => {
+          while (true) {
+            const index = cursor++;
+            if (index >= items.length) return;
+            try {
+              results[index] = await worker(items[index], index);
+            } catch (_error) {
+              results[index] = undefined;
+            }
+          }
+        });
+        await Promise.all(runners);
+        return results;
+      };
+
+      const sanitizeFontFileName = (value, fallback = "imported-font.ttf") => {
+        const source = String(value || "").trim();
+        const cleaned = source
+          .replace(/[?#].*$/, "")
+          .split("/")
+          .pop()
+          ?.replace(/[^\w.\- ]+/g, "")
+          .trim();
+        if (cleaned) return cleaned.slice(0, 180);
+        return fallback;
+      };
+
+      const readFontAssetAsDataUrl = async (entry) => {
+        const sourceUrl = String(entry?.url || "").trim();
+        if (!sourceUrl) return { dataUrl: "", mimeType: "" };
+        if (sourceUrl.startsWith("data:")) {
+          const hintedMimeType = String(
+            entry?.mimeType || guessFontMimeType(sourceUrl, entry?.format || "") || ""
+          ).toLowerCase();
+          const dataMimeType =
+            parseFontMimeTypeFromDataUrl(sourceUrl) ||
+            hintedMimeType;
+          const normalizedMimeType = String(dataMimeType || "").toLowerCase();
+          const finalMimeType =
+            normalizedMimeType === "application/octet-stream" && hintedMimeType
+              ? hintedMimeType
+              : normalizedMimeType;
+          return { dataUrl: sourceUrl, mimeType: finalMimeType };
+        }
+        try {
+          const controller = new AbortController();
+          const timeoutId = window.setTimeout(() => controller.abort(), 12_000);
+          let response = null;
+          try {
+            response = await fetch(sourceUrl, {
+              credentials: "omit",
+              cache: "force-cache",
+              signal: controller.signal,
+            });
+          } finally {
+            window.clearTimeout(timeoutId);
+          }
+          if (!response.ok) return { dataUrl: "", mimeType: "" };
+          const blob = await response.blob();
+          if (!blob || blob.size <= 0 || blob.size > 5_000_000) {
+            return { dataUrl: "", mimeType: "" };
+          }
+          const dataUrl = await toDataUrlFromBlob(blob);
+          if (!String(dataUrl).startsWith("data:")) return { dataUrl: "", mimeType: "" };
+          const hintedMimeType = String(
+            entry?.mimeType || guessFontMimeType(sourceUrl, entry?.format || "") || ""
+          ).toLowerCase();
+          const mimeType =
+            String(blob.type || "").trim().toLowerCase() ||
+            hintedMimeType;
+          const finalMimeType =
+            mimeType === "application/octet-stream" && hintedMimeType ? hintedMimeType : mimeType;
+          return { dataUrl, mimeType: finalMimeType };
+        } catch (_error) {
+          return { dataUrl: "", mimeType: "" };
+        }
+      };
+
+      const extractFontFaceEntriesFromSrc = (srcValue) => {
+        const entries = [];
+        const source = String(srcValue || "");
+        if (!source) return entries;
+        const regex = /url\(([^)]+)\)\s*(?:format\(([^)]+)\))?/gi;
+        let match = regex.exec(source);
+        while (match) {
+          const rawUrl = String(match[1] || "").replace(/^['"]+|['"]+$/g, "").trim();
+          const normalizedUrl = normalizeAssetUrl(rawUrl);
+          if (normalizedUrl) {
+            const formatHint = String(match[2] || "").replace(/^['"]+|['"]+$/g, "").trim();
+            const mimeType = guessFontMimeType(normalizedUrl, formatHint);
+            entries.push({
+              url: normalizedUrl,
+              mimeType,
+              format: formatHint,
+            });
+          }
+          match = regex.exec(source);
+        }
+        return entries;
+      };
+
+      const collectDocumentFontAssets = () => {
+        const byFamily = new Map();
+        const addEntry = (familyName, entry) => {
+          const normalizedFamily = normalizeFontFamilyName(familyName);
+          if (!normalizedFamily) return;
+          if (!entry || typeof entry !== "object") return;
+          const url = normalizeAssetUrl(entry.url);
+          if (!url) return;
+          const weightRange = parseFontFaceWeightRange(entry.fontWeight);
+          const normalizedStyle = normalizeFontStyle(entry.fontStyle);
+          const dedupeKey = `${url}|${normalizedStyle}|${weightRange.min}|${weightRange.max}`;
+          const current = byFamily.get(normalizedFamily) || [];
+          if (
+            current.some(
+              (item) =>
+                `${String(item?.url || "")}|${String(item?.fontStyle || "")}|${Number(item?.fontWeightMin || 0)}|${Number(item?.fontWeightMax || 0)}` ===
+                dedupeKey
+            )
+          ) {
+            return;
+          }
+          current.push({
+            url,
+            mimeType: String(entry.mimeType || guessFontMimeType(url, entry.format || "") || ""),
+            format: String(entry.format || ""),
+            fileName: sanitizeFontFileName(url),
+            fontStyle: normalizedStyle,
+            fontWeightMin: weightRange.min,
+            fontWeightMax: weightRange.max,
+          });
+          byFamily.set(normalizedFamily, current);
+        };
+
+        const styleSheets = Array.from(document.styleSheets || []);
+        styleSheets.forEach((sheet) => {
+          let rules = null;
+          try {
+            rules = sheet.cssRules || [];
+          } catch (_error) {
+            rules = null;
+          }
+          if (!rules || !rules.length) return;
+          Array.from(rules).forEach((rule) => {
+            if (!rule || rule.type !== CSSRule.FONT_FACE_RULE) return;
+            const familyRaw = rule.style?.getPropertyValue?.("font-family") || "";
+            const srcRaw = rule.style?.getPropertyValue?.("src") || "";
+            const styleRaw = rule.style?.getPropertyValue?.("font-style") || "";
+            const weightRaw = rule.style?.getPropertyValue?.("font-weight") || "";
+            const entries = extractFontFaceEntriesFromSrc(srcRaw);
+            entries.forEach((entry) =>
+              addEntry(familyRaw, {
+                ...entry,
+                fontStyle: styleRaw,
+                fontWeight: weightRaw,
+              })
+            );
+          });
+        });
+
+        return Array.from(byFamily.entries()).reduce((accumulator, [family, entries]) => {
+          accumulator[family] = entries;
+          return accumulator;
+        }, {});
+      };
+
+      const getFontEntriesByFamily = (fontAssets, familyName) => {
+        const family = normalizeFontFamilyName(familyName);
+        if (!family) return [];
+        const direct = Array.isArray(fontAssets?.[family]) ? fontAssets[family] : [];
+        if (direct.length > 0) return direct;
+        const key = family.toLowerCase();
+        const matched = Object.keys(fontAssets || {}).find(
+          (candidate) => String(candidate || "").toLowerCase() === key
+        );
+        if (!matched) return [];
+        return Array.isArray(fontAssets?.[matched]) ? fontAssets[matched] : [];
+      };
+
+      const resolveFontAssetsForFamilies = async (fontAssets, families) => {
+        const result = {};
+        const seenFamilies = new Set();
+        const sourceFamilies = Array.isArray(families) ? families : [];
+        for (let index = 0; index < sourceFamilies.length; index += 1) {
+          const family = normalizeFontFamilyName(sourceFamilies[index]);
+          if (!family) continue;
+          const familyKey = family.toLowerCase();
+          if (seenFamilies.has(familyKey)) continue;
+          seenFamilies.add(familyKey);
+
+          const entries = getFontEntriesByFamily(fontAssets, family);
+          if (entries.length === 0) continue;
+
+          const resolvedEntries = [];
+          for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
+            const entry = entries[entryIndex];
+            if (!entry || typeof entry !== "object") continue;
+            const url = String(entry.url || "").trim();
+            if (!url) continue;
+            const resolved = await readFontAssetAsDataUrl(entry);
+            resolvedEntries.push({
+              url,
+              dataUrl: String(resolved?.dataUrl || ""),
+              mimeType: String(
+                resolved?.mimeType ||
+                  entry.mimeType ||
+                  guessFontMimeType(url, entry.format || "") ||
+                  ""
+              ).toLowerCase(),
+              format: String(entry.format || ""),
+              fileName: sanitizeFontFileName(entry.fileName || url, `${family}.ttf`),
+              fontStyle: normalizeFontStyle(entry.fontStyle || ""),
+              fontWeightMin: Number.isFinite(Number(entry.fontWeightMin))
+                ? Number(entry.fontWeightMin)
+                : 400,
+              fontWeightMax: Number.isFinite(Number(entry.fontWeightMax))
+                ? Number(entry.fontWeightMax)
+                : 400,
+            });
+            if (resolvedEntries.length >= 4) break;
+          }
+          if (resolvedEntries.length > 0) {
+            result[family] = resolvedEntries;
+          }
+        }
+        return result;
+      };
+
+      const parseBackgroundImageUrl = (value) => {
+        const source = String(value || "");
+        const match = source.match(/url\((['"]?)(.*?)\1\)/i);
+        return match?.[2] ? normalizeAssetUrl(match[2]) : "";
+      };
+
+      const findCssImageUrl = (element) => {
+        if (!element) return "";
+        const searchSources = [];
+        const pushStyle = (style) => {
+          if (!style) return;
+          searchSources.push(style.backgroundImage);
+          searchSources.push(style.maskImage);
+          searchSources.push(style.webkitMaskImage);
+          searchSources.push(style.content);
+        };
+        try {
+          pushStyle(window.getComputedStyle(element));
+          pushStyle(window.getComputedStyle(element, "::before"));
+          pushStyle(window.getComputedStyle(element, "::after"));
+        } catch (_error) {
+          // Ignore pseudo-style errors.
+        }
+        for (let index = 0; index < searchSources.length; index += 1) {
+          const found = parseBackgroundImageUrl(searchSources[index]);
+          if (found) return found;
+        }
+        return "";
+      };
+
+      const isInsideForeignLayer = (element, ownerNode) => {
+        const layerAncestor = element?.closest?.('[id^="LB"]');
+        if (!layerAncestor) return false;
+        if (!ownerNode) return true;
+        return layerAncestor !== ownerNode;
+      };
+
+      const getScopedImageElements = (node) => {
+        if (!node) return [];
+        return Array.from(node.querySelectorAll("img, image")).filter(
+          (element) => !isInsideForeignLayer(element, node)
+        );
+      };
+
+      const scopedDescendantsCache = new WeakMap();
+      const getScopedDescendants = (node) => {
+        if (!node) return [];
+        const cached = scopedDescendantsCache.get(node);
+        if (cached) return cached;
+        const descendants = Array.from(node.querySelectorAll("*")).filter(
+          (candidate) => !isInsideForeignLayer(candidate, node)
+        );
+        scopedDescendantsCache.set(node, descendants);
+        return descendants;
+      };
+
+      const getScopedTextPreview = (node) => {
+        if (!node) return "";
+        const parts = [];
+        try {
+          const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT);
+          let current = walker.nextNode();
+          while (current) {
+            const parentElement = current.parentElement || null;
+            if (!isInsideForeignLayer(parentElement, node)) {
+              const value = String(current.textContent || "").trim();
+              if (value) parts.push(value);
+            }
+            current = walker.nextNode();
+          }
+        } catch (_error) {
+          return "";
+        }
+        return dedupeTextLines(parts.join("\n"));
+      };
+
+      const getNodeVisualAssetKey = (node) => {
+        if (!node) return "";
+        const images = getScopedImageElements(node);
+        for (let index = 0; index < images.length; index += 1) {
+          const source = getImageElementSource(images[index]);
+          if (source) return source;
+        }
+        const cssSource = findCssImageUrl(node);
+        if (cssSource) return cssSource;
+        const descendants = getScopedDescendants(node);
+        for (let index = 0; index < descendants.length; index += 1) {
+          const source = findCssImageUrl(descendants[index]);
+          if (source) return source;
+        }
+        return "";
+      };
+
+      const parseNumericPx = (value) => {
+        const numeric = Number.parseFloat(String(value || "").replace(/[^\d.\-]/g, ""));
+        return Number.isFinite(numeric) ? numeric : 0;
+      };
+
+      const isTransparentColor = (value) => {
+        const color = String(value || "").trim().toLowerCase();
+        return (
+          !color ||
+          color === "none" ||
+          color === "transparent" ||
+          color === "rgba(0, 0, 0, 0)"
+        );
+      };
+
+      const resolveTextBackgroundStyle = (element, stopAtNode) => {
+        const empty = { color: "", radius: 0 };
+        if (!element) return empty;
+        let node = element;
+        let depth = 0;
+        while (node && depth < 12) {
+          const style = window.getComputedStyle(node);
+          const backgroundColor = String(style.backgroundColor || "").trim();
+          if (!isTransparentColor(backgroundColor)) {
+            return {
+              color: backgroundColor,
+              radius: Math.max(0, parseNumericPx(style.borderRadius || "")),
+            };
+          }
+          if (node === stopAtNode) break;
+          node = node.parentElement;
+          depth += 1;
+        }
+        if (!stopAtNode || !stopAtNode.querySelectorAll) return empty;
+
+        const ownerRect = stopAtNode.getBoundingClientRect();
+        const ownerArea = Math.max(1, rectArea(ownerRect));
+        const textRect =
+          element && typeof element.getBoundingClientRect === "function"
+            ? element.getBoundingClientRect()
+            : ownerRect;
+        const textArea = Math.max(1, rectArea(textRect));
+        const textCenterX = Number(textRect.left || 0) + Number(textRect.width || 0) / 2;
+        const textCenterY = Number(textRect.top || 0) + Number(textRect.height || 0) / 2;
+
+        const candidates = [stopAtNode, ...getScopedDescendants(stopAtNode)];
+        let best = empty;
+        let bestScore = -1;
+
+        for (let index = 0; index < candidates.length; index += 1) {
+          const candidate = candidates[index];
+          let style = null;
+          try {
+            style = window.getComputedStyle(candidate);
+          } catch (_error) {
+            style = null;
+          }
+          if (!style) continue;
+          const backgroundColor = String(style.backgroundColor || "").trim();
+          if (isTransparentColor(backgroundColor)) continue;
+          const candidateRect = candidate.getBoundingClientRect();
+          const clipped = intersectRects(candidateRect, ownerRect);
+          if (!clipped) continue;
+          const candidateArea = Math.max(1, rectArea(clipped));
+          const coverage = candidateArea / ownerArea;
+          if (coverage < 0.01) continue;
+
+          const centerInside =
+            textCenterX >= clipped.left &&
+            textCenterX <= clipped.right &&
+            textCenterY >= clipped.top &&
+            textCenterY <= clipped.bottom;
+          const textOverlapRect = intersectRects(clipped, textRect);
+          const textOverlap = textOverlapRect ? rectArea(textOverlapRect) / textArea : 0;
+          if (!centerInside && textOverlap < 0.2) continue;
+
+          const radius = Math.max(0, parseNumericPx(style.borderRadius || ""));
+          const score =
+            (centerInside ? 8 : 0) +
+            Math.min(4, textOverlap * 6) +
+            Math.max(0, 2 - coverage * 3) +
+            (radius > 0 ? 1 : 0);
+          if (score > bestScore) {
+            bestScore = score;
+            best = { color: backgroundColor, radius };
+          }
+        }
+        return best;
+      };
+
+      const findBestTextStyleElement = (node, ownerNode = node) => {
+        const candidates = Array.from(node.querySelectorAll("p,span,div")).filter(
+          (candidate) =>
+            !isInsideForeignLayer(candidate, ownerNode) &&
+            String(candidate.innerText || "").trim()
+        );
+        let best = null;
+        let bestScore = -1;
+        for (let index = 0; index < candidates.length; index += 1) {
+          const candidate = candidates[index];
+          const style = window.getComputedStyle(candidate);
+          const fontSize = Number.parseFloat(style.fontSize || "") || 0;
+          const color = style.color;
+          const hasVar = String(candidate.getAttribute("style") || "").includes("--H97cbQ");
+          const score =
+            (candidate.tagName === "P" ? 12 : 0) +
+            (hasVar ? 8 : 0) +
+            (!isTransparentColor(color) ? 5 : 0) +
+            (fontSize >= 10 ? 3 : 0);
+          if (score > bestScore) {
+            bestScore = score;
+            best = candidate;
+          }
+        }
+        if (!best) return null;
+        const style = window.getComputedStyle(best);
+        return isTransparentColor(style.color) ? null : best;
+      };
+
+      const findCustomFontSizeFromNode = (element, stopAtNode) => {
+        let node = element;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 10) {
+          const style = node.style;
+          const raw = style?.getPropertyValue?.("--H97cbQ") || "";
+          const px = parseNumericPx(raw);
+          if (px > 0) return px;
+          node = node.parentElement;
+          depth += 1;
+        }
+        return 0;
+      };
+
+      const detectMaskedImageLayer = (layerNode, imageElement, viewportRect) => {
+        if (!layerNode || !imageElement || !viewportRect) return false;
+        const layerStyle = window.getComputedStyle(layerNode);
+        const imageStyle = window.getComputedStyle(imageElement);
+        const imageRect = imageElement.getBoundingClientRect();
+        const imageArea = Math.max(0, imageRect.width) * Math.max(0, imageRect.height);
+        const layerArea = Math.max(0, viewportRect.width) * Math.max(0, viewportRect.height);
+        const clippedByArea = imageArea > 1 && layerArea > 1 && imageArea > layerArea * 1.18;
+        const ratioLayer = viewportRect.width / Math.max(1, viewportRect.height);
+        const ratioImage = imageRect.width / Math.max(1, imageRect.height);
+        const ratioDelta = Math.abs(ratioLayer - ratioImage);
+        let hasMaskSignals = false;
+        let node = imageElement;
+        let depth = 0;
+        while (node && node !== layerNode && depth < 10) {
+          const style = window.getComputedStyle(node);
+          if (
+            style.overflow !== "visible" ||
+            style.clipPath !== "none" ||
+            style.maskImage !== "none" ||
+            style.webkitMaskImage !== "none" ||
+            parseNumericPx(style.borderRadius) > 0
+          ) {
+            hasMaskSignals = true;
+            break;
+          }
+          node = node.parentElement;
+          depth += 1;
+        }
+        return (
+          hasMaskSignals ||
+          layerStyle.overflow !== "visible" ||
+          imageStyle.objectFit === "cover" ||
+          imageStyle.objectFit === "contain" ||
+          ratioDelta > 0.22 ||
+          clippedByArea
+        );
+      };
+
+      const shouldPreferRenderedImageSnapshot = (layerNode, imageElement) => {
+        if (!layerNode || !imageElement) return false;
+        if (hasMeaningfulTransformBetween(imageElement, layerNode)) return true;
+
+        const renderableDescendants = Array.from(
+          layerNode.querySelectorAll("img, image, svg, canvas")
+        ).filter(
+          (candidate) =>
+            !isInsideForeignLayer(candidate, layerNode) &&
+            candidate !== imageElement &&
+            !candidate.contains?.(imageElement)
+        );
+        if (renderableDescendants.length > 0) return true;
+
+        if (findCssImageUrl(layerNode)) return true;
+
+        const primarySource = getImageElementSource(imageElement);
+        const siblingSources = getScopedImageElements(layerNode)
+          .filter((candidate) => candidate !== imageElement)
+          .map((candidate) => getImageElementSource(candidate))
+          .filter(Boolean);
+        return siblingSources.some((candidate) => candidate !== primarySource);
+      };
+
+      const resolveThinVectorStrokeStyle = (layerNode) => {
+        const svgCandidate = findBestSvgRenderCandidate(layerNode);
+        if (!(svgCandidate instanceof SVGElement)) {
+          return { color: "", strokeOnly: false };
+        }
+        const vectorNodes = Array.from(
+          svgCandidate.querySelectorAll("path,line,polyline,polygon,rect,ellipse,circle")
+        ).filter((candidate) => !candidate.closest("defs"));
+        let bestColor = "";
+        let bestStrokeOnly = false;
+        let bestScore = -1;
+
+        for (let index = 0; index < vectorNodes.length; index += 1) {
+          const candidate = vectorNodes[index];
+          const style = window.getComputedStyle(candidate);
+          const opacity = Number(style.opacity);
+          if (Number.isFinite(opacity) && opacity <= 0.01) continue;
+          const stroke = String(style.stroke || "").trim();
+          const fill = String(style.fill || "").trim();
+          const strokeWidth = parseNumericPx(style.strokeWidth || "");
+          const rect = candidate.getBoundingClientRect();
+          const score = Math.max(1, rectArea(rect)) + strokeWidth * 10;
+          const strokeVisible = !isTransparentColor(stroke);
+          const fillVisible = !isTransparentColor(fill);
+          if (!strokeVisible && !fillVisible) continue;
+          if (score <= bestScore) continue;
+          bestScore = score;
+          bestColor = strokeVisible ? stroke : fill;
+          bestStrokeOnly = strokeVisible && !fillVisible;
+        }
+
+        if (!bestColor) {
+          const svgStyle = window.getComputedStyle(svgCandidate);
+          const svgStroke = String(svgStyle.stroke || "").trim();
+          const svgFill = String(svgStyle.fill || "").trim();
+          const svgStrokeVisible = !isTransparentColor(svgStroke);
+          const svgFillVisible = !isTransparentColor(svgFill);
+          if (svgStrokeVisible || svgFillVisible) {
+            bestColor = svgStrokeVisible ? svgStroke : svgFill;
+            bestStrokeOnly = svgStrokeVisible && !svgFillVisible;
+          }
+        }
+
+        return {
+          color: bestColor,
+          strokeOnly: bestStrokeOnly,
+        };
+      };
+
+      const hasVisibleBackgroundPaint = (element) => {
+        if (!element) return false;
+        const bgImage = findCssImageUrl(element);
+        if (bgImage) return true;
+        const style = window.getComputedStyle(element);
+        const bgColor = String(style.backgroundColor || "").trim().toLowerCase();
+        return Boolean(bgColor && bgColor !== "transparent" && bgColor !== "rgba(0, 0, 0, 0)");
+      };
+
+      const renderElementToDataUrl = (element, targetWidth, targetHeight) => {
+        if (!element) return "";
+        try {
+          const elementWidth = Number(element.naturalWidth || element.width?.baseVal?.value || element.width || 0);
+          const elementHeight = Number(element.naturalHeight || element.height?.baseVal?.value || element.height || 0);
+          const width = Math.max(1, Math.round(targetWidth || elementWidth || 1));
+          const height = Math.max(1, Math.round(targetHeight || elementHeight || 1));
+          const rasterCanvas = document.createElement("canvas");
+          rasterCanvas.width = width;
+          rasterCanvas.height = height;
+          const rasterContext = rasterCanvas.getContext("2d");
+          if (!rasterContext) return "";
+          rasterContext.drawImage(element, 0, 0, width, height);
+          return rasterCanvas.toDataURL("image/png");
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const SVG_RENDER_STYLE_PROPERTIES = [
+        "fill",
+        "fill-rule",
+        "fill-opacity",
+        "stroke",
+        "clip-rule",
+        "stroke-opacity",
+        "stroke-width",
+        "stroke-linecap",
+        "stroke-linejoin",
+        "stroke-dasharray",
+        "stroke-dashoffset",
+        "opacity",
+        "filter",
+        "clip-path",
+        "mask",
+        "transform",
+        "transform-origin",
+        "mix-blend-mode",
+      ];
+
+      const copyComputedSvgStyles = (sourceNode, targetNode) => {
+        if (!(sourceNode instanceof Element) || !(targetNode instanceof Element)) return;
+        try {
+          const computed = window.getComputedStyle(sourceNode);
+          SVG_RENDER_STYLE_PROPERTIES.forEach((property) => {
+            const value = computed.getPropertyValue(property);
+            if (value) {
+              targetNode.style.setProperty(property, value);
+            }
+          });
+        } catch (_error) {
+          // Ignore style copy failures and keep the inline SVG as-is.
+        }
+
+        const sourceChildren = Array.from(sourceNode.children || []);
+        const targetChildren = Array.from(targetNode.children || []);
+        const childCount = Math.min(sourceChildren.length, targetChildren.length);
+        for (let index = 0; index < childCount; index += 1) {
+          copyComputedSvgStyles(sourceChildren[index], targetChildren[index]);
+        }
+      };
+
+      const extractUrlFragmentId = (value) => {
+        const source = String(value || "");
+        const match = source.match(/url\((['"]?)#([^'")]+)\1\)/i);
+        return match?.[2] ? String(match[2]).trim() : "";
+      };
+
+      const createSvgBounds = (x, y, width, height) => {
+        const left = Number(x);
+        const top = Number(y);
+        const boxWidth = Number(width);
+        const boxHeight = Number(height);
+        if (
+          !Number.isFinite(left) ||
+          !Number.isFinite(top) ||
+          !Number.isFinite(boxWidth) ||
+          !Number.isFinite(boxHeight) ||
+          boxWidth <= 0 ||
+          boxHeight <= 0
+        ) {
+          return null;
+        }
+        return {
+          x: left,
+          y: top,
+          width: boxWidth,
+          height: boxHeight,
+          right: left + boxWidth,
+          bottom: top + boxHeight,
+        };
+      };
+
+      const mergeSvgBounds = (a, b) => {
+        if (!a) return b || null;
+        if (!b) return a || null;
+        const left = Math.min(a.x, b.x);
+        const top = Math.min(a.y, b.y);
+        const right = Math.max(a.right ?? a.x + a.width, b.right ?? b.x + b.width);
+        const bottom = Math.max(a.bottom ?? a.y + a.height, b.bottom ?? b.y + b.height);
+        return createSvgBounds(left, top, right - left, bottom - top);
+      };
+
+      const addSvgPointToBounds = (bounds, x, y) => {
+        const nextX = Number(x);
+        const nextY = Number(y);
+        if (!Number.isFinite(nextX) || !Number.isFinite(nextY)) return bounds || null;
+        return mergeSvgBounds(bounds, createSvgBounds(nextX, nextY, 0.0001, 0.0001));
+      };
+
+      const parseSvgNumber = (value, fallback = 0) => {
+        const numeric = Number.parseFloat(String(value || "").trim());
+        return Number.isFinite(numeric) ? numeric : fallback;
+      };
+
+      const parseSvgNumberList = (value) =>
+        (String(value || "").match(/[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/gi) || [])
+          .map((item) => Number.parseFloat(item))
+          .filter((item) => Number.isFinite(item));
+
+      const hasSvgTransform = (element) => {
+        if (!(element instanceof Element)) return false;
+        const transformAttr = String(element.getAttribute("transform") || "").trim();
+        const inlineTransform = String(element.style?.transform || "").trim();
+        return Boolean(transformAttr || (inlineTransform && inlineTransform !== "none"));
+      };
+
+      const getPathDataBounds = (pathData) => {
+        const tokens = String(pathData || "").match(/[a-zA-Z]|[-+]?(?:\d*\.)?\d+(?:e[-+]?\d+)?/g) || [];
+        if (tokens.length === 0) return null;
+
+        let index = 0;
+        let command = "";
+        let x = 0;
+        let y = 0;
+        let startX = 0;
+        let startY = 0;
+        let bounds = null;
+        const isCommandToken = (token) => /^[a-zA-Z]$/.test(String(token || ""));
+        const readNumber = () => {
+          if (index >= tokens.length || isCommandToken(tokens[index])) return null;
+          const numeric = Number.parseFloat(tokens[index]);
+          index += 1;
+          return Number.isFinite(numeric) ? numeric : null;
+        };
+        const addPoint = (nextX, nextY) => {
+          x = nextX;
+          y = nextY;
+          bounds = addSvgPointToBounds(bounds, x, y);
+        };
+
+        while (index < tokens.length) {
+          if (isCommandToken(tokens[index])) {
+            command = tokens[index];
+            index += 1;
+          }
+          if (!command) break;
+
+          const upper = command.toUpperCase();
+          const relative = command === command.toLowerCase();
+
+          if (upper === "Z") {
+            addPoint(startX, startY);
+            command = "";
+            continue;
+          }
+
+          if (upper === "M" || upper === "L" || upper === "T") {
+            let firstPair = true;
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawX = readNumber();
+              const rawY = readNumber();
+              if (rawX === null || rawY === null) break;
+              const nextX = relative ? x + rawX : rawX;
+              const nextY = relative ? y + rawY : rawY;
+              addPoint(nextX, nextY);
+              if (upper === "M" && firstPair) {
+                startX = nextX;
+                startY = nextY;
+                command = relative ? "l" : "L";
+              }
+              firstPair = false;
+            }
+            continue;
+          }
+
+          if (upper === "H") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawX = readNumber();
+              if (rawX === null) break;
+              addPoint(relative ? x + rawX : rawX, y);
+            }
+            continue;
+          }
+
+          if (upper === "V") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const rawY = readNumber();
+              if (rawY === null) break;
+              addPoint(x, relative ? y + rawY : rawY);
+            }
+            continue;
+          }
+
+          if (upper === "C") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 6 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              for (let valueIndex = 0; valueIndex < values.length; valueIndex += 2) {
+                const pointX = relative ? x + values[valueIndex] : values[valueIndex];
+                const pointY = relative ? y + values[valueIndex + 1] : values[valueIndex + 1];
+                bounds = addSvgPointToBounds(bounds, pointX, pointY);
+              }
+              x = relative ? x + values[4] : values[4];
+              y = relative ? y + values[5] : values[5];
+            }
+            continue;
+          }
+
+          if (upper === "S" || upper === "Q") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 4 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              for (let valueIndex = 0; valueIndex < values.length; valueIndex += 2) {
+                const pointX = relative ? x + values[valueIndex] : values[valueIndex];
+                const pointY = relative ? y + values[valueIndex + 1] : values[valueIndex + 1];
+                bounds = addSvgPointToBounds(bounds, pointX, pointY);
+              }
+              x = relative ? x + values[2] : values[2];
+              y = relative ? y + values[3] : values[3];
+            }
+            continue;
+          }
+
+          if (upper === "A") {
+            while (index < tokens.length && !isCommandToken(tokens[index])) {
+              const values = Array.from({ length: 7 }, () => readNumber());
+              if (values.some((value) => value === null)) break;
+              const radiusX = Math.abs(Number(values[0] || 0));
+              const radiusY = Math.abs(Number(values[1] || 0));
+              const endX = relative ? x + values[5] : values[5];
+              const endY = relative ? y + values[6] : values[6];
+              bounds = addSvgPointToBounds(bounds, x - radiusX, y - radiusY);
+              bounds = addSvgPointToBounds(bounds, x + radiusX, y + radiusY);
+              bounds = addSvgPointToBounds(bounds, endX - radiusX, endY - radiusY);
+              bounds = addSvgPointToBounds(bounds, endX + radiusX, endY + radiusY);
+              x = endX;
+              y = endY;
+            }
+            continue;
+          }
+
+          break;
+        }
+
+        return bounds && bounds.width > 0 && bounds.height > 0 ? bounds : null;
+      };
+
+      const getManualSvgShapeBounds = (shapeElement) => {
+        if (!(shapeElement instanceof Element) || hasSvgTransform(shapeElement)) return null;
+        const tagName = String(shapeElement.tagName || "").toLowerCase();
+
+        if (tagName === "rect") {
+          return createSvgBounds(
+            parseSvgNumber(shapeElement.getAttribute("x")),
+            parseSvgNumber(shapeElement.getAttribute("y")),
+            parseSvgNumber(shapeElement.getAttribute("width")),
+            parseSvgNumber(shapeElement.getAttribute("height"))
+          );
+        }
+
+        if (tagName === "circle") {
+          const radius = Math.max(0, parseSvgNumber(shapeElement.getAttribute("r")));
+          const centerX = parseSvgNumber(shapeElement.getAttribute("cx"));
+          const centerY = parseSvgNumber(shapeElement.getAttribute("cy"));
+          return createSvgBounds(centerX - radius, centerY - radius, radius * 2, radius * 2);
+        }
+
+        if (tagName === "ellipse") {
+          const radiusX = Math.max(0, parseSvgNumber(shapeElement.getAttribute("rx")));
+          const radiusY = Math.max(0, parseSvgNumber(shapeElement.getAttribute("ry")));
+          const centerX = parseSvgNumber(shapeElement.getAttribute("cx"));
+          const centerY = parseSvgNumber(shapeElement.getAttribute("cy"));
+          return createSvgBounds(centerX - radiusX, centerY - radiusY, radiusX * 2, radiusY * 2);
+        }
+
+        if (tagName === "line") {
+          let bounds = null;
+          bounds = addSvgPointToBounds(
+            bounds,
+            parseSvgNumber(shapeElement.getAttribute("x1")),
+            parseSvgNumber(shapeElement.getAttribute("y1"))
+          );
+          bounds = addSvgPointToBounds(
+            bounds,
+            parseSvgNumber(shapeElement.getAttribute("x2")),
+            parseSvgNumber(shapeElement.getAttribute("y2"))
+          );
+          return bounds;
+        }
+
+        if (tagName === "polygon" || tagName === "polyline") {
+          const values = parseSvgNumberList(shapeElement.getAttribute("points"));
+          let bounds = null;
+          for (let pointIndex = 0; pointIndex < values.length - 1; pointIndex += 2) {
+            bounds = addSvgPointToBounds(bounds, values[pointIndex], values[pointIndex + 1]);
+          }
+          return bounds;
+        }
+
+        if (tagName === "path") {
+          return getPathDataBounds(shapeElement.getAttribute("d"));
+        }
+
+        return null;
+      };
+
+      const getSvgShapeElementsBounds = (shapeElements) => {
+        let bounds = null;
+        shapeElements.forEach((shapeElement) => {
+          bounds = mergeSvgBounds(bounds, getManualSvgShapeBounds(shapeElement));
+        });
+        if (bounds && bounds.width > 0 && bounds.height > 0) return bounds;
+
+        shapeElements.forEach((shapeElement) => {
+          if (typeof shapeElement?.getBBox !== "function") return;
+          try {
+            const box = shapeElement.getBBox();
+            bounds = mergeSvgBounds(bounds, createSvgBounds(box.x, box.y, box.width, box.height));
+          } catch (_error) {
+            // Ignore per-shape bbox failures and keep looking.
+          }
+        });
+        return bounds && bounds.width > 0 && bounds.height > 0 ? bounds : null;
+      };
+
+      const hasRenderableSvgContent = (svgElement) => {
+        if (!(svgElement instanceof SVGElement)) return false;
+        const renderableTags = [
+          "path",
+          "rect",
+          "circle",
+          "ellipse",
+          "line",
+          "polyline",
+          "polygon",
+          "image",
+          "text",
+          "use",
+        ];
+        return renderableTags.some((tagName) =>
+          Array.from(svgElement.querySelectorAll(tagName)).some(
+            (candidate) => !candidate.closest("defs")
+          )
+        );
+      };
+
+      const findBestSvgRenderCandidate = (layerNode) => {
+        if (!layerNode) return null;
+        const candidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "svg" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("svg")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        let best = null;
+        let bestArea = 0;
+        candidates.forEach((candidate) => {
+          if (!(candidate instanceof SVGElement)) return;
+          if (!hasRenderableSvgContent(candidate)) return;
+          const rect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, rect)) return;
+          const area = Math.max(1, rect.width * rect.height);
+          if (area > bestArea) {
+            best = candidate;
+            bestArea = area;
+          }
+        });
+        return best;
+      };
+
+      const hasRenderableVectorSignal = (layerNode) => {
+        if (!layerNode) return false;
+        if (findBestClipPathShapeCandidate(layerNode)) return true;
+        if (findBestSvgRenderCandidate(layerNode)) return true;
+        const canvasCandidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "canvas" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("canvas")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        return canvasCandidates.some((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          return isVisible(candidate, rect);
+        });
+      };
+
+      const stripTextNodesFromElement = (rootElement) => {
+        if (!(rootElement instanceof Element)) return;
+        Array.from(rootElement.querySelectorAll("text, tspan, foreignObject")).forEach((candidate) =>
+          candidate.remove()
+        );
+      };
+
+      const serializeSvgElementToDataUrl = (svgElement, targetWidth, targetHeight, options = {}) => {
+        if (!(svgElement instanceof SVGElement)) return "";
+        try {
+          const clone = svgElement.cloneNode(true);
+          copyComputedSvgStyles(svgElement, clone);
+          if (options?.excludeTextNodes) {
+            stripTextNodesFromElement(clone);
+          }
+
+          const rect = svgElement.getBoundingClientRect();
+          const width = Math.max(
+            1,
+            Math.round(targetWidth || parseNumericDimension(svgElement.getAttribute("width")) || rect.width || 1)
+          );
+          const height = Math.max(
+            1,
+            Math.round(targetHeight || parseNumericDimension(svgElement.getAttribute("height")) || rect.height || 1)
+          );
+
+          clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+          clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+          clone.setAttribute("width", String(width));
+          clone.setAttribute("height", String(height));
+          if (!clone.getAttribute("viewBox")) {
+            clone.setAttribute("viewBox", `0 0 ${width} ${height}`);
+          }
+          clone.setAttribute("preserveAspectRatio", clone.getAttribute("preserveAspectRatio") || "none");
+
+          const serialized = new XMLSerializer().serializeToString(clone);
+          if (!serialized.includes("<svg")) return "";
+          return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const rasterizeDataUrlWithCanvas = async (dataUrl, targetWidth, targetHeight) => {
+        if (!String(dataUrl || "").startsWith("data:image/")) return "";
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("image-load-failed"));
+            element.src = dataUrl;
+          });
+          const width = Math.max(
+            1,
+            Math.round(
+              targetWidth || Number(image?.naturalWidth || image?.width || 0) || 1
+            )
+          );
+          const height = Math.max(
+            1,
+            Math.round(
+              targetHeight || Number(image?.naturalHeight || image?.height || 0) || 1
+            )
+          );
+          const rasterCanvas = document.createElement("canvas");
+          rasterCanvas.width = width;
+          rasterCanvas.height = height;
+          const rasterContext = rasterCanvas.getContext("2d");
+          if (!rasterContext) return "";
+          rasterContext.drawImage(image, 0, 0, width, height);
+          return rasterCanvas.toDataURL("image/png");
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const buildDisplayedImageCropRegion = (imageElement, visibleRect) => {
+        if (!imageElement || !visibleRect) return null;
+        const imageRect = imageElement.getBoundingClientRect();
+        const intersection = intersectRects(
+          {
+            x: imageRect.left,
+            y: imageRect.top,
+            width: imageRect.width,
+            height: imageRect.height,
+          },
+          visibleRect
+        );
+        if (!intersection || imageRect.width <= 0.01 || imageRect.height <= 0.01) return null;
+        const x = (intersection.x - imageRect.left) / imageRect.width;
+        const y = (intersection.y - imageRect.top) / imageRect.height;
+        const width = intersection.width / imageRect.width;
+        const height = intersection.height / imageRect.height;
+        if (width <= 0 || height <= 0) return null;
+        return {
+          x: Math.max(0, Math.min(1, x)),
+          y: Math.max(0, Math.min(1, y)),
+          width: Math.max(0, Math.min(1, width)),
+          height: Math.max(0, Math.min(1, height)),
+        };
+      };
+
+      const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null) => {
+        if (!String(dataUrl || "").startsWith("data:image/")) return "";
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("image-load-failed"));
+            element.src = dataUrl;
+          });
+          const sourceWidth = Math.max(1, Number(image?.naturalWidth || image?.width || 0) || 1);
+          const sourceHeight = Math.max(1, Number(image?.naturalHeight || image?.height || 0) || 1);
+          const width = Math.max(1, Math.round(targetWidth || sourceWidth));
+          const height = Math.max(1, Math.round(targetHeight || sourceHeight));
+          let sx = 0;
+          let sy = 0;
+          let sw = sourceWidth;
+          let sh = sourceHeight;
+          if (
+            cropRegion &&
+            Number.isFinite(cropRegion.x) &&
+            Number.isFinite(cropRegion.y) &&
+            Number.isFinite(cropRegion.width) &&
+            Number.isFinite(cropRegion.height)
+          ) {
+            sx = Math.max(0, Math.min(sourceWidth - 1, cropRegion.x * sourceWidth));
+            sy = Math.max(0, Math.min(sourceHeight - 1, cropRegion.y * sourceHeight));
+            sw = Math.max(1, Math.min(sourceWidth - sx, cropRegion.width * sourceWidth));
+            sh = Math.max(1, Math.min(sourceHeight - sy, cropRegion.height * sourceHeight));
+          } else {
+            const targetRatio = width / Math.max(1, height);
+            const sourceRatio = sourceWidth / Math.max(1, sourceHeight);
+            if (sourceRatio > targetRatio) {
+              sw = sourceHeight * targetRatio;
+              sx = (sourceWidth - sw) / 2;
+            } else if (sourceRatio < targetRatio) {
+              sh = sourceWidth / targetRatio;
+              sy = (sourceHeight - sh) / 2;
+            }
+          }
+          const canvas = document.createElement("canvas");
+          canvas.width = width;
+          canvas.height = height;
+          const context = canvas.getContext("2d");
+          if (!context) return "";
+          context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
+          return canvas.toDataURL("image/png");
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const findBestClipPathShapeCandidate = (layerNode) => {
+        if (!layerNode) return null;
+        const layerRect = layerNode.getBoundingClientRect();
+        const candidates = [layerNode, ...getScopedDescendants(layerNode)];
+        let best = null;
+        let bestArea = 0;
+        candidates.forEach((candidate) => {
+          if (!(candidate instanceof Element)) return;
+          let style = null;
+          try {
+            style = window.getComputedStyle(candidate);
+          } catch (_error) {
+            style = null;
+          }
+          if (!style) return;
+          const clipPathId =
+            extractUrlFragmentId(style.clipPath) ||
+            extractUrlFragmentId(style.webkitClipPath) ||
+            extractUrlFragmentId(candidate.getAttribute("style"));
+          if (!clipPathId) return;
+          const backgroundColor = String(style.backgroundColor || "").trim();
+          if (isTransparentColor(backgroundColor)) return;
+          const candidateRect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, candidateRect)) return;
+          const clippedRect = intersectRects(candidateRect, layerRect);
+          const area = Math.max(1, rectArea(clippedRect || candidateRect));
+          if (area > bestArea) {
+            best = {
+              candidate,
+              rect: candidateRect,
+              clipPathId,
+              backgroundColor,
+              opacity: Math.max(0, Math.min(1, Number.parseFloat(style.opacity || "1") || 1)),
+            };
+            bestArea = area;
+          }
+        });
+        return best;
+      };
+
+      const serializeClipPathShapeToDataUrl = (
+        layerNode,
+        clipPathShapeCandidate,
+        targetWidth,
+        targetHeight
+      ) => {
+        if (!layerNode || !clipPathShapeCandidate?.clipPathId) return "";
+        try {
+          const clipPathElement = Array.from(layerNode.querySelectorAll("clipPath")).find(
+            (candidate) => String(candidate.id || "").trim() === clipPathShapeCandidate.clipPathId
+          );
+          if (!(clipPathElement instanceof Element)) return "";
+          const shapeElements = Array.from(
+            clipPathElement.querySelectorAll(
+              "path,rect,circle,ellipse,line,polyline,polygon"
+            )
+          );
+          if (shapeElements.length === 0) return "";
+
+          const clipBounds =
+            getSvgShapeElementsBounds(shapeElements) ||
+            (typeof clipPathElement.getBBox === "function"
+              ? clipPathElement.getBBox()
+              : shapeElements[0].getBBox?.());
+          if (!clipBounds || clipBounds.width <= 0 || clipBounds.height <= 0) return "";
+
+          const layerRect = layerNode.getBoundingClientRect();
+          const candidateRect = clipPathShapeCandidate.rect;
+          const width = Math.max(1, Math.round(targetWidth || layerRect.width || candidateRect.width || 1));
+          const height = Math.max(1, Math.round(targetHeight || layerRect.height || candidateRect.height || 1));
+          const scaleX = candidateRect.width / Math.max(1, clipBounds.width);
+          const scaleY = candidateRect.height / Math.max(1, clipBounds.height);
+          const translateX =
+            candidateRect.left - layerRect.left - clipBounds.x * scaleX;
+          const translateY =
+            candidateRect.top - layerRect.top - clipBounds.y * scaleY;
+          const serializer = new XMLSerializer();
+          const serializedShapes = shapeElements
+            .map((shapeElement) => {
+              const clone = shapeElement.cloneNode(true);
+              copyComputedSvgStyles(shapeElement, clone);
+              if (clone instanceof Element) {
+                clone.removeAttribute("clip-path");
+                clone.removeAttribute("fill");
+                clone.style.removeProperty("clip-path");
+                clone.style.removeProperty("fill");
+                clone.style.removeProperty("fill-opacity");
+                clone.removeAttribute("stroke");
+                clone.style.removeProperty("stroke");
+                clone.style.removeProperty("stroke-opacity");
+                clone.style.removeProperty("stroke-width");
+                clone.removeAttribute("opacity");
+                clone.style.removeProperty("opacity");
+              }
+              return serializer.serializeToString(clone);
+            })
+            .join("");
+          if (!serializedShapes) return "";
+
+          const svgMarkup = [
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`,
+            `<g fill="${clipPathShapeCandidate.backgroundColor}" opacity="${clipPathShapeCandidate.opacity}" transform="translate(${translateX} ${translateY}) scale(${scaleX} ${scaleY})">`,
+            serializedShapes,
+            "</g>",
+            "</svg>",
+          ].join("");
+          return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      const extractShapeImageDataUrl = (layerNode, targetWidth, targetHeight, options = {}) => {
+        if (!layerNode) return "";
+
+        const clipPathShapeCandidate = findBestClipPathShapeCandidate(layerNode);
+        if (clipPathShapeCandidate) {
+          const clipPathDataUrl = serializeClipPathShapeToDataUrl(
+            layerNode,
+            clipPathShapeCandidate,
+            targetWidth,
+            targetHeight
+          );
+          if (clipPathDataUrl.startsWith("data:image/")) {
+            return clipPathDataUrl;
+          }
+        }
+
+        const svgCandidate = findBestSvgRenderCandidate(layerNode);
+        if (svgCandidate) {
+          const svgDataUrl = serializeSvgElementToDataUrl(svgCandidate, targetWidth, targetHeight, options);
+          if (svgDataUrl.startsWith("data:image/")) {
+            return svgDataUrl;
+          }
+        }
+
+        const canvasCandidates = [
+          ...(String(layerNode.tagName || "").toLowerCase() === "canvas" ? [layerNode] : []),
+          ...Array.from(layerNode.querySelectorAll("canvas")).filter(
+            (candidate) => !isInsideForeignLayer(candidate, layerNode)
+          ),
+        ];
+        let bestCanvas = null;
+        let bestCanvasArea = 0;
+        canvasCandidates.forEach((candidate) => {
+          const rect = candidate.getBoundingClientRect();
+          if (!isVisible(candidate, rect)) return;
+          const area = Math.max(1, rect.width * rect.height);
+          if (area > bestCanvasArea) {
+            bestCanvas = candidate;
+            bestCanvasArea = area;
+          }
+        });
+
+        if (bestCanvas && typeof bestCanvas.toDataURL === "function") {
+          try {
+            const canvasDataUrl = bestCanvas.toDataURL("image/png");
+            if (String(canvasDataUrl).startsWith("data:image/")) {
+              return canvasDataUrl;
+            }
+          } catch (_error) {
+            return "";
+          }
+        }
+
+        return "";
+      };
+
+      const blobUrlToDataUrl = async (blobUrl, maxBytes = 8_000_000) => {
+        if (!String(blobUrl || "").startsWith("blob:")) return "";
+        try {
+          const response = await fetch(blobUrl);
+          if (!response.ok) return "";
+          const blob = await response.blob();
+          if (!blob || blob.size <= 0 || blob.size > maxBytes) return "";
+          return await new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => {
+              resolve(typeof reader.result === "string" ? reader.result : "");
+            };
+            reader.onerror = () => resolve("");
+            reader.readAsDataURL(blob);
+          });
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      let bestPage = null;
+      const pageNodes = Array.from(document.querySelectorAll("[data-page-id]"));
+      pageNodes.forEach((page) => {
+        const rect = page.getBoundingClientRect();
+        if (!isVisible(page, rect)) return;
+
+        let designWidth = 0;
+        let designHeight = 0;
+
+        const scaleRoot = page.querySelector('div[style*="transform: scale"]');
+        if (scaleRoot) {
+          const styleText = scaleRoot.getAttribute("style") || "";
+          designWidth = parseStyleDimension(styleText, "width");
+          designHeight = parseStyleDimension(styleText, "height");
+        }
+
+        if (!designWidth || !designHeight) {
+          const pageStyleText = page.getAttribute("style") || "";
+          designWidth = parseStyleDimension(pageStyleText, "width") || parsePx(page.style.width) || rect.width;
+          designHeight = parseStyleDimension(pageStyleText, "height") || parsePx(page.style.height) || rect.height;
+        }
+
+        const score = scoreRect(rect);
+        if (!bestPage || score > bestPage.score) {
+          bestPage = {
+            node: page,
+            score,
+            rect: {
+              x: rect.left,
+              y: rect.top,
+              width: rect.width,
+              height: rect.height,
+            },
+            designWidth: Math.max(1, Math.round(designWidth)),
+            designHeight: Math.max(1, Math.round(designHeight)),
+          };
+        }
+      });
+
+      let bestCanvas = null;
+      const canvases = Array.from(document.querySelectorAll("canvas"));
+      canvases.forEach((canvas) => {
+        const rect = canvas.getBoundingClientRect();
+        if (!isVisible(canvas, rect)) return;
+        if (rect.width < 220 || rect.height < 220) return;
+
+        const score = scoreRect(rect);
+        if (!bestCanvas || score > bestCanvas.score) {
+          bestCanvas = {
+            score,
+            node: canvas,
+            rect: {
+              x: rect.left,
+              y: rect.top,
+              width: rect.width,
+              height: rect.height,
+            },
+          };
+        }
+      });
+
+      const selectedCanvas = bestPage ? null : bestCanvas;
+
+      let directDataUrl = "";
+      let designWidth = 0;
+      let designHeight = 0;
+      let rect = null;
+
+      if (selectedCanvas) {
+        rect = selectedCanvas.rect;
+        designWidth = Number(selectedCanvas.node.width || 0);
+        designHeight = Number(selectedCanvas.node.height || 0);
+        try {
+          directDataUrl = selectedCanvas.node.toDataURL("image/png");
+        } catch (_error) {
+          directDataUrl = "";
+        }
+      } else if (bestPage) {
+        rect = bestPage.rect;
+        designWidth = bestPage.designWidth;
+        designHeight = bestPage.designHeight;
+      } else if (bestCanvas) {
+        rect = bestCanvas.rect;
+        designWidth = Math.round(bestCanvas.rect.width);
+        designHeight = Math.round(bestCanvas.rect.height);
+      }
+
+      if (!rect) {
+        return {
+          ok: false,
+          error: "No visible Canva page frame was detected. Zoom/page view may be collapsed.",
+        };
+      }
+
+      const layers = [];
+      const documentFontAssets = collectDocumentFontAssets();
+      const isDuplicateLayerEntry = (candidate) => {
+        const tolerance = 1.5;
+        return layers.some((existing) => {
+          if (existing.kind !== candidate.kind) return false;
+          const samePosition =
+            Math.abs(Number(existing.x || 0) - Number(candidate.x || 0)) <= tolerance &&
+            Math.abs(Number(existing.y || 0) - Number(candidate.y || 0)) <= tolerance &&
+            Math.abs(Number(existing.width || 0) - Number(candidate.width || 0)) <= tolerance &&
+            Math.abs(Number(existing.height || 0) - Number(candidate.height || 0)) <= tolerance &&
+            Math.abs(Number(existing.angle || 0) - Number(candidate.angle || 0)) <= 0.8 &&
+            Boolean(existing.flipX) === Boolean(candidate.flipX) &&
+            Boolean(existing.flipY) === Boolean(candidate.flipY);
+          if (!samePosition) return false;
+          if (candidate.kind === "text") {
+            return String(existing.text || "").trim() === String(candidate.text || "").trim();
+          }
+          if (candidate.kind === "image") {
+            const a = String(existing.imageSrc || existing.imageDataUrl || "").trim();
+            const b = String(candidate.imageSrc || candidate.imageDataUrl || "").trim();
+            return Boolean(a && b && a === b);
+          }
+          return true;
+        });
+      };
+
+      if (bestPage?.node) {
+        const designScaleX = Math.max(0.0001, Number(designWidth || rect.width) / Math.max(Number(rect.width || 1), 1));
+        const designScaleY = Math.max(0.0001, Number(designHeight || rect.height) / Math.max(Number(rect.height || 1), 1));
+
+        let backgroundLayerNodes = [];
+        const backgroundLayerMeta = new Map();
+        const pageArea = Math.max(1, rect.width * rect.height);
+        const backgroundCandidatePool = [
+          ...Array.from(bestPage.node.querySelectorAll('[style*="touch-action"]')),
+          ...Array.from(bestPage.node.querySelectorAll("div")),
+        ];
+        const backgroundLayerCandidates = backgroundCandidatePool.filter((node, index, list) => {
+          if (!node || list.indexOf(node) !== index) return false;
+          if (node === bestPage.node) return false;
+          if (String(node?.id || "").startsWith("LB")) return false;
+          if (node.closest('[id^="LB"]')) return false;
+          const nodeRect = node.getBoundingClientRect();
+          if (!isVisible(node, nodeRect)) return false;
+          const intersection = intersectRects(nodeRect, {
+            left: rect.x,
+            top: rect.y,
+            width: rect.width,
+            height: rect.height,
+          });
+          if (!intersection) return false;
+          const visibleArea = rectArea(intersection);
+          const pageCoverage = visibleArea / pageArea;
+          const assetKey = getNodeVisualAssetKey(node);
+          const hasImageElement = Boolean(assetKey);
+          const hasBackgroundPaint = hasVisibleBackgroundPaint(node);
+          const hasLayerDescendants = Boolean(node.querySelector('[id^="LB"]'));
+          if (hasLayerDescendants && !hasImageElement && !hasBackgroundPaint) return false;
+          if (!hasImageElement && !hasBackgroundPaint) return false;
+          return pageCoverage >= 0.18;
+        });
+        const scoredBackgroundCandidates = [];
+        backgroundLayerCandidates.forEach((candidate) => {
+          const candidateRect = candidate.getBoundingClientRect();
+          const intersection = intersectRects(candidateRect, {
+            left: rect.x,
+            top: rect.y,
+            width: rect.width,
+            height: rect.height,
+          });
+          const visibleArea = rectArea(intersection || candidateRect);
+          const coverage = visibleArea / pageArea;
+          const assetKey = getNodeVisualAssetKey(candidate);
+          const hasImageElement = Boolean(assetKey);
+          const hasBackgroundPaint = hasVisibleBackgroundPaint(candidate);
+          const score =
+            coverage * 100 +
+            visibleArea / pageArea +
+            (hasImageElement ? 0.5 : 0) +
+            (hasBackgroundPaint ? 0.5 : 0);
+          scoredBackgroundCandidates.push({
+            node: candidate,
+            score,
+            coverage,
+            assetKey,
+          });
+        });
+        scoredBackgroundCandidates.sort((a, b) => {
+          if (b.score !== a.score) return b.score - a.score;
+          const assetDelta = Number(Boolean(b.assetKey)) - Number(Boolean(a.assetKey));
+          if (assetDelta !== 0) return assetDelta;
+          return 0;
+        });
+        const selectedBackgroundCandidates = [];
+        for (let index = 0; index < scoredBackgroundCandidates.length; index += 1) {
+          const candidate = scoredBackgroundCandidates[index];
+          const overlapsExisting = selectedBackgroundCandidates.some(
+            (existing) => {
+              const overlaps =
+                existing.node === candidate.node ||
+                existing.node.contains(candidate.node) ||
+                candidate.node.contains(existing.node);
+              if (!overlaps) return false;
+              const sameAsset =
+                Boolean(existing.assetKey && candidate.assetKey) &&
+                existing.assetKey === candidate.assetKey;
+              const uncertainAsset = !existing.assetKey && !candidate.assetKey;
+              return sameAsset || uncertainAsset;
+            }
+          );
+          if (overlapsExisting) continue;
+          selectedBackgroundCandidates.push(candidate);
+          if (selectedBackgroundCandidates.length >= 3) break;
+        }
+        selectedBackgroundCandidates.forEach((candidate) => {
+          backgroundLayerMeta.set(candidate.node, candidate);
+        });
+        backgroundLayerNodes = selectedBackgroundCandidates.map((candidate) => candidate.node);
+
+        const matchesCanvaLayerId = (node) =>
+          Boolean(String(node?.id || "").match(/^LB[A-Za-z0-9_-]+$/));
+        const scopedLayerNodes = Array.from(bestPage.node.querySelectorAll('[id^="LB"]'));
+        const fallbackLayerNodes =
+          scopedLayerNodes.length > 0
+            ? []
+            : Array.from(document.querySelectorAll("*")).filter(matchesCanvaLayerId);
+        const uniqueLayerNodes = [...scopedLayerNodes, ...fallbackLayerNodes].filter(
+          (node, index, all) =>
+            node?.id &&
+            all.findIndex((candidate) => candidate.id === node.id) === index &&
+            !backgroundLayerMeta.has(node)
+        );
+        const layerNodes = [
+          ...backgroundLayerNodes,
+          ...uniqueLayerNodes,
+        ];
+
+        const imageMetadataCandidates = [];
+
+        for (let layerIndex = 0; layerIndex < layerNodes.length; layerIndex += 1) {
+          const node = layerNodes[layerIndex];
+          const styleText = node.getAttribute("style") || "";
+          const styleTransform = parseStyleTransform(styleText);
+          const computedNodeStyle = window.getComputedStyle(node);
+          const transform = parseComputedTransform(computedNodeStyle.transform || styleText);
+          const backgroundMeta = backgroundLayerMeta.get(node) || null;
+          const isBackgroundNode = Boolean(backgroundMeta);
+          const isFullPageBackground = Boolean(backgroundMeta && backgroundMeta.coverage >= 0.9);
+          const viewportInfo = isFullPageBackground
+            ? {
+                x: rect.x,
+                y: rect.y,
+                width: rect.width,
+                height: rect.height,
+                rawRect: {
+                  left: rect.x,
+                  top: rect.y,
+                  width: rect.width,
+                  height: rect.height,
+                  right: rect.x + rect.width,
+                  bottom: rect.y + rect.height,
+                },
+                rawArea: rect.width * rect.height,
+                visibleArea: rect.width * rect.height,
+                coverage: 1,
+              }
+            : getTransformedViewportRect(node, rect);
+          if (!viewportInfo) continue;
+
+          const viewportRect = {
+            x: viewportInfo.x,
+            y: viewportInfo.y,
+            width: viewportInfo.width,
+            height: viewportInfo.height,
+          };
+          const minLayerSide = Math.max(14, Math.min(rect.width, rect.height) * 0.012);
+          const minLayerArea = Math.max(320, rect.width * rect.height * 0.00035);
+          const textPreview = getScopedTextPreview(node);
+          const hasTextPreview = textPreview.length >= 2;
+          const hasVectorSignal = hasRenderableVectorSignal(node);
+          const minTextLayerSide = Math.max(4, Math.min(rect.width, rect.height) * 0.004);
+          const minTextLayerArea = Math.max(16, rect.width * rect.height * 0.00001);
+          const minVectorLayerSide = Math.max(1, Math.min(rect.width, rect.height) * 0.0012);
+          const minVectorLayerArea = Math.max(4, rect.width * rect.height * 0.000003);
+          const viewportArea = viewportRect.width * viewportRect.height;
+          const isLargeEnough = viewportRect.width >= minLayerSide && viewportRect.height >= minLayerSide;
+          const hasEnoughArea = viewportArea >= minLayerArea;
+          const isTextLayerLargeEnough =
+            viewportRect.width >= minTextLayerSide && viewportRect.height >= minTextLayerSide;
+          const hasEnoughTextArea = viewportArea >= minTextLayerArea;
+          const isVectorLayerLargeEnough =
+            viewportRect.width >= minVectorLayerSide && viewportRect.height >= 1.5;
+          const hasEnoughVectorArea = viewportArea >= minVectorLayerArea;
+          const isInsidePageFrame = viewportInfo.coverage >= 0.2;
+          const passesDefaultSizeGate = isLargeEnough && hasEnoughArea;
+          const passesSmallTextGate =
+            hasTextPreview && isTextLayerLargeEnough && hasEnoughTextArea;
+          const passesThinVectorGate =
+            hasVectorSignal && isVectorLayerLargeEnough && hasEnoughVectorArea;
+          if (
+            !isBackgroundNode &&
+            (!isInsidePageFrame || (!passesDefaultSizeGate && !passesSmallTextGate && !passesThinVectorGate))
+          ) {
+            continue;
+          }
+
+          const styleWidth = parseStyleDimension(styleText, "width");
+          const styleHeight = parseStyleDimension(styleText, "height");
+          const hasStyleGeometry = styleWidth >= 2 && styleHeight >= 2;
+          const imageElements = getScopedImageElements(node);
+          const imageElement =
+            imageElements
+              .map((element) => ({ element, rect: element.getBoundingClientRect() }))
+              .sort((a, b) => rectArea(b.rect) - rectArea(a.rect))[0]?.element || null;
+          const imageTitleHint = getImageElementTitleHint(imageElement);
+          const shouldUseVisibleGeometry =
+            !isBackgroundNode &&
+            Boolean(imageElement) &&
+            detectMaskedImageLayer(node, imageElement, viewportRect);
+          const rawRect = shouldUseVisibleGeometry
+            ? viewportRect
+            : viewportInfo.rawRect || viewportRect;
+          const nodeScale = getCompositeScaleToAncestor(node, bestPage.node);
+          const layerScaleX = Math.max(0.01, Number(transform.scaleX || 1));
+          const layerScaleY = Math.max(0.01, Number(transform.scaleY || 1));
+          const rawDesignWidth = Math.max(1, rawRect.width * designScaleX);
+          const rawDesignHeight = Math.max(1, rawRect.height * designScaleY);
+          const centerDesignX =
+            (rawRect.x - rect.x + rawRect.width / 2) * designScaleX;
+          const centerDesignY =
+            (rawRect.y - rect.y + rawRect.height / 2) * designScaleY;
+          const styledWidth = hasStyleGeometry
+            ? Math.max(1, styleWidth * nodeScale.x * layerScaleX)
+            : 0;
+          const styledHeight = hasStyleGeometry
+            ? Math.max(1, styleHeight * nodeScale.y * layerScaleY)
+            : 0;
+          const styleWidthRatio = styledWidth > 0 ? styledWidth / rawDesignWidth : 0;
+          const styleHeightRatio = styledHeight > 0 ? styledHeight / rawDesignHeight : 0;
+          const styleGeometryMatchesViewport =
+            hasStyleGeometry &&
+            styleWidthRatio >= 0.8 &&
+            styleWidthRatio <= 1.25 &&
+            styleHeightRatio >= 0.8 &&
+            styleHeightRatio <= 1.25;
+          const width = isFullPageBackground
+            ? Math.max(1, Number(designWidth || rect.width))
+            : styleGeometryMatchesViewport
+              ? styledWidth
+              : rawDesignWidth;
+          const height = isFullPageBackground
+            ? Math.max(1, Number(designHeight || rect.height))
+            : styleGeometryMatchesViewport
+              ? styledHeight
+              : rawDesignHeight;
+          const x = isFullPageBackground ? 0 : centerDesignX - width / 2;
+          const y = isFullPageBackground ? 0 : centerDesignY - height / 2;
+          const layerAngle = isFullPageBackground
+            ? 0
+            : transform.hasReflection
+              ? transform.angle
+              : styleTransform.hasAngle
+                ? styleTransform.angle
+                : transform.angle;
+          const layerFlipX = isFullPageBackground ? false : Boolean(transform.flipX);
+          const layerFlipY = isFullPageBackground ? false : Boolean(transform.flipY);
+          if (width < 2 || height < 2) continue;
+
+          const textFromParagraphs = Array.from(node.querySelectorAll("p"))
+            .filter((item) => !isInsideForeignLayer(item, node))
+            .map((item) => item.innerText || "")
+            .filter(Boolean)
+            .join("\n");
+          const text = dedupeTextLines(textFromParagraphs || textPreview);
+
+          const textStyleElement = findBestTextStyleElement(node, node);
+
+          let shapeFill = "";
+          let shapeImageDataUrl = "";
+          let thinVectorStrokeStyle = { color: "", strokeOnly: false };
+          if (!imageElement) {
+            const shapeCandidates = [node, ...getScopedDescendants(node)];
+            for (let index = 0; index < shapeCandidates.length; index += 1) {
+              const candidate = shapeCandidates[index];
+              const style = window.getComputedStyle(candidate);
+              const backgroundColor = style.backgroundColor;
+              if (
+                backgroundColor &&
+                backgroundColor !== "rgba(0, 0, 0, 0)" &&
+                backgroundColor !== "transparent"
+              ) {
+                shapeFill = backgroundColor;
+                break;
+              }
+            }
+            thinVectorStrokeStyle = resolveThinVectorStrokeStyle(node);
+            shapeImageDataUrl = extractShapeImageDataUrl(node, width, height, {
+              excludeTextNodes: Boolean(text),
+            });
+            const shouldRasterizeThinVectorShape =
+              shapeImageDataUrl.startsWith("data:image/svg+xml") &&
+              hasVectorSignal &&
+              (Math.max(1, Math.round(width)) <= 24 ||
+                Math.max(1, Math.round(height)) <= 16 ||
+                viewportRect.height <= 8);
+            if (shouldRasterizeThinVectorShape) {
+              const rasterizedShapeImageDataUrl = await rasterizeDataUrlWithCanvas(
+                shapeImageDataUrl,
+                Math.max(1, Math.round(width)),
+                Math.max(1, Math.round(height))
+              );
+              if (rasterizedShapeImageDataUrl.startsWith("data:image/")) {
+                shapeImageDataUrl = rasterizedShapeImageDataUrl;
+              }
+            }
+          }
+
+          const effectiveOpacity = getEffectiveOpacity(node, bestPage.node);
+          const zIndex = getNumericZIndex(node, bestPage.node);
+          let imageSrc = "";
+          let imageDataUrl = "";
+          let imageProvenance = "";
+          let preferSnapshot = false;
+          const backgroundImageSignals = [];
+
+          if (shapeImageDataUrl.startsWith("data:image/")) {
+            imageSrc = shapeImageDataUrl;
+            imageDataUrl = shapeImageDataUrl;
+            imageProvenance = "shape-svg";
+          }
+
+          let imageAcquisitionJob = null;
+          if (imageElement && !imageDataUrl) {
+            imageSrc = getImageElementSource(imageElement);
+            if (String(imageSrc).startsWith("data:image/")) {
+              imageDataUrl = imageSrc;
+              imageProvenance = "data";
+            } else {
+              // Defer acquisition; resolve all jobs in parallel after the loop.
+              imageAcquisitionJob = { kind: "element", element: imageElement, width, height };
+            }
+          }
+
+          if (!imageSrc) {
+            const backgroundCandidates = [node, ...getScopedDescendants(node)];
+            for (let index = 0; index < backgroundCandidates.length; index += 1) {
+              const candidate = backgroundCandidates[index];
+              const inlineStyle = candidate.getAttribute("style") || "";
+              const inlineBackgroundImage = parseBackgroundImageUrl(inlineStyle);
+              if (inlineBackgroundImage) {
+                backgroundImageSignals.push(inlineBackgroundImage);
+                imageSrc = inlineBackgroundImage;
+                break;
+              }
+              const computedBackgroundImage = findCssImageUrl(candidate);
+              if (computedBackgroundImage) {
+                backgroundImageSignals.push(computedBackgroundImage);
+                imageSrc = computedBackgroundImage;
+                break;
+              }
+            }
+            if (!imageDataUrl && /^https?:\/\//i.test(String(imageSrc || ""))) {
+              imageAcquisitionJob = { kind: "url", url: imageSrc, provenance: "css-bg" };
+            }
+          }
+
+          if (imageElement && (imageSrc || imageDataUrl)) {
+            preferSnapshot =
+              shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement);
+          }
+          if (
+            !preferSnapshot &&
+            shapeImageDataUrl.startsWith("data:image/") &&
+            hasVectorSignal &&
+            (Math.max(1, Math.round(width)) <= 8 || Math.max(1, Math.round(height)) <= 8)
+          ) {
+            preferSnapshot = true;
+          }
+
+          const textStyle = textStyleElement ? window.getComputedStyle(textStyleElement) : null;
+          const textFontSize = Number.parseFloat(textStyle?.fontSize || "") || 0;
+          const textScale = textStyleElement ? getCompositeScaleToAncestor(textStyleElement, node) : { x: 1, y: 1 };
+          const customFontSize = textStyleElement ? findCustomFontSizeFromNode(textStyleElement, node) : 0;
+          const resolvedFontFamily = normalizeFontFamilyName(textStyle?.fontFamily || "Arial") || "Arial";
+          const resolvedFontSize = Math.max(
+            8,
+            (customFontSize > 0 ? customFontSize : textFontSize > 0 ? textFontSize : 28) * textScale.y
+          );
+          const textLineHeightRaw = Number.parseFloat(textStyle?.lineHeight || "");
+          const textLineHeight =
+            textLineHeightRaw && textFontSize > 0 ? textLineHeightRaw / textFontSize : 1.2;
+          const textLetterSpacing = parseNumericPx(textStyle?.letterSpacing || "");
+          const textDecoration = String(
+            textStyle?.textDecorationLine || textStyle?.textDecoration || ""
+          ).toLowerCase();
+          const textBackgroundStyle = textStyleElement
+            ? resolveTextBackgroundStyle(textStyleElement, node)
+            : { color: "", radius: 0 };
+          const textBackgroundColor = textBackgroundStyle.color;
+          const textBackgroundRadius = textBackgroundStyle.radius;
+
+          const mediaWidth = Number(imageElement?.naturalWidth || imageElement?.width?.baseVal?.value || 0);
+          const mediaHeight = Number(imageElement?.naturalHeight || imageElement?.height?.baseVal?.value || 0);
+          const hasMediaDimensions = mediaWidth >= 12 && mediaHeight >= 12;
+          const hasImageSignal = Boolean(imageElement || imageSrc || imageDataUrl || backgroundImageSignals.length);
+          const zIndexSignal = zIndex === null || zIndex >= -10;
+          const opacitySignal = effectiveOpacity > 0.03;
+          let imageConfidence = 0;
+          if (imageElement) imageConfidence += 3;
+          if (shapeImageDataUrl) imageConfidence += 4;
+          if (imageSrc) imageConfidence += 2;
+          if (imageDataUrl) imageConfidence += 2;
+          if (hasMediaDimensions) imageConfidence += 1;
+          if (isLargeEnough && hasEnoughArea) imageConfidence += 1;
+          if (isInsidePageFrame) imageConfidence += 1;
+          if (opacitySignal) imageConfidence += 1;
+          if (zIndexSignal) imageConfidence += 1;
+
+          const isLikelyImageLayer =
+            hasImageSignal &&
+            isLargeEnough &&
+            hasEnoughArea &&
+            isInsidePageFrame &&
+            opacitySignal &&
+            imageConfidence >= 5;
+          const roundedWidth = Math.max(1, Math.round(width));
+          const roundedHeight = Math.max(1, Math.round(height));
+          const vectorAspectRatio =
+            Math.max(roundedWidth, roundedHeight) / Math.max(1, Math.min(roundedWidth, roundedHeight));
+          const isThinVectorDividerLayer =
+            !imageElement &&
+            !text &&
+            hasVectorSignal &&
+            thinVectorStrokeStyle.strokeOnly &&
+            Boolean(thinVectorStrokeStyle.color) &&
+            vectorAspectRatio >= 12 &&
+            (roundedWidth <= 8 ||
+              roundedHeight <= 8 ||
+              viewportRect.width <= 8 ||
+              viewportRect.height <= 8);
+
+          const kind = isThinVectorDividerLayer
+            ? "shape"
+            : shapeImageDataUrl
+            ? "image"
+            : isLikelyImageLayer
+              ? "image"
+              : text
+                ? "text"
+                : shapeFill
+                  ? "shape"
+                  : "unknown";
+          if (kind === "unknown") continue;
+          const parentLayerNode = node.parentElement?.closest?.('[id^="LB"]');
+          const parentId =
+            parentLayerNode && parentLayerNode !== node
+              ? String(parentLayerNode.id || "").trim()
+              : "";
+          const fallbackReason =
+            kind === "image" && preferSnapshot
+              ? "masked-or-clipped"
+              : kind === "image" && !imageSrc && !imageDataUrl
+                ? "unresolved-image-source"
+                : "";
+
+          const normalizedLayerAngle = isThinVectorDividerLayer ? 0 : layerAngle;
+          const normalizedLayerFlipX = isThinVectorDividerLayer ? false : layerFlipX;
+          const normalizedLayerFlipY = isThinVectorDividerLayer ? false : layerFlipY;
+          const hasCompanionText =
+            kind === "image" &&
+            Boolean(text && textStyleElement);
+          const shouldPreserveRenderedImagePixels =
+            imageElement &&
+            kind === "image" &&
+            (shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement));
+
+          if (shouldPreserveRenderedImagePixels && imageAcquisitionJob?.kind === "element") {
+            imageAcquisitionJob = {
+              ...imageAcquisitionJob,
+              fitFetchedToTarget: true,
+              cropRegion: buildDisplayedImageCropRegion(imageElement, viewportRect),
+            };
+          }
+          if (shouldPreserveRenderedImagePixels && !hasCompanionText) {
+            preferSnapshot = true;
+          }
+
+          const layerRecord = {
+            id: String(node.id || `layer-${layerIndex + 1}`),
+            parentId: parentId || null,
+            name:
+              String(node.getAttribute?.("aria-label") || "").trim() ||
+              String(node.getAttribute?.("data-element-name") || "").trim() ||
+              imageTitleHint ||
+              `${kind === "text" ? "Text" : shapeImageDataUrl ? "Shape" : kind === "shape" ? "Shape" : "Image"} ${layerIndex + 1}`,
+            kind,
+            x,
+            y,
+            width: roundedWidth,
+            height: roundedHeight,
+            angle: normalizedLayerAngle,
+            flipX: normalizedLayerFlipX,
+            flipY: normalizedLayerFlipY,
+            viewportRect: {
+              x: viewportRect.x,
+              y: viewportRect.y,
+              width: viewportRect.width,
+              height: viewportRect.height,
+            },
+            pageRelativeRect: {
+              x,
+              y,
+              width: roundedWidth,
+              height: roundedHeight,
+            },
+            imageSrc,
+            imageDataUrl,
+            imageProvenance,
+            imageAcquisitionJob,
+            preferSnapshot,
+            sourceWidth:
+              mediaWidth > 0 ? mediaWidth : shapeImageDataUrl ? Math.max(1, Math.round(width)) : undefined,
+            sourceHeight:
+              mediaHeight > 0 ? mediaHeight : shapeImageDataUrl ? Math.max(1, Math.round(height)) : undefined,
+            text: kind === "text" ? text : "",
+            textAlign: textStyle?.textAlign || "left",
+            color: textStyle?.color || "#111827",
+            fontFamily: resolvedFontFamily,
+            fontSize: resolvedFontSize,
+            fontStyle: textStyle?.fontStyle || "normal",
+            fontWeight: parseFontWeight(textStyle?.fontWeight),
+            lineHeight: Math.max(0.8, textLineHeight || 1.2),
+            letterSpacing: textLetterSpacing,
+            textDecoration,
+            textBackgroundColor,
+            textBackgroundRadius,
+            fill: isThinVectorDividerLayer ? thinVectorStrokeStyle.color : shapeFill || "",
+            zIndex: zIndex ?? layerIndex,
+            opacity: effectiveOpacity,
+            titleEn: kind === "image" ? imageTitleHint : "",
+            tagsEn:
+              kind === "image" && imageTitleHint
+                ? uniqueMetadataStrings(tokenizeMetadataLabel(imageTitleHint))
+                : [],
+            labelsEn:
+              kind === "image" && imageTitleHint
+                ? uniqueMetadataStrings([imageTitleHint, ...tokenizeMetadataLabel(imageTitleHint)])
+                : [],
+            isBackgroundNode,
+            isFullPageBackground,
+            fallback: Boolean(fallbackReason),
+            fallbackReason,
+            hasCompanionText,
+          };
+          let companionTextRecord = null;
+          if (hasCompanionText) {
+            const textViewportInfo = getTransformedViewportRect(textStyleElement, rect);
+            if (textViewportInfo) {
+              const textViewportRect = {
+                x: textViewportInfo.x,
+                y: textViewportInfo.y,
+                width: textViewportInfo.width,
+                height: textViewportInfo.height,
+              };
+              const textWidth = Math.max(1, Math.round(textViewportRect.width * designScaleX));
+              const textHeight = Math.max(1, Math.round(textViewportRect.height * designScaleY));
+              const textX = (textViewportRect.x - rect.x) * designScaleX;
+              const textY = (textViewportRect.y - rect.y) * designScaleY;
+              companionTextRecord = {
+                id: `${String(node.id || `layer-${layerIndex + 1}`)}__text`,
+                parentId: String(node.id || "").trim() || null,
+                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} Text`,
+                kind: "text",
+                x: textX,
+                y: textY,
+                width: textWidth,
+                height: textHeight,
+                angle: 0,
+                flipX: false,
+                flipY: false,
+                viewportRect: textViewportRect,
+                pageRelativeRect: {
+                  x: textX,
+                  y: textY,
+                  width: textWidth,
+                  height: textHeight,
+                },
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text,
+                textAlign: textStyle?.textAlign || "left",
+                color: textStyle?.color || "#111827",
+                fontFamily: resolvedFontFamily,
+                fontSize: resolvedFontSize,
+                fontStyle: textStyle?.fontStyle || "normal",
+                fontWeight: parseFontWeight(textStyle?.fontWeight),
+                lineHeight: Math.max(0.8, textLineHeight || 1.2),
+                letterSpacing: textLetterSpacing,
+                textDecoration,
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                zIndex: (zIndex ?? layerIndex) + 0.25,
+                opacity: effectiveOpacity,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                fallback: false,
+                fallbackReason: "",
+              };
+            }
+          }
+          if (kind === "image") {
+            imageMetadataCandidates.push({
+              id: layerRecord.id,
+              node,
+              kind,
+              name: layerRecord.name,
+              width: layerRecord.width,
+              height: layerRecord.height,
+              fallback: layerRecord.fallback,
+              isBackgroundNode,
+              isFullPageBackground,
+            });
+          }
+          if (!isDuplicateLayerEntry(layerRecord)) {
+            layers.push(layerRecord);
+          }
+          if (companionTextRecord && !isDuplicateLayerEntry(companionTextRecord)) {
+            layers.push(companionTextRecord);
+          }
+        }
+
+        // Drain deferred image acquisitions in parallel.
+        const layersNeedingImages = layers.filter((layer) => layer.imageAcquisitionJob);
+        await runWithConcurrency(layersNeedingImages, 6, async (layer) => {
+          const job = layer.imageAcquisitionJob;
+          if (!job) return;
+          if (job.kind === "element") {
+            const acquired = await acquireImageForElement(job.element, job.width, job.height, {
+              fitFetchedToTarget: Boolean(job.fitFetchedToTarget),
+              cropRegion: job.cropRegion || null,
+            });
+            if (acquired.src) layer.imageSrc = acquired.src;
+            if (acquired.dataUrl) layer.imageDataUrl = acquired.dataUrl;
+            if (acquired.provenance) layer.imageProvenance = acquired.provenance;
+            if (acquired.sourceWidth) layer.sourceWidth = acquired.sourceWidth;
+            if (acquired.sourceHeight) layer.sourceHeight = acquired.sourceHeight;
+          } else if (job.kind === "url") {
+            let dataUrl = "";
+            if (String(job.url).startsWith("blob:")) {
+              dataUrl = await blobUrlToDataUrl(job.url);
+            } else if (/^https?:\/\//i.test(String(job.url))) {
+              dataUrl = await readRemoteImageAssetAsDataUrl(job.url);
+            }
+            if (dataUrl && dataUrl.startsWith("data:image/")) {
+              layer.imageSrc = dataUrl;
+              layer.imageDataUrl = dataUrl;
+              layer.imageProvenance =
+                job.provenance || (String(job.url).startsWith("blob:") ? "blob" : "fetch");
+            }
+          }
+        });
+        for (const layer of layers) delete layer.imageAcquisitionJob;
+
+        const imageMetadataById = shouldCollectLayerMetadata
+          ? await collectCanvaLayerMetadata(
+              imageMetadataCandidates,
+              Number(designWidth || rect.width),
+              Number(designHeight || rect.height)
+            )
+          : new Map();
+        if (imageMetadataById.size > 0) {
+          for (let index = 0; index < layers.length; index += 1) {
+            const layer = layers[index];
+            if (String(layer?.kind || "").toLowerCase() !== "image") continue;
+            const metadata = imageMetadataById.get(String(layer.id || ""));
+            if (!metadata) continue;
+            layer.titleEn = sanitizeMetadataText(metadata.titleEn || layer.name || "");
+            layer.tagsEn = uniqueMetadataStrings(metadata.tagsEn);
+            layer.labelsEn = uniqueMetadataStrings(
+              metadata.labelsEn && metadata.labelsEn.length > 0
+                ? metadata.labelsEn
+                : [layer.titleEn, ...layer.tagsEn, ...tokenizeMetadataLabel(layer.titleEn)]
+            );
+            layer.sourceAssetId =
+              sanitizeMetadataText(layer.sourceAssetId || layer.imageSrc || layer.imageDataUrl || layer.id);
+          }
+        }
+
+        if (layers.length <= 1) {
+          const pageBounds = {
+            left: rect.x,
+            top: rect.y,
+            width: rect.width,
+            height: rect.height,
+          };
+          const pageArea = Math.max(1, rect.width * rect.height);
+          const minTextArea = Math.max(120, pageArea * 0.0002);
+          const minImageArea = Math.max(200, pageArea * 0.0003);
+          const maxFallbackLayers = 60;
+          const fallbackCandidates = [];
+          const seenTextKeys = new Set();
+
+          const toLayerFromViewportRect = (rawRect) => {
+            const clipped = intersectRects(rawRect, pageBounds);
+            if (!clipped) return null;
+            const width = Math.max(1, clipped.width * designScaleX);
+            const height = Math.max(1, clipped.height * designScaleY);
+            const x = (clipped.x - rect.x) * designScaleX;
+            const y = (clipped.y - rect.y) * designScaleY;
+            return {
+              x,
+              y,
+              width,
+              height,
+              viewportRect: {
+                x: clipped.x,
+                y: clipped.y,
+                width: clipped.width,
+                height: clipped.height,
+              },
+            };
+          };
+
+          const textNodes = Array.from(bestPage.node.querySelectorAll("p,span,div"));
+          for (let index = 0; index < textNodes.length; index += 1) {
+            const node = textNodes[index];
+            if (!node) continue;
+            const text = dedupeTextLines(node.innerText || "");
+            if (!text || text.length < 2) continue;
+            const nodeRect = node.getBoundingClientRect();
+            const layerRect = toLayerFromViewportRect(nodeRect);
+            if (!layerRect) continue;
+            const area = Math.max(1, layerRect.width * layerRect.height);
+            if (area < minTextArea) continue;
+
+            const textStyle = window.getComputedStyle(node);
+            const fontFamily = normalizeFontFamilyName(textStyle.fontFamily || "Arial") || "Arial";
+            const textScale = getCompositeScaleToAncestor(node, bestPage.node);
+            const textFontSize = Number.parseFloat(textStyle.fontSize || "") || 0;
+            const resolvedFontSize = Math.max(8, (textFontSize || 24) * Math.max(0.01, textScale.y));
+            const textLineHeightRaw = Number.parseFloat(textStyle.lineHeight || "");
+            const textLineHeight =
+              textLineHeightRaw && textFontSize > 0 ? textLineHeightRaw / textFontSize : 1.2;
+            const textLetterSpacing = parseNumericPx(textStyle.letterSpacing || "");
+            const textDecoration = String(
+              textStyle.textDecorationLine || textStyle.textDecoration || ""
+            ).toLowerCase();
+            const textBackgroundStyle = resolveTextBackgroundStyle(node, node);
+            const textBackgroundColor = textBackgroundStyle.color;
+            const textBackgroundRadius = textBackgroundStyle.radius;
+            const opacity = getEffectiveOpacity(node, bestPage.node);
+            if (opacity <= 0.03) continue;
+
+            const textKey = `${text.toLowerCase()}|${Math.round(layerRect.x)}|${Math.round(
+              layerRect.y
+            )}|${Math.round(layerRect.width)}|${Math.round(layerRect.height)}`;
+            if (seenTextKeys.has(textKey)) continue;
+            seenTextKeys.add(textKey);
+
+            const textRecord = {
+              id: String(node.id || `fallback-text-${index + 1}`),
+              parentId: null,
+              name:
+                String(node.getAttribute?.("aria-label") || "").trim() ||
+                `Text ${fallbackCandidates.length + 1}`,
+              kind: "text",
+              x: layerRect.x,
+              y: layerRect.y,
+              width: Math.max(1, Math.round(layerRect.width)),
+              height: Math.max(1, Math.round(layerRect.height)),
+              angle: 0,
+              flipX: false,
+              flipY: false,
+              viewportRect: layerRect.viewportRect,
+              pageRelativeRect: {
+                x: layerRect.x,
+                y: layerRect.y,
+                width: Math.max(1, Math.round(layerRect.width)),
+                height: Math.max(1, Math.round(layerRect.height)),
+              },
+              imageSrc: "",
+              imageDataUrl: "",
+              preferSnapshot: false,
+              sourceWidth: undefined,
+              sourceHeight: undefined,
+              text,
+              textAlign: textStyle.textAlign || "left",
+              color: textStyle.color || "#111827",
+              fontFamily,
+              fontSize: resolvedFontSize,
+              fontStyle: textStyle.fontStyle || "normal",
+              fontWeight: parseFontWeight(textStyle.fontWeight),
+              lineHeight: Math.max(0.8, textLineHeight || 1.2),
+              letterSpacing: textLetterSpacing,
+              textDecoration,
+              textBackgroundColor,
+              textBackgroundRadius,
+              fill: "",
+              zIndex: getNumericZIndex(node, bestPage.node) ?? 1000 + index,
+              opacity,
+              fallback: false,
+              fallbackReason: "",
+            };
+            if (!isDuplicateLayerEntry(textRecord)) {
+              fallbackCandidates.push(textRecord);
+            }
+            if (fallbackCandidates.length >= maxFallbackLayers) break;
+          }
+
+          if (fallbackCandidates.length < maxFallbackLayers) {
+            const mediaNodes = Array.from(bestPage.node.querySelectorAll("img,image,canvas,svg"));
+            for (let index = 0; index < mediaNodes.length; index += 1) {
+              const node = mediaNodes[index];
+              if (!node) continue;
+
+              const nodeRect = node.getBoundingClientRect();
+              const layerRect = toLayerFromViewportRect(nodeRect);
+              if (!layerRect) continue;
+              const area = Math.max(1, layerRect.width * layerRect.height);
+              if (area < minImageArea) continue;
+
+              const tagName = String(node.tagName || "").toLowerCase();
+              const imageTitleHint =
+                tagName === "img" || tagName === "image"
+                  ? getImageElementTitleHint(node)
+                  : "";
+              const isDecorativeFrame = looksLikeDecorativeFrameLabel(imageTitleHint);
+              if (area > pageArea * 0.96 && layers.length > 0 && !isDecorativeFrame) continue;
+
+              let imageSrc = "";
+              if (tagName === "img" || tagName === "image") {
+                imageSrc = getImageElementSource(node);
+              } else if (tagName === "canvas") {
+                try {
+                  imageSrc = node.toDataURL("image/png");
+                } catch (_error) {
+                  imageSrc = "";
+                }
+              } else if (tagName === "svg") {
+                if (hasRenderableSvgContent(node)) {
+                  imageSrc = serializeSvgElementToDataUrl(
+                    node,
+                    Math.max(1, Math.round(layerRect.width)),
+                    Math.max(1, Math.round(layerRect.height))
+                  );
+                }
+              }
+              if (!imageSrc) {
+                imageSrc = findCssImageUrl(node);
+              }
+
+              let imageDataUrl = imageSrc.startsWith("data:image/") ? imageSrc : "";
+              let imageProvenance = imageDataUrl ? "data" : "";
+              let imageAcquisitionJob = null;
+              if (
+                !imageDataUrl &&
+                (String(imageSrc).startsWith("blob:") || /^https?:\/\//i.test(String(imageSrc || "")))
+              ) {
+                imageAcquisitionJob = { kind: "url", url: imageSrc };
+              }
+
+              const opacity = getEffectiveOpacity(node, bestPage.node);
+              if (opacity <= 0.03) continue;
+
+              const fallbackReason = imageSrc ? "" : "unresolved-image-source";
+              const imageRecord = {
+                id: String(node.id || `fallback-image-${index + 1}`),
+                parentId: null,
+                name:
+                  String(node.getAttribute?.("aria-label") || "").trim() ||
+                  imageTitleHint ||
+                  `Image ${fallbackCandidates.length + 1}`,
+                kind: "image",
+                x: layerRect.x,
+                y: layerRect.y,
+                width: Math.max(1, Math.round(layerRect.width)),
+                height: Math.max(1, Math.round(layerRect.height)),
+                angle: 0,
+                flipX: false,
+                flipY: false,
+                viewportRect: layerRect.viewportRect,
+                pageRelativeRect: {
+                  x: layerRect.x,
+                  y: layerRect.y,
+                  width: Math.max(1, Math.round(layerRect.width)),
+                  height: Math.max(1, Math.round(layerRect.height)),
+                },
+                imageSrc,
+                imageDataUrl,
+                imageProvenance,
+                imageAcquisitionJob,
+                preferSnapshot: !imageSrc,
+                sourceWidth: Math.max(1, Math.round(layerRect.width)),
+                sourceHeight: Math.max(1, Math.round(layerRect.height)),
+                text: "",
+                textAlign: "left",
+                color: "#111827",
+                fontFamily: "Arial",
+                fontSize: 28,
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                fill: "",
+                zIndex: getNumericZIndex(node, bestPage.node) ?? 2000 + index,
+                opacity,
+                sourceAssetId: sanitizeMetadataText(imageSrc || node.id || ""),
+                titleEn: imageTitleHint,
+                tagsEn: imageTitleHint ? uniqueMetadataStrings(tokenizeMetadataLabel(imageTitleHint)) : [],
+                labelsEn: imageTitleHint
+                  ? uniqueMetadataStrings([imageTitleHint, ...tokenizeMetadataLabel(imageTitleHint)])
+                  : [],
+                fallback: Boolean(fallbackReason),
+                fallbackReason,
+              };
+              if (!isDuplicateLayerEntry(imageRecord)) {
+                fallbackCandidates.push(imageRecord);
+              }
+              if (fallbackCandidates.length >= maxFallbackLayers) break;
+            }
+          }
+
+          const fallbackJobsNeedingImages = fallbackCandidates.filter(
+            (record) => record.imageAcquisitionJob
+          );
+          await runWithConcurrency(fallbackJobsNeedingImages, 6, async (record) => {
+            const job = record.imageAcquisitionJob;
+            if (!job) return;
+            let dataUrl = "";
+            if (String(job.url).startsWith("blob:")) {
+              dataUrl = await blobUrlToDataUrl(job.url);
+            } else if (/^https?:\/\//i.test(String(job.url))) {
+              dataUrl = await readRemoteImageAssetAsDataUrl(job.url);
+            }
+            if (dataUrl && dataUrl.startsWith("data:image/")) {
+              record.imageSrc = dataUrl;
+              record.imageDataUrl = dataUrl;
+              record.imageProvenance = String(job.url).startsWith("blob:") ? "blob" : "fetch";
+            }
+          });
+          for (const record of fallbackCandidates) delete record.imageAcquisitionJob;
+
+          fallbackCandidates
+            .sort((a, b) => {
+              const zA = Number.isFinite(Number(a?.zIndex)) ? Number(a.zIndex) : 0;
+              const zB = Number.isFinite(Number(b?.zIndex)) ? Number(b.zIndex) : 0;
+              if (zA !== zB) return zA - zB;
+              const yA = Number.isFinite(Number(a?.y)) ? Number(a.y) : 0;
+              const yB = Number.isFinite(Number(b?.y)) ? Number(b.y) : 0;
+              return yA - yB;
+            })
+            .slice(0, maxFallbackLayers)
+            .forEach((candidate) => {
+              if (!isDuplicateLayerEntry(candidate)) {
+                layers.push(candidate);
+              }
+            });
+        }
+      }
+
+      const usedLayerFonts = Array.from(
+        new Set(
+          layers
+            .filter((layer) => String(layer?.kind || "").toLowerCase() === "text")
+            .map((layer) => normalizeFontFamilyName(layer?.fontFamily))
+            .filter(Boolean)
+        )
+      );
+      const resolvedFontAssets = await resolveFontAssetsForFamilies(
+        documentFontAssets,
+        usedLayerFonts
+      );
+
+      return {
+        ok: true,
+        title: document.title || "",
+        sourceUrl: location.href,
+        rect,
+        devicePixelRatio: window.devicePixelRatio || 1,
+        designWidth: Math.max(1, Math.round(designWidth || rect.width)),
+        designHeight: Math.max(1, Math.round(designHeight || rect.height)),
+        directDataUrl,
+        sourceType: selectedCanvas ? "canvas" : "page-frame",
+        layers,
+        fontAssets: resolvedFontAssets,
+      };
+      
+  }
+
+  globalThis.__canvaImporterGetCaptureMetaFromTab = canvaImporterGetCaptureMeta;
+})();

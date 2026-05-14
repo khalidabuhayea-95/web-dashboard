@@ -4,6 +4,7 @@
 
   const STORAGE_KEY = "canva_importer_logs_v1";
   const MAX_LOG_ENTRIES = 250;
+  const FLUSH_DEBOUNCE_MS = 250;
   const LEVELS = {
     debug: 10,
     info: 20,
@@ -61,19 +62,31 @@
     return candidate >= configured;
   }
 
-  function persistLog(entry) {
+  let pendingEntries = [];
+  let flushTimer = 0;
+
+  function flushPendingLogs() {
+    flushTimer = 0;
     try {
       if (!chrome?.storage?.local?.get || !chrome?.storage?.local?.set) return;
+      if (!pendingEntries.length) return;
+      const entries = pendingEntries.splice(0, pendingEntries.length);
       chrome.storage.local.get(STORAGE_KEY, (result) => {
         const runtimeGetError = chrome?.runtime?.lastError;
         if (runtimeGetError) return;
         const existing = Array.isArray(result?.[STORAGE_KEY]) ? result[STORAGE_KEY] : [];
-        const next = [...existing, entry].slice(-MAX_LOG_ENTRIES);
+        const next = [...existing, ...entries].slice(-MAX_LOG_ENTRIES);
         chrome.storage.local.set({ [STORAGE_KEY]: next }, () => {});
       });
     } catch (_error) {
       // Logging must never crash extension execution.
     }
+  }
+
+  function persistLog(entry) {
+    pendingEntries.push(entry);
+    if (flushTimer) return;
+    flushTimer = globalThis.setTimeout(flushPendingLogs, FLUSH_DEBOUNCE_MS);
   }
 
   function readStoredLogs() {
@@ -101,6 +114,11 @@
   function clearStoredLogs() {
     return new Promise((resolve) => {
       try {
+        pendingEntries = [];
+        if (flushTimer) {
+          globalThis.clearTimeout(flushTimer);
+          flushTimer = 0;
+        }
         if (!chrome?.storage?.local?.remove) {
           resolve();
           return;

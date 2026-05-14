@@ -1,4 +1,6 @@
 import { createHash } from "node:crypto";
+import { createRequire } from "node:module";
+import { gunzipSync } from "node:zlib";
 
 import { NextResponse } from "next/server";
 
@@ -26,6 +28,10 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 120;
 const logger = createLogger("api.tools.canva-extension-import");
+const require = createRequire(import.meta.url);
+const {
+  CANVA_IMPORTER_SHARED_CONSTANTS = {},
+} = require("../../../../../../extension/canva-importer/shared-constants.js");
 const EXTENSION_IMPORT_IP_LIMIT = {
   limit: 120,
   windowMs: 60_000,
@@ -38,7 +44,7 @@ const EXTENSION_IMPORT_USER_LIMIT = {
 const CORS_HEADERS = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Methods": "POST,OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type,Authorization",
+  "Access-Control-Allow-Headers": "Content-Type,Authorization,Content-Encoding",
   "Access-Control-Allow-Private-Network": "true",
 };
 
@@ -48,6 +54,80 @@ const CANVA_IMPORTED_ELEMENT_SKIP_FALLBACKS = new Set([
   "payload-limit-full-snapshot",
   "backdrop-crop-server",
 ]);
+
+const IMPORT_MULTIPART_MANIFEST_FIELD = String(
+  CANVA_IMPORTER_SHARED_CONSTANTS.IMPORT_MULTIPART_MANIFEST_FIELD || "payload"
+);
+const IMPORT_MULTIPART_ASSET_PREFIX = String(
+  CANVA_IMPORTER_SHARED_CONSTANTS.IMPORT_MULTIPART_ASSET_PREFIX || "asset_"
+);
+
+function bufferToDataUrl(buffer, mimeType) {
+  return `data:${String(mimeType || "application/octet-stream").trim() || "application/octet-stream"};base64,${buffer.toString("base64")}`;
+}
+
+function reviveMultipartAssetRefs(value, assetMap) {
+  if (Array.isArray(value)) {
+    return value.map((item) => reviveMultipartAssetRefs(item, assetMap));
+  }
+  if (value && typeof value === "object") {
+    const ref = String(value.__canvaMultipartAssetRef || "").trim();
+    if (ref) {
+      return assetMap.get(ref) || "";
+    }
+    return Object.fromEntries(
+      Object.entries(value).map(([key, nestedValue]) => [key, reviveMultipartAssetRefs(nestedValue, assetMap)])
+    );
+  }
+  return value;
+}
+
+async function readExtensionImportMultipartBody(request) {
+  const formData = await request.formData();
+  const manifestValue = formData.get(IMPORT_MULTIPART_MANIFEST_FIELD);
+  const manifestText = typeof manifestValue === "string" ? manifestValue : "";
+  if (!manifestText) {
+    throw new Error("Missing multipart payload manifest.");
+  }
+  const body = JSON.parse(manifestText);
+  const assetMap = new Map();
+  for (const [key, value] of formData.entries()) {
+    if (!String(key || "").startsWith(IMPORT_MULTIPART_ASSET_PREFIX)) continue;
+    if (!(value instanceof File)) continue;
+    const buffer = Buffer.from(await value.arrayBuffer());
+    assetMap.set(
+      String(key),
+      bufferToDataUrl(buffer, value.type || "application/octet-stream")
+    );
+  }
+  return reviveMultipartAssetRefs(body, assetMap);
+}
+
+async function readExtensionImportJsonBody(request) {
+  const encoding = String(request.headers.get("content-encoding") || "")
+    .trim()
+    .toLowerCase();
+  if (!encoding || encoding === "identity") {
+    return request.json();
+  }
+  const bodyBuffer = Buffer.from(await request.arrayBuffer());
+  const decodedBuffer =
+    encoding === "gzip" ? gunzipSync(bodyBuffer) : null;
+  if (!decodedBuffer) {
+    throw new Error(`Unsupported content encoding: ${encoding}`);
+  }
+  return JSON.parse(decodedBuffer.toString("utf8") || "{}");
+}
+
+async function readExtensionImportBody(request) {
+  const contentType = String(request.headers.get("content-type") || "")
+    .trim()
+    .toLowerCase();
+  if (contentType.includes("multipart/form-data")) {
+    return readExtensionImportMultipartBody(request);
+  }
+  return readExtensionImportJsonBody(request);
+}
 
 function withCors(response) {
   Object.entries(CORS_HEADERS).forEach(([key, value]) => {
@@ -1364,10 +1444,14 @@ export async function POST(request) {
 
   let body = {};
   try {
-    body = await request.json();
-  } catch (_error) {
-    requestLogger.warn("Invalid JSON body in extension import");
-    return withCorsRequest(NextResponse.json({ error: "Invalid JSON body." }, { status: 400 }));
+    body = await readExtensionImportBody(request);
+  } catch (error) {
+    requestLogger.warn("Invalid extension import body", {
+      contentType: String(request.headers.get("content-type") || ""),
+      contentEncoding: String(request.headers.get("content-encoding") || ""),
+      reason: String(error?.message || error || ""),
+    });
+    return withCorsRequest(NextResponse.json({ error: "Invalid request body." }, { status: 400 }));
   }
 
   const token = getToken(request, body);

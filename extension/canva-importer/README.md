@@ -24,7 +24,7 @@ This extension captures the active Canva design tab and sends it to your dashboa
 2. Click extension icon.
 3. Click `Import current tab`.
 
-The extension extracts Canva layer nodes (`[id^=\"LB\"].DF_utQ`) and posts a Fabric layer list to:
+The extension extracts Canva layer nodes (`[id^=\"LB\"]`) and posts a Fabric layer list to:
 
 - `POST /api/tools/canva-import/extension-import`
 

@@ -1734,6 +1734,35 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           },
         },
       },
+      "/api/mobile/templates/search": {
+        get: {
+          tags: ["Mobile Templates"],
+          summary: "Search published templates",
+          description:
+            "Returns the same paginated, grouped template payload as /api/mobile/templates. The `query` parameter performs a case-insensitive partial search across template names and tags.",
+          parameters: [
+            ...localeHeaderParameters,
+            ...localeQueryParameters,
+            reusableParameters.categoryId,
+            reusableParameters.subCategoryId,
+            reusableParameters.query,
+            reusableParameters.templatesPage,
+            reusableParameters.templatesPageSize,
+          ],
+          responses: {
+            200: {
+              description: "Published templates search response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/TemplateListResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/mobile/templates/{id}": {
         get: {
           tags: ["Mobile Templates"],
