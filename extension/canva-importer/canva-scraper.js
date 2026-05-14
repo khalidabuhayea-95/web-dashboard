@@ -2941,13 +2941,33 @@
           const normalizedLayerAngle = isThinVectorDividerLayer ? 0 : layerAngle;
           const normalizedLayerFlipX = isThinVectorDividerLayer ? false : layerFlipX;
           const normalizedLayerFlipY = isThinVectorDividerLayer ? false : layerFlipY;
+          const imageRect = imageElement?.getBoundingClientRect?.() || null;
+          const overflowsContainer =
+            imageRect &&
+            (imageRect.left < viewportRect.x - 0.5 ||
+              imageRect.top < viewportRect.y - 0.5 ||
+              imageRect.right > viewportRect.x + viewportRect.width + 0.5 ||
+              imageRect.bottom > viewportRect.y + viewportRect.height + 0.5);
+          const aspectMismatch =
+            imageRect &&
+            imageRect.width > 0.01 &&
+            imageRect.height > 0.01 &&
+            Math.abs(
+              imageRect.width / imageRect.height -
+                viewportRect.width / Math.max(0.01, viewportRect.height)
+            ) > 0.01;
           const hasCompanionText =
             kind === "image" &&
             Boolean(text && textStyleElement);
           const shouldPreserveRenderedImagePixels =
             imageElement &&
             kind === "image" &&
-            (shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement));
+            (
+              shouldUseVisibleGeometry ||
+              shouldPreferRenderedImageSnapshot(node, imageElement) ||
+              overflowsContainer ||
+              aspectMismatch
+            );
 
           if (shouldPreserveRenderedImagePixels && imageAcquisitionJob?.kind === "element") {
             imageAcquisitionJob = {
@@ -2994,9 +3014,21 @@
             imageAcquisitionJob,
             preferSnapshot,
             sourceWidth:
-              mediaWidth > 0 ? mediaWidth : shapeImageDataUrl ? Math.max(1, Math.round(width)) : undefined,
+              shouldPreserveRenderedImagePixels
+                ? roundedWidth
+                : mediaWidth > 0
+                  ? mediaWidth
+                  : shapeImageDataUrl
+                    ? Math.max(1, Math.round(width))
+                    : undefined,
             sourceHeight:
-              mediaHeight > 0 ? mediaHeight : shapeImageDataUrl ? Math.max(1, Math.round(height)) : undefined,
+              shouldPreserveRenderedImagePixels
+                ? roundedHeight
+                : mediaHeight > 0
+                  ? mediaHeight
+                  : shapeImageDataUrl
+                    ? Math.max(1, Math.round(height))
+                    : undefined,
             text: kind === "text" ? text : "",
             textAlign: textStyle?.textAlign || "left",
             color: textStyle?.color || "#111827",

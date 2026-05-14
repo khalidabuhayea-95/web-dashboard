@@ -69,6 +69,7 @@ interface PreviewMediaController {
 interface ImageNodeProps {
   element: EditorElement;
   pose: ElementRenderPose;
+  interactive: boolean;
   canTransform: boolean;
   playheadFrame?: number;
   previewFps?: number;
@@ -397,6 +398,7 @@ function CanvasBackgroundImage({
 function CanvasImageNode({
   element,
   pose,
+  interactive,
   canTransform,
   onSelect,
   onContextMenu,
@@ -539,7 +541,7 @@ function CanvasImageNode({
       opacity={pose.opacity}
       visible={element.visible}
       draggable={canTransform}
-      listening={canTransform}
+      listening={interactive}
       globalCompositeOperation={element.blendMode}
       cornerRadius={element.cornerRadius || 0}
       shadowColor={element.shadowColor}
@@ -579,6 +581,7 @@ function CanvasImageNode({
 function CanvasVideoNode({
   element,
   pose,
+  interactive,
   canTransform,
   playheadFrame = 0,
   previewFps = 60,
@@ -744,7 +747,7 @@ function CanvasVideoNode({
       opacity={pose.opacity}
       visible={element.visible}
       draggable={canTransform}
-      listening={canTransform}
+      listening={interactive}
       globalCompositeOperation={element.blendMode}
       onClick={onSelect}
       onTap={onSelect}
@@ -789,6 +792,7 @@ function CanvasVideoNode({
 interface FrameNodeProps {
   element: EditorElement;
   pose: ElementRenderPose;
+  interactive: boolean;
   canTransform: boolean;
   isDropTarget: boolean;
   isContentEditing: boolean;
@@ -904,6 +908,7 @@ function getFrameBoundsClientRect(
 function CanvasFrameNode({
   element,
   pose,
+  interactive,
   canTransform,
   isDropTarget,
   isContentEditing,
@@ -1200,7 +1205,7 @@ function CanvasFrameNode({
       scaleY={pose.scaleY}
       opacity={pose.opacity}
       draggable={canTransform && !isContentEditing}
-      listening={canTransform || isContentEditing}
+      listening={interactive || isContentEditing}
       globalCompositeOperation={element.blendMode}
       shadowColor={element.shadowColor}
       shadowBlur={element.shadowBlur}
@@ -1239,7 +1244,7 @@ function CanvasFrameNode({
           context.fillStrokeShape(shape);
         }}
         // The frame group itself has no hit area, so this masked fill is the click/drag target.
-        listening={canTransform || isContentEditing}
+        listening={interactive || isContentEditing}
       />
       {mediaSource ? (
         <KonvaImage
@@ -1330,6 +1335,7 @@ function CanvasFrameNode({
 interface CanvasPageSceneProps {
   page: EditorPage;
   elements: EditorElement[];
+  selectedIds?: string[];
   pageDurationMs: number;
   playheadMs: number;
   playheadFrame: number;
@@ -1377,6 +1383,7 @@ interface CanvasPageSceneProps {
 function CanvasPageScene({
   page,
   elements,
+  selectedIds = [],
   pageDurationMs,
   playheadMs,
   playheadFrame,
@@ -1414,6 +1421,7 @@ function CanvasPageScene({
     },
     [registerPreviewMediaController]
   );
+  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
   return (
     <>
@@ -1472,7 +1480,9 @@ function CanvasPageScene({
             pageDurationMs
           );
           const isEditingFrameContent = interactive && frameContentEditId === element.id;
-          const canTransform = interactive && !element.locked && toolMode !== "draw" && !isEditingFrameContent;
+          const isSelected = interactive && selectedIdSet.has(element.id);
+          const canTransform =
+            interactive && isSelected && !element.locked && toolMode !== "draw" && !isEditingFrameContent;
           const commonProps = {
             ref: (node: Konva.Node | null) => safeRegisterRef(element.id, node),
             id: element.id,
@@ -1483,7 +1493,7 @@ function CanvasPageScene({
             scaleY: pose.scaleY,
             opacity: pose.opacity,
             draggable: canTransform,
-            listening: canTransform,
+            listening: interactive,
             globalCompositeOperation: element.blendMode,
             shadowColor: element.shadowColor,
             shadowBlur: element.shadowBlur,
@@ -1518,6 +1528,7 @@ function CanvasPageScene({
                 key={element.id}
                 element={element}
                 pose={pose}
+                interactive={interactive}
                 canTransform={canTransform}
                 isDropTarget={interactive && frameDropTargetId === element.id}
                 isContentEditing={isEditingFrameContent}
@@ -1545,6 +1556,7 @@ function CanvasPageScene({
                 key={element.id}
                 element={element}
                 pose={pose}
+                interactive={interactive}
                 canTransform={canTransform}
                 playheadFrame={playheadFrame}
                 previewFps={previewFps}
@@ -1567,6 +1579,7 @@ function CanvasPageScene({
                 key={element.id}
                 element={element}
                 pose={pose}
+                interactive={interactive}
                 canTransform={canTransform}
                 playheadFrame={playheadFrame}
                 previewFps={previewFps}
@@ -3585,6 +3598,7 @@ export default function CanvasEditor() {
           <CanvasPageScene
             page={activePage}
             elements={elements}
+            selectedIds={selectedIds}
             pageDurationMs={activePageDurationMs}
             playheadMs={effectiveActivePagePlayheadMs}
             playheadFrame={effectiveActivePageFrame}
