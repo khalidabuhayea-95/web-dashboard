@@ -1,0 +1,1822 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>نيروز — استوديو التصميم العربي على هاتفك</title>
+<meta name="description" content="نيروز: تطبيق التصميم العربي الأول. صوّر، صمّم، حرّك، وانشر — كل شيء من هاتفك." />
+<meta name="theme-color" content="#22828C" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="canonical" href="https://nayroz.com/" />
+
+<!-- Open Graph / social sharing -->
+<meta property="og:type" content="website" />
+<meta property="og:site_name" content="نيروز" />
+<meta property="og:locale" content="ar_AR" />
+<meta property="og:url" content="https://nayroz.com/" />
+<meta property="og:title" content="نيروز — استوديو التصميم العربي على هاتفك" />
+<meta property="og:description" content="نيروز: تطبيق التصميم العربي الأول. صوّر، صمّم، حرّك، وانشر — كل شيء من هاتفك." />
+<meta property="og:image" content="https://nayroz.com/og-image.png" />
+<meta name="twitter:card" content="summary_large_image" />
+<meta name="twitter:title" content="نيروز — استوديو التصميم العربي على هاتفك" />
+<meta name="twitter:description" content="نيروز: تطبيق التصميم العربي الأول. صوّر، صمّم، حرّك، وانشر — كل شيء من هاتفك." />
+<meta name="twitter:image" content="https://nayroz.com/og-image.png" />
+
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@300;400;500;600;700;900&family=El+Messiri:wght@400;500;600;700&display=swap" rel="stylesheet" />
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --teal:        #22828C;
+  --teal-dark:   #195f68;
+  --teal-light:  #e0f4f6;
+  --teal-mid:    #7ec8cd;
+  --navy:        #104D6F;
+  --navy-dark:   #0a3550;
+  --navy-light:  #e0eef5;
+  --coral:       var(--teal);
+  --coral-light: var(--teal-light);
+  --gold:        var(--teal);
+  --gold-dark:   var(--teal-dark);
+  --off-white:   #f7fafb;
+  --cream:       #F5EDE3;
+  --cream-deep:  #E8DDC9;
+  --dark:        #0b1e28;
+  --text:        #1a2e36;
+  --text-mid:    #4a6a78;
+  --text-soft:   #8aabb8;
+  --border:      rgba(34,130,140,0.15);
+  --font:        'Cairo', 'Tajawal', sans-serif;
+  --font-editorial: 'El Messiri', serif;
+  --r:           18px;
+  --r-sm:        10px;
+  --r-pill:      999px;
+  --shadow:      0 4px 28px rgba(16,77,111,0.10);
+  --shadow-lg:   0 20px 60px rgba(16,77,111,0.18);
+}
+
+html { scroll-behavior: smooth; }
+body {
+  font-family: var(--font);
+  color: var(--text);
+  background: #fff;
+  line-height: 1.7;
+  overflow-x: hidden;
+  direction: rtl;
+}
+
+/* ── SCROLLBAR ── */
+::-webkit-scrollbar { width: 6px; }
+::-webkit-scrollbar-track { background: #f0f0f0; }
+::-webkit-scrollbar-thumb { background: var(--teal-mid); border-radius: 3px; }
+
+/* ── UTILITIES ── */
+.container { max-width: 1140px; margin: 0 auto; padding: 0 5vw; }
+.btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  padding: 12px 26px; border-radius: var(--r-pill);
+  font-family: var(--font); font-size: 1rem; font-weight: 600;
+  text-decoration: none; cursor: pointer; border: none;
+  transition: all 0.25s; white-space: nowrap;
+}
+.btn-teal { background: var(--teal); color: white; box-shadow: 0 6px 20px rgba(34,130,140,0.35); }
+.btn-teal:hover { background: var(--teal-dark); transform: translateY(-2px); box-shadow: 0 10px 28px rgba(34,130,140,0.45); }
+.btn-navy { background: var(--navy); color: white; box-shadow: 0 6px 20px rgba(16,77,111,0.35); }
+.btn-navy:hover { background: var(--navy-dark); transform: translateY(-2px); }
+.btn-outline { background: transparent; color: var(--teal); border: 2px solid var(--teal); }
+.btn-outline:hover { background: var(--teal-light); }
+.btn-lg { padding: 16px 36px; font-size: 1.1rem; }
+.btn-ghost { background: rgba(255,255,255,0.15); color: white; border: 1.5px solid rgba(255,255,255,0.3); }
+.btn-ghost:hover { background: rgba(255,255,255,0.25); }
+
+.tag {
+  display: inline-block;
+  font-size: 0.75rem; font-weight: 700; letter-spacing: 0.06em;
+  text-transform: uppercase; padding: 5px 14px;
+  border-radius: var(--r-pill); margin-bottom: 1rem;
+}
+.tag-teal { background: var(--teal-light); color: var(--teal-dark); }
+.tag-coral { background: var(--coral-light); color: var(--teal-dark); }
+.tag-gold { background: var(--coral-light); color: var(--teal-dark); }
+.tag-navy { background: var(--navy-light); color: var(--navy-dark); }
+
+.section-title {
+  font-size: clamp(1.9rem, 3.5vw, 2.8rem);
+  font-weight: 900; line-height: 1.2;
+  letter-spacing: -0.02em; color: var(--dark);
+  margin-bottom: 1rem;
+}
+.section-sub {
+  font-size: 1.05rem; color: var(--text-mid);
+  font-weight: 400; max-width: 540px;
+}
+.section-header { margin-bottom: 56px; }
+.section-header.center { text-align: center; }
+.section-header.center .section-sub { margin: 0 auto; }
+
+.reveal {
+  opacity: 0; transform: translateY(32px);
+  transition: opacity 0.7s ease, transform 0.7s ease;
+}
+.reveal.visible { opacity: 1; transform: translateY(0); }
+
+/* ──────────────────────────────────────────
+   NAV
+──────────────────────────────────────────── */
+nav {
+  position: fixed; top: 0; right: 0; left: 0; z-index: 200;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 5vw; height: 70px;
+  background: rgba(255,255,255,0.93);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid var(--border);
+  transition: box-shadow 0.3s;
+}
+nav.scrolled { box-shadow: var(--shadow); }
+
+.nav-logo {
+  display: flex; align-items: center; gap: 10px;
+  text-decoration: none;
+}
+.logo-img {
+  width: 38px; height: 38px; border-radius: 10px;
+  background: linear-gradient(135deg, var(--teal), var(--navy));
+  display: flex; align-items: center; justify-content: center;
+  color: white; font-size: 1.1rem; font-weight: 900;
+}
+.logo-name {
+  font-size: 1.45rem; font-weight: 900; color: var(--dark);
+  letter-spacing: -0.02em;
+}
+.logo-name span { color: var(--teal); }
+
+.nav-links {
+  display: flex; align-items: center; gap: 1.75rem; list-style: none;
+}
+.nav-links a {
+  font-size: 0.95rem; font-weight: 500; color: var(--text-mid);
+  text-decoration: none; transition: color 0.2s;
+}
+.nav-links a:hover { color: var(--teal); }
+
+.nav-actions { display: flex; align-items: center; gap: 1rem; }
+.lang-toggle {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 0.85rem; font-weight: 600; color: var(--text-mid);
+  cursor: pointer; background: var(--off-white);
+  border: 1px solid var(--border); border-radius: var(--r-pill);
+  padding: 6px 14px;
+}
+
+.nav-hamburger { display: none; cursor: pointer; background: none; border: none; flex-direction: column; gap: 5px; }
+.nav-hamburger span { display: block; width: 22px; height: 2px; background: var(--text); border-radius: 2px; transition: all 0.3s; }
+
+/* ──────────────────────────────────────────
+   HERO
+──────────────────────────────────────────── */
+.hero {
+  min-height: 100vh;
+  padding: 110px 5vw 80px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  align-items: center; gap: 4rem;
+  background: #fff;
+  position: relative; overflow: hidden;
+}
+
+/* geometric blobs */
+.hero::before {
+  content: '';
+  position: absolute; top: -160px; left: -120px;
+  width: 700px; height: 700px; border-radius: 50%;
+  background: radial-gradient(circle, var(--teal-light) 0%, transparent 65%);
+  pointer-events: none;
+}
+.hero::after {
+  content: '';
+  position: absolute; bottom: -100px; right: 5%;
+  width: 400px; height: 400px; border-radius: 50%;
+  background: radial-gradient(circle, var(--navy-light) 0%, transparent 65%);
+  pointer-events: none;
+}
+
+.hero-badge {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: var(--teal-light); color: var(--teal-dark);
+  border: 1px solid rgba(34,130,140,0.2);
+  padding: 7px 16px; border-radius: var(--r-pill);
+  font-size: 0.88rem; font-weight: 700; margin-bottom: 1.5rem;
+  animation: fadeUp 0.5s ease both;
+}
+.live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--coral); animation: pulse 2s infinite; }
+
+.hero-title {
+  font-size: clamp(2.4rem, 5vw, 3.8rem);
+  font-weight: 900; line-height: 1.15;
+  letter-spacing: -0.025em; color: var(--dark);
+  margin-bottom: 1.25rem;
+  animation: fadeUp 0.6s ease 0.1s both;
+}
+.hero-title .hl-teal { color: var(--teal); }
+.hero-title .hl-coral { color: var(--coral); }
+
+.hero-sub {
+  font-size: 1.1rem; color: var(--text-mid); font-weight: 400;
+  line-height: 1.75; max-width: 480px; margin-bottom: 2rem;
+  animation: fadeUp 0.6s ease 0.2s both;
+}
+
+.hero-ctas {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  margin-bottom: 2.5rem;
+  animation: fadeUp 0.6s ease 0.3s both;
+}
+
+.store-badges { display: flex; gap: 0.75rem; flex-wrap: wrap; animation: fadeUp 0.6s ease 0.4s both; }
+.store-badge {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 18px; border-radius: var(--r-sm);
+  text-decoration: none; transition: all 0.25s;
+  border: 1.5px solid;
+}
+.store-badge.dark { background: var(--dark); border-color: var(--dark); color: white; }
+.store-badge.dark:hover { background: var(--navy); transform: translateY(-2px); }
+.store-badge svg { width: 22px; height: 22px; fill: currentColor; flex-shrink: 0; }
+.store-badge-text small { font-size: 0.7rem; opacity: 0.65; display: block; }
+.store-badge-text strong { font-size: 0.9rem; font-weight: 700; }
+
+.hero-trust {
+  display: flex; align-items: center; gap: 1rem; flex-wrap: wrap;
+  animation: fadeUp 0.6s ease 0.5s both;
+}
+.trust-item { display: flex; align-items: center; gap: 6px; font-size: 0.85rem; color: var(--text-soft); font-weight: 500; }
+.trust-dot { color: var(--border); }
+
+/* phone carousel */
+.hero-visual {
+  display: flex; justify-content: center; align-items: center;
+  position: relative; z-index: 2;
+  animation: fadeUp 0.8s ease 0.15s both;
+}
+.phone-wrap {
+  position: relative; width: 280px;
+}
+.phone-frame {
+  width: 280px; background: #0d1b22;
+  border-radius: 46px; padding: 14px;
+  box-shadow: 0 40px 100px rgba(10,30,40,0.4), 0 0 0 1px rgba(255,255,255,0.06) inset;
+}
+.phone-inner {
+  background: #f6fafb; border-radius: 34px;
+  overflow: hidden; height: 530px;
+  position: relative;
+}
+.phone-slide {
+  position: absolute; inset: 0;
+  display: flex; flex-direction: column;
+  opacity: 0; transition: opacity 0.8s ease;
+}
+.phone-slide.active { opacity: 1; }
+
+/* slide 1 — poster editor UI */
+.slide-editor { background: #f0f6f8; }
+.slide-editor .s-topbar {
+  height: 44px; background: var(--dark);
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 14px;
+}
+.s-topbar-icons { display: flex; gap: 8px; }
+.s-icon { width: 7px; height: 7px; border-radius: 50%; }
+.s-canvas {
+  flex: 1; margin: 12px; border-radius: 12px;
+  background: linear-gradient(135deg, var(--navy) 0%, var(--teal) 100%);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden;
+}
+.s-canvas-text {
+  color: white; font-size: 1.5rem; font-weight: 900;
+  text-align: center; line-height: 1.3; z-index: 2; position: relative;
+}
+.s-canvas-text small { display: block; font-size: 0.7rem; font-weight: 400; opacity: 0.7; margin-top: 4px; }
+.s-toolbar { height: 52px; background: white; display: flex; align-items: center; justify-content: space-around; padding: 0 8px; }
+.s-tool { width: 32px; height: 32px; border-radius: 8px; background: var(--off-white); display: flex; align-items: center; justify-content: center; font-size: 0.85rem; }
+.s-tool.active { background: var(--teal); }
+
+/* slide 2 — animation output */
+.slide-reel { background: #000; position: relative; }
+.slide-reel .reel-content {
+  position: absolute; inset: 0;
+  background: linear-gradient(160deg, var(--dark) 0%, var(--navy) 40%, var(--teal) 100%);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+}
+.reel-badge {
+  background: var(--coral); color: white;
+  padding: 4px 12px; border-radius: var(--r-pill);
+  font-size: 0.7rem; font-weight: 700;
+}
+.reel-title { color: white; font-size: 1.6rem; font-weight: 900; text-align: center; }
+.reel-sub { color: rgba(255,255,255,0.6); font-size: 0.8rem; text-align: center; }
+.reel-anim-bars { display: flex; gap: 4px; align-items: flex-end; margin-top: 8px; }
+.reel-bar { width: 6px; border-radius: 3px; background: var(--gold); animation: barPulse 1.2s ease-in-out infinite; }
+
+/* slide 3 — story */
+.slide-story { background: linear-gradient(180deg, var(--teal-light) 0%, #c2e6ea 100%); }
+.story-inner { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; padding: 20px; }
+.story-img-mock { width: 140px; height: 160px; border-radius: 16px; background: linear-gradient(135deg, var(--navy), var(--teal)); }
+.story-chip { background: white; border-radius: var(--r-pill); padding: 6px 14px; font-size: 0.75rem; font-weight: 700; color: var(--navy); }
+
+/* floating badges */
+.hero-float {
+  position: absolute; background: white;
+  border-radius: 14px; padding: 10px 14px;
+  box-shadow: var(--shadow-lg);
+  display: flex; align-items: center; gap: 10px;
+  font-size: 0.82rem; z-index: 5;
+}
+.hero-float.f-ai { top: 30px; left: -50px; animation: float 4s ease-in-out infinite; }
+.hero-float.f-dl { bottom: 50px; left: -40px; animation: float 4s ease-in-out infinite; animation-delay: -2s; }
+.hero-float.f-rt { top: 120px; right: -55px; animation: float 4s ease-in-out infinite; animation-delay: -1s; }
+.hf-icon {
+  width: 36px; height: 36px; border-radius: 10px;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; flex-shrink: 0;
+}
+.hf-text { line-height: 1.3; }
+.hf-text strong { display: block; font-weight: 700; color: var(--dark); font-size: 0.85rem; }
+.hf-text small { color: var(--text-soft); }
+
+/* slide dots */
+.slide-dots {
+  position: absolute; bottom: -32px; left: 50%; transform: translateX(-50%);
+  display: flex; gap: 6px;
+}
+.dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: var(--border); transition: all 0.3s; cursor: pointer;
+}
+.dot.active { background: var(--teal); width: 20px; border-radius: 4px; }
+
+/* ──────────────────────────────────────────
+   STATS
+──────────────────────────────────────────── */
+.stats {
+  background: var(--dark);
+  padding: 60px 5vw;
+}
+.stats-inner {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  max-width: 1140px; margin: 0 auto;
+  border: 1px solid rgba(255,255,255,0.06);
+  border-radius: var(--r);
+  overflow: hidden;
+}
+.stat {
+  padding: 2.5rem 2rem;
+  border-left: 1px solid rgba(255,255,255,0.06);
+  text-align: center;
+}
+.stat:first-child { border-left: none; }
+.stat-num {
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  font-weight: 900; line-height: 1;
+  background: linear-gradient(135deg, var(--teal), var(--teal-mid));
+  -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+  background-clip: text;
+}
+.stat-label { font-size: 0.88rem; color: rgba(255,255,255,0.45); margin-top: 8px; }
+
+/* ──────────────────────────────────────────
+   AI TOOLS
+──────────────────────────────────────────── */
+.ai-section {
+  padding: 100px 5vw;
+  background: var(--off-white);
+  position: relative; overflow: hidden;
+}
+.ai-section::before {
+  content: '';
+  position: absolute; top: -200px; right: -150px;
+  width: 600px; height: 600px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(34,130,140,0.06) 0%, transparent 65%);
+}
+
+.ai-grid {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1.5rem; max-width: 1140px; margin: 0 auto;
+  align-items: start;
+}
+.ai-card {
+  background: white; border-radius: var(--r);
+  border: 1px solid var(--border);
+  padding: 2rem;
+  transition: all 0.3s;
+  position: relative; overflow: hidden;
+}
+.ai-card:hover { transform: translateY(-4px); box-shadow: var(--shadow-lg); }
+.ai-card.tall { padding-bottom: 0; }
+.ai-icon-row { display: flex; align-items: center; gap: 12px; margin-bottom: 1rem; }
+.ai-icon {
+  width: 48px; height: 48px; border-radius: 14px;
+  display: flex; align-items: center; justify-content: center; font-size: 1.4rem;
+}
+.ai-card-title { font-size: 1.2rem; font-weight: 800; color: var(--dark); margin-bottom: 0.5rem; }
+.ai-card-desc { font-size: 0.92rem; color: var(--text-mid); line-height: 1.7; }
+.ai-badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1rem; }
+.ai-badge {
+  font-size: 0.78rem; font-weight: 600; padding: 4px 12px;
+  border-radius: var(--r-pill); border: 1.5px solid;
+}
+
+/* before/after mock */
+.before-after {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 6px; margin-top: 1.5rem;
+  height: 160px;
+}
+.ba-side {
+  border-radius: var(--r-sm);
+  display: flex; align-items: center; justify-content: center;
+  position: relative; overflow: hidden; font-size: 0.75rem; font-weight: 700;
+}
+.ba-label {
+  position: absolute; bottom: 8px; right: 8px;
+  background: rgba(0,0,0,0.5); color: white;
+  padding: 2px 8px; border-radius: var(--r-pill); font-size: 0.65rem;
+}
+.ba-before { background: linear-gradient(135deg, var(--navy-light), #bcd6e6); }
+.ba-after { background: linear-gradient(135deg, var(--teal-light), var(--teal-mid)); }
+
+/* anim preview grid */
+.anim-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 8px; margin-top: 1.5rem;
+}
+.anim-chip {
+  border-radius: var(--r-sm); padding: 10px 8px;
+  text-align: center; font-size: 0.72rem; font-weight: 700;
+  cursor: pointer; transition: all 0.2s; border: 1.5px solid transparent;
+}
+.anim-chip:hover { transform: scale(1.04); }
+
+/* ──────────────────────────────────────────
+   ARABIC — BOLD TYPOGRAPHIC STATEMENT
+──────────────────────────────────────────── */
+.arabic-section {
+  padding: 140px 5vw;
+  background: white;
+  overflow: hidden;
+  position: relative;
+}
+.arabic-section::before {
+  content: '';
+  position: absolute; top: -200px; right: -150px;
+  width: 700px; height: 700px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(34,130,140,0.07) 0%, transparent 60%);
+  pointer-events: none;
+}
+.arabic-section::after {
+  content: '';
+  position: absolute; bottom: -180px; left: -120px;
+  width: 500px; height: 500px; border-radius: 50%;
+  background: radial-gradient(circle, rgba(34,130,140,0.07) 0%, transparent 60%);
+  pointer-events: none;
+}
+.arabic-statement {
+  max-width: 1140px; margin: 0 auto;
+  position: relative; z-index: 2;
+}
+.arabic-headline {
+  font-family: var(--font);
+  font-weight: 900;
+  font-size: clamp(2.6rem, 7vw, 6.5rem);
+  line-height: 1.05;
+  letter-spacing: -0.03em;
+  color: var(--dark);
+  margin-bottom: 2rem;
+}
+.arabic-headline em {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  font-weight: 600;
+  color: var(--coral);
+}
+
+.arabic-lead {
+  font-family: var(--font);
+  font-size: clamp(1.05rem, 1.6vw, 1.3rem);
+  font-weight: 400;
+  line-height: 1.75;
+  color: var(--text-mid);
+  max-width: 620px;
+  margin-bottom: 4rem;
+}
+.arabic-lead strong { color: var(--dark); font-weight: 600; }
+
+.arabic-features {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1.5rem;
+  padding-top: 3rem;
+  border-top: 1px solid var(--border);
+}
+.ar-feat {
+  display: flex; flex-direction: column; gap: 0.5rem;
+}
+.ar-feat-icon {
+  width: 40px; height: 40px; border-radius: 10px;
+  background: var(--teal-light);
+  border: 1px solid rgba(34, 130, 140, 0.12);
+  display: flex; align-items: center; justify-content: center;
+  font-size: 1.1rem; flex-shrink: 0;
+  color: var(--teal);
+  margin-bottom: 0.5rem;
+}
+.ar-feat-title { font-size: 1.05rem; font-weight: 700; color: var(--dark); margin-bottom: 4px; }
+.ar-feat-desc { font-size: 0.92rem; color: var(--text-mid); line-height: 1.65; font-weight: 300; }
+
+/* ──────────────────────────────────────────
+   MANIFESTO
+──────────────────────────────────────────── */
+.manifesto {
+  padding: 140px 5vw;
+  background: var(--cream);
+  text-align: center;
+  position: relative;
+  overflow: hidden;
+}
+.manifesto::before {
+  content: '';
+  position: absolute; inset: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(34,130,140,0.04) 0%, transparent 50%),
+    radial-gradient(circle at 80% 70%, rgba(34,130,140,0.04) 0%, transparent 50%);
+  pointer-events: none;
+}
+.manifesto-inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  position: relative;
+  z-index: 2;
+}
+.manifesto-eyebrow {
+  display: inline-flex; align-items: center; gap: 14px;
+  font-family: var(--font);
+  font-size: 0.92rem; font-weight: 500;
+  color: var(--text-mid);
+  letter-spacing: 0.04em;
+  margin-bottom: 3rem;
+}
+.manifesto-eyebrow::before,
+.manifesto-eyebrow::after {
+  content: '';
+  width: 32px; height: 1px;
+  background: var(--text-mid);
+}
+.manifesto-text {
+  font-family: var(--font);
+  font-weight: 400;
+  font-size: clamp(1.6rem, 3.2vw, 2.8rem);
+  line-height: 1.55;
+  color: var(--dark);
+  letter-spacing: -0.01em;
+}
+.manifesto-text em {
+  font-family: var(--font-editorial);
+  font-style: italic;
+  font-weight: 600;
+  color: var(--teal);
+}
+.manifesto-text strong {
+  font-weight: 800;
+  color: var(--dark);
+}
+.manifesto-text .accent {
+  color: var(--coral);
+  font-weight: 500;
+}
+.manifesto-text .gap { display: block; height: 1.5rem; }
+
+.manifesto-sign {
+  display: inline-flex; align-items: center; gap: 14px;
+  margin-top: 3.5rem;
+  font-family: var(--font);
+  font-size: 0.85rem; color: var(--text-mid);
+  letter-spacing: 0.06em;
+}
+.manifesto-sign::before,
+.manifesto-sign::after {
+  content: '';
+  width: 24px; height: 1px;
+  background: var(--text-mid);
+}
+
+/* ──────────────────────────────────────────
+   PLATFORMS
+──────────────────────────────────────────── */
+.platforms {
+  padding: 100px 5vw;
+  background: white;
+}
+.platform-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1rem; max-width: 1140px; margin: 3rem auto 0;
+}
+.plat-card {
+  border-radius: var(--r-sm); padding: 1.5rem 1rem;
+  text-align: center; cursor: pointer;
+  border: 1.5px solid var(--border);
+  transition: all 0.25s; background: var(--off-white);
+}
+.plat-card:hover, .plat-card.active {
+  border-color: var(--teal); background: var(--teal-light);
+  transform: translateY(-3px); box-shadow: var(--shadow);
+}
+.plat-icon { font-size: 2rem; margin-bottom: 0.5rem; }
+.plat-name { font-size: 0.85rem; font-weight: 700; color: var(--dark); }
+.plat-size { font-size: 0.72rem; color: var(--text-soft); margin-top: 2px; }
+
+/* ──────────────────────────────────────────
+   FEATURES GRID (quiet strengths)
+──────────────────────────────────────────── */
+.feats {
+  padding: 100px 5vw;
+  background: var(--off-white);
+}
+.feats-grid {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 1.25rem; max-width: 1140px; margin: 3rem auto 0;
+}
+.feat-item {
+  background: white; border-radius: var(--r-sm);
+  border: 1px solid var(--border); padding: 1.5rem;
+  transition: all 0.25s;
+}
+.feat-item:hover { border-color: var(--teal-mid); box-shadow: var(--shadow); transform: translateY(-2px); }
+.feat-emoji { font-size: 1.75rem; margin-bottom: 0.75rem; }
+.feat-name { font-size: 0.9rem; font-weight: 700; color: var(--dark); margin-bottom: 0.3rem; }
+.feat-desc { font-size: 0.82rem; color: var(--text-mid); line-height: 1.6; }
+
+/* ──────────────────────────────────────────
+   TEMPLATES GALLERY
+──────────────────────────────────────────── */
+.gallery {
+  padding: 100px 0;
+  background: white; overflow: hidden;
+}
+.gallery .container { margin-bottom: 3rem; }
+.gallery-runner-wrap {
+  overflow: hidden;
+  margin-bottom: 1rem;
+  position: relative;
+  /* LTR so the wide track is left-origin (transform:0 = left edge at 0),
+     which is what the JS marquee assumes. Cards keep RTL via .gal-card. */
+  direction: ltr;
+}
+.gallery-runner {
+  display: flex;
+  gap: 1rem;
+  direction: ltr; /* predictable layout regardless of RTL page */
+  width: max-content;
+  will-change: transform;
+  /* JS will set transform; no CSS animation */
+}
+.gal-card {
+  width: 200px; height: 260px; border-radius: 14px;
+  flex-shrink: 0; position: relative; overflow: hidden;
+  cursor: pointer; transition: transform 0.3s;
+  direction: rtl; /* keep Arabic text RTL inside cards */
+}
+.gal-card:hover { transform: scale(1.04) rotate(-1deg); }
+.gal-inner {
+  width: 100%; height: 100%; border-radius: 14px;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  gap: 8px; padding: 16px; text-align: center;
+}
+.gal-label {
+  position: absolute; bottom: 10px; right: 10px;
+  background: rgba(0,0,0,0.5); color: white;
+  padding: 3px 10px; border-radius: var(--r-pill);
+  font-size: 0.65rem; font-weight: 700;
+}
+
+/* ──────────────────────────────────────────
+   HOW IT WORKS
+──────────────────────────────────────────── */
+.how {
+  padding: 100px 5vw;
+  background: var(--navy);
+  position: relative; overflow: hidden;
+}
+.how::before {
+  content: '';
+  position: absolute; top: 0; left: 0; right: 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--teal), var(--coral), var(--navy));
+}
+.how .section-title { color: white; }
+.how .section-sub { color: rgba(255,255,255,0.55); }
+.steps-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 2rem; max-width: 1140px; margin: 3rem auto 0;
+  position: relative;
+}
+.steps-grid::before {
+  content: '';
+  position: absolute; top: 36px; right: calc(33% + 20px); left: calc(33% + 20px);
+  height: 2px; background: rgba(255,255,255,0.1);
+}
+.step {
+  text-align: center; padding: 2rem 1.5rem;
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
+  border-radius: var(--r);
+  position: relative;
+}
+.step-num {
+  width: 56px; height: 56px; border-radius: 50%;
+  background: var(--teal); color: white;
+  font-size: 1.4rem; font-weight: 900;
+  display: flex; align-items: center; justify-content: center;
+  margin: 0 auto 1.25rem;
+  box-shadow: 0 6px 20px rgba(34,130,140,0.4);
+}
+.step-icon { font-size: 2rem; margin-bottom: 0.75rem; }
+.step-title { font-size: 1.05rem; font-weight: 800; color: white; margin-bottom: 0.5rem; }
+.step-desc { font-size: 0.88rem; color: rgba(255,255,255,0.5); line-height: 1.7; }
+
+/* ──────────────────────────────────────────
+   FAQ
+──────────────────────────────────────────── */
+.faq {
+  padding: 100px 5vw;
+  background: var(--off-white);
+}
+.faq-list { max-width: 800px; margin: 3rem auto 0; display: flex; flex-direction: column; gap: 1rem; }
+.faq-item {
+  background: white; border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  overflow: hidden; transition: box-shadow 0.2s;
+}
+.faq-item:hover { box-shadow: var(--shadow); }
+.faq-q {
+  width: 100%; text-align: right;
+  padding: 1.25rem 1.5rem;
+  background: none; border: none; cursor: pointer;
+  font-family: var(--font); font-size: 0.97rem; font-weight: 700;
+  color: var(--dark); display: flex; align-items: center;
+  justify-content: space-between; gap: 1rem;
+}
+.faq-arrow {
+  width: 28px; height: 28px; border-radius: 50%;
+  background: var(--teal-light); color: var(--teal);
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0; font-size: 1.1rem;
+  transition: transform 0.3s;
+}
+.faq-item.open .faq-arrow { transform: rotate(180deg); }
+.faq-a {
+  padding: 0 1.5rem;
+  font-size: 0.9rem; color: var(--text-mid); line-height: 1.8;
+  max-height: 0; overflow: hidden; transition: max-height 0.35s ease, padding 0.25s;
+}
+.faq-item.open .faq-a { max-height: 200px; padding: 0 1.5rem 1.25rem; }
+
+/* ──────────────────────────────────────────
+   FINAL CTA
+──────────────────────────────────────────── */
+.cta-section {
+  padding: 100px 5vw;
+  background: linear-gradient(135deg, var(--navy) 0%, var(--teal) 100%);
+  text-align: center; position: relative; overflow: hidden;
+}
+.cta-section::before {
+  content: '';
+  position: absolute; top: -150px; left: -100px;
+  width: 500px; height: 500px; border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+}
+.cta-section::after {
+  content: '';
+  position: absolute; bottom: -100px; right: -50px;
+  width: 350px; height: 350px; border-radius: 50%;
+  background: rgba(255,255,255,0.04);
+}
+.cta-tag { background: rgba(255,255,255,0.15); color: white; }
+.cta-title { color: white; margin: 0 auto 1rem; }
+.cta-sub { color: rgba(255,255,255,0.7); max-width: 540px; margin: 0 auto 2.5rem; font-size: 1.05rem; }
+.cta-badges { display: flex; justify-content: center; gap: 1rem; flex-wrap: wrap; }
+.store-badge.light { background: white; border-color: white; color: var(--dark); }
+.store-badge.light svg { fill: var(--dark); }
+.store-badge.light:hover { background: var(--teal-light); }
+.store-badge.light .store-badge-text small { color: var(--text-mid); }
+
+/* ──────────────────────────────────────────
+   FOOTER
+──────────────────────────────────────────── */
+footer {
+  background: var(--dark);
+  padding: 70px 5vw 40px;
+  border-top: 1px solid rgba(255,255,255,0.05);
+}
+.footer-top {
+  display: grid; grid-template-columns: 2fr 1fr 1fr 1fr;
+  gap: 3rem; padding-bottom: 3rem;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  margin-bottom: 2rem;
+}
+.footer-logo { margin-bottom: 1rem; }
+.footer-logo .logo-name { color: white; }
+.footer-about { font-size: 0.88rem; color: rgba(255,255,255,0.4); line-height: 1.75; max-width: 260px; margin-bottom: 1.5rem; }
+.footer-socials { display: flex; gap: 0.75rem; }
+.footer-socials a {
+  width: 38px; height: 38px; border-radius: 9px;
+  background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.08);
+  display: flex; align-items: center; justify-content: center;
+  color: rgba(255,255,255,0.5); text-decoration: none; font-size: 0.9rem;
+  transition: all 0.25s;
+}
+.footer-socials a:hover { background: var(--teal); color: white; border-color: var(--teal); }
+.footer-col h4 { font-size: 0.82rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.07em; color: rgba(255,255,255,0.4); margin-bottom: 1.25rem; }
+.footer-col ul { list-style: none; display: flex; flex-direction: column; gap: 0.65rem; }
+.footer-col ul li a { font-size: 0.9rem; color: rgba(255,255,255,0.55); text-decoration: none; transition: color 0.2s; }
+.footer-col ul li a:hover { color: var(--teal); }
+.footer-bottom { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
+.footer-copy { font-size: 0.82rem; color: rgba(255,255,255,0.25); }
+.footer-legal { display: flex; gap: 1.5rem; }
+.footer-legal a { font-size: 0.82rem; color: rgba(255,255,255,0.3); text-decoration: none; transition: color 0.2s; }
+.footer-legal a:hover { color: var(--teal); }
+
+/* ──────────────────────────────────────────
+   ANIMATIONS
+──────────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(24px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes float {
+  0%, 100% { transform: translateY(0); }
+  50%       { transform: translateY(-9px); }
+}
+@keyframes pulse {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+@keyframes barPulse {
+  0%, 100% { transform: scaleY(0.5); }
+  50%       { transform: scaleY(1); }
+}
+/* gallery marquee handled by JS (see end of file) */
+
+/* ──────────────────────────────────────────
+   RESPONSIVE
+──────────────────────────────────────────── */
+@media (max-width: 1024px) {
+  .feats-grid { grid-template-columns: repeat(2, 1fr); }
+  .platform-grid { grid-template-columns: repeat(3, 1fr); }
+}
+@media (max-width: 860px) {
+  .hero { grid-template-columns: 1fr; text-align: center; padding-top: 96px; }
+  .hero-sub, .hero-badge { margin-inline: auto; }
+  .hero-ctas, .store-badges, .hero-trust { justify-content: center; }
+  .hero-visual { order: -1; }
+  .hero-float.f-ai, .hero-float.f-dl, .hero-float.f-rt { display: none; }
+  .phone-frame { width: 240px; }
+  .phone-inner { height: 456px; }
+  .stats-inner { grid-template-columns: repeat(2, 1fr); }
+  .ai-grid { grid-template-columns: 1fr; }
+  .arabic-features { grid-template-columns: 1fr; gap: 2rem; }
+  .steps-grid { grid-template-columns: 1fr; }
+  .steps-grid::before { display: none; }
+  .footer-top { grid-template-columns: 1fr 1fr; }
+  .nav-links { display: none; }
+  .nav-hamburger { display: flex; }
+}
+@media (max-width: 560px) {
+  .stats-inner { grid-template-columns: 1fr 1fr; }
+  .platform-grid { grid-template-columns: repeat(2, 1fr); }
+  .feats-grid { grid-template-columns: 1fr; }
+  .footer-top { grid-template-columns: 1fr; }
+}
+
+/* mobile menu overlay */
+.mobile-menu {
+  position: fixed; inset: 0; z-index: 150;
+  background: rgba(10,20,30,0.95); backdrop-filter: blur(8px);
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 2rem; opacity: 0; pointer-events: none; transition: opacity 0.3s;
+}
+.mobile-menu.open { opacity: 1; pointer-events: all; }
+.mobile-menu a {
+  font-size: 1.5rem; font-weight: 700; color: white; text-decoration: none;
+  transition: color 0.2s;
+}
+.mobile-menu a:hover { color: var(--teal); }
+.mobile-menu-close {
+  position: absolute; top: 1.5rem; left: 1.5rem;
+  background: none; border: none; color: rgba(255,255,255,0.5);
+  font-size: 1.5rem; cursor: pointer;
+}
+
+/* ── REDUCED MOTION ── */
+@media (prefers-reduced-motion: reduce) {
+  html { scroll-behavior: auto; }
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  .reveal { opacity: 1 !important; transform: none !important; }
+}
+</style>
+<noscript><style>.reveal { opacity: 1; transform: none; }</style></noscript>
+</head>
+<body>
+
+<!-- MOBILE MENU -->
+<div class="mobile-menu" id="mobileMenu">
+  <button class="mobile-menu-close" onclick="closeMobileMenu()">✕</button>
+  <a href="#ai" onclick="closeMobileMenu()">أدوات الذكاء الاصطناعي</a>
+  <a href="#arabic" onclick="closeMobileMenu()">دعم العربية</a>
+  <a href="#features" onclick="closeMobileMenu()">المميزات</a>
+  <a href="#how" onclick="closeMobileMenu()">كيف يعمل</a>
+  <a href="#faq" onclick="closeMobileMenu()">الأسئلة الشائعة</a>
+  <a href="#download" onclick="closeMobileMenu()" class="btn btn-teal btn-lg">حمّل التطبيق</a>
+</div>
+
+<!-- NAV -->
+<nav id="nav">
+  <a href="#" class="nav-logo">
+    <!-- Replace with <img src="logo.svg" alt="نيروز"> once you have the logo -->
+    <div class="logo-img">ن</div>
+    <span class="logo-name">نيروز<span>.</span></span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#ai">أدوات الذكاء الاصطناعي</a></li>
+    <li><a href="#arabic">دعم العربية</a></li>
+    <li><a href="#features">المميزات</a></li>
+    <li><a href="#how">كيف يعمل</a></li>
+    <li><a href="#faq">الأسئلة الشائعة</a></li>
+  </ul>
+  <div class="nav-actions">
+    <a href="#download" class="btn btn-teal">حمّل مجاناً</a>
+    <button class="nav-hamburger" id="hamburger" onclick="openMobileMenu()" aria-label="القائمة">
+      <span></span><span></span><span></span>
+    </button>
+  </div>
+</nav>
+
+<!-- ══════════════════════════════════════
+     HERO
+══════════════════════════════════════ -->
+<section class="hero" id="home">
+  <div class="hero-content">
+    <div class="hero-badge">
+      <span class="live-dot"></span>
+      متاح الآن على iOS و Android
+    </div>
+
+    <h1 class="hero-title">
+      صمّم باحتراف<br/>
+      <span class="hl-teal">بالعربية</span> —<br/>
+      من هاتفك
+    </h1>
+
+    <p class="hero-sub">
+      من اللوحة البيضاء إلى ريل منتهي في تطبيق واحد. صور، فيديو، وحركة — مع دعم كامل للغة العربية.
+    </p>
+
+    <div class="hero-ctas">
+      <a href="#download" class="btn btn-teal btn-lg">حمّل مجاناً</a>
+      <a href="#ai" class="btn btn-outline btn-lg">اكتشف المميزات</a>
+    </div>
+
+    <div class="store-badges">
+      <a href="#download" class="store-badge dark">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        <div class="store-badge-text">
+          <small>Download on the</small>
+          <strong>App Store</strong>
+        </div>
+      </a>
+      <a href="#download" class="store-badge dark">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="white"><path d="M3.18 23.94c.33.18.71.2 1.07.04l12.54-7.18-2.63-2.66-11 9.8zm-1.18-21.5v19.12c0 .59.32 1.07.78 1.31L14.59 12 2.78.85A1.5 1.5 0 002 2.44zM20.67 9.94l-2.41-1.38-2.93 2.93 2.93 2.93 2.43-1.39c.7-.4.7-1.68-.02-2.09zM4.25.06C3.89-.1 3.51-.07 3.18.11L14.59 12 17.22 9.37 4.25.06z"/></svg>
+        <div class="store-badge-text">
+          <small>Get it on</small>
+          <strong>Google Play</strong>
+        </div>
+      </a>
+    </div>
+
+    <div class="hero-trust" style="margin-top:1.5rem;">
+      <div class="trust-item">✓ متاح الآن</div>
+      <span class="trust-dot">·</span>
+      <div class="trust-item">iOS & Android</div>
+      <span class="trust-dot">·</span>
+      <div class="trust-item">مجاني للتنزيل</div>
+    </div>
+  </div>
+
+  <div class="hero-visual">
+    <div class="phone-wrap">
+      <div class="phone-frame">
+        <div class="phone-inner">
+
+          <!-- Slide 1: Editor UI -->
+          <div class="phone-slide active slide-editor" id="slide0">
+            <div class="s-topbar">
+              <div class="s-topbar-icons">
+                <span class="s-icon" style="background:var(--coral)"></span>
+                <span class="s-icon" style="background:var(--teal-mid)"></span>
+                <span class="s-icon" style="background:var(--teal)"></span>
+              </div>
+              <span style="color:rgba(255,255,255,0.4);font-size:0.65rem;">نيروز</span>
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.4)" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.07 4.93a10 10 0 010 14.14M4.93 4.93a10 10 0 000 14.14"/></svg>
+            </div>
+            <div class="s-canvas">
+              <div class="s-canvas-text">
+                عيد الفطر المبارك
+                <small>تهنئة مُصمَّمة بنيروز</small>
+              </div>
+            </div>
+            <div class="s-toolbar">
+              <div class="s-tool active" style="color:white;">🖼</div>
+              <div class="s-tool">✍️</div>
+              <div class="s-tool">🎨</div>
+              <div class="s-tool">⚡</div>
+              <div class="s-tool">↗️</div>
+            </div>
+          </div>
+
+          <!-- Slide 2: Reel/Animation -->
+          <div class="phone-slide slide-reel" id="slide1">
+            <div class="reel-content">
+              <div class="reel-badge">REEL</div>
+              <div class="reel-title">قصتك<br/>في حركة</div>
+              <div class="reel-sub">+٢٠ حركة احترافية</div>
+              <div class="reel-anim-bars">
+                <div class="reel-bar" style="height:24px;animation-delay:0s;"></div>
+                <div class="reel-bar" style="height:40px;animation-delay:0.15s;"></div>
+                <div class="reel-bar" style="height:16px;animation-delay:0.3s;"></div>
+                <div class="reel-bar" style="height:36px;animation-delay:0.45s;"></div>
+                <div class="reel-bar" style="height:28px;animation-delay:0.6s;"></div>
+                <div class="reel-bar" style="height:48px;animation-delay:0.75s;"></div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Slide 3: Story -->
+          <div class="phone-slide slide-story" id="slide2">
+            <div class="story-inner">
+              <div style="font-size:0.75rem;font-weight:700;color:var(--text-mid);">INSTAGRAM STORY — 9:16</div>
+              <div class="story-img-mock"></div>
+              <div style="font-size:1rem;font-weight:900;color:var(--navy);text-align:center;">تصاميم احترافية<br/>لكل المنصات</div>
+              <div class="story-chip">اضغط لتصمّم</div>
+            </div>
+          </div>
+
+        </div>
+      </div>
+      <div class="slide-dots" style="bottom:-28px;">
+        <div class="dot active" onclick="goSlide(0)"></div>
+        <div class="dot" onclick="goSlide(1)"></div>
+        <div class="dot" onclick="goSlide(2)"></div>
+      </div>
+    </div>
+
+    <div class="hero-float f-ai">
+      <div class="hf-icon" style="background:var(--teal-light);">🤖</div>
+      <div class="hf-text">
+        <strong>إزالة الخلفية بالذكاء</strong>
+        <small>بضغطة واحدة</small>
+      </div>
+    </div>
+    <div class="hero-float f-dl">
+      <div class="hf-icon" style="background:var(--coral-light);">🎬</div>
+      <div class="hf-text">
+        <strong>تصدير MP4 و GIF</strong>
+        <small>مباشرة للريلز</small>
+      </div>
+    </div>
+    <div class="hero-float f-rt">
+      <div class="hf-icon" style="background:var(--coral-light);">🔤</div>
+      <div class="hf-text">
+        <strong>خط عربي كامل</strong>
+        <small>RTL أصيل</small>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     STATS
+══════════════════════════════════════ -->
+<section class="stats">
+  <div class="stats-inner">
+    <div class="stat reveal">
+      <div class="stat-num">+٧٠٠٠</div>
+      <div class="stat-label">قالب جاهز للتعديل</div>
+    </div>
+    <div class="stat reveal">
+      <div class="stat-num">+٢٠</div>
+      <div class="stat-label">حركة احترافية للأنيميشن</div>
+    </div>
+    <div class="stat reveal">
+      <div class="stat-num">٨</div>
+      <div class="stat-label">منصات مدعومة بمقاسات جاهزة</div>
+    </div>
+    <div class="stat reveal">
+      <div class="stat-num">٦</div>
+      <div class="stat-label">صيغ تصدير مختلفة</div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     AI TOOLS
+══════════════════════════════════════ -->
+<section class="ai-section" id="ai">
+  <div class="container">
+    <div class="section-header reveal">
+      <div class="tag tag-coral">ذكاء اصطناعي ✨</div>
+      <h2 class="section-title">السحر الحقيقي<br/>في تطبيقك</h2>
+      <p class="section-sub">أدوات ذكاء اصطناعي متقدمة مُدمجة بالكامل — بدون اشتراك إضافي.</p>
+    </div>
+
+    <div class="ai-grid">
+      <!-- Remove Background -->
+      <div class="ai-card tall reveal">
+        <div class="ai-icon-row">
+          <div class="ai-icon" style="background:var(--coral-light);">✂️</div>
+          <div>
+            <div class="ai-card-title">إزالة الخلفية</div>
+          </div>
+        </div>
+        <p class="ai-card-desc">بضغطة واحدة، يحذف الذكاء الاصطناعي الخلفية بدقة ممتازة — سواء كان الموضوع شخصاً أو منتجاً أو حيواناً أليفاً.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">أشخاص</span>
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">منتجات</span>
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">حيوانات</span>
+        </div>
+        <div class="before-after">
+          <div class="ba-side ba-before">
+            <div style="width:60px;height:80px;background:linear-gradient(135deg,#c0c0c0,#a0a0a0);border-radius:8px;"></div>
+            <div class="ba-label">قبل</div>
+          </div>
+          <div class="ba-side ba-after">
+            <div style="width:60px;height:80px;background:linear-gradient(135deg,var(--teal),var(--navy));border-radius:8px;position:relative;">
+              <div style="position:absolute;inset:0;background:repeating-conic-gradient(rgba(255,255,255,0.15) 0% 25%, transparent 0% 50%) 0 0 / 12px 12px;border-radius:8px;"></div>
+            </div>
+            <div class="ba-label">بعد</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Object Removal -->
+      <div class="ai-card reveal">
+        <div class="ai-icon-row">
+          <div class="ai-icon" style="background:var(--navy-light);">🪄</div>
+          <div>
+            <div class="ai-card-title">إزالة الأشياء</div>
+          </div>
+        </div>
+        <p class="ai-card-desc">امسح أي عنصر لا تريده من الصورة — خطوط كهربائية، زوار عشوائيون، لافتات — مع ملء ذكي يطابق الخلفية.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--navy);border-color:var(--navy-light);">ملء ذكي بالذكاء الاصطناعي</span>
+        </div>
+      </div>
+
+      <!-- AI Expand -->
+      <div class="ai-card reveal">
+        <div class="ai-icon-row">
+          <div class="ai-icon" style="background:var(--coral-light);">↔️</div>
+          <div>
+            <div class="ai-card-title">توسيع الصورة بالذكاء</div>
+          </div>
+        </div>
+        <p class="ai-card-desc">مدّد حدود صورتك. يولّد الذكاء الاصطناعي بكسلات جديدة تتناسب مع مشهد الصورة الأصلية — مثالي لتغيير نسب العرض.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--gold-dark);border-color:var(--coral-light);">توليد بكسلات</span>
+        </div>
+      </div>
+
+      <!-- Animation -->
+      <div class="ai-card tall reveal">
+        <div class="ai-icon-row">
+          <div class="ai-icon" style="background:var(--teal-light);">⚡</div>
+          <div>
+            <div class="ai-card-title">حرّك كل شيء</div>
+          </div>
+        </div>
+        <p class="ai-card-desc">من صورة ثابتة إلى ريل متحرك بنقرتين. تحكّم في التوقيت، الدخول، والخروج لكل طبقة على حدة.</p>
+        <div class="anim-grid">
+          <div class="anim-chip" style="background:var(--teal-light);color:var(--teal-dark);border-color:rgba(34,130,140,0.2);">Rise ↑</div>
+          <div class="anim-chip" style="background:var(--coral-light);color:var(--teal-dark);border-color:rgba(34,130,140,0.2);">Pop 💥</div>
+          <div class="anim-chip" style="background:var(--navy-light);color:var(--navy-dark);border-color:rgba(16,77,111,0.2);">Neon ✨</div>
+          <div class="anim-chip" style="background:var(--teal-light);color:var(--teal-dark);border-color:rgba(34,130,140,0.2);">Wipe →</div>
+          <div class="anim-chip" style="background:var(--coral-light);color:var(--teal-dark);border-color:rgba(34,130,140,0.2);">Pulse 🌊</div>
+          <div class="anim-chip" style="background:var(--navy-light);color:var(--navy-dark);border-color:rgba(16,77,111,0.15);">Stomp 🦶</div>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     ARABIC — BOLD STATEMENT
+══════════════════════════════════════ -->
+<section class="arabic-section" id="arabic">
+  <div class="arabic-statement">
+    <h2 class="arabic-headline reveal">
+      العربية ليست <em>إضافة</em>.<br/>
+      هي الأساس.
+    </h2>
+    <p class="arabic-lead reveal">
+      تطبيقات التصميم العالمية تعامل العربية كفكرة لاحقة — تشكيل مكسور، اتجاه عكسي، خطوط محدودة.
+      <strong>نحن بنينا نيروز من الصفر للعربية.</strong>
+    </p>
+
+    <div class="arabic-features reveal">
+      <div class="ar-feat">
+        <div class="ar-feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
+        </div>
+        <div class="ar-feat-title">محرّك نصوص عربي متكامل</div>
+        <div class="ar-feat-desc">تشكيل أصيل، خط مقوّس على مسار، ظل، إطار، وتحكّم كامل بالأحرف والأسطر.</div>
+      </div>
+      <div class="ar-feat">
+        <div class="ar-feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2zM22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z"/></svg>
+        </div>
+        <div class="ar-feat-title">مكتبة خطوط شاسعة</div>
+        <div class="ar-feat-desc">مئات الخطوط العربية الكلاسيكية والحديثة مع بحث وتحميل سريع.</div>
+      </div>
+      <div class="ar-feat">
+        <div class="ar-feat-icon">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M17 8l4 4-4 4M3 12h18M7 16l-4-4 4-4"/></svg>
+        </div>
+        <div class="ar-feat-title">RTL في كل تفصيل</div>
+        <div class="ar-feat-desc">اللوحة، الطبقات، القوائم، الأدوات — كلّها من اليمين لليسار بشكل طبيعي.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     MANIFESTO
+══════════════════════════════════════ -->
+<section class="manifesto">
+  <div class="manifesto-inner">
+    <div class="manifesto-eyebrow reveal">— بياننا —</div>
+
+    <p class="manifesto-text reveal">
+      <em>نحن نؤمن</em> أن العربية تستحقّ أداة تصميم تَحترم تفاصيلها،
+      تفهم ايقاعها، وتُبرز جمالها <strong>بدون تنازلات</strong>.
+      <span class="gap"></span>
+      نيروز ليس <span class="accent">"دعم عربي"</span> أُضيف لاحقاً.
+      نيروز <strong>وُلد عربيّاً</strong>.
+    </p>
+
+    <div class="manifesto-sign reveal">صنع بحبّ في المنطقة</div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     PLATFORMS
+══════════════════════════════════════ -->
+<section class="platforms" id="platforms">
+  <div class="container">
+    <div class="section-header center reveal">
+      <div class="tag tag-teal">لكل المنصات</div>
+      <h2 class="section-title">مقاسات جاهزة لكل ما تنشر</h2>
+      <p class="section-sub">لا حاجة للبحث عن المقاسات — كل منصة جاهزة بضغطة.</p>
+    </div>
+
+    <div class="platform-grid">
+      <div class="plat-card active reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">📸</div>
+        <div class="plat-name">Instagram</div>
+        <div class="plat-size">منشور · ستوري · ريلز</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">🎵</div>
+        <div class="plat-name">TikTok</div>
+        <div class="plat-size">9:16 فيديو</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">📺</div>
+        <div class="plat-name">YouTube</div>
+        <div class="plat-size">Shorts · Thumbnail</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">👻</div>
+        <div class="plat-name">Snapchat</div>
+        <div class="plat-size">9:16 ستوري</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">💙</div>
+        <div class="plat-name">Facebook</div>
+        <div class="plat-size">منشور · قصة</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">𝕏</div>
+        <div class="plat-name">X / Twitter</div>
+        <div class="plat-size">16:9 · صورة</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">💼</div>
+        <div class="plat-name">LinkedIn</div>
+        <div class="plat-size">منشور · بانر</div>
+      </div>
+      <div class="plat-card reveal" onclick="selectPlat(this)">
+        <div class="plat-icon">💬</div>
+        <div class="plat-name">WhatsApp</div>
+        <div class="plat-size">حالة · ملصقات</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     QUIET STRENGTHS / FEATURES
+══════════════════════════════════════ -->
+<section class="feats" id="features">
+  <div class="container">
+    <div class="section-header center reveal">
+      <div class="tag tag-navy">كل ما تحتاج</div>
+      <h2 class="section-title">أداة واحدة — إمكانيات<br/>لا حدود لها</h2>
+      <p class="section-sub">لا تحتاج لـ٥ تطبيقات مختلفة. نيروز يجمع كل شيء.</p>
+    </div>
+
+    <div class="feats-grid">
+      <div class="feat-item reveal">
+        <div class="feat-emoji">📁</div>
+        <div class="feat-name">مكتبة قوالب</div>
+        <div class="feat-desc">ابدأ من قالب مصمّم احترافياً بدلاً من الصفحة البيضاء.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">💾</div>
+        <div class="feat-name">حفظ تلقائي</div>
+        <div class="feat-desc">لا تفقد عملك أبداً — كل تغيير يُحفظ فوراً.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">↩️</div>
+        <div class="feat-name">تراجع غير محدود</div>
+        <div class="feat-desc">تراجع وإعادة بتاريخ عميق — ارجع لأي خطوة سابقة.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🎬</div>
+        <div class="feat-name">دعم الفيديو</div>
+        <div class="feat-desc">قصّ مقاطع، أضف فلاتر، وحرّكها مثل أي طبقة أخرى.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🖼</div>
+        <div class="feat-name">إطارات وأشكال</div>
+        <div class="feat-desc">ضع صورتك داخل إطار دائرة، قلب، بولارويد وغيرها.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🎨</div>
+        <div class="feat-name">لوحة ألوان كاملة</div>
+        <div class="feat-desc">طيف كامل مع قطّارة الألوان لاختيار أي لون من الصورة.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">✋</div>
+        <div class="feat-name">إيماءات اللمس</div>
+        <div class="feat-desc">قرص للتكبير، تدوير، واختصارات بإصبعين — يشعر طبيعياً تماماً.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">📶</div>
+        <div class="feat-name">يعمل بدون إنترنت (جزئياً)</div>
+        <div class="feat-desc">المحرر والطبقات وأدوات الرسم تعمل offline. أدوات الذكاء الاصطناعي تحتاج اتصالاً.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🖊</div>
+        <div class="feat-name">أدوات الرسم</div>
+        <div class="feat-desc">قلم، ماركر، وممحاة بنعومة قابلة للتعديل.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">📤</div>
+        <div class="feat-name">تصدير مرن</div>
+        <div class="feat-desc">JPEG · PNG شفاف · WebP · PDF · MP4 · GIF — جودة وحجم حسب اختيارك.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🧱</div>
+        <div class="feat-name">طبقات وبلندنج</div>
+        <div class="feat-desc">طبقات، أقنعة، وضعيات دمج، وتحكم كامل في الشفافية.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-emoji">🧲</div>
+        <div class="feat-name">خطوط المحاذاة</div>
+        <div class="feat-desc">خطوط snap ذكية تساعدك على محاذاة عناصرك بدقة.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     TEMPLATES GALLERY
+══════════════════════════════════════ -->
+<section class="gallery" id="templates">
+  <div class="container">
+    <div class="section-header center reveal">
+      <div class="tag tag-teal">قوالب</div>
+      <h2 class="section-title">لا تبدأ من الصفر —<br/>ابدأ من الرائع</h2>
+      <p class="section-sub">آلاف القوالب المُختارة بعناية، مُحدَّثة باستمرار.</p>
+    </div>
+  </div>
+
+  <div class="gallery-runner-wrap">
+    <div class="gallery-runner" data-marquee data-direction="left" data-speed="55">
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--navy),var(--teal));"><span style="color:white;font-size:1.4rem;font-weight:900;">عيد الفطر</span></div><div class="gal-label">مناسبة</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--coral),var(--navy-dark));"><span style="color:white;font-size:1.1rem;font-weight:900;text-align:center;">تهنئة<br/>بالزواج</span></div><div class="gal-label">مناسبة</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(160deg,var(--navy),var(--teal));"><span style="color:white;font-size:1rem;font-weight:700;text-align:center;">افتتاح<br/>متجر</span></div><div class="gal-label">أعمال</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--navy-dark),var(--coral));"><span style="color:white;font-size:1rem;font-weight:700;">عرض ٥٠٪</span></div><div class="gal-label">كمبين</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--teal-dark),var(--teal));"><span style="color:white;font-size:1.1rem;font-weight:900;text-align:center;">يوم<br/>ميلاد</span></div><div class="gal-label">مناسبة</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--dark),var(--navy));"><span style="color:white;font-size:1rem;font-weight:700;text-align:center;">إعلان<br/>وظيفي</span></div><div class="gal-label">أعمال</div></div>
+    </div>
+  </div>
+
+  <div class="gallery-runner-wrap">
+    <div class="gallery-runner" data-marquee data-direction="right" data-speed="55">
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--teal),var(--teal-dark));"><span style="color:white;font-size:1rem;font-weight:900;">رمضان كريم</span></div><div class="gal-label">مناسبة</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--teal-dark),var(--teal));"><span style="color:white;font-size:0.9rem;font-weight:700;text-align:center;">تصميم<br/>إنفوغرافيك</span></div><div class="gal-label">تعليم</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--coral),var(--navy-dark));"><span style="color:white;font-size:1.1rem;font-weight:900;">مبروك! 🎉</span></div><div class="gal-label">مناسبة</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--navy-dark),var(--teal));"><span style="color:white;font-size:0.9rem;font-weight:700;text-align:center;">تصميم<br/>بودكاست</span></div><div class="gal-label">سوشيال</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--dark),var(--teal));"><span style="color:white;font-size:1rem;font-weight:800;text-align:center;">اقتباس<br/>ملهم</span></div><div class="gal-label">سوشيال</div></div>
+      <div class="gal-card"><div class="gal-inner" style="background:linear-gradient(135deg,var(--navy-dark),var(--coral));"><span style="color:white;font-size:0.9rem;font-weight:800;text-align:center;">دعوة<br/>خطوبة</span></div><div class="gal-label">مناسبة</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     HOW IT WORKS
+══════════════════════════════════════ -->
+<section class="how" id="how">
+  <div class="container">
+    <div class="section-header center reveal">
+      <div class="tag" style="background:rgba(255,255,255,0.1);color:rgba(255,255,255,0.7);">كيف يعمل</div>
+      <h2 class="section-title">ثلاث خطوات<br/>إلى تصميم رائع</h2>
+      <p class="section-sub">بسيط كفاية للمبتدئين — وقوي كفاية للمحترفين.</p>
+    </div>
+
+    <div class="steps-grid">
+      <div class="step reveal">
+        <div class="step-num">١</div>
+        <div class="step-icon">🖼</div>
+        <div class="step-title">اختر قالباً أو ابدأ فارغاً</div>
+        <div class="step-desc">تصفّح آلاف القوالب المصنّفة حسب المناسبة، أو ابدأ من لوحة بيضاء مع مقاس المنصة التي تريد.</div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">٢</div>
+        <div class="step-icon">✏️</div>
+        <div class="step-title">صمّم وخصّص</div>
+        <div class="step-desc">غيّر النصوص، الألوان، الصور، الخطوط، وأضف الأنيميشن — كل شيء بلمسة وسحب على شاشتك.</div>
+      </div>
+      <div class="step reveal">
+        <div class="step-num">٣</div>
+        <div class="step-icon">🚀</div>
+        <div class="step-title">صدّر وانشر</div>
+        <div class="step-desc">صدّر بجودة عالية كـ PNG أو MP4 أو GIF وشارك مباشرة على إنستغرام، تيك توك، واتساب، وأكثر.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     FAQ
+══════════════════════════════════════ -->
+<section class="faq" id="faq">
+  <div class="container">
+    <div class="section-header center reveal">
+      <div class="tag tag-navy">أسئلة شائعة</div>
+      <h2 class="section-title">كل ما تريد معرفته</h2>
+    </div>
+
+    <div class="faq-list">
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>هل التطبيق مجاني؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">نيروز مجاني للتنزيل والاستخدام. بعض الميزات المتقدمة وعدد من القوالب الحصرية ستكون ضمن الاشتراك المميز، لكن المحرر الأساسي وعدداً كبيراً من القوالب ستبقى مجانية تماماً.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>هل يعمل التطبيق بدون اتصال بالإنترنت؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">المحرر الأساسي — الطبقات، النصوص، الأشكال، الرسم — يعمل بدون إنترنت. لكن أدوات الذكاء الاصطناعي مثل إزالة الخلفية وتوسيع الصورة تحتاج اتصالاً بالإنترنت، كذلك تصفّح القوالب الجديدة وتحميل الخطوط.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>ماذا يحدث بصوري عند استخدام أدوات الذكاء الاصطناعي؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">خصوصيتك تهمنا. صورك تُرسل للمعالجة بشكل مشفّر، ولا تُحفظ على خوادمنا بعد اكتمال المعالجة. لا نبيع بياناتك ولا نستخدمها لأغراض تجارية.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>ما صيغ التصدير المتاحة؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">يدعم نيروز التصدير بصيغ: JPEG، PNG (مع شفافية)، WebP، PDF، MP4، وGIF. يمكنك اختيار الجودة ودقة الدقة قبل التصدير مع معاينة حجم الملف.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>هل التطبيق متاح على Android و iOS؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">نعم، نيروز متاح الآن على App Store لأجهزة iPhone وiPad، وعلى Google Play لأجهزة Android. حمّله مجاناً وابدأ التصميم خلال دقائق.</div>
+      </div>
+      <div class="faq-item">
+        <button class="faq-q" onclick="toggleFaq(this)">
+          <span>هل يوجد دعم للغة العربية الكامل؟</span>
+          <span class="faq-arrow">▾</span>
+        </button>
+        <div class="faq-a">نيروز مبني أساساً للغة العربية. الواجهة كاملة RTL، ومحرك النصوص يدعم التشكيل العربي الكامل، الخط المقوّس، ومئات الخطوط العربية عالية الجودة.</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     FINAL CTA
+══════════════════════════════════════ -->
+<section class="cta-section" id="download">
+  <div class="container" style="position:relative;z-index:2;">
+    <div class="tag cta-tag reveal">حمّل الآن</div>
+    <h2 class="section-title cta-title reveal" style="margin:0 auto 1rem;">
+      تطبيقك المثالي<br/>لتصاميم احترافية
+    </h2>
+    <p class="section-sub cta-sub reveal">
+      ابدأ التصميم بنيروز الآن — مجاناً. متاح على iOS و Android.
+    </p>
+    <div class="cta-badges reveal">
+      <a href="#" class="store-badge light">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M18.71 19.5c-.83 1.24-1.71 2.45-3.05 2.47-1.34.03-1.77-.79-3.29-.79-1.53 0-2 .77-3.27.82-1.31.05-2.3-1.32-3.14-2.53C4.25 17 2.94 12.45 4.7 9.39c.87-1.52 2.43-2.48 4.12-2.51 1.28-.02 2.5.87 3.29.87.78 0 2.26-1.07 3.8-.91.65.03 2.47.26 3.64 1.98-.09.06-2.17 1.28-2.15 3.81.03 3.02 2.65 4.03 2.68 4.04-.03.07-.42 1.44-1.38 2.83M13 3.5c.73-.83 1.94-1.46 2.94-1.5.13 1.17-.34 2.35-1.04 3.19-.69.85-1.83 1.51-2.95 1.42-.15-1.15.41-2.35 1.05-3.11z"/></svg>
+        <div class="store-badge-text">
+          <small>Download on the</small>
+          <strong>App Store</strong>
+        </div>
+      </a>
+      <a href="#" class="store-badge light">
+        <svg viewBox="0 0 24 24" width="22" height="22"><path d="M3.18 23.94c.33.18.71.2 1.07.04l12.54-7.18-2.63-2.66-11 9.8zm-1.18-21.5v19.12c0 .59.32 1.07.78 1.31L14.59 12 2.78.85A1.5 1.5 0 002 2.44zM20.67 9.94l-2.41-1.38-2.93 2.93 2.93 2.93 2.43-1.39c.7-.4.7-1.68-.02-2.09zM4.25.06C3.89-.1 3.51-.07 3.18.11L14.59 12 17.22 9.37 4.25.06z"/></svg>
+        <div class="store-badge-text">
+          <small>Get it on</small>
+          <strong>Google Play</strong>
+        </div>
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- ══════════════════════════════════════
+     FOOTER
+══════════════════════════════════════ -->
+<footer>
+  <div class="footer-top">
+    <div>
+      <div class="footer-logo nav-logo">
+        <div class="logo-img">ن</div>
+        <span class="logo-name">نيروز<span style="color:var(--teal);">.</span></span>
+      </div>
+      <p class="footer-about">استوديو التصميم العربي الأول على الهاتف. صور، فيديو، وحركة — في تطبيق واحد.</p>
+      <div class="footer-socials">
+        <a href="#" aria-label="Instagram">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838a6.162 6.162 0 100 12.324 6.162 6.162 0 000-12.324zM12 16a4 4 0 110-8 4 4 0 010 8zm6.406-11.845a1.44 1.44 0 100 2.881 1.44 1.44 0 000-2.881z"/></svg>
+        </a>
+        <a href="#" aria-label="TikTok">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19.59 6.69a4.83 4.83 0 01-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 01-2.88 2.5 2.89 2.89 0 01-2.89-2.89 2.89 2.89 0 012.89-2.89c.28 0 .54.04.79.1V9.01a6.33 6.33 0 00-.79-.05 6.34 6.34 0 00-6.34 6.34 6.34 6.34 0 006.34 6.34 6.34 6.34 0 006.33-6.34V8.69a8.18 8.18 0 004.77 1.52V6.74a4.85 4.85 0 01-1-.05z"/></svg>
+        </a>
+        <a href="#" aria-label="X / Twitter">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>
+        </a>
+        <a href="#" aria-label="Facebook">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M24 12.073c0-6.627-5.373-12-12-12s-12 5.373-12 12c0 5.99 4.388 10.954 10.125 11.854v-8.385H7.078v-3.47h3.047V9.43c0-3.007 1.792-4.669 4.533-4.669 1.312 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.874v2.25h3.328l-.532 3.47h-2.796v8.385C19.612 23.027 24 18.062 24 12.073z"/></svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="footer-col">
+      <h4>التطبيق</h4>
+      <ul>
+        <li><a href="#">القوالب</a></li>
+        <li><a href="#">تصاميمي</a></li>
+        <li><a href="#">تحميل التطبيق</a></li>
+        <li><a href="#">الجديد</a></li>
+      </ul>
+    </div>
+
+    <div class="footer-col">
+      <h4>الدعم</h4>
+      <ul>
+        <li><a href="#">مركز المساعدة</a></li>
+        <li><a href="#">تواصل معنا</a></li>
+        <li><a href="#">الأسئلة الشائعة</a></li>
+        <li><a href="#">وظائف</a></li>
+      </ul>
+    </div>
+
+    <div class="footer-col">
+      <h4>القانونية</h4>
+      <ul>
+        <li><a href="#">شروط الاستخدام</a></li>
+        <li><a href="#">سياسة الخصوصية</a></li>
+        <li><a href="#">سياسة ملفات الكوكيز</a></li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer-bottom">
+    <p class="footer-copy">© ٢٠٢٥ نيروز. جميع الحقوق محفوظة.</p>
+    <div class="footer-legal">
+      <a href="#">الشروط</a>
+      <a href="#">الخصوصية</a>
+      <a href="#">تواصل</a>
+    </div>
+  </div>
+</footer>
+
+<script>
+// Nav scroll
+const nav = document.getElementById('nav');
+let navTicking = false;
+window.addEventListener('scroll', () => {
+  if (navTicking) return;
+  navTicking = true;
+  requestAnimationFrame(() => {
+    nav.classList.toggle('scrolled', window.scrollY > 20);
+    navTicking = false;
+  });
+}, { passive: true });
+
+// Scroll reveal
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(e => { if (e.isIntersecting) e.target.classList.add('visible'); });
+}, { threshold: 0.08 });
+document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
+
+// Phone slides
+let currentSlide = 0;
+const slides = document.querySelectorAll('.phone-slide');
+const dots = document.querySelectorAll('.dot');
+function goSlide(n) {
+  slides[currentSlide].classList.remove('active');
+  dots[currentSlide].classList.remove('active');
+  currentSlide = n;
+  slides[currentSlide].classList.add('active');
+  dots[currentSlide].classList.add('active');
+}
+if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+  setInterval(() => goSlide((currentSlide + 1) % slides.length), 3000);
+}
+
+// FAQ
+function toggleFaq(btn) {
+  const item = btn.parentElement;
+  const isOpen = item.classList.contains('open');
+  document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
+  if (!isOpen) item.classList.add('open');
+}
+
+// Platform cards
+function selectPlat(el) {
+  document.querySelectorAll('.plat-card').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+}
+
+// Mobile menu
+function openMobileMenu() { document.getElementById('mobileMenu').classList.add('open'); }
+function closeMobileMenu() { document.getElementById('mobileMenu').classList.remove('open'); }
+
+/* ──────────────────────────────────────────────────────────────
+   PRODUCTION-GRADE INFINITE MARQUEE
+   - Time-based motion (framerate independent)
+   - GPU accelerated via translate3d
+   - Auto-clones cards to fill viewport with buffer
+   - Pauses on hover, tab hidden, and prefers-reduced-motion
+   - Re-measures on resize
+   - True infinite: cards exit one end, reappear at the other
+──────────────────────────────────────────────────────────────── */
+class InfiniteMarquee {
+  constructor(track, options = {}) {
+    this.track = track;
+    this.wrap = track.parentElement;
+    this.speed = options.speed || 50;                   // px/sec
+    this.direction = options.direction === 'right' ? 1 : -1;
+    this.offset = 0;
+    this.setWidth = 0;                                   // width of one original set
+    this.isPaused = false;
+    this.lastTime = null;
+    this.rafId = null;
+    this.originalCards = Array.from(track.children);
+    this.resizeTimer = null;
+
+    this.build();
+    this.bindEvents();
+    this.start();
+  }
+
+  // Clone original card set enough times so total content is at least 3x viewport.
+  // This ensures we always have offscreen buffer on both sides of the visible area.
+  build() {
+    // Reset to original
+    this.track.style.transform = 'translate3d(0, 0, 0)';
+    while (this.track.children.length > this.originalCards.length) {
+      this.track.removeChild(this.track.lastChild);
+    }
+
+    // Force layout to measure one full original set
+    const firstSetWidth = this.track.scrollWidth;
+    this.setWidth = firstSetWidth + this.getGap();      // include gap after last card
+
+    // Clone until track is wide enough: target = visible width × 3
+    const target = Math.max(this.wrap.offsetWidth * 3, this.setWidth * 2);
+    while (this.track.scrollWidth < target) {
+      this.originalCards.forEach(card => {
+        this.track.appendChild(card.cloneNode(true));
+      });
+    }
+
+    // Keep the loop position continuous across rebuilds (e.g. on resize):
+    // normalize the current offset into a single set-width period [-setWidth, 0]
+    // so the carousel never jumps back to the start.
+    this.offset = this.offset % this.setWidth;
+    if (this.offset > 0) this.offset -= this.setWidth;
+    this.apply();
+  }
+
+  getGap() {
+    const style = getComputedStyle(this.track);
+    return parseFloat(style.gap || style.columnGap || 0) || 0;
+  }
+
+  apply() {
+    this.track.style.transform = `translate3d(${this.offset}px, 0, 0)`;
+  }
+
+  tick = (timestamp) => {
+    if (this.lastTime === null) this.lastTime = timestamp;
+    const delta = (timestamp - this.lastTime) / 1000;
+    this.lastTime = timestamp;
+
+    if (!this.isPaused) {
+      this.offset += this.speed * this.direction * delta;
+
+      // Seamless wrap using modulo math — visual is identical at wrap point
+      // because content is duplicated.
+      if (this.direction === -1 && this.offset <= -this.setWidth) {
+        this.offset += this.setWidth;
+      } else if (this.direction === 1 && this.offset >= 0) {
+        this.offset -= this.setWidth;
+      }
+
+      this.apply();
+    }
+
+    this.rafId = requestAnimationFrame(this.tick);
+  };
+
+  start() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      this.isPaused = true;
+    }
+    this.rafId = requestAnimationFrame(this.tick);
+  }
+
+  pause() { this.isPaused = true; this.lastTime = null; }
+  resume() {
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    this.isPaused = false;
+    this.lastTime = null;
+  }
+
+  bindEvents() {
+    // Pause on hover
+    this.wrap.addEventListener('mouseenter', () => this.pause());
+    this.wrap.addEventListener('mouseleave', () => this.resume());
+    // Pause when off-screen / tab hidden
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) this.pause();
+      else if (!this.wrap.matches(':hover')) this.resume();
+    });
+    // Re-measure on resize
+    window.addEventListener('resize', () => {
+      clearTimeout(this.resizeTimer);
+      this.resizeTimer = setTimeout(() => this.build(), 200);
+    });
+  }
+}
+
+// Initialize all marquees on the page
+document.querySelectorAll('[data-marquee]').forEach(track => {
+  new InfiniteMarquee(track, {
+    speed: parseFloat(track.dataset.speed) || 50,
+    direction: track.dataset.direction || 'left'
+  });
+});
+</script>
+</body>
+</html>
