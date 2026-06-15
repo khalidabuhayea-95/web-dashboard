@@ -80,7 +80,8 @@ BEGIN
       slug,
       author_id,
       author_name,
-      category_value,
+      -- editor_element_assets has no category_value column; backfill as NULL.
+      NULL,
       asset_url,
       thumbnail_url,
       width,

@@ -397,7 +397,7 @@ function PreviewTile({ item, selected, onToggle }) {
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={item.thumbnailUrl}
-          alt={item.name || "Freepik icon"}
+          alt={item.name || "Magnific icon"}
           className="h-32 w-full rounded-2xl bg-white object-contain"
         />
         {animated ? (
@@ -434,7 +434,7 @@ export default function FreepikImportWorkspaceClient() {
   const [baselineQuery, setBaselineQuery] = useState(DEFAULT_QUERY);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [baselineFilters, setBaselineFilters] = useState(DEFAULT_FILTERS);
-  const [status, setStatus] = useState(createStatus("neutral", "Loading Freepik defaults..."));
+  const [status, setStatus] = useState(createStatus("neutral", "Loading Magnific defaults..."));
   const [saving, setSaving] = useState(false);
 
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -459,7 +459,7 @@ export default function FreepikImportWorkspaceClient() {
         const response = await fetch("/api/settings/freepik", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(formatErrorMessage(payload, "Failed to load Freepik settings."));
+          throw new Error(formatErrorMessage(payload, "Failed to load Magnific settings."));
         }
 
         if (!mounted) return;
@@ -494,7 +494,7 @@ export default function FreepikImportWorkspaceClient() {
         setStatus(
           createStatus(
             "error",
-            error?.message || "We could not load the Freepik defaults."
+            error?.message || "We could not load the Magnific defaults."
           )
         );
       } finally {
@@ -538,7 +538,7 @@ export default function FreepikImportWorkspaceClient() {
 
   const handleSaveSettings = async () => {
     setSaving(true);
-    setStatus(createStatus("neutral", "Saving Freepik defaults..."));
+    setStatus(createStatus("neutral", "Saving Magnific defaults..."));
     try {
       const filtersPayload = buildFreepikFiltersPayload(filters);
       const response = await fetch("/api/settings/freepik", {
@@ -556,17 +556,17 @@ export default function FreepikImportWorkspaceClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to save Freepik settings."));
+        throw new Error(formatErrorMessage(payload, "Failed to save Magnific settings."));
       }
 
       setBaselineQuery(query);
       setBaselineFilters(filters);
-      setStatus(createStatus("success", "Freepik defaults saved."));
+      setStatus(createStatus("success", "Magnific defaults saved."));
     } catch (error) {
       setStatus(
         createStatus(
           "error",
-          error?.message || "We could not save the Freepik defaults."
+          error?.message || "We could not save the Magnific defaults."
         )
       );
     } finally {
@@ -576,7 +576,7 @@ export default function FreepikImportWorkspaceClient() {
 
   const fetchPreview = async (override = {}) => {
     setPreviewBusy(true);
-    setStatus(createStatus("neutral", "Fetching Freepik icons..."));
+    setStatus(createStatus("neutral", "Fetching Magnific icons..."));
     setImportResult(null);
     try {
       const filtersPayload = buildFreepikFiltersPayload(filters);
@@ -697,7 +697,7 @@ export default function FreepikImportWorkspaceClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to queue Freepik import."));
+        throw new Error(formatErrorMessage(payload, "Failed to queue Magnific import."));
       }
 
       const jobId = String(payload?.job?.id || "").trim();
@@ -707,7 +707,7 @@ export default function FreepikImportWorkspaceClient() {
 
       const completedJob = await pollImportJob(jobId, {
         onUpdate: (job) => {
-          setJobProgress(String(job?.progress || "Processing Freepik import..."));
+          setJobProgress(String(job?.progress || "Processing Magnific import..."));
         },
       });
 
@@ -733,7 +733,7 @@ export default function FreepikImportWorkspaceClient() {
       );
     } catch (error) {
       setStatus(
-        createStatus("error", error?.message || "Freepik import failed.")
+        createStatus("error", error?.message || "Magnific import failed.")
       );
     } finally {
       setImportBusy(false);
@@ -745,7 +745,7 @@ export default function FreepikImportWorkspaceClient() {
     <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 sm:px-6 lg:px-8">
       <WorkspaceSection
         eyebrow="Icons"
-        title="Search, preview, and import Freepik icons"
+        title="Search, preview, and import Magnific icons"
         description="Tune search defaults, preview the current query response, and import only the assets you want. The workflow is laid out for quick iteration rather than raw parameter dumping."
         icon={Search}
         badges={[
@@ -772,7 +772,7 @@ export default function FreepikImportWorkspaceClient() {
               <FieldBlock
                 id="freepik-accept-language"
                 label="Accept-Language"
-                description="Forward a locale when you want region-specific Freepik search behavior."
+                description="Forward a locale when you want region-specific Magnific search behavior."
               >
                 <Input
                   id="freepik-accept-language"
@@ -813,7 +813,7 @@ export default function FreepikImportWorkspaceClient() {
               <FieldBlock
                 id="freepik-slug"
                 label="Slug"
-                description="Optional direct slug when you already know the exact Freepik item."
+                description="Optional direct slug when you already know the exact Magnific item."
               >
                 <Input
                   id="freepik-slug"
@@ -1092,7 +1092,7 @@ export default function FreepikImportWorkspaceClient() {
       <WorkspaceSection
         eyebrow="Backgrounds"
         title="Background import"
-        description="Use the existing background import workflow from the same page so teams can manage both Freepik asset types from one workspace."
+        description="Use the existing background import workflow from the same page so teams can manage both Magnific asset types from one workspace."
         icon={Download}
         badges={[{ tone: "neutral", label: "Shared import workspace" }]}
       >

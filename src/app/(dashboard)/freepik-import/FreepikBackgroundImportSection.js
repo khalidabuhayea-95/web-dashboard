@@ -268,7 +268,7 @@ export default function FreepikBackgroundImportSection({
 
   const fetchPreview = async (override = {}) => {
     setPreviewBusy(true);
-    setStatus("Fetching Freepik backgrounds...");
+    setStatus("Fetching Magnific backgrounds...");
     setImportResult(null);
     try {
       const filtersPayload = buildBackgroundFiltersPayload(filters);
@@ -385,7 +385,7 @@ export default function FreepikBackgroundImportSection({
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to queue Freepik background import."));
+        throw new Error(formatErrorMessage(payload, "Failed to queue Magnific background import."));
       }
 
       const jobId = String(payload?.job?.id || "").trim();
@@ -395,7 +395,7 @@ export default function FreepikBackgroundImportSection({
 
       const completedJob = await pollImportJob(jobId, {
         onUpdate: (job) => {
-          setJobProgress(String(job?.progress || "Processing Freepik background import..."));
+          setJobProgress(String(job?.progress || "Processing Magnific background import..."));
         },
       });
 
@@ -414,7 +414,7 @@ export default function FreepikBackgroundImportSection({
           : `Background import completed. Imported ${imported} / ${requested}. Failed: ${failed}.`
       );
     } catch (error) {
-      setStatus(error?.message || "Freepik background import failed.");
+      setStatus(error?.message || "Magnific background import failed.");
     } finally {
       setImportBusy(false);
       setJobProgress("");
@@ -427,7 +427,7 @@ export default function FreepikBackgroundImportSection({
         <div>
           <CardTitle>Backgrounds Import</CardTitle>
           <CardSubtitle>
-            Search Freepik stock backgrounds, choose a background category, then import the selected assets.
+            Search Magnific stock backgrounds, choose a background category, then import the selected assets.
           </CardSubtitle>
         </div>
         <Button
@@ -652,7 +652,7 @@ export default function FreepikBackgroundImportSection({
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={item.thumbnailUrl || item.assetUrl}
-                      alt={item.title || "Freepik background"}
+                      alt={item.title || "Magnific background"}
                       className="h-40 w-full object-cover"
                     />
                     {item.type ? (

@@ -24,8 +24,9 @@ import {
 import { normalizeBackgroundCategory } from "@/lib/backgrounds/categorySettings";
 
 const FREEPIK_SETTINGS_KEY = "freepik_import_settings_v1";
-const FREEPIK_ICONS_API_URL = "https://api.freepik.com/v1/icons";
-const FREEPIK_RESOURCES_API_URL = "https://api.freepik.com/v1/resources";
+const MAGNIFIC_API_KEY_HEADER = "x-magnific-api-key";
+const MAGNIFIC_ICONS_API_URL = "https://api.magnific.com/v1/icons";
+const MAGNIFIC_RESOURCES_API_URL = "https://api.magnific.com/v1/resources";
 const DEFAULT_BUCKET = getPublicStorageBucketName();
 const DOWNLOAD_TIMEOUT_MS = 20_000;
 const PREVIEW_PAGE_SIZE_MAX = 100;
@@ -34,6 +35,21 @@ const MAX_ZIP_LIST_BUFFER = 10 * 1024 * 1024;
 const MAX_ZIP_EXTRACT_BUFFER = 100 * 1024 * 1024;
 const MAX_IMPORTED_BACKGROUND_DIMENSION = 2048;
 const execFileAsync = promisify(execFile);
+
+function createFreepikRequestError(response, payload, fallbackMessage) {
+  const rawMessage = sanitizeText(
+    payload?.message || payload?.error || fallbackMessage || `Magnific request failed (${response.status}).`
+  );
+  const isInvalidApiKey =
+    response.status === 401 ||
+    /api key.*invalid|provided api key is invalid|magnific\.com\/developers\/dashboard\/api-key/i.test(rawMessage);
+  const message = isInvalidApiKey
+    ? "Magnific API key is invalid or expired. Create a new key in the Magnific API dashboard, then save it in Settings > Magnific API key."
+    : rawMessage;
+  const error = new Error(message);
+  error.statusCode = response.status || 500;
+  return error;
+}
 
 function sanitizeText(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
@@ -484,14 +500,14 @@ function normalizeFreepikBackgroundItem(item) {
 export async function previewFreepikIcons({ query = {}, apiKey = "" } = {}) {
   const key = sanitizeApiKey(apiKey);
   if (!key) {
-    throw new Error("Freepik API key is not configured.");
+    throw new Error("Magnific API key is not configured.");
   }
 
   const { normalized, params } = buildFreepikSearchParams(query);
-  const url = `${FREEPIK_ICONS_API_URL}?${params.toString()}`;
+  const url = `${MAGNIFIC_ICONS_API_URL}?${params.toString()}`;
 
   const headers = {
-    "x-freepik-api-key": key,
+    [MAGNIFIC_API_KEY_HEADER]: key,
     Accept: "application/json",
   };
   if (normalized.acceptLanguage) {
@@ -501,7 +517,7 @@ export async function previewFreepikIcons({ query = {}, apiKey = "" } = {}) {
   const curlLines = [
     "curl --request GET \\",
     `  --url '${url}' \\`,
-    `  --header 'x-freepik-api-key: ${maskApiKey(key) || "YOUR_API_KEY"}'`,
+    `  --header '${MAGNIFIC_API_KEY_HEADER}: ${maskApiKey(key) || "YOUR_API_KEY"}'`,
   ];
   if (normalized.acceptLanguage) {
     curlLines.splice(
@@ -519,9 +535,7 @@ export async function previewFreepikIcons({ query = {}, apiKey = "" } = {}) {
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      String(payload?.message || payload?.error || `Freepik request failed (${response.status}).`)
-    );
+    throw createFreepikRequestError(response, payload, `Magnific request failed (${response.status}).`);
   }
 
   const items = Array.isArray(payload?.data)
@@ -550,14 +564,14 @@ export async function previewFreepikIcons({ query = {}, apiKey = "" } = {}) {
 export async function previewFreepikBackgrounds({ query = {}, apiKey = "" } = {}) {
   const key = sanitizeApiKey(apiKey);
   if (!key) {
-    throw new Error("Freepik API key is not configured.");
+    throw new Error("Magnific API key is not configured.");
   }
 
   const { normalized, params } = buildFreepikResourceSearchParams(query);
-  const url = `${FREEPIK_RESOURCES_API_URL}?${params.toString()}`;
+  const url = `${MAGNIFIC_RESOURCES_API_URL}?${params.toString()}`;
 
   const headers = {
-    "x-freepik-api-key": key,
+    [MAGNIFIC_API_KEY_HEADER]: key,
     Accept: "application/json",
   };
   if (normalized.acceptLanguage) {
@@ -567,7 +581,7 @@ export async function previewFreepikBackgrounds({ query = {}, apiKey = "" } = {}
   const curlLines = [
     "curl --request GET \\",
     `  --url '${url}' \\`,
-    `  --header 'x-freepik-api-key: ${maskApiKey(key) || "YOUR_API_KEY"}'`,
+    `  --header '${MAGNIFIC_API_KEY_HEADER}: ${maskApiKey(key) || "YOUR_API_KEY"}'`,
   ];
   if (normalized.acceptLanguage) {
     curlLines.splice(
@@ -585,9 +599,7 @@ export async function previewFreepikBackgrounds({ query = {}, apiKey = "" } = {}
   });
   const payload = await response.json().catch(() => ({}));
   if (!response.ok) {
-    throw new Error(
-      String(payload?.message || payload?.error || `Freepik request failed (${response.status}).`)
-    );
+    throw createFreepikRequestError(response, payload, `Magnific request failed (${response.status}).`);
   }
 
   const items = Array.isArray(payload?.data)
@@ -993,11 +1005,11 @@ function resolveTranslationStatus({ titleEn, titleAr, tagsEn, tagsAr }) {
 }
 
 function asProgressText(current, total) {
-  return `Importing Freepik icons (${current}/${total})...`;
+  return `Importing Magnific icons (${current}/${total})...`;
 }
 
 function asBackgroundProgressText(current, total) {
-  return `Importing Freepik backgrounds (${current}/${total})...`;
+  return `Importing Magnific backgrounds (${current}/${total})...`;
 }
 
 function isDirectAssetLikeUrl(value) {
@@ -1014,14 +1026,14 @@ async function resolveBackgroundAssetUrl({ item, apiKey = "", acceptLanguage = "
   }
 
   const headers = {
-    "x-freepik-api-key": sanitizeApiKey(apiKey),
+    [MAGNIFIC_API_KEY_HEADER]: sanitizeApiKey(apiKey),
     Accept: "application/json",
   };
   if (sanitizeText(acceptLanguage)) {
     headers["Accept-Language"] = sanitizeText(acceptLanguage);
   }
 
-  const url = `${FREEPIK_RESOURCES_API_URL}/${resourceId}/download`;
+  const url = `${MAGNIFIC_RESOURCES_API_URL}/${resourceId}/download`;
 
   try {
     const response = await fetch(url, {
@@ -1050,7 +1062,7 @@ async function resolveBackgroundAssetUrl({ item, apiKey = "", acceptLanguage = "
 export async function runFreepikImportForOwner({ ownerId, selectedItems = [], onProgress } = {}) {
   const safeOwnerId = sanitizeText(ownerId);
   if (!safeOwnerId) {
-    throw new Error("Owner id is required for Freepik import.");
+    throw new Error("Owner id is required for Magnific import.");
   }
 
   const items = sanitizeSelectedItems(selectedItems);
@@ -1137,7 +1149,7 @@ export async function runFreepikImportForOwner({ ownerId, selectedItems = [], on
         mimeType: uploadMimeType,
       });
 
-      const titleEn = item.name || item.slug || `Freepik ${item.id}`;
+      const titleEn = item.name || item.slug || `Magnific ${item.id}`;
       const titleAr = translationMap.get(titleEn) || titleEn;
       const tagsEn = item.tags;
       const tagsAr = tagsEn.map((value) => translationMap.get(value) || value);
@@ -1199,7 +1211,7 @@ export async function runFreepikBackgroundImportForOwner({
 } = {}) {
   const safeOwnerId = sanitizeText(ownerId);
   if (!safeOwnerId) {
-    throw new Error("Owner id is required for Freepik background import.");
+    throw new Error("Owner id is required for Magnific background import.");
   }
 
   const items = sanitizeSelectedBackgroundItems(selectedItems);
@@ -1281,7 +1293,7 @@ export async function runFreepikBackgroundImportForOwner({
           })
         : storedUrl;
 
-      const titleEn = item.title || item.slug || `Freepik background ${item.id}`;
+      const titleEn = item.title || item.slug || `Magnific background ${item.id}`;
       const titleAr = translationMap.get(titleEn) || titleEn;
       const tagsEn = item.tags;
       const tagsAr = tagsEn.map((value) => translationMap.get(value) || value);

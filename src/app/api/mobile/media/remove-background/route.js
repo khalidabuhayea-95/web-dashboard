@@ -6,13 +6,13 @@ import {
   getRequestLogContext,
   resolveRequestId,
 } from "@/lib/logging/request";
+import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { removeBackground } from "@/lib/media/backgroundRemoval/index.server";
 import { isBackgroundRemovalError } from "@/lib/media/backgroundRemoval/errors";
 import { removeRasterBackgroundWithRembg } from "@/lib/media/backgroundRemoval/providers/rembg.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
-  resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
 
 export const runtime = "nodejs";
@@ -98,10 +98,20 @@ export async function POST(request) {
   const startedAt = Date.now();
 
   try {
-    const clientIdentity = resolveRequestIp(request) || "anonymous";
+    const auth = await resolveMobileBearerUser(request);
+    if (!auth.ok) {
+      requestLogger.warn("Background removal rejected: unauthenticated", {
+        reason: auth.reason,
+      });
+      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+        "Cache-Control": "no-store",
+      });
+    }
+    const mobileUser = auth.mobileUser;
+
     const rateLimitState = checkRateLimit({
       scope: "api:mobile:media:remove-background",
-      identifier: clientIdentity,
+      identifier: mobileUser.id,
       limit: REMOVE_BACKGROUND_LIMIT.limit,
       windowMs: REMOVE_BACKGROUND_LIMIT.windowMs,
     });
@@ -165,6 +175,7 @@ export async function POST(request) {
       });
     }
     requestLogger.info("Background removal completed", {
+      mobileUserId: mobileUser.id,
       inputMimeType: String(file.type || "").trim().toLowerCase() || null,
       inputBytes: inputBytes.length,
       outputBytes: result.bytes.length,

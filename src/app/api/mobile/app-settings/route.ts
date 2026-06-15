@@ -50,6 +50,7 @@ export async function GET(request: NextRequest) {
     const {
       objectRemovalModel: _objectRemovalModel,
       aiExpandModel: _aiExpandModel,
+      upscaleModel: _upscaleModel,
       ...publicResponsePayload
     } = responsePayload;
 

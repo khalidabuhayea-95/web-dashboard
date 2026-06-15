@@ -69,20 +69,20 @@ function useFreepikSettingsForm() {
   const [updatedAt, setUpdatedAt] = useState("");
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
   const [apiKeyMasked, setApiKeyMasked] = useState("");
-  const [status, setStatus] = useState(createStatus("neutral", "Loading Freepik credentials..."));
+  const [status, setStatus] = useState(createStatus("neutral", "Loading Magnific credentials..."));
 
   useEffect(() => {
     let mounted = true;
 
     const loadSettings = async () => {
       setLoading(true);
-      setStatus(createStatus("neutral", "Loading Freepik credentials..."));
+      setStatus(createStatus("neutral", "Loading Magnific credentials..."));
 
       try {
         const response = await fetch("/api/settings/freepik", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(formatErrorMessage(payload, "Failed to load Freepik settings."));
+          throw new Error(formatErrorMessage(payload, "Failed to load Magnific settings."));
         }
 
         if (!mounted) return;
@@ -99,7 +99,7 @@ function useFreepikSettingsForm() {
         setStatus(
           createStatus(
             "error",
-            error?.message || "We could not load the Freepik configuration."
+            error?.message || "We could not load the Magnific configuration."
           )
         );
       } finally {
@@ -120,7 +120,7 @@ function useFreepikSettingsForm() {
 
   const save = async () => {
     setSaving(true);
-    setStatus(createStatus("neutral", "Saving Freepik credentials..."));
+    setStatus(createStatus("neutral", "Saving Magnific credentials..."));
 
     try {
       const response = await fetch("/api/settings/freepik", {
@@ -132,7 +132,7 @@ function useFreepikSettingsForm() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to save Freepik settings."));
+        throw new Error(formatErrorMessage(payload, "Failed to save Magnific settings."));
       }
 
       const nextSettings = mapFreepikSettings(payload?.settings || {});
@@ -141,12 +141,12 @@ function useFreepikSettingsForm() {
       setApiKeyConfigured(nextSettings.apiKeyConfigured);
       setApiKeyMasked(nextSettings.apiKeyMasked);
       setUpdatedAt(String(payload?.settings?.updatedAt || ""));
-      setStatus(createStatus("success", "Freepik credentials saved."));
+      setStatus(createStatus("success", "Magnific credentials saved."));
     } catch (error) {
       setStatus(
         createStatus(
           "error",
-          error?.message || "We could not save the Freepik configuration."
+          error?.message || "We could not save the Magnific configuration."
         )
       );
     } finally {
@@ -414,7 +414,7 @@ function SettingsWorkspaceClient() {
               saving={freepik.saving}
               hasChanges={freepik.hasChanges}
               onSave={freepik.save}
-              saveLabel="Save Freepik credentials"
+              saveLabel="Save Magnific credentials"
               saveDisabled={!freepik.form.apiKey.trim()}
             />
           }
@@ -422,13 +422,13 @@ function SettingsWorkspaceClient() {
           <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
             <SurfaceCard
               icon={Download}
-              title="Freepik API key"
-              description="Manage the API key used by the Freepik icon and background import flows."
+              title="Magnific API key"
+              description="Manage the API key used by the Magnific (formerly Freepik) icon and background import flows."
             >
               <div className="space-y-4">
                 <FieldBlock
                   id="settings-freepik-api-key"
-                  label="Freepik API key"
+                  label="Magnific API key"
                   description="Paste a replacement key only when rotating credentials."
                   hint="The current key stays active until you save a new one."
                 >
@@ -446,7 +446,7 @@ function SettingsWorkspaceClient() {
                     placeholder={
                       freepik.apiKeyConfigured
                         ? "Enter new key to replace existing"
-                        : "Enter Freepik API key"
+                        : "Enter Magnific API key"
                     }
                   />
                 </FieldBlock>
@@ -454,7 +454,7 @@ function SettingsWorkspaceClient() {
                 <CredentialState
                   configured={freepik.apiKeyConfigured}
                   maskedValue={freepik.apiKeyMasked}
-                  emptyCopy="No Freepik API key is stored yet."
+                  emptyCopy="No Magnific API key is stored yet."
                 />
               </div>
             </SurfaceCard>
@@ -471,7 +471,7 @@ function SettingsWorkspaceClient() {
                   <ul className="space-y-2 text-sm leading-6 text-[color:var(--ds-text-muted)]">
                     <li>Only admins can update stored credentials from this page.</li>
                     <li>Existing keys stay masked after save to reduce accidental exposure.</li>
-                    <li>Use the import workspace below to validate new Freepik access after rotation.</li>
+                    <li>Use the import workspace below to validate new Magnific access after rotation.</li>
                   </ul>
                 </div>
               </div>
@@ -554,7 +554,7 @@ function SettingsWorkspaceClient() {
             >
               <div className="space-y-3">
                 <Button as="a" href="/freepik-import" className="w-full justify-between">
-                  Open Freepik import
+                  Open Magnific import
                   <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
                 </Button>
                 <Button

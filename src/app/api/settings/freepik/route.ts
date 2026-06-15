@@ -22,7 +22,7 @@ export async function GET() {
     const session = await getEditorSession();
     if (session.error) return session.error;
 
-    logger.info("Freepik import settings requested", {
+    logger.info("Magnific import settings requested", {
       userId: session.userId,
     });
 
@@ -32,7 +32,7 @@ export async function GET() {
       canEdit: session.role === "admin",
     });
   } catch (error) {
-    return handleApiError(error, "Failed to retrieve Freepik settings");
+    return handleApiError(error, "Failed to retrieve Magnific settings");
   }
 }
 
@@ -42,7 +42,7 @@ export async function PUT(request: NextRequest) {
     if (session.error) return session.error;
 
     if (session.role !== "admin") {
-      return handleForbidden("Only admins can update Freepik settings");
+      return handleForbidden("Only admins can update Magnific settings");
     }
 
     let body: any = {};
@@ -52,7 +52,7 @@ export async function PUT(request: NextRequest) {
       return handleBadRequest("Invalid JSON body");
     }
 
-    logger.info("Updating Freepik settings", {
+    logger.info("Updating Magnific settings", {
       userId: session.userId,
     });
 
@@ -68,7 +68,7 @@ export async function PUT(request: NextRequest) {
   } catch (error) {
     return handleApiError(
       error,
-      error instanceof Error ? error.message : "Failed to save Freepik settings",
+      error instanceof Error ? error.message : "Failed to save Magnific settings",
       500
     );
   }

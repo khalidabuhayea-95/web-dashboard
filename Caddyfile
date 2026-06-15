@@ -1,0 +1,7 @@
+# Local-only reverse proxy. Listens on :80 inside the container (published as
+# host :8080 in docker-compose). No domain/TLS — for production you'd switch
+# this to `your.domain { reverse_proxy web:3000 }` and Caddy auto-provisions
+# certificates.
+:80 {
+	reverse_proxy web:3000
+}

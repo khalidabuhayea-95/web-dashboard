@@ -5,15 +5,39 @@ import {
   markImportJobFailed,
   markImportJobSucceeded,
   requeueStalledImportJob,
+  setImportJobProducedTemplate,
   updateImportJobProgress,
 } from "@/lib/tools/importJobsStore.server";
-import { runCanvaImportForOwner } from "@/app/api/tools/canva-import/route.ts";
+import { runCanvaImportForOwner } from "@/lib/tools/canvaImport.server";
 import {
   runFreepikBackgroundImportForOwner,
   runFreepikImportForOwner,
 } from "@/lib/tools/freepikImport.server";
+import { logger } from "@/lib/logging/logger";
 
 const activeJobs = new Set();
+
+const DEFAULT_MAX_IMPORT_JOB_ATTEMPTS = 3;
+
+// Per-type retry caps. Canva is non-idempotent across separate attempts and
+// drives an external browser, so it gets a tighter cap; Freepik writes are
+// idempotent (ON CONFLICT upserts) and safe to retry more.
+const MAX_IMPORT_JOB_ATTEMPTS_BY_TYPE = {
+  "canva-url": 2,
+  "freepik-icons": 5,
+  "freepik-backgrounds": 5,
+};
+
+function maxAttemptsForType(type) {
+  const key = String(type || "").trim().toLowerCase();
+  if (Object.prototype.hasOwnProperty.call(MAX_IMPORT_JOB_ATTEMPTS_BY_TYPE, key)) {
+    return MAX_IMPORT_JOB_ATTEMPTS_BY_TYPE[key];
+  }
+  const envDefault = Number(process.env.IMPORT_JOBS_MAX_ATTEMPTS);
+  return Number.isFinite(envDefault) && envDefault > 0
+    ? Math.floor(envDefault)
+    : DEFAULT_MAX_IMPORT_JOB_ATTEMPTS;
+}
 
 function toErrorMessage(error, fallback = "Import failed.") {
   if (error instanceof Error && error.message) return error.message;
@@ -38,6 +62,29 @@ async function runImportJobInternal(jobId) {
     };
   }
 
+  // Poison-job guard: `attempts` is incremented on every claim, so a job whose
+  // count now exceeds its cap has already been run `maxAttempts` times. Fail it
+  // terminally instead of letting the stale-requeue path loop it forever.
+  const maxAttempts = maxAttemptsForType(claimed.type);
+  if (claimed.attempts > maxAttempts) {
+    logger.error("Import job exceeded max attempts", {
+      jobId,
+      type: claimed.type,
+      attempts: claimed.attempts,
+      maxAttempts,
+    });
+    const failed = await markImportJobFailed(
+      jobId,
+      `Import job exceeded maximum attempts (${maxAttempts}).`
+    );
+    return {
+      claimed: true,
+      status: String(failed?.status || "failed").trim().toLowerCase() || "failed",
+      jobId,
+      reason: "max-attempts-exceeded",
+    };
+  }
+
   const input = claimed.input && typeof claimed.input === "object" ? claimed.input : {};
 
   try {
@@ -53,6 +100,12 @@ async function runImportJobInternal(jobId) {
         maxDimension: input.maxDimension,
         timeoutMs: input.timeoutMs,
         interactiveBrowser: input.interactiveBrowser === true,
+        // Retry-safety: reuse the template a prior attempt of this job created
+        // (if any), and record any new one the moment it exists.
+        existingTemplateId: claimed.producedTemplateId || "",
+        onTemplateProduced: async (templateId) => {
+          await setImportJobProducedTemplate(jobId, templateId);
+        },
       });
       result = output?.payload && typeof output.payload === "object" ? output.payload : output;
     } else if (claimed.type === "freepik-icons") {

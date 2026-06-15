@@ -3,6 +3,10 @@ import {
   normalizeAiExpandModelId,
 } from "../media/aiExpand/models.js";
 import {
+  DEFAULT_IMAGE_UPSCALE_MODEL_ID,
+  normalizeImageUpscaleModelId,
+} from "../media/imageUpscale/models.js";
+import {
   DEFAULT_OBJECT_REMOVAL_MODEL_ID,
   normalizeObjectRemovalModelId,
   normalizeObjectRemovalModelOrder,
@@ -21,6 +25,7 @@ const ROOT_SETTING_KEYS = new Set([
   "ios",
   "objectRemovalModel",
   "aiExpandModel",
+  "upscaleModel",
   "updatedAt",
 ]);
 
@@ -51,6 +56,11 @@ function sanitizeObjectRemovalModel(value) {
 
 function sanitizeAiExpandModel(value) {
   const normalized = normalizeAiExpandModelId(value);
+  return normalized || null;
+}
+
+function sanitizeUpscaleModel(value) {
+  const normalized = normalizeImageUpscaleModelId(value);
   return normalized || null;
 }
 
@@ -168,11 +178,13 @@ export function normalizeStoredMobileAppSettings(value = {}) {
     sanitizeObjectRemovalModel(source.objectRemovalModel) ||
     resolveLegacyPlatformObjectRemovalModel(source);
   const aiExpandModel = sanitizeAiExpandModel(source.aiExpandModel);
+  const upscaleModel = sanitizeUpscaleModel(source.upscaleModel);
   return {
     android: normalizeStoredPlatformSettings(source.android),
     ios: normalizeStoredPlatformSettings(source.ios),
     objectRemovalModel,
     aiExpandModel,
+    upscaleModel,
     updatedAt: sanitizeString(source.updatedAt) || new Date().toISOString(),
   };
 }
@@ -193,6 +205,10 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
       "aiExpandModel" in input
         ? sanitizeAiExpandModel(input.aiExpandModel)
         : current.aiExpandModel,
+    upscaleModel:
+      "upscaleModel" in input
+        ? sanitizeUpscaleModel(input.upscaleModel)
+        : current.upscaleModel,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -204,6 +220,7 @@ export function resolveMobileAppSettingsDecision(
     appVersion,
     defaultObjectRemovalModel = DEFAULT_OBJECT_REMOVAL_MODEL_ID,
     defaultAiExpandModel = DEFAULT_AI_EXPAND_MODEL_ID,
+    defaultUpscaleModel = DEFAULT_IMAGE_UPSCALE_MODEL_ID,
   } = {}
 ) {
   const normalizedDeviceType = normalizeMobileDeviceType(deviceType);
@@ -239,6 +256,9 @@ export function resolveMobileAppSettingsDecision(
     aiExpandModel: resolveMobileAiExpandModel(settings, {
       defaultAiExpandModel,
     }),
+    upscaleModel: resolveMobileUpscaleModel(settings, {
+      defaultUpscaleModel,
+    }),
   };
 }
 
@@ -263,5 +283,17 @@ export function resolveMobileAiExpandModel(
     sanitizeAiExpandModel(normalizedSettings.aiExpandModel) ||
     sanitizeAiExpandModel(defaultAiExpandModel) ||
     DEFAULT_AI_EXPAND_MODEL_ID
+  );
+}
+
+export function resolveMobileUpscaleModel(
+  settings,
+  { defaultUpscaleModel = DEFAULT_IMAGE_UPSCALE_MODEL_ID } = {}
+) {
+  const normalizedSettings = normalizeStoredMobileAppSettings(settings);
+  return (
+    sanitizeUpscaleModel(normalizedSettings.upscaleModel) ||
+    sanitizeUpscaleModel(defaultUpscaleModel) ||
+    DEFAULT_IMAGE_UPSCALE_MODEL_ID
   );
 }

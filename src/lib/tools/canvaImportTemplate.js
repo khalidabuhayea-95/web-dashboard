@@ -1,7 +1,7 @@
 import prisma from "@/lib/prisma";
 import { resizeThumbnailDataUrlHalf } from "@/lib/media/thumbnailResize.server";
 import { extractFabricData } from "@/lib/templates/editorData";
-import { buildSnapshot, normalizeSlug } from "@/lib/templates/server";
+import { buildSnapshot, normalizeSlug } from "@/lib/templates/serverCore";
 import {
   attachImportMetadataToFabricData,
   readImportMetadataFromEditorData,

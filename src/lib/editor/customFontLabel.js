@@ -2,6 +2,12 @@ import { normalizeFontFamilyName } from "@/lib/editor/fonts";
 
 const SYNTHETIC_FAMILY_PATTERN = /^YA[A-Za-z0-9_-]+(?:_[0-9]+)?$/;
 
+// True when `value` looks like a Canva opaque font id (e.g. "YADkLzugzJU_0")
+// rather than a real human font name.
+export function isSyntheticFontFamily(value) {
+  return SYNTHETIC_FAMILY_PATTERN.test(String(value || "").trim());
+}
+
 export function deriveReadableFontLabel(font) {
   const family =
     normalizeFontFamilyName(font?.family || "") || String(font?.family || "").trim();

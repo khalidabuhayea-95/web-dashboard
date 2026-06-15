@@ -6,7 +6,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { createLogger } from "@/lib/logging/logger";
-import { resolveStoredObjectUrl } from "@/lib/storage/objectStorage.server";
+import { getObject } from "@/lib/storage/objectStorage.server";
 import {
   getFontFamilyById,
   isMobileCompatibleFontFile,
@@ -51,13 +51,6 @@ function unsupportedFormatResponse(requestId, format, mimeType) {
   );
 }
 
-function getStoragePublicUrl(file) {
-  const bucket = String(file?.storageBucket || "").trim();
-  const path = String(file?.storagePath || "").trim();
-  if (!bucket || !path) return "";
-  return resolveStoredObjectUrl(bucket, path);
-}
-
 export async function GET(request, { params }) {
   const requestId = resolveRequestId(request);
   const requestLogger = logger.child(getRequestLogContext(request, requestId));
@@ -92,26 +85,48 @@ export async function GET(request, { params }) {
       return unsupportedFormatResponse(requestId, format, file.mimeType);
     }
 
-    const fileUrl = String(file.publicUrl || "").trim() || getStoragePublicUrl(file);
-    if (fileUrl) {
-      const response = NextResponse.redirect(fileUrl, 307);
-      response.headers.set("Cache-Control", "public, max-age=31536000, immutable");
-      return attachRequestIdHeader(response, requestId);
-    }
-
+    const bucket = String(file.storageBucket || "").trim();
+    const key = String(file.storagePath || "").trim();
+    const mimeType = normalizeMimeType(file.mimeType) || canonicalMimeForFormat(format);
     const fileName =
       sanitizeFileName(file.fileName || font.family || `font.${format}`) || `font.${format}`;
-    return attachRequestIdHeader(
-      NextResponse.json(
-        {
-          error: "Font data is unavailable.",
-          fileName,
-          mimeType: normalizeMimeType(file.mimeType) || canonicalMimeForFormat(format),
-        },
-        { status: 404 }
-      ),
-      requestId
-    );
+
+    if (!bucket || !key) {
+      return attachRequestIdHeader(
+        NextResponse.json({ error: "Font data is unavailable.", fileName, mimeType }, { status: 404 }),
+        requestId
+      );
+    }
+
+    // Stream the file from R2 through this origin rather than 307-redirecting to
+    // the public bucket URL. Some networks (e.g. FortiGuard web filtering) block
+    // the public *.r2.dev host, which breaks @font-face loading in the editor.
+    // The server reaches R2 via the S3 API endpoint, so proxying the bytes keeps
+    // fonts working regardless of client-side egress filtering.
+    let object;
+    try {
+      object = await getObject(bucket, key);
+    } catch (storageError) {
+      requestLogger.error("Failed to read font object from storage", { bucket, key }, storageError);
+      return attachRequestIdHeader(
+        NextResponse.json({ error: "Font data is unavailable.", fileName, mimeType }, { status: 502 }),
+        requestId
+      );
+    }
+
+    const bytes = await object.Body.transformToByteArray();
+    const body = Buffer.from(bytes);
+    const response = new NextResponse(body, {
+      status: 200,
+      headers: {
+        "Content-Type": object.ContentType || mimeType,
+        "Content-Length": String(body.length),
+        "Content-Disposition": `inline; filename="${fileName}"`,
+        "Cache-Control": "public, max-age=31536000, immutable",
+        "Access-Control-Allow-Origin": "*",
+      },
+    });
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
     requestLogger.error("Failed to resolve font file", {}, error);
     return attachRequestIdHeader(

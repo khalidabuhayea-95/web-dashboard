@@ -6,17 +6,13 @@ import {
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
 } from "@/lib/templates/templateSettings";
+// Pure, framework-free helpers live in serverCore so the import worker can use
+// them without importing next/server. Re-exported here for existing callers.
+import { buildSnapshot, normalizeSlug } from "@/lib/templates/serverCore";
+
+export { buildSnapshot, normalizeSlug };
 
 const EDITOR_ROLES = new Set(["admin", "designer"]);
-
-export function normalizeSlug(value) {
-  return String(value || "")
-    .toLowerCase()
-    .trim()
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 60);
-}
 
 export function normalizeCanvasSize(canvasSize) {
   const width = Number(canvasSize?.width);
@@ -58,27 +54,6 @@ export function normalizeTags(value) {
     );
   }
   return [];
-}
-
-export function buildSnapshot(template) {
-  return {
-    name: template.name,
-    slug: template.slug,
-    status: template.status,
-    canvasSize: template.canvasSize,
-    category: template.category,
-    subCategory: template.subCategory,
-    tags: template.tags,
-    thumbnailDataUrl: template.thumbnailDataUrl,
-    previewVideoUrl: template.previewVideoUrl ?? null,
-    previewPosterUrl: template.previewPosterUrl ?? null,
-    previewStatus: template.previewStatus ?? null,
-    previewDurationMs: template.previewDurationMs ?? null,
-    previewVersion: template.previewVersion ?? null,
-    previewError: template.previewError ?? null,
-    previewUpdatedAt: template.previewUpdatedAt ?? null,
-    data: template.data,
-  };
 }
 
 export function mapTemplatePreview(template) {

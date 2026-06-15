@@ -1,6 +1,9 @@
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
 import { requireRole, Roles } from "@/lib/auth/roles";
 
+// Auth-gated editor pages (layout calls requireRole → DB). Render on demand.
+export const dynamic = "force-dynamic";
+
 export default async function EditorLayout({ children }) {
   const session = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
   const role = session.role;

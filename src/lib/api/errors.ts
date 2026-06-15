@@ -19,12 +19,20 @@ export function handleApiError(
   statusCode: number = 500
 ) {
   logger.error(defaultMessage, error);
+  const errorStatusCode = Number(
+    (error as { statusCode?: unknown; status?: unknown } | null)?.statusCode ??
+      (error as { statusCode?: unknown; status?: unknown } | null)?.status
+  );
+  const responseStatusCode =
+    Number.isFinite(errorStatusCode) && errorStatusCode >= 400 && errorStatusCode <= 599
+      ? errorStatusCode
+      : statusCode;
 
   // Don't expose sensitive error details in production
   const message =
     process.env.NODE_ENV === "production" ? defaultMessage : String(error);
 
-  return NextResponse.json({ error: message }, { status: statusCode });
+  return NextResponse.json({ error: message }, { status: responseStatusCode });
 }
 
 /**

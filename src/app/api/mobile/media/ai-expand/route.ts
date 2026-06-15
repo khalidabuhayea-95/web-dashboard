@@ -6,7 +6,7 @@ import {
   getRequestLogContext,
   resolveRequestId,
 } from "@/lib/logging/request";
-import { verifyMobileRequest } from "@/lib/mobile/auth";
+import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { expandImageWithAi } from "@/lib/media/aiExpand/index.server";
 import {
   createFileTooLargeError,
@@ -24,7 +24,6 @@ import {
 import {
   checkRateLimit,
   createRateLimitResponse,
-  resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
 
 export const runtime = "nodejs";
@@ -66,19 +65,20 @@ export async function POST(request: NextRequest) {
   const startedAt = Date.now();
 
   try {
-    const mobileAuth = verifyMobileRequest(request);
-    if (!mobileAuth.ok) {
-      return jsonResponse(
-        requestId,
-        { error: mobileAuth.error || "Unauthorized" },
-        401,
-        { "Cache-Control": "no-store" }
-      );
+    const auth = await resolveMobileBearerUser(request);
+    if (!auth.ok) {
+      requestLogger.warn("AI Expand rejected: unauthenticated", {
+        reason: auth.reason,
+      });
+      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+        "Cache-Control": "no-store",
+      });
     }
+    const mobileUser = auth.mobileUser;
 
     const rateLimitState = checkRateLimit({
       scope: "api:mobile:media:ai-expand",
-      identifier: resolveRequestIp(request) || "anonymous",
+      identifier: mobileUser.id,
       limit: AI_EXPAND_LIMIT.limit,
       windowMs: AI_EXPAND_LIMIT.windowMs,
     });
@@ -137,6 +137,7 @@ export async function POST(request: NextRequest) {
     });
 
     requestLogger.info("AI Expand completed", {
+      mobileUserId: mobileUser.id,
       inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
       inputBytes: imageBytes.length,
       targetWidth,

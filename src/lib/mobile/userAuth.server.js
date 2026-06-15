@@ -155,6 +155,42 @@ export async function requireMobileBearerUser(request) {
   return verifyMobileAccessToken(token);
 }
 
+/**
+ * Resolve the logged-in mobile user from the request's bearer token without
+ * throwing. Returns a discriminated result so route handlers can map auth
+ * failures to a consistent 401 response. The `reason` field is for
+ * server-side logging only and is never sent to clients.
+ *
+ * @typedef {{ ok: true, mobileUser: { id: string, name: string | null, email: string | null, emailVerified: boolean }, payload: import("jose").JWTPayload }} ResolvedMobileBearerUser
+ * @typedef {{ ok: false, status: number, error: string, reason: string }} RejectedMobileBearerUser
+ *
+ * @param {Request} request
+ * @returns {Promise<ResolvedMobileBearerUser | RejectedMobileBearerUser>}
+ */
+export async function resolveMobileBearerUser(request) {
+  const token = getBearerTokenFromRequest(request);
+  if (!token) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Authentication required. Sign in and include a bearer token.",
+      reason: "missing_token",
+    };
+  }
+
+  try {
+    const { mobileUser, payload } = await verifyMobileAccessToken(token);
+    return { ok: true, mobileUser, payload };
+  } catch (error) {
+    return {
+      ok: false,
+      status: 401,
+      error: "Your session is invalid or has expired. Please sign in again.",
+      reason: error instanceof Error ? error.message : "invalid_token",
+    };
+  }
+}
+
 export async function refreshMobileSession({ refreshToken, userAgent, ipAddress }) {
   const settings = await getMobileAuthConfig();
   const refreshTokenSecret = String(settings.bearer.refreshTokenSecret || "").trim();

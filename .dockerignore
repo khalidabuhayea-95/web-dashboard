@@ -1,0 +1,28 @@
+# Build context excludes. Keep this lean — everything here is either rebuilt in
+# the image, secret, or a local-only artifact.
+node_modules
+npm-debug.log*
+.next
+out
+
+.git
+.gitignore
+
+# Secrets (env comes from docker-compose, not the image)
+.env
+.env.local
+.env.*.local
+
+# Local Python venv for rembg — its bin/python symlink points outside the repo
+# and makes Turbopack panic during `next build`. Never ship it in the image.
+.venv-rembg
+
+# Local scratch / OS cruft
+.tmp
+**/.DS_Store
+*.log
+
+# Repo docs / nested tooling not needed at build time
+extension/**/.claude
+AUDIT_REPORT.md
+IMPORT_WORKER_SPEC.md

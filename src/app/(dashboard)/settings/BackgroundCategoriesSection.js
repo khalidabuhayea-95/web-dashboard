@@ -266,7 +266,7 @@ export default function BackgroundCategoriesSection({ canEdit }) {
         <div>
           <CardTitle>Background Categories</CardTitle>
           <CardSubtitle>
-            Manage the categories used when importing Freepik backgrounds on the importer page.
+            Manage the categories used when importing Magnific backgrounds on the importer page.
           </CardSubtitle>
         </div>
         <Button

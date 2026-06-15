@@ -3,6 +3,10 @@ import SignOutButton from "@/app/login/SignOutButton";
 import { requireRole, Roles } from "@/lib/auth/roles";
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
 
+// Auth-gated, per-user pages (the layout calls requireRole → DB). They must be
+// rendered on demand, never statically prerendered at build time.
+export const dynamic = "force-dynamic";
+
 export const metadata = {
   title: "Dashboard",
   description: "Template editor dashboard",

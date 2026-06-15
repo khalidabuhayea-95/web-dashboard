@@ -7,18 +7,18 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
-import { removeObjectFromImage } from "@/lib/media/objectRemoval/index.server";
+import { upscaleImageWithAi } from "@/lib/media/imageUpscale/index.server";
 import {
   createFileTooLargeError,
-  isObjectRemovalError,
-} from "@/lib/media/objectRemoval/errors";
+  isImageUpscaleError,
+} from "@/lib/media/imageUpscale/errors";
 import {
-  assertReplicateObjectRemovalConfigured,
-  getReplicateDefaultObjectRemovalModelId,
-} from "@/lib/media/objectRemoval/providers/replicate.server";
+  assertReplicateImageUpscaleConfigured,
+  getReplicateDefaultImageUpscaleModelId,
+} from "@/lib/media/imageUpscale/providers/replicate.server";
 import {
   getMobileAppSettings,
-  resolveMobileObjectRemovalModel,
+  resolveMobileUpscaleModel,
 } from "@/lib/settings/mobileAppSettings.server";
 import {
   checkRateLimit,
@@ -28,13 +28,12 @@ import {
 export const runtime = "nodejs";
 export const maxDuration = 300;
 
-const logger = createLogger("api.mobile.media.object-remove");
-const OBJECT_REMOVE_LIMIT = {
+const logger = createLogger("api.mobile.media.upscale");
+const UPSCALE_LIMIT = {
   limit: 6,
   windowMs: 5 * 60_000,
 };
 const MAX_IMAGE_UPLOAD_BYTES = 15 * 1024 * 1024;
-const MAX_MASK_UPLOAD_BYTES = 10 * 1024 * 1024;
 
 function jsonResponse(
   requestId: string,
@@ -59,7 +58,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await resolveMobileBearerUser(request);
     if (!auth.ok) {
-      requestLogger.warn("Object removal rejected: unauthenticated", {
+      requestLogger.warn("Image upscale rejected: unauthenticated", {
         reason: auth.reason,
       });
       return jsonResponse(requestId, { error: auth.error }, auth.status, {
@@ -69,15 +68,15 @@ export async function POST(request: NextRequest) {
     const mobileUser = auth.mobileUser;
 
     const rateLimitState = checkRateLimit({
-      scope: "api:mobile:media:object-remove",
+      scope: "api:mobile:media:upscale",
       identifier: mobileUser.id,
-      limit: OBJECT_REMOVE_LIMIT.limit,
-      windowMs: OBJECT_REMOVE_LIMIT.windowMs,
+      limit: UPSCALE_LIMIT.limit,
+      windowMs: UPSCALE_LIMIT.windowMs,
     });
     if (!rateLimitState.allowed) {
       return attachRequestIdHeader(
         createRateLimitResponse(
-          "Too many object removal requests. Please retry shortly.",
+          "Too many image upscale requests. Please retry shortly.",
           rateLimitState
         ),
         requestId
@@ -91,61 +90,48 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    const defaultModelId = getReplicateDefaultObjectRemovalModelId();
-    const configuredModel = resolveMobileObjectRemovalModel(await getMobileAppSettings(), {
-      defaultObjectRemovalModel: defaultModelId,
+    const defaultModelId = getReplicateDefaultImageUpscaleModelId();
+    const configuredModel = resolveMobileUpscaleModel(await getMobileAppSettings(), {
+      defaultUpscaleModel: defaultModelId,
     });
 
-    assertReplicateObjectRemovalConfigured(configuredModel);
+    assertReplicateImageUpscaleConfigured(configuredModel);
 
     const imageFile = formData.get("image");
-    const maskFile = formData.get("mask");
     if (!(imageFile instanceof File)) {
       return jsonResponse(requestId, { error: "Missing image upload." }, 400, {
         "Cache-Control": "no-store",
       });
     }
-    if (!(maskFile instanceof File)) {
-      return jsonResponse(requestId, { error: "Missing mask upload." }, 400, {
+
+    if (Number(imageFile.size || 0) <= 0) {
+      return jsonResponse(requestId, { error: "Image upload must not be empty." }, 400, {
         "Cache-Control": "no-store",
       });
     }
 
-    if (Number(imageFile.size || 0) <= 0 || Number(maskFile.size || 0) <= 0) {
-      return jsonResponse(
-        requestId,
-        { error: "Image and mask uploads must not be empty." },
-        400,
-        { "Cache-Control": "no-store" }
-      );
-    }
     if (Number(imageFile.size || 0) > MAX_IMAGE_UPLOAD_BYTES) {
       throw createFileTooLargeError("Image upload is too large.");
     }
-    if (Number(maskFile.size || 0) > MAX_MASK_UPLOAD_BYTES) {
-      throw createFileTooLargeError("Mask upload is too large.");
-    }
 
-    const [imageBytes, maskBytes] = await Promise.all([
-      imageFile.arrayBuffer().then((value) => Buffer.from(value)),
-      maskFile.arrayBuffer().then((value) => Buffer.from(value)),
-    ]);
+    const scaleValue = formData.get("scale");
+    const imageBytes = await imageFile.arrayBuffer().then((value) => Buffer.from(value));
 
-    const result = await removeObjectFromImage({
+    const result = await upscaleImageWithAi({
       imageBytes,
       imageMimeType: imageFile.type,
       imageFileName: imageFile.name,
-      maskBytes,
-      maskMimeType: maskFile.type,
-      maskFileName: maskFile.name,
+      scale: scaleValue,
       modelId: configuredModel,
     });
 
-    requestLogger.info("Object removal completed", {
+    requestLogger.info("Image upscale completed", {
       mobileUserId: mobileUser.id,
       inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
       inputBytes: imageBytes.length,
-      maskBytes: maskBytes.length,
+      inputWidth: result.inputWidth || null,
+      inputHeight: result.inputHeight || null,
+      scale: result.scale,
       outputBytes: result.bytes.length,
       width: result.width || null,
       height: result.height || null,
@@ -159,26 +145,28 @@ export async function POST(request: NextRequest) {
         status: 200,
         headers: {
           "Content-Type": result.mimeType || "image/png",
-          "Content-Disposition": `inline; filename="${result.fileName || "object-removed.png"}"`,
+          "Content-Disposition": `inline; filename="${result.fileName || "upscaled-image.png"}"`,
           "Cache-Control": "no-store",
           "X-Output-Width": String(result.width || ""),
           "X-Output-Height": String(result.height || ""),
-          "X-Object-Removal-Provider": String(result.provider || ""),
-          "X-Object-Removal-Model": String(result.model || ""),
+          "X-Upscale-Scale": String(result.scale || ""),
+          "X-Upscale-Provider": String(result.provider || ""),
+          "X-Upscale-Model": String(result.model || ""),
         },
       }),
       requestId
     );
   } catch (error) {
     const statusCode =
-      isObjectRemovalError(error) && Number.isFinite(Number(error.statusCode))
+      isImageUpscaleError(error) && Number.isFinite(Number(error.statusCode))
         ? Number(error.statusCode)
         : 500;
     const message =
-      isObjectRemovalError(error) && error.expose !== false
+      isImageUpscaleError(error) && error.expose !== false
         ? error.message
-        : "Failed to remove the selected object.";
-    requestLogger.error("Object removal failed", error, {
+        : "Failed to upscale the selected image.";
+
+    requestLogger.error("Image upscale failed", error, {
       statusCode,
       durationMs: Date.now() - startedAt,
     });

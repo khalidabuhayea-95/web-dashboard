@@ -38,7 +38,7 @@ export async function POST(request: NextRequest) {
     });
     if (!rateLimitState.allowed) {
       return createRateLimitResponse(
-        "Too many Freepik background preview requests. Please retry shortly.",
+        "Too many Magnific background preview requests. Please retry shortly.",
         rateLimitState
       );
     }
@@ -50,7 +50,7 @@ export async function POST(request: NextRequest) {
       return handleBadRequest("Invalid JSON body");
     }
 
-    logger.info("Previewing Freepik backgrounds", {
+    logger.info("Previewing Magnific backgrounds", {
       userId: session.userId,
       queryKeys: Object.keys(body?.query || body || {}),
     });
@@ -69,12 +69,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json(preview);
   } catch (error) {
-    logger.error("Freepik background preview failed", {
+    logger.error("Magnific background preview failed", {
       error: error instanceof Error ? error.message : "Unknown error",
     });
     return handleApiError(
       error,
-      error instanceof Error ? error.message : "Failed to preview Freepik backgrounds"
+      error instanceof Error ? error.message : "Failed to preview Magnific backgrounds"
     );
   }
 }

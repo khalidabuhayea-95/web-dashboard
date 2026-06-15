@@ -66,39 +66,6 @@ const localeHeaderParameters = [
   },
 ];
 
-const mobileSigningHeaderParameters = [
-  {
-    name: "x-mobile-key",
-    in: "header",
-    required: false,
-    description: "Mobile request signing key id. Required when mobile signing is enabled for write routes.",
-    schema: {
-      type: "string",
-      example: "mobile-client-1",
-    },
-  },
-  {
-    name: "x-mobile-ts",
-    in: "header",
-    required: false,
-    description: "Unix timestamp used for mobile request signing. Required when mobile signing is enabled.",
-    schema: {
-      type: "string",
-      example: "1742995200000",
-    },
-  },
-  {
-    name: "x-mobile-sign",
-    in: "header",
-    required: false,
-    description: "HMAC request signature. Required when mobile signing is enabled.",
-    schema: {
-      type: "string",
-      example: "8c2d6a2b2ca6c3d3f0a5280c0d0e67f9537a2d8c60b5d54c8ef7088ccf205962",
-    },
-  },
-];
-
 const localeQueryParameters = [
   {
     name: "lang",
@@ -2116,7 +2083,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Media"],
           summary: "Remove image background",
           description:
-            "Accepts a single PNG or JPEG upload and returns a transparent PNG. This route uses the local rembg runtime as the primary remover and automatically falls back to the legacy local remover when rembg cannot safely process the image. This route is currently public and does not require mobile signing headers.",
+            "Accepts a single PNG or JPEG upload and returns a transparent PNG. This route uses the local rembg runtime as the primary remover and automatically falls back to the legacy local remover when rembg cannot safely process the image. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
             content: {
@@ -2148,6 +2116,16 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             400: {
               description: "Invalid multipart payload or missing file",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
               content: {
                 "application/json": {
                   schema: {
@@ -2224,8 +2202,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Media"],
           summary: "Remove object from image",
           description:
-            "Accepts an image plus a same-size binary mask, stages both inputs privately for Replicate, waits for the object-removal model to finish, and returns the edited image directly in the response.",
-          parameters: [...mobileSigningHeaderParameters],
+            "Accepts an image plus a same-size binary mask, stages both inputs privately for Replicate, waits for the object-removal model to finish, and returns the edited image directly in the response. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
             content: {
@@ -2282,7 +2260,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               },
             },
             401: {
-              description: "Missing or invalid mobile signature",
+              description: "Missing or invalid bearer token",
               content: {
                 "application/json": {
                   schema: {
@@ -2333,6 +2311,250 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             503: {
               description: "Replicate object removal is unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/ai-expand": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "AI expand image canvas",
+          description:
+            "Accepts an image plus target canvas dimensions, stages the input privately for Replicate, runs the configured AI Expand (outpainting) model, and returns the expanded image directly in the response. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["image", "targetWidth", "targetHeight"],
+                  properties: {
+                    image: {
+                      type: "string",
+                      format: "binary",
+                    },
+                    targetWidth: {
+                      type: "integer",
+                      description: "Target canvas width in pixels.",
+                    },
+                    targetHeight: {
+                      type: "integer",
+                      description: "Target canvas height in pixels.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Expanded image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/jpeg": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload, empty upload, or invalid target dimensions",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Image could not be processed safely",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Replicate AI Expand is unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/upscale": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Upscale / enhance image quality",
+          description:
+            "Accepts a single PNG or JPEG upload, stages it privately for Replicate, runs the configured AI upscaler model (default Pruna p-image-upscale) at 2x, and returns the higher-resolution image directly in the response. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["image"],
+                  properties: {
+                    image: {
+                      type: "string",
+                      format: "binary",
+                    },
+                    scale: {
+                      type: "integer",
+                      enum: [2],
+                      default: 2,
+                      description: "Upscale factor. Fixed at 2x.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Upscaled image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/jpeg": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload, empty upload, or invalid scale",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Image could not be upscaled",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Replicate image upscale is unavailable",
               content: {
                 "application/json": {
                   schema: {

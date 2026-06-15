@@ -33,6 +33,10 @@ const MOBILE_AI_EXPAND_INITIAL_FORM = {
   aiExpandModel: "bria/expand-image",
 };
 
+const MOBILE_IMAGE_UPSCALE_INITIAL_FORM = {
+  upscaleModel: "prunaai/p-image-upscale",
+};
+
 const MOBILE_AUTH_INITIAL_FORM = {
   googleEnabled: false,
   googleAndroidClientIds: "",
@@ -64,6 +68,15 @@ const AI_EXPAND_MODEL_OPTIONS = [
   { value: "allenhooo/lama", label: "allenhooo/lama", detail: "Budget" },
   { value: "luma/reframe-image", label: "luma/reframe-image", detail: "Recommended" },
   { value: "bria/expand-image", label: "bria/expand-image", detail: "Premium" },
+];
+
+const IMAGE_UPSCALE_MODEL_OPTIONS = [
+  { value: "prunaai/p-image-upscale", label: "prunaai/p-image-upscale", detail: "Fast · default" },
+  { value: "recraft-ai/recraft-crisp-upscale", label: "recraft-ai/recraft-crisp-upscale", detail: "Crisp" },
+  { value: "cjwbw/real-esrgan", label: "cjwbw/real-esrgan", detail: "ESRGAN" },
+  { value: "google/upscaler", label: "google/upscaler", detail: "Simple" },
+  { value: "nightmareai/real-esrgan", label: "nightmareai/real-esrgan", detail: "ESRGAN" },
+  { value: "alexgenovese/upscaler", label: "alexgenovese/upscaler", detail: "Face restore" },
 ];
 
 function formatErrorMessage(payload, fallback = "Request failed.") {
@@ -114,6 +127,12 @@ function mapMobileObjectRemovalSettings(settings) {
 function mapMobileAiExpandSettings(settings) {
   return {
     aiExpandModel: String(settings?.aiExpandModel || "bria/expand-image"),
+  };
+}
+
+function mapMobileImageUpscaleSettings(settings) {
+  return {
+    upscaleModel: String(settings?.upscaleModel || "prunaai/p-image-upscale"),
   };
 }
 
@@ -660,6 +679,18 @@ function MobileSettingsClient() {
     }),
   });
 
+  const imageUpscaleSettings = useSettingsForm({
+    endpoint: "/api/settings/mobile-app",
+    initialForm: MOBILE_IMAGE_UPSCALE_INITIAL_FORM,
+    loadingMessage: "Loading image upscale settings...",
+    savingMessage: "Saving image upscale settings...",
+    successMessage: "Image upscale settings saved.",
+    mapSettings: mapMobileImageUpscaleSettings,
+    buildPayload: (form) => ({
+      upscaleModel: form.upscaleModel,
+    }),
+  });
+
   const mobileAuth = useSettingsForm({
     endpoint: "/api/settings/mobile-auth",
     initialForm: MOBILE_AUTH_INITIAL_FORM,
@@ -695,6 +726,7 @@ function MobileSettingsClient() {
     releaseControls.canEdit ||
     objectRemovalSettings.canEdit ||
     aiExpandSettings.canEdit ||
+    imageUpscaleSettings.canEdit ||
     mobileAuth.canEdit;
 
   return (
@@ -906,6 +938,64 @@ function MobileSettingsClient() {
                 <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
                   Mobile does not send a mask or prompt. The server creates the expansion canvas automatically
                   from the original image and target dimensions, then calls the selected AI Expand model.
+                </p>
+              </div>
+            </div>
+          </div>
+        </SettingsSection>
+
+        <SettingsSection
+          eyebrow="Media"
+          title="Image upscaling model"
+          description="Choose one shared Replicate model for the mobile Enhance Quality (image upscaling) feature. Mobile sends only the image; the server runs the selected model at 2x and returns the higher-resolution result."
+          icon={ShieldEllipsis}
+          badges={[
+            { tone: imageUpscaleSettings.hasChanges ? "warning" : "success", label: imageUpscaleSettings.hasChanges ? "Unsaved edits" : "Synced" },
+            { tone: "neutral", label: "Shared across platforms" },
+          ]}
+          footer={
+            <SectionFooter
+              status={imageUpscaleSettings.status}
+              updatedAt={imageUpscaleSettings.updatedAt}
+              canEdit={imageUpscaleSettings.canEdit}
+              saving={imageUpscaleSettings.saving}
+              hasChanges={imageUpscaleSettings.hasChanges}
+              onSave={imageUpscaleSettings.save}
+              saveLabel="Save image upscale settings"
+            />
+          }
+        >
+          <SharedModelCard
+            icon={ShieldEllipsis}
+            title="Image upscaling model"
+            description="Choose one shared Replicate upscaler for both Android and iOS. All models run at 2x."
+            modelId="mobile-image-upscale-model"
+            modelLabel="Shared model"
+            modelDescription="The server uses this model for all mobile image upscale requests. Default is prunaai/p-image-upscale."
+            modelValue={imageUpscaleSettings.form.upscaleModel}
+            onModelChange={(event) =>
+              imageUpscaleSettings.setForm((current) => ({
+                ...current,
+                upscaleModel: event.target.value,
+              }))
+            }
+            disabled={imageUpscaleSettings.disabled}
+            options={IMAGE_UPSCALE_MODEL_OPTIONS}
+          />
+
+          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
+            <div className="flex items-start gap-3">
+              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
+                <Sparkles className="h-4 w-4" aria-hidden="true" />
+              </div>
+              <div className="space-y-1">
+                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
+                  Runtime behavior
+                </div>
+                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
+                  Mobile sends only the original image. The server stages it privately, runs the selected
+                  upscaler at 2x on Replicate, and returns the enhanced image. recraft-crisp-upscale has no
+                  scale control, and google/upscaler enlarges small images more aggressively.
                 </p>
               </div>
             </div>

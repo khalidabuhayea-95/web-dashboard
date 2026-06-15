@@ -1,4 +1,6 @@
 import { normalizeFontFamilyName } from "@/lib/editor/fonts";
+import { extractFontFamilyName } from "@/lib/editor/fontName.server";
+import { isSyntheticFontFamily } from "@/lib/editor/customFontLabel";
 import {
   deleteFontFamily,
   FONT_FILE_KIND_MOBILE,
@@ -1012,10 +1014,25 @@ export async function upsertEditorCustomFont({
     throw new Error("Mobile font file is unavailable.");
   }
 
+  // Canva-imported fonts are named by an opaque id (e.g. "YADkLzugzJU_0"); the
+  // real family name (e.g. "Laftah") only exists inside the font file. Recover
+  // it so the editor shows a readable label instead of the id / "font".
+  let resolvedDisplayName = normalizedFamily;
+  const extraAliases = [];
+  if (isSyntheticFontFamily(normalizedFamily)) {
+    const nameSource =
+      parseDataUri(mobileVariant?.dataUrl) || parseDataUri(sourceVariant?.dataUrl);
+    const realName = nameSource?.bytes?.length ? extractFontFamilyName(nameSource.bytes) : "";
+    if (realName && !isSyntheticFontFamily(realName)) {
+      resolvedDisplayName = realName;
+      extraAliases.push(realName);
+    }
+  }
+
   const stored = await upsertFontFamilyWithFiles({
     id: fontId,
     family: normalizedFamily,
-    displayName: normalizedFamily,
+    displayName: resolvedDisplayName,
     source: FONT_SOURCE_CUSTOM,
     status:
       conversionStatus === FONT_CONVERSION_STATUS_READY
@@ -1030,7 +1047,7 @@ export async function upsertEditorCustomFont({
     cssFontFamily: `'${normalizedFamily}'`,
     removable: true,
     files: [mobileFile],
-    aliases: [normalizedFamily, familyKey],
+    aliases: [normalizedFamily, familyKey, ...extraAliases],
   });
   const editorFont = toEditorFontRecord({
     ...stored,

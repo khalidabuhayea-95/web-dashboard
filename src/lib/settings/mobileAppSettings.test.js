@@ -9,6 +9,7 @@ import {
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
   resolveMobileObjectRemovalModel,
+  resolveMobileUpscaleModel,
 } from "./mobileAppSettings.js";
 
 test("normalizeStoredMobileAppSettings returns safe defaults when no settings exist", () => {
@@ -26,6 +27,7 @@ test("normalizeStoredMobileAppSettings returns safe defaults when no settings ex
   });
   assert.equal(settings.objectRemovalModel, null);
   assert.equal(settings.aiExpandModel, null);
+  assert.equal(settings.upscaleModel, null);
   assert.ok(settings.updatedAt);
 });
 
@@ -60,6 +62,7 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
       redirectLink: "https://play.google.com/store/apps/details?id=com.example",
       objectRemovalModel: "zylim0702/remove-object",
       aiExpandModel: "luma/reframe-image",
+      upscaleModel: "prunaai/p-image-upscale",
     }
   );
 
@@ -77,6 +80,7 @@ test("resolveMobileAppSettingsDecision enables force update only below minimum v
       redirectLink: "https://play.google.com/store/apps/details?id=com.example",
       objectRemovalModel: "zylim0702/remove-object",
       aiExpandModel: "luma/reframe-image",
+      upscaleModel: "prunaai/p-image-upscale",
     }
   );
 });
@@ -143,6 +147,29 @@ test("resolveMobileAiExpandModel falls back to the provided default model", () =
     }),
     "bria/expand-image"
   );
+});
+
+test("resolveMobileUpscaleModel falls back to the provided default model", () => {
+  const settings = normalizeStoredMobileAppSettings();
+
+  assert.equal(
+    resolveMobileUpscaleModel(settings, {
+      defaultUpscaleModel: "google/upscaler",
+    }),
+    "google/upscaler"
+  );
+});
+
+test("mergeMobileAppSettingsInput stores and normalizes the upscale model", () => {
+  const next = mergeMobileAppSettingsInput(normalizeStoredMobileAppSettings(), {
+    upscaleModel: "nightmareai/real-esrgan",
+  });
+  assert.equal(next.upscaleModel, "nightmareai/real-esrgan");
+
+  const rejected = mergeMobileAppSettingsInput(normalizeStoredMobileAppSettings(), {
+    upscaleModel: "not-a-real-model",
+  });
+  assert.equal(rejected.upscaleModel, null);
 });
 
 test("invalid versions are rejected during save/evaluation flows", () => {

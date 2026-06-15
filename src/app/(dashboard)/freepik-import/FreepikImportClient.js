@@ -215,7 +215,7 @@ export default function FreepikImportClient() {
   const [query, setQuery] = useState(DEFAULT_QUERY);
   const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [iconSectionCollapsed, setIconSectionCollapsed] = useState(false);
-  const [status, setStatus] = useState("Loading Freepik defaults...");
+  const [status, setStatus] = useState("Loading Magnific defaults...");
   const [saving, setSaving] = useState(false);
 
   const [previewBusy, setPreviewBusy] = useState(false);
@@ -236,7 +236,7 @@ export default function FreepikImportClient() {
         const response = await fetch("/api/settings/freepik", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(formatErrorMessage(payload, "Failed to load Freepik settings."));
+          throw new Error(formatErrorMessage(payload, "Failed to load Magnific settings."));
         }
 
         if (!mounted) return;
@@ -261,7 +261,7 @@ export default function FreepikImportClient() {
         setStatus("");
       } catch (error) {
         if (!mounted) return;
-        setStatus(error?.message || "Failed to load Freepik settings.");
+        setStatus(error?.message || "Failed to load Magnific settings.");
       } finally {
         if (mounted) setLoadingSettings(false);
       }
@@ -297,7 +297,7 @@ export default function FreepikImportClient() {
 
   const handleSaveSettings = async () => {
     setSaving(true);
-    setStatus("Saving Freepik settings...");
+    setStatus("Saving Magnific settings...");
     try {
       const filtersPayload = buildFreepikFiltersPayload(filters);
       const response = await fetch("/api/settings/freepik", {
@@ -316,12 +316,12 @@ export default function FreepikImportClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to save Freepik settings."));
+        throw new Error(formatErrorMessage(payload, "Failed to save Magnific settings."));
       }
 
-      setStatus("Freepik defaults saved.");
+      setStatus("Magnific defaults saved.");
     } catch (error) {
-      setStatus(error?.message || "Failed to save Freepik defaults.");
+      setStatus(error?.message || "Failed to save Magnific defaults.");
     } finally {
       setSaving(false);
     }
@@ -329,7 +329,7 @@ export default function FreepikImportClient() {
 
   const fetchPreview = async (override = {}) => {
     setPreviewBusy(true);
-    setStatus("Fetching Freepik icons...");
+    setStatus("Fetching Magnific icons...");
     setImportResult(null);
     try {
       const filtersPayload = buildFreepikFiltersPayload(filters);
@@ -439,7 +439,7 @@ export default function FreepikImportClient() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to queue Freepik import."));
+        throw new Error(formatErrorMessage(payload, "Failed to queue Magnific import."));
       }
 
       const jobId = String(payload?.job?.id || "").trim();
@@ -449,7 +449,7 @@ export default function FreepikImportClient() {
 
       const completedJob = await pollImportJob(jobId, {
         onUpdate: (job) => {
-          setJobProgress(String(job?.progress || "Processing Freepik import..."));
+          setJobProgress(String(job?.progress || "Processing Magnific import..."));
         },
       });
 
@@ -467,7 +467,7 @@ export default function FreepikImportClient() {
           : `Import completed. Imported ${imported} / ${requested}. Failed: ${failed}.`
       );
     } catch (error) {
-      setStatus(error?.message || "Freepik import failed.");
+      setStatus(error?.message || "Magnific import failed.");
     } finally {
       setImportBusy(false);
       setJobProgress("");
@@ -477,9 +477,9 @@ export default function FreepikImportClient() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-semibold">Freepik Import</h1>
+        <h1 className="text-2xl font-semibold">Magnific Import</h1>
         <p className="text-sm text-muted-foreground">
-          Import either icons or backgrounds into Elements from the same page. Manage the Freepik API key in Settings.
+          Import either icons or backgrounds into Elements from the same page. Manage the Magnific API key in Settings.
         </p>
       </div>
 
@@ -792,7 +792,7 @@ export default function FreepikImportClient() {
                         {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={item.thumbnailUrl}
-                          alt={item.name || "Freepik icon"}
+                          alt={item.name || "Magnific icon"}
                           className="h-28 w-full rounded-md object-contain bg-white"
                         />
                         {animated ? (

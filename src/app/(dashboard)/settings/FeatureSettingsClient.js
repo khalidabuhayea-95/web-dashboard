@@ -68,7 +68,7 @@ function FreepikSettingsCard() {
   const [apiKeyInput, setApiKeyInput] = useState("");
   const [apiKeyMasked, setApiKeyMasked] = useState("");
   const [apiKeyConfigured, setApiKeyConfigured] = useState(false);
-  const [status, setStatus] = useState("Loading Freepik settings...");
+  const [status, setStatus] = useState("Loading Magnific settings...");
 
   useEffect(() => {
     let mounted = true;
@@ -79,7 +79,7 @@ function FreepikSettingsCard() {
         const response = await fetch("/api/settings/freepik", { cache: "no-store" });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) {
-          throw new Error(formatErrorMessage(payload, "Failed to load Freepik settings."));
+          throw new Error(formatErrorMessage(payload, "Failed to load Magnific settings."));
         }
 
         if (!mounted) return;
@@ -90,7 +90,7 @@ function FreepikSettingsCard() {
         setStatus("");
       } catch (error) {
         if (!mounted) return;
-        setStatus(error?.message || "Failed to load Freepik settings.");
+        setStatus(error?.message || "Failed to load Magnific settings.");
       } finally {
         if (mounted) setLoading(false);
       }
@@ -104,7 +104,7 @@ function FreepikSettingsCard() {
 
   const handleSave = async () => {
     setSaving(true);
-    setStatus("Saving Freepik API key...");
+    setStatus("Saving Magnific API key...");
     try {
       const response = await fetch("/api/settings/freepik", {
         method: "PUT",
@@ -115,16 +115,16 @@ function FreepikSettingsCard() {
       });
       const payload = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(formatErrorMessage(payload, "Failed to save Freepik API key."));
+        throw new Error(formatErrorMessage(payload, "Failed to save Magnific API key."));
       }
 
       const settings = payload?.settings || {};
       setApiKeyConfigured(Boolean(settings?.apiKeyConfigured));
       setApiKeyMasked(String(settings?.apiKeyMasked || ""));
       setApiKeyInput("");
-      setStatus("Freepik API key saved.");
+      setStatus("Magnific API key saved.");
     } catch (error) {
-      setStatus(error?.message || "Failed to save Freepik API key.");
+      setStatus(error?.message || "Failed to save Magnific API key.");
     } finally {
       setSaving(false);
     }
@@ -133,20 +133,20 @@ function FreepikSettingsCard() {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Freepik Credentials</CardTitle>
+        <CardTitle>Magnific Credentials</CardTitle>
         <CardSubtitle>
-          Manage the API key used by the Freepik icon and background import flows.
+          Manage the API key used by the Magnific (formerly Freepik) icon and background import flows.
         </CardSubtitle>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="space-y-2">
-          <Label htmlFor="settings-freepik-api-key">Freepik API key</Label>
+          <Label htmlFor="settings-freepik-api-key">Magnific API key</Label>
           <Input
             id="settings-freepik-api-key"
             type="password"
             value={apiKeyInput}
             onChange={(event) => setApiKeyInput(event.target.value)}
-            placeholder={apiKeyConfigured ? "Enter new key to replace existing" : "Enter Freepik API key"}
+            placeholder={apiKeyConfigured ? "Enter new key to replace existing" : "Enter Magnific API key"}
             disabled={!canEdit || loading}
           />
           {apiKeyConfigured ? (
@@ -158,13 +158,13 @@ function FreepikSettingsCard() {
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" onClick={handleSave} disabled={saving || !canEdit || loading || !apiKeyInput.trim()}>
-            {saving ? "Saving..." : "Save Freepik key"}
+            {saving ? "Saving..." : "Save Magnific key"}
           </Button>
           <a
             href="/freepik-import"
             className="inline-flex h-10 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-foreground transition hover:bg-muted"
           >
-            Open Freepik import
+            Open Magnific import
           </a>
         </div>
 
@@ -808,7 +808,7 @@ export default function FeatureSettingsClient() {
             href="/freepik-import"
             className="inline-flex h-10 items-center justify-center rounded-lg border border-border px-4 text-sm font-medium text-foreground transition hover:bg-muted"
           >
-            Open Freepik import
+            Open Magnific import
           </a>
         </CardContent>
       </Card>

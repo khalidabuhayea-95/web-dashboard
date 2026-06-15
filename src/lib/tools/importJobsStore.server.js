@@ -3,6 +3,9 @@ import prisma from "@/lib/prisma";
 const JOB_STATUSES = new Set(["pending", "running", "succeeded", "failed"]);
 let ensureImportJobsSchemaPromise = null;
 
+// NOTE: keep this in sync with prisma/migrations/*_import_jobs_worker_safety.
+// Both the runtime self-healing DDL below and the committed migration must add
+// the same columns or the table shape diverges between environments.
 const IMPORT_JOBS_SCHEMA_STATEMENTS = [
   `
     CREATE TABLE IF NOT EXISTS import_jobs (
@@ -16,6 +19,9 @@ const IMPORT_JOBS_SCHEMA_STATEMENTS = [
       error TEXT,
       progress TEXT NOT NULL DEFAULT '',
       attempts INTEGER NOT NULL DEFAULT 0,
+      locked_at TIMESTAMPTZ,
+      locked_by TEXT,
+      produced_template_id UUID,
       started_at TIMESTAMPTZ,
       finished_at TIMESTAMPTZ,
       created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -25,6 +31,18 @@ const IMPORT_JOBS_SCHEMA_STATEMENTS = [
   `
     ALTER TABLE import_jobs
     ADD COLUMN IF NOT EXISTS idempotency_key TEXT
+  `,
+  `
+    ALTER TABLE import_jobs
+    ADD COLUMN IF NOT EXISTS locked_at TIMESTAMPTZ
+  `,
+  `
+    ALTER TABLE import_jobs
+    ADD COLUMN IF NOT EXISTS locked_by TEXT
+  `,
+  `
+    ALTER TABLE import_jobs
+    ADD COLUMN IF NOT EXISTS produced_template_id UUID
   `,
   `
     CREATE INDEX IF NOT EXISTS import_jobs_owner_idx
@@ -39,6 +57,15 @@ const IMPORT_JOBS_SCHEMA_STATEMENTS = [
       ON import_jobs(owner_id, type, idempotency_key)
   `,
 ];
+
+// Identifies which worker/process currently holds a claimed job. Purely a
+// fencing/observability token today (single-box deploy); future multi-worker
+// setups can use it to attribute and reclaim work safely.
+function getWorkerId() {
+  const explicit = String(process.env.IMPORT_JOBS_WORKER_ID || "").trim();
+  if (explicit) return explicit.slice(0, 128);
+  return `pid-${process.pid}`;
+}
 
 async function ensureImportJobsSchema() {
   if (ensureImportJobsSchemaPromise) {
@@ -93,6 +120,9 @@ function normalizeJobRow(row) {
     error: String(row.error || ""),
     progress: String(row.progress || ""),
     attempts: Number(row.attempts || 0),
+    lockedAt: row.locked_at ? new Date(row.locked_at).toISOString() : "",
+    lockedBy: String(row.locked_by || ""),
+    producedTemplateId: String(row.produced_template_id || ""),
     startedAt: row.started_at ? new Date(row.started_at).toISOString() : "",
     finishedAt: row.finished_at ? new Date(row.finished_at).toISOString() : "",
     createdAt: row.created_at ? new Date(row.created_at).toISOString() : nowIsoString(),
@@ -278,6 +308,9 @@ export async function getImportJobById(id) {
       error,
       progress,
       attempts,
+      locked_at,
+      locked_by,
+      produced_template_id,
       started_at,
       finished_at,
       created_at,
@@ -295,11 +328,14 @@ export async function claimImportJob(jobId) {
 
   const id = String(jobId || "").trim();
   if (!id) return null;
+  const workerId = getWorkerId();
   const rows = await prisma.$queryRaw`
     UPDATE import_jobs
     SET
       status = 'running',
       attempts = attempts + 1,
+      locked_at = NOW(),
+      locked_by = ${workerId},
       started_at = COALESCE(started_at, NOW()),
       updated_at = NOW()
     WHERE id = ${id}::uuid
@@ -315,6 +351,44 @@ export async function claimImportJob(jobId) {
       error,
       progress,
       attempts,
+      locked_at,
+      locked_by,
+      produced_template_id,
+      started_at,
+      finished_at,
+      created_at,
+      updated_at
+  `;
+
+  return normalizeJobRow(Array.isArray(rows) ? rows[0] : null);
+}
+
+export async function setImportJobProducedTemplate(jobId, templateId) {
+  await ensureImportJobsSchema();
+
+  const id = String(jobId || "").trim();
+  const template = String(templateId || "").trim();
+  if (!id || !template) return null;
+  const rows = await prisma.$queryRaw`
+    UPDATE import_jobs
+    SET
+      produced_template_id = ${template}::uuid,
+      updated_at = NOW()
+    WHERE id = ${id}::uuid
+    RETURNING
+      id,
+      owner_id,
+      type,
+      status,
+      idempotency_key,
+      input,
+      result,
+      error,
+      progress,
+      attempts,
+      locked_at,
+      locked_by,
+      produced_template_id,
       started_at,
       finished_at,
       created_at,
@@ -335,6 +409,8 @@ export async function requeueStalledImportJob(jobId, staleAfterSeconds = 300) {
     SET
       status = 'pending',
       progress = '',
+      locked_at = NULL,
+      locked_by = NULL,
       updated_at = NOW()
     WHERE id = ${id}::uuid
       AND status = 'running'
@@ -407,6 +483,7 @@ export async function markImportJobSucceeded(jobId, result) {
       finished_at = NOW(),
       updated_at = NOW()
     WHERE id = ${id}::uuid
+      AND status = 'running'
     RETURNING
       id,
       owner_id,
@@ -444,6 +521,7 @@ export async function markImportJobFailed(jobId, errorValue, result = null) {
       finished_at = NOW(),
       updated_at = NOW()
     WHERE id = ${id}::uuid
+      AND status = 'running'
     RETURNING
       id,
       owner_id,
