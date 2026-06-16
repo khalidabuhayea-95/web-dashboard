@@ -4,22 +4,21 @@ import {
   createUnprocessableImageError,
 } from "../errors";
 import {
-  DEFAULT_AI_EXPAND_MODEL_ID,
-  getAiExpandModelDefinition,
-  normalizeAiExpandModelId,
+  DEFAULT_EDIT_IMAGE_MODEL_ID,
+  getEditImageModelDefinition,
+  normalizeEditImageModelId,
 } from "../models.js";
 
 const REPLICATE_API_BASE = "https://api.replicate.com/v1";
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-// Wait well past running time to absorb Replicate queue spikes; kept under the
-// route's maxDuration (300s) with headroom for the output download.
+// Editing models run ~5-15s but can sit in Replicate's queue much longer
+// (queue spikes of 40s+ observed), so wait well past the running time. Kept
+// under the route's maxDuration (300s) with headroom for the output download.
 const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-// Backstop must exceed the wait timeout so queue spikes aren't cancelled early.
+// Backstop so Replicate cancels (stops billing) a prediction we've abandoned;
+// must exceed the wait timeout above so queue spikes aren't cancelled early.
 const DEFAULT_CANCEL_AFTER = "5m";
-const DEFAULT_FLUX_PROMPT =
-  "Extend the image naturally into the empty canvas while preserving the original photo and continuing the scene realistically.";
-const SUPPORTED_LUMA_ASPECT_RATIOS = ["1:1", "3:4", "4:3", "9:16", "16:9", "9:21", "21:9"] as const;
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 const JPEG_SIGNATURE = [0xff, 0xd8];
 const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46];
@@ -33,30 +32,40 @@ type ReplicatePrediction = {
   logs?: string | null;
 };
 
+type EditImageModelConfig = {
+  apiToken: string;
+  model: string;
+  version: string;
+  promptKey: string;
+  inputImageKey: string;
+  imageIsArray: boolean;
+  extraInput: Record<string, unknown>;
+};
+
 function normalizeText(value: unknown): string {
   return String(value || "").trim();
 }
 
 function getLegacyDefaultModelId() {
   return (
-    normalizeAiExpandModelId(process.env.AI_EXPAND_REPLICATE_MODEL) ||
-    DEFAULT_AI_EXPAND_MODEL_ID
+    normalizeEditImageModelId(process.env.IMAGE_EDIT_REPLICATE_MODEL) ||
+    DEFAULT_EDIT_IMAGE_MODEL_ID
   );
 }
 
-export function getReplicateDefaultAiExpandModelId() {
+export function getReplicateDefaultEditImageModelId() {
   return getLegacyDefaultModelId();
 }
 
-function resolveModelRuntimeConfig(modelId?: string) {
-  const normalizedModelId = normalizeAiExpandModelId(modelId) || getLegacyDefaultModelId();
-  const definition = getAiExpandModelDefinition(normalizedModelId);
+function resolveModelRuntimeConfig(modelId?: string): EditImageModelConfig {
+  const normalizedModelId = normalizeEditImageModelId(modelId) || getLegacyDefaultModelId();
+  const definition = getEditImageModelDefinition(normalizedModelId);
   if (!definition) {
-    throw createProviderUnavailableError(`Unsupported AI Expand model: ${normalizedModelId}`);
+    throw createProviderUnavailableError(`Unsupported image edit model: ${normalizedModelId}`);
   }
 
   const legacyDefaultModelId = getLegacyDefaultModelId();
-  const legacyVersionOverride = normalizeText(process.env.AI_EXPAND_REPLICATE_VERSION);
+  const legacyVersionOverride = normalizeText(process.env.IMAGE_EDIT_REPLICATE_VERSION);
 
   return {
     apiToken: normalizeText(process.env.REPLICATE_API_TOKEN),
@@ -64,12 +73,18 @@ function resolveModelRuntimeConfig(modelId?: string) {
     version:
       normalizedModelId === legacyDefaultModelId && legacyVersionOverride
         ? legacyVersionOverride
-        : definition.defaultVersion,
-    kind: definition.kind,
+        : normalizeText(definition.defaultVersion),
+    promptKey: definition.promptKey || "prompt",
+    inputImageKey: definition.inputImageKey,
+    imageIsArray: definition.imageIsArray === true,
+    extraInput:
+      definition.extraInput && typeof definition.extraInput === "object"
+        ? definition.extraInput
+        : {},
   };
 }
 
-export function getReplicateAiExpandMetadata(modelId?: string) {
+export function getReplicateEditImageMetadata(modelId?: string) {
   const config = resolveModelRuntimeConfig(modelId);
   return {
     provider: "replicate",
@@ -78,10 +93,12 @@ export function getReplicateAiExpandMetadata(modelId?: string) {
   };
 }
 
-export function assertReplicateAiExpandConfigured(modelId?: string) {
+export function assertReplicateEditImageConfigured(modelId?: string) {
   const config = resolveModelRuntimeConfig(modelId);
-  if (!config.apiToken || !config.version) {
-    throw createProviderUnavailableError("Replicate AI Expand is not configured.");
+  // Official always-on models run by bare slug, so a pinned version is optional;
+  // only the API token and a resolvable model slug are strictly required.
+  if (!config.apiToken || !config.model) {
+    throw createProviderUnavailableError("Replicate image edit is not configured.");
   }
   return config;
 }
@@ -142,7 +159,7 @@ async function replicateRequest<T = any>(
     retryTransient?: boolean;
   } = {}
 ): Promise<T> {
-  const config = assertReplicateAiExpandConfigured();
+  const config = assertReplicateEditImageConfigured();
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -155,7 +172,7 @@ async function replicateRequest<T = any>(
         Authorization: `Bearer ${config.apiToken}`,
         Accept: "application/json",
         "Content-Type": "application/json",
-        "User-Agent": "web-dashboard/ai-expand",
+        "User-Agent": "web-dashboard/image-edit",
         ...headers,
       },
       body: body === undefined ? undefined : JSON.stringify(body),
@@ -236,93 +253,44 @@ function outputUrlFromPredictionOutput(output: unknown): string {
   return "";
 }
 
-function parseAspectRatio(value: string) {
-  const [width, height] = String(value || "")
-    .split(":")
-    .map((part) => Number.parseFloat(part));
-  if (!Number.isFinite(width) || !Number.isFinite(height) || width <= 0 || height <= 0) {
-    return 1;
-  }
-  return width / height;
+function buildModelInput(
+  config: EditImageModelConfig,
+  { imageUrl, prompt }: { imageUrl: string; prompt: string }
+): Record<string, unknown> {
+  const imageValue: unknown = config.imageIsArray ? [imageUrl] : imageUrl;
+  return {
+    [config.promptKey]: prompt,
+    [config.inputImageKey]: imageValue,
+    ...config.extraInput,
+  };
 }
 
-function resolveLumaAspectRatio(width: number, height: number) {
-  const targetRatio = Math.max(1, Number(width) || 1) / Math.max(1, Number(height) || 1);
-  let best = SUPPORTED_LUMA_ASPECT_RATIOS[0];
-  let bestDistance = Math.abs(parseAspectRatio(best) - targetRatio);
-
-  for (const candidate of SUPPORTED_LUMA_ASPECT_RATIOS.slice(1)) {
-    const distance = Math.abs(parseAspectRatio(candidate) - targetRatio);
-    if (distance < bestDistance) {
-      best = candidate;
-      bestDistance = distance;
-    }
-  }
-
-  return best;
-}
-
-export async function createReplicateAiExpandPrediction({
+export async function createReplicateEditImagePrediction({
   imageUrl,
-  canvasImageUrl,
-  maskUrl,
-  targetWidth,
-  targetHeight,
-  placedImageX,
-  placedImageY,
-  placedImageWidth,
-  placedImageHeight,
+  prompt,
   modelId,
 }: {
   imageUrl: string;
-  canvasImageUrl: string;
-  maskUrl: string;
-  targetWidth: number;
-  targetHeight: number;
-  placedImageX: number;
-  placedImageY: number;
-  placedImageWidth: number;
-  placedImageHeight: number;
+  prompt: string;
   modelId?: string;
 }): Promise<ReplicatePrediction> {
-  const config = assertReplicateAiExpandConfigured(modelId);
+  const config = assertReplicateEditImageConfigured(modelId);
+  const input = buildModelInput(config, { imageUrl, prompt });
 
-  let input: Record<string, unknown>;
-  if (config.kind === "bria-expand") {
-    input = {
-      image_url: imageUrl,
-      canvas_size: [targetWidth, targetHeight],
-      original_image_size: [placedImageWidth, placedImageHeight],
-      original_image_location: [placedImageX, placedImageY],
-    };
-  } else if (config.kind === "luma-reframe") {
-    input = {
-      image: imageUrl,
-      aspect_ratio: resolveLumaAspectRatio(targetWidth, targetHeight),
-    };
-  } else if (config.kind === "flux-fill") {
-    input = {
-      image: canvasImageUrl,
-      mask: maskUrl,
-      prompt: DEFAULT_FLUX_PROMPT,
-      output_format: "png",
-    };
-  } else {
-    input = {
-      image: canvasImageUrl,
-      mask: maskUrl,
-    };
-  }
+  // With a pinned version, use the global predictions endpoint; otherwise run the
+  // official model by slug via the model-scoped predictions endpoint.
+  const usingVersion = Boolean(config.version);
+  const path = usingVersion
+    ? "/predictions"
+    : `/models/${config.model}/predictions`;
+  const body = usingVersion ? { version: config.version, input } : { input };
 
-  const prediction = await replicateRequest<ReplicatePrediction>("/predictions", {
+  const prediction = await replicateRequest<ReplicatePrediction>(path, {
     method: "POST",
     headers: {
       "Cancel-After": DEFAULT_CANCEL_AFTER,
     },
-    body: {
-      version: config.version,
-      input,
-    },
+    body,
   });
 
   if (!prediction?.id) {
@@ -359,7 +327,7 @@ export async function waitForReplicatePrediction({
     if (isTerminalStatus(status)) {
       if (!isSuccessStatus(status)) {
         throw createProcessingFailedError(
-          normalizeText(prediction?.error) || "Replicate AI Expand failed."
+          normalizeText(prediction?.error) || "Replicate image edit failed."
         );
       }
 
@@ -377,7 +345,7 @@ export async function waitForReplicatePrediction({
     await delay(Math.max(500, Math.round(Number(pollIntervalMs) || DEFAULT_POLL_INTERVAL_MS)));
   }
 
-  throw createProviderUnavailableError("Replicate AI Expand timed out.");
+  throw createProviderUnavailableError("Replicate image edit timed out.");
 }
 
 function matchesSignature(bytes: Uint8Array, signature: number[], offset = 0) {
@@ -413,7 +381,7 @@ function sanitizeOutputFileName(value: string, mimeType: string) {
     .replace(/-+/g, "-")
     .replace(/^-+|-+$/g, "")
     .slice(0, 120);
-  return `${safeBase || "expanded-image"}.${extensionFromMimeType(mimeType)}`;
+  return `${safeBase || "edited-image"}.${extensionFromMimeType(mimeType)}`;
 }
 
 function readPngDimensions(bytes: Buffer) {
@@ -443,7 +411,7 @@ export async function downloadReplicateOutput({
       cache: "no-store",
       headers: {
         Accept: "image/*,application/octet-stream,*/*",
-        "User-Agent": "web-dashboard/ai-expand",
+        "User-Agent": "web-dashboard/image-edit",
       },
     });
 

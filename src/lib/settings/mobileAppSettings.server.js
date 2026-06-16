@@ -9,6 +9,7 @@ import {
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
   resolveMobileAiExpandModel,
+  resolveMobileEditImageModel,
   resolveMobileObjectRemovalModel,
   resolveMobileUpscaleModel,
 } from "./mobileAppSettings";
@@ -58,6 +59,7 @@ export {
   normalizeStoredMobileAppSettings,
   resolveMobileAppSettingsDecision,
   resolveMobileAiExpandModel,
+  resolveMobileEditImageModel,
   resolveMobileObjectRemovalModel,
   resolveMobileUpscaleModel,
 };

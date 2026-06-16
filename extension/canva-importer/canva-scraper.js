@@ -1244,7 +1244,7 @@
         return Array.isArray(fontAssets?.[matched]) ? fontAssets[matched] : [];
       };
 
-      const resolveFontAssetsForFamilies = async (fontAssets, families) => {
+      const resolveFontAssetsForFamilies = async (fontAssets, families, usedTargetsByFamily = {}) => {
         const result = {};
         const seenFamilies = new Set();
         const sourceFamilies = Array.isArray(families) ? families : [];
@@ -1258,12 +1258,75 @@
           const entries = getFontEntriesByFamily(fontAssets, family);
           if (entries.length === 0) continue;
 
+          // Canva declares ~36 @font-face variants per family (every weight 100-900
+          // x italic/normal) in arbitrary order, so a naive first-N cap can drop the
+          // exact face a design relies on (e.g. Poppins Black 900 for big numbers).
+          // Order entries by distance to the (weight, style) targets this family's
+          // text is actually rendered at, so those faces survive the cap below.
+          const usedTargets = Array.isArray(usedTargetsByFamily?.[family])
+            ? usedTargetsByFamily[family]
+            : [];
+          const describeEntry = (entry) => {
+            const min = Number.isFinite(Number(entry?.fontWeightMin))
+              ? Number(entry.fontWeightMin)
+              : 400;
+            const max = Number.isFinite(Number(entry?.fontWeightMax))
+              ? Number(entry.fontWeightMax)
+              : 400;
+            return {
+              min,
+              max,
+              mid: (min + max) / 2,
+              style: normalizeFontStyle(entry?.fontStyle || ""),
+            };
+          };
+          const distanceToTargets = (entry) => {
+            const profile = describeEntry(entry);
+            if (usedTargets.length === 0) {
+              // No usage info: prefer regular-normal so the family still renders.
+              return Math.abs(profile.mid - 400) + (profile.style === "normal" ? 0 : 1000);
+            }
+            let best = Infinity;
+            for (let t = 0; t < usedTargets.length; t += 1) {
+              const target = usedTargets[t];
+              const targetWeight = Number.isFinite(Number(target?.weight))
+                ? Number(target.weight)
+                : 400;
+              const targetStyle = normalizeFontStyle(target?.style || "");
+              const weightDistance =
+                targetWeight < profile.min
+                  ? profile.min - targetWeight
+                  : targetWeight > profile.max
+                    ? targetWeight - profile.max
+                    : 0;
+              const styleDistance = profile.style === targetStyle ? 0 : 1000;
+              best = Math.min(best, weightDistance + styleDistance);
+            }
+            return best;
+          };
+          const orderedEntries = entries
+            .filter(
+              (entry) =>
+                entry && typeof entry === "object" && String(entry.url || "").trim()
+            )
+            .map((entry, originalIndex) => ({
+              entry,
+              originalIndex,
+              distance: distanceToTargets(entry),
+            }))
+            .sort((a, b) => a.distance - b.distance || a.originalIndex - b.originalIndex);
+
           const resolvedEntries = [];
-          for (let entryIndex = 0; entryIndex < entries.length; entryIndex += 1) {
-            const entry = entries[entryIndex];
-            if (!entry || typeof entry !== "object") continue;
+          const seenVariantKeys = new Set();
+          for (let entryIndex = 0; entryIndex < orderedEntries.length; entryIndex += 1) {
+            const entry = orderedEntries[entryIndex].entry;
             const url = String(entry.url || "").trim();
             if (!url) continue;
+            // Dedupe by resolved (weight, style) so the 4 slots hold distinct faces.
+            const profile = describeEntry(entry);
+            const variantKey = `${Math.round(profile.mid)}|${profile.style}`;
+            if (seenVariantKeys.has(variantKey)) continue;
+            seenVariantKeys.add(variantKey);
             const resolved = await readFontAssetAsDataUrl(entry);
             resolvedEntries.push({
               url,
@@ -1505,6 +1568,39 @@
         return isTransparentColor(style.color) ? null : best;
       };
 
+      // Canva sets the real (often bold) weight on the leaf glyph <span> while the
+      // wrapper <p> that findBestTextStyleElement picks stays at 400. Read the weight
+      // from the dominant leaf text element so imported text matches the rendered
+      // weight (e.g. numbers shown in Poppins 900, not the inherited 400). Computed
+      // style resolves inheritance, so a genuinely-400 leaf still reports 400.
+      const resolveEffectiveFontWeight = (styleElement, ownerNode, fallbackStyle) => {
+        const root = styleElement || ownerNode;
+        const fallback = parseFontWeight(fallbackStyle?.fontWeight);
+        if (!root || !root.querySelectorAll) return fallback;
+        const leaves = Array.from(root.querySelectorAll("span,p,div,b,strong")).filter(
+          (el) =>
+            el.children.length === 0 &&
+            !isInsideForeignLayer(el, ownerNode || root) &&
+            String(el.textContent || "").trim()
+        );
+        let best = null;
+        let bestScore = -1;
+        for (let index = 0; index < leaves.length; index += 1) {
+          const el = leaves[index];
+          const style = window.getComputedStyle(el);
+          const fontSize = Number.parseFloat(style.fontSize || "") || 0;
+          const textLen = String(el.textContent || "").trim().length;
+          // Favor the largest, longest glyph run (the layer's dominant text).
+          const score = fontSize * 100 + textLen;
+          if (score > bestScore) {
+            bestScore = score;
+            best = el;
+          }
+        }
+        if (!best) return fallback;
+        return parseFontWeight(window.getComputedStyle(best).fontWeight);
+      };
+
       const findCustomFontSizeFromNode = (element, stopAtNode) => {
         let node = element;
         let depth = 0;
@@ -1524,10 +1620,21 @@
         const layerStyle = window.getComputedStyle(layerNode);
         const imageStyle = window.getComputedStyle(imageElement);
         const imageRect = imageElement.getBoundingClientRect();
+        // Compare the image against the layer's FULL bounds, not the page-clipped
+        // viewportRect. Otherwise an image that merely bleeds off the page edge
+        // (common for decorative florals/borders) looks "clipped" relative to the
+        // clipped rect and gets mis-flagged as masked — then cropped to only the
+        // visible portion. A genuine frame/mask clips the image inside its own
+        // layer box, which comparing against layerBounds still detects correctly.
+        const layerBoundsRect = layerNode.getBoundingClientRect();
+        const maskReferenceRect =
+          layerBoundsRect && layerBoundsRect.width > 1 && layerBoundsRect.height > 1
+            ? layerBoundsRect
+            : viewportRect;
         const imageArea = Math.max(0, imageRect.width) * Math.max(0, imageRect.height);
-        const layerArea = Math.max(0, viewportRect.width) * Math.max(0, viewportRect.height);
+        const layerArea = Math.max(0, maskReferenceRect.width) * Math.max(0, maskReferenceRect.height);
         const clippedByArea = imageArea > 1 && layerArea > 1 && imageArea > layerArea * 1.18;
-        const ratioLayer = viewportRect.width / Math.max(1, viewportRect.height);
+        const ratioLayer = maskReferenceRect.width / Math.max(1, maskReferenceRect.height);
         const ratioImage = imageRect.width / Math.max(1, imageRect.height);
         const ratioDelta = Math.abs(ratioLayer - ratioImage);
         let hasMaskSignals = false;
@@ -2672,9 +2779,34 @@
             hasTextPreview && isTextLayerLargeEnough && hasEnoughTextArea;
           const passesThinVectorGate =
             hasVectorSignal && isVectorLayerLargeEnough && hasEnoughVectorArea;
+          // Small image/icon gate: a layer holding a real resolvable image
+          // (blob/url/data) should still import even when it falls under the default
+          // area threshold — otherwise tiny icons (e.g. a location pin) get dropped.
+          const scopedImageElements = getScopedImageElements(node);
+          const hasResolvableImage = scopedImageElements.some((element) => {
+            const src = String(
+              element.currentSrc ||
+                element.src ||
+                element.getAttribute?.("href") ||
+                element.getAttribute?.("xlink:href") ||
+                ""
+            );
+            return /^(blob:|https?:|file:|data:)/i.test(src);
+          });
+          const minImageLayerSide = Math.max(8, Math.min(rect.width, rect.height) * 0.006);
+          const minImageLayerArea = Math.max(64, rect.width * rect.height * 0.00008);
+          const passesSmallImageGate =
+            hasResolvableImage &&
+            viewportRect.width >= minImageLayerSide &&
+            viewportRect.height >= minImageLayerSide &&
+            viewportArea >= minImageLayerArea;
           if (
             !isBackgroundNode &&
-            (!isInsidePageFrame || (!passesDefaultSizeGate && !passesSmallTextGate && !passesThinVectorGate))
+            (!isInsidePageFrame ||
+              (!passesDefaultSizeGate &&
+                !passesSmallTextGate &&
+                !passesThinVectorGate &&
+                !passesSmallImageGate))
           ) {
             continue;
           }
@@ -2682,7 +2814,7 @@
           const styleWidth = parseStyleDimension(styleText, "width");
           const styleHeight = parseStyleDimension(styleText, "height");
           const hasStyleGeometry = styleWidth >= 2 && styleHeight >= 2;
-          const imageElements = getScopedImageElements(node);
+          const imageElements = scopedImageElements;
           const imageElement =
             imageElements
               .map((element) => ({ element, rect: element.getBoundingClientRect() }))
@@ -2893,11 +3025,10 @@
 
           const isLikelyImageLayer =
             hasImageSignal &&
-            isLargeEnough &&
-            hasEnoughArea &&
             isInsidePageFrame &&
             opacitySignal &&
-            imageConfidence >= 5;
+            imageConfidence >= 5 &&
+            ((isLargeEnough && hasEnoughArea) || passesSmallImageGate);
           const roundedWidth = Math.max(1, Math.round(width));
           const roundedHeight = Math.max(1, Math.round(height));
           const vectorAspectRatio =
@@ -3035,7 +3166,7 @@
             fontFamily: resolvedFontFamily,
             fontSize: resolvedFontSize,
             fontStyle: textStyle?.fontStyle || "normal",
-            fontWeight: parseFontWeight(textStyle?.fontWeight),
+            fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
             lineHeight: Math.max(0.8, textLineHeight || 1.2),
             letterSpacing: textLetterSpacing,
             textDecoration,
@@ -3103,7 +3234,7 @@
                 fontFamily: resolvedFontFamily,
                 fontSize: resolvedFontSize,
                 fontStyle: textStyle?.fontStyle || "normal",
-                fontWeight: parseFontWeight(textStyle?.fontWeight),
+                fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
                 lineHeight: Math.max(0.8, textLineHeight || 1.2),
                 letterSpacing: textLetterSpacing,
                 textDecoration,
@@ -3301,7 +3432,7 @@
               fontFamily,
               fontSize: resolvedFontSize,
               fontStyle: textStyle.fontStyle || "normal",
-              fontWeight: parseFontWeight(textStyle.fontWeight),
+              fontWeight: resolveEffectiveFontWeight(node, node, textStyle),
               lineHeight: Math.max(0.8, textLineHeight || 1.2),
               letterSpacing: textLetterSpacing,
               textDecoration,
@@ -3477,9 +3608,29 @@
             .filter(Boolean)
         )
       );
+      // Capture which (weight, style) each family is actually used at, so the resolver
+      // keeps the matching font faces (e.g. Poppins Black 900 for big numbers) instead
+      // of the arbitrary first few Canva happens to declare for the family.
+      const usedFontTargetsByFamily = {};
+      layers
+        .filter((layer) => String(layer?.kind || "").toLowerCase() === "text")
+        .forEach((layer) => {
+          const family = normalizeFontFamilyName(layer?.fontFamily);
+          if (!family) return;
+          const target = {
+            weight: parseFontWeight(layer?.fontWeight),
+            style: normalizeFontStyle(layer?.fontStyle),
+          };
+          const bucket = usedFontTargetsByFamily[family] || [];
+          if (!bucket.some((t) => t.weight === target.weight && t.style === target.style)) {
+            bucket.push(target);
+          }
+          usedFontTargetsByFamily[family] = bucket;
+        });
       const resolvedFontAssets = await resolveFontAssetsForFamilies(
         documentFontAssets,
-        usedLayerFonts
+        usedLayerFonts,
+        usedFontTargetsByFamily
       );
 
       return {

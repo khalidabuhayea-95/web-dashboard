@@ -10,7 +10,7 @@ import {
   ShieldCheck,
   ShieldEllipsis,
   Smartphone,
-  Sparkles,
+  Wand2,
 } from "lucide-react";
 
 import Button from "@/components/ui/button";
@@ -35,6 +35,10 @@ const MOBILE_AI_EXPAND_INITIAL_FORM = {
 
 const MOBILE_IMAGE_UPSCALE_INITIAL_FORM = {
   upscaleModel: "prunaai/p-image-upscale",
+};
+
+const MOBILE_IMAGE_EDIT_INITIAL_FORM = {
+  editImageModel: "google/nano-banana",
 };
 
 const MOBILE_AUTH_INITIAL_FORM = {
@@ -79,6 +83,12 @@ const IMAGE_UPSCALE_MODEL_OPTIONS = [
   { value: "alexgenovese/upscaler", label: "alexgenovese/upscaler", detail: "Face restore" },
 ];
 
+const IMAGE_EDIT_MODEL_OPTIONS = [
+  { value: "google/nano-banana", label: "google/nano-banana", detail: "~$0.039 · default" },
+  { value: "qwen/qwen-image-edit-plus", label: "qwen/qwen-image-edit-plus", detail: "~$0.03 · cheapest" },
+  { value: "black-forest-labs/flux-kontext-pro", label: "black-forest-labs/flux-kontext-pro", detail: "~$0.04 · consistency" },
+];
+
 function formatErrorMessage(payload, fallback = "Request failed.") {
   const details = [];
   if (payload?.error && typeof payload.error === "string") {
@@ -99,9 +109,9 @@ function createStatus(tone, message) {
 }
 
 function formatSavedAt(value) {
-  if (!value) return "Not saved yet";
+  if (!value) return "not yet";
   const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) return "Recently updated";
+  if (Number.isNaN(parsed.getTime())) return "recently";
   return parsed.toLocaleString();
 }
 
@@ -133,6 +143,12 @@ function mapMobileAiExpandSettings(settings) {
 function mapMobileImageUpscaleSettings(settings) {
   return {
     upscaleModel: String(settings?.upscaleModel || "prunaai/p-image-upscale"),
+  };
+}
+
+function mapMobileImageEditSettings(settings) {
+  return {
+    editImageModel: String(settings?.editImageModel || "google/nano-banana"),
   };
 }
 
@@ -267,7 +283,7 @@ function useSettingsForm({
   };
 }
 
-function StatusPill({ tone = "neutral", children, className = "" }) {
+function StatusPill({ tone = "neutral", children }) {
   const toneClasses =
     tone === "success"
       ? "border-emerald-200 bg-emerald-50 text-emerald-700"
@@ -275,11 +291,11 @@ function StatusPill({ tone = "neutral", children, className = "" }) {
         ? "border-amber-200 bg-amber-50 text-amber-700"
         : tone === "error"
           ? "border-rose-200 bg-rose-50 text-rose-700"
-          : "border-white/60 bg-white/75 text-[color:var(--ds-text-muted)]";
+          : "border-border/70 bg-white/75 text-[color:var(--ds-text-muted)]";
 
   return (
     <span
-      className={`inline-flex items-center rounded-full border px-3 py-1 text-[0.72rem] font-semibold tracking-[0.08em] uppercase ${toneClasses} ${className}`}
+      className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-[0.68rem] font-semibold tracking-[0.06em] uppercase ${toneClasses}`}
     >
       {children}
     </span>
@@ -294,125 +310,60 @@ function StatusBanner({ status }) {
       ? "border-emerald-200/80 bg-emerald-50 text-emerald-700"
       : status.tone === "error"
         ? "border-rose-200/80 bg-rose-50 text-rose-700"
-        : "border-slate-200/80 bg-white/80 text-[color:var(--ds-text-muted)]";
+        : "border-border/70 bg-white/80 text-[color:var(--ds-text-muted)]";
 
   return (
     <div
       aria-live="polite"
-      className={`rounded-2xl border px-4 py-3 text-sm font-medium shadow-sm ${toneClasses}`}
+      className={`rounded-xl border px-3.5 py-2.5 text-sm font-medium ${toneClasses}`}
     >
       {status.message}
     </div>
   );
 }
 
-function SettingsSection({
-  eyebrow,
-  title,
-  description,
-  icon: Icon,
-  badges,
-  children,
-  footer,
-}) {
+function SettingsSection({ title, icon: Icon, badge, children, footer }) {
   return (
-    <section className="overflow-hidden rounded-[28px] border border-white/65 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(249,250,253,0.95))] shadow-[0_18px_48px_rgba(15,23,42,0.07)]">
-      <div className="border-b border-border/70 px-5 py-5 sm:px-7 sm:py-6">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-          <div className="min-w-0">
-            <div className="flex items-center gap-3">
-              <div className="inline-flex h-11 w-11 items-center justify-center rounded-2xl bg-[linear-gradient(180deg,rgba(59,91,219,0.14),rgba(59,91,219,0.06))] text-[color:var(--ds-primary)] shadow-sm">
-                <Icon className="h-5 w-5" aria-hidden="true" />
-              </div>
-              <div>
-                <p className="text-[0.72rem] font-semibold uppercase tracking-[0.12em] text-[color:var(--ds-text-muted)]">
-                  {eyebrow}
-                </p>
-                <h2 className="mt-1 text-[1.35rem] font-semibold tracking-[-0.03em] text-[color:var(--ds-text)]">
-                  {title}
-                </h2>
-              </div>
-            </div>
-            <p className="mt-4 max-w-3xl text-[0.96rem] leading-7 text-[color:var(--ds-text-muted)]">
-              {description}
-            </p>
+    <section className="overflow-hidden rounded-2xl border border-border/70 bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+      <div className="flex items-center justify-between gap-4 border-b border-border/70 px-5 py-4">
+        <div className="flex items-center gap-3">
+          <div className="inline-flex h-9 w-9 items-center justify-center rounded-xl bg-[color:var(--ds-primary)]/10 text-[color:var(--ds-primary)]">
+            <Icon className="h-4.5 w-4.5" aria-hidden="true" />
           </div>
-
-          {badges?.length ? (
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              {badges.map((badge) => (
-                <StatusPill key={`${badge.tone}-${badge.label}`} tone={badge.tone}>
-                  {badge.label}
-                </StatusPill>
-              ))}
-            </div>
-          ) : null}
+          <h2 className="text-base font-semibold tracking-[-0.01em] text-[color:var(--ds-text)]">
+            {title}
+          </h2>
         </div>
+        {badge ? <StatusPill tone={badge.tone}>{badge.label}</StatusPill> : null}
       </div>
 
-      <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-7">{children}</div>
-      {footer ? <div className="border-t border-border/70 px-5 py-5 sm:px-7">{footer}</div> : null}
+      <div className="space-y-5 px-5 py-5">{children}</div>
+      {footer ? <div className="border-t border-border/70 px-5 py-4">{footer}</div> : null}
     </section>
   );
 }
 
-function SurfaceCard({ title, description, icon: Icon, children, className = "" }) {
+function FieldBlock({ id, label, hint, children }) {
   return (
-    <div
-      className={`rounded-[24px] border border-border/70 bg-white/80 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur ${className}`}
-    >
-      <div className="mb-4 flex items-start gap-3">
-        <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(180deg,rgba(59,91,219,0.12),rgba(59,91,219,0.05))] text-[color:var(--ds-primary)]">
-          <Icon className="h-4.5 w-4.5" aria-hidden="true" />
-        </div>
-        <div>
-          <h3 className="text-base font-semibold tracking-[-0.02em] text-[color:var(--ds-text)]">
-            {title}
-          </h3>
-          {description ? (
-            <p className="mt-1 text-sm leading-6 text-[color:var(--ds-text-muted)]">
-              {description}
-            </p>
-          ) : null}
-        </div>
-      </div>
-      {children}
-    </div>
-  );
-}
-
-function FieldBlock({ id, label, description, hint, children }) {
-  return (
-    <div className="space-y-2.5">
+    <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      {description ? (
-        <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">{description}</p>
-      ) : null}
       {children}
       {hint ? <p className="field-help">{hint}</p> : null}
     </div>
   );
 }
 
-function SwitchRow({ id, label, description, checked, onChange, disabled = false }) {
+function SwitchRow({ id, label, checked, onChange, disabled = false }) {
   return (
     <label
       htmlFor={id}
-      className={`flex items-center justify-between gap-4 rounded-[22px] border px-4 py-4 transition ${
+      className={`flex items-center justify-between gap-4 rounded-xl border px-4 py-3 transition ${
         disabled
           ? "border-border/60 bg-slate-50/70 opacity-80"
-          : "border-border/70 bg-white/75 hover:border-[color:var(--ds-primary)]/35 hover:bg-white"
+          : "border-border/70 bg-white hover:border-[color:var(--ds-primary)]/35"
       }`}
     >
-      <div className="min-w-0">
-        <div className="text-sm font-semibold text-[color:var(--ds-text)]">{label}</div>
-        {description ? (
-          <p className="mt-1 text-sm leading-6 text-[color:var(--ds-text-muted)]">
-            {description}
-          </p>
-        ) : null}
-      </div>
-
+      <span className="text-sm font-medium text-[color:var(--ds-text)]">{label}</span>
       <span className="relative inline-flex shrink-0 items-center">
         <input
           id={id}
@@ -422,8 +373,8 @@ function SwitchRow({ id, label, description, checked, onChange, disabled = false
           disabled={disabled}
           className="peer sr-only"
         />
-        <span className="h-8 w-14 rounded-full bg-slate-200 transition peer-checked:bg-[color:var(--ds-primary)] peer-disabled:opacity-60" />
-        <span className="pointer-events-none absolute left-1 top-1 h-6 w-6 rounded-full bg-white shadow-sm transition peer-checked:translate-x-6" />
+        <span className="h-7 w-12 rounded-full bg-slate-200 transition peer-checked:bg-[color:var(--ds-primary)] peer-disabled:opacity-60" />
+        <span className="pointer-events-none absolute left-1 top-1 h-5 w-5 rounded-full bg-white shadow-sm transition peer-checked:translate-x-5" />
       </span>
     </label>
   );
@@ -431,40 +382,29 @@ function SwitchRow({ id, label, description, checked, onChange, disabled = false
 
 function CredentialState({ configured, maskedValue, emptyCopy }) {
   return (
-    <div className="rounded-2xl border border-dashed border-border/80 bg-slate-50/80 px-4 py-3 text-sm text-[color:var(--ds-text-muted)]">
+    <p className="text-xs text-[color:var(--ds-text-muted)]">
       {configured ? (
         <span>
-          Stored value: <span className="font-medium text-[color:var(--ds-text)]">{maskedValue || "********"}</span>
+          Stored: <span className="font-medium text-[color:var(--ds-text)]">{maskedValue || "********"}</span>
         </span>
       ) : (
         <span>{emptyCopy}</span>
       )}
-    </div>
+    </p>
   );
 }
 
 function SectionFooter({ status, updatedAt, canEdit, saving, hasChanges, onSave, saveLabel }) {
   return (
-    <div className="space-y-4">
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <div className="space-y-2">
-          <div className="text-sm font-medium text-[color:var(--ds-text)]">
-            Last synced {formatSavedAt(updatedAt)}
-          </div>
-          <p className="text-sm text-[color:var(--ds-text-muted)]">
-            {canEdit
-              ? hasChanges
-                ? "You have unsaved edits in this section."
-                : "Everything in this section is up to date."
-              : "You can review current configuration, but only admins can make changes."}
-          </p>
-        </div>
-
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <span className="text-xs text-[color:var(--ds-text-muted)]">
+          {canEdit ? `Last saved ${formatSavedAt(updatedAt)}` : "Read only — admin access required"}
+        </span>
         <Button
           type="button"
           onClick={onSave}
           disabled={!canEdit || saving || !hasChanges}
-          className="w-full sm:w-auto"
         >
           {saving ? <Loader2 className="h-4 w-4 animate-spin" aria-hidden="true" /> : null}
           {saving ? "Saving..." : saveLabel}
@@ -490,22 +430,17 @@ function PlatformCard({
 }) {
   const isAndroid = platform === "Android";
   return (
-    <SurfaceCard
-      icon={isAndroid ? Smartphone : Apple}
-      title={platform}
-      description={
-        isAndroid
-          ? "Define rollout behavior for Android clients using version codes."
-          : "Keep iOS rollout controls independent so release policies stay predictable."
-      }
-    >
-      <div className="space-y-4">
-        <FieldBlock
-          id={versionId}
-          label="Minimum supported version code"
-          description="Apps below this version code will receive forceUpdate=true."
-          hint="Leave blank if you do not want to enforce a minimum yet."
-        >
+    <div className="rounded-xl border border-border/70 bg-white p-4">
+      <div className="mb-4 flex items-center gap-2.5">
+        {isAndroid ? (
+          <Smartphone className="h-4 w-4 text-[color:var(--ds-primary)]" aria-hidden="true" />
+        ) : (
+          <Apple className="h-4 w-4 text-[color:var(--ds-primary)]" aria-hidden="true" />
+        )}
+        <h3 className="text-sm font-semibold text-[color:var(--ds-text)]">{platform}</h3>
+      </div>
+      <div className="space-y-3.5">
+        <FieldBlock id={versionId} label="Minimum version code">
           <Input
             id={versionId}
             type="number"
@@ -514,25 +449,19 @@ function PlatformCard({
             value={versionValue}
             onChange={onVersionChange}
             disabled={disabled}
-            placeholder="Example: 205"
+            placeholder="e.g. 205"
           />
         </FieldBlock>
 
         <SwitchRow
           id={toggleId}
           label="Enable cache"
-          description="Controls whether this platform receives enableCache=true from the public mobile settings endpoint."
           checked={cacheEnabled}
           onChange={onCacheChange}
           disabled={disabled}
         />
 
-        <FieldBlock
-          id={redirectId}
-          label="Redirect link"
-          description="Returned by the public mobile settings endpoint so the app can send users to the right store or update destination."
-          hint="Leave blank if the app should not receive a redirect link for this platform."
-        >
+        <FieldBlock id={redirectId} label="Redirect link">
           <Input
             id={redirectId}
             type="url"
@@ -547,21 +476,13 @@ function PlatformCard({
           />
         </FieldBlock>
       </div>
-    </SurfaceCard>
+    </div>
   );
 }
 
-function ModelSelect({
-  id,
-  label,
-  description,
-  value,
-  onChange,
-  disabled,
-  options,
-}) {
+function ModelSelect({ id, label, value, onChange, disabled, options }) {
   return (
-    <FieldBlock id={id} label={label} description={description}>
+    <FieldBlock id={id} label={label}>
       <Select id={id} value={value} onChange={onChange} disabled={disabled}>
         {options.map((option) => (
           <option key={option.value} value={option.value}>
@@ -573,64 +494,41 @@ function ModelSelect({
   );
 }
 
-function SharedModelCard({
-  icon,
-  title,
-  description,
-  modelId,
-  modelLabel,
-  modelDescription,
-  modelValue,
-  onModelChange,
-  disabled,
-  options,
-}) {
-  return (
-    <SurfaceCard
-      icon={icon}
-      title={title}
-      description={description}
-    >
-      <ModelSelect
-        id={modelId}
-        label={modelLabel}
-        description={modelDescription}
-        value={modelValue}
-        onChange={onModelChange}
-        disabled={disabled}
-        options={options}
-      />
-    </SurfaceCard>
-  );
-}
-
 function ProviderCard({
-  icon,
+  icon: Icon,
   title,
-  description,
   toggleId,
   toggleLabel,
-  toggleDescription,
   enabled,
   onToggle,
   disabled,
   children,
 }) {
   return (
-    <SurfaceCard icon={icon} title={title} description={description}>
-      <div className="space-y-4">
+    <div className="rounded-xl border border-border/70 bg-white p-4">
+      <div className="mb-4 flex items-center gap-2.5">
+        <Icon className="h-4 w-4 text-[color:var(--ds-primary)]" aria-hidden="true" />
+        <h3 className="text-sm font-semibold text-[color:var(--ds-text)]">{title}</h3>
+      </div>
+      <div className="space-y-3.5">
         <SwitchRow
           id={toggleId}
           label={toggleLabel}
-          description={toggleDescription}
           checked={enabled}
           onChange={onToggle}
           disabled={disabled}
         />
-        <div className="space-y-4">{children}</div>
+        <div className="space-y-3.5">{children}</div>
       </div>
-    </SurfaceCard>
+    </div>
   );
+}
+
+function statusBadge(controls) {
+  return {
+    tone: controls.hasChanges ? "warning" : "success",
+    label: controls.hasChanges ? "Unsaved" : "Synced",
+  };
 }
 
 function MobileSettingsClient() {
@@ -691,6 +589,18 @@ function MobileSettingsClient() {
     }),
   });
 
+  const imageEditSettings = useSettingsForm({
+    endpoint: "/api/settings/mobile-app",
+    initialForm: MOBILE_IMAGE_EDIT_INITIAL_FORM,
+    loadingMessage: "Loading edit image settings...",
+    savingMessage: "Saving edit image settings...",
+    successMessage: "Edit image settings saved.",
+    mapSettings: mapMobileImageEditSettings,
+    buildPayload: (form) => ({
+      editImageModel: form.editImageModel,
+    }),
+  });
+
   const mobileAuth = useSettingsForm({
     endpoint: "/api/settings/mobile-auth",
     initialForm: MOBILE_AUTH_INITIAL_FORM,
@@ -722,584 +632,486 @@ function MobileSettingsClient() {
     }),
   });
 
-  const pageCanEdit =
-    releaseControls.canEdit ||
-    objectRemovalSettings.canEdit ||
-    aiExpandSettings.canEdit ||
-    imageUpscaleSettings.canEdit ||
-    mobileAuth.canEdit;
-
   return (
-    <div className="mx-auto flex max-w-6xl flex-col gap-6 px-4 pb-10 sm:px-6 lg:px-8">
-      <div className="space-y-6">
-        <SettingsSection
-          eyebrow="Release"
-          title="Rollout and cache behavior"
-          description="Set platform-specific version gates and cache behavior without making the screen feel like a low-level admin form. The structure is intentionally split by platform so release managers can scan Android and iOS independently."
-          icon={ShieldCheck}
-          badges={[
-            { tone: releaseControls.hasChanges ? "warning" : "success", label: releaseControls.hasChanges ? "Unsaved edits" : "Synced" },
-            { tone: pageCanEdit ? "neutral" : "warning", label: pageCanEdit ? "Admin controls" : "Read only" },
-          ]}
-          footer={
-            <SectionFooter
-              status={releaseControls.status}
-              updatedAt={releaseControls.updatedAt}
-              canEdit={releaseControls.canEdit}
-              saving={releaseControls.saving}
-              hasChanges={releaseControls.hasChanges}
-              onSave={releaseControls.save}
-              saveLabel="Save release controls"
-            />
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-2">
-            <PlatformCard
-              platform="Android"
-              versionId="mobile-android-version-code"
-              toggleId="mobile-android-enable-cache"
-              redirectId="mobile-android-redirect-link"
-              versionValue={releaseControls.form.androidMinimumSupportedVersion}
-              onVersionChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  androidMinimumSupportedVersion: event.target.value,
-                }))
-              }
-              cacheEnabled={releaseControls.form.androidEnableCache}
-              onCacheChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  androidEnableCache: event.target.checked,
-                }))
-              }
-              redirectValue={releaseControls.form.androidRedirectLink}
-              onRedirectChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  androidRedirectLink: event.target.value,
-                }))
-              }
-              disabled={releaseControls.disabled}
-            />
-            <PlatformCard
-              platform="iOS"
-              versionId="mobile-ios-version-code"
-              toggleId="mobile-ios-enable-cache"
-              redirectId="mobile-ios-redirect-link"
-              versionValue={releaseControls.form.iosMinimumSupportedVersion}
-              onVersionChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  iosMinimumSupportedVersion: event.target.value,
-                }))
-              }
-              cacheEnabled={releaseControls.form.iosEnableCache}
-              onCacheChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  iosEnableCache: event.target.checked,
-                }))
-              }
-              redirectValue={releaseControls.form.iosRedirectLink}
-              onRedirectChange={(event) =>
-                releaseControls.setForm((current) => ({
-                  ...current,
-                  iosRedirectLink: event.target.value,
-                }))
-              }
-              disabled={releaseControls.disabled}
-            />
-          </div>
-
-          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
-                  Evaluation model
-                </div>
-                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
-                  `forceUpdate` depends on version code only. `enableCache` and
-                  `redirectLink` are platform preferences and do not vary by version code.
-                </p>
-              </div>
-            </div>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
-          eyebrow="Media"
-          title="Object removal model routing"
-          description="Choose one shared Replicate model for both Android and iOS. This keeps object-removal behavior aligned across platforms."
-          icon={ShieldEllipsis}
-          badges={[
-            { tone: objectRemovalSettings.hasChanges ? "warning" : "success", label: objectRemovalSettings.hasChanges ? "Unsaved edits" : "Synced" },
-            { tone: "neutral", label: "Shared across platforms" },
-          ]}
-          footer={
-            <SectionFooter
-              status={objectRemovalSettings.status}
-              updatedAt={objectRemovalSettings.updatedAt}
-              canEdit={objectRemovalSettings.canEdit}
-              saving={objectRemovalSettings.saving}
-              hasChanges={objectRemovalSettings.hasChanges}
-              onSave={objectRemovalSettings.save}
-              saveLabel="Save object removal routing"
-            />
-          }
-        >
-          <SharedModelCard
-            icon={ShieldEllipsis}
-            title="Object removal model"
-            description="Choose one shared Replicate model for both Android and iOS so mobile behavior stays consistent."
-            modelId="mobile-object-remove-model"
-            modelLabel="Shared model"
-            modelDescription="The server uses this same model for Android and iOS object-removal requests."
-            modelValue={objectRemovalSettings.form.objectRemovalModel}
-            onModelChange={(event) =>
-              objectRemovalSettings.setForm((current) => ({
-                ...current,
-                objectRemovalModel: event.target.value,
-              }))
-            }
-            disabled={objectRemovalSettings.disabled}
-            options={OBJECT_REMOVAL_MODEL_OPTIONS}
-          />
-
-          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
-                  Runtime behavior
-                </div>
-                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
-                  The server uses the selected model directly for all mobile object-removal requests.
-                  Android and iOS now share the same model choice, which makes QA and cost tracking simpler.
-                </p>
-              </div>
-            </div>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
-          eyebrow="Media"
-          title="AI Expand model"
-          description="Choose one shared Replicate model for AI Expand. Mobile sends only the original image and target size, and the server handles canvas placement and model-specific preprocessing."
-          icon={ShieldEllipsis}
-          badges={[
-            { tone: aiExpandSettings.hasChanges ? "warning" : "success", label: aiExpandSettings.hasChanges ? "Unsaved edits" : "Synced" },
-            { tone: "neutral", label: "Shared across platforms" },
-          ]}
-          footer={
-            <SectionFooter
-              status={aiExpandSettings.status}
-              updatedAt={aiExpandSettings.updatedAt}
-              canEdit={aiExpandSettings.canEdit}
-              saving={aiExpandSettings.saving}
-              hasChanges={aiExpandSettings.hasChanges}
-              onSave={aiExpandSettings.save}
-              saveLabel="Save AI Expand settings"
-            />
-          }
-        >
-          <SharedModelCard
-            icon={ShieldEllipsis}
-            title="AI Expand model"
-            description="Choose one shared AI Expand tier for both Android and iOS: Budget, Recommended, or Premium."
-            modelId="mobile-ai-expand-model"
-            modelLabel="Shared model"
-            modelDescription="Recommended uses `luma/reframe-image`, with `allenhooo/lama` as Budget and `bria/expand-image` as Premium."
-            modelValue={aiExpandSettings.form.aiExpandModel}
-            onModelChange={(event) =>
-              aiExpandSettings.setForm((current) => ({
-                ...current,
-                aiExpandModel: event.target.value,
-              }))
-            }
-            disabled={aiExpandSettings.disabled}
-            options={AI_EXPAND_MODEL_OPTIONS}
-          />
-
-          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
-                  Runtime behavior
-                </div>
-                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
-                  Mobile does not send a mask or prompt. The server creates the expansion canvas automatically
-                  from the original image and target dimensions, then calls the selected AI Expand model.
-                </p>
-              </div>
-            </div>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
-          eyebrow="Media"
-          title="Image upscaling model"
-          description="Choose one shared Replicate model for the mobile Enhance Quality (image upscaling) feature. Mobile sends only the image; the server runs the selected model at 2x and returns the higher-resolution result."
-          icon={ShieldEllipsis}
-          badges={[
-            { tone: imageUpscaleSettings.hasChanges ? "warning" : "success", label: imageUpscaleSettings.hasChanges ? "Unsaved edits" : "Synced" },
-            { tone: "neutral", label: "Shared across platforms" },
-          ]}
-          footer={
-            <SectionFooter
-              status={imageUpscaleSettings.status}
-              updatedAt={imageUpscaleSettings.updatedAt}
-              canEdit={imageUpscaleSettings.canEdit}
-              saving={imageUpscaleSettings.saving}
-              hasChanges={imageUpscaleSettings.hasChanges}
-              onSave={imageUpscaleSettings.save}
-              saveLabel="Save image upscale settings"
-            />
-          }
-        >
-          <SharedModelCard
-            icon={ShieldEllipsis}
-            title="Image upscaling model"
-            description="Choose one shared Replicate upscaler for both Android and iOS. All models run at 2x."
-            modelId="mobile-image-upscale-model"
-            modelLabel="Shared model"
-            modelDescription="The server uses this model for all mobile image upscale requests. Default is prunaai/p-image-upscale."
-            modelValue={imageUpscaleSettings.form.upscaleModel}
-            onModelChange={(event) =>
-              imageUpscaleSettings.setForm((current) => ({
-                ...current,
-                upscaleModel: event.target.value,
-              }))
-            }
-            disabled={imageUpscaleSettings.disabled}
-            options={IMAGE_UPSCALE_MODEL_OPTIONS}
-          />
-
-          <div className="rounded-[24px] border border-[color:var(--ds-primary)]/12 bg-[linear-gradient(135deg,rgba(59,91,219,0.08),rgba(255,255,255,0.95))] px-5 py-4">
-            <div className="flex items-start gap-3">
-              <div className="mt-0.5 inline-flex h-9 w-9 items-center justify-center rounded-2xl bg-white/80 text-[color:var(--ds-primary)] shadow-sm">
-                <Sparkles className="h-4 w-4" aria-hidden="true" />
-              </div>
-              <div className="space-y-1">
-                <div className="text-sm font-semibold text-[color:var(--ds-text)]">
-                  Runtime behavior
-                </div>
-                <p className="text-sm leading-6 text-[color:var(--ds-text-muted)]">
-                  Mobile sends only the original image. The server stages it privately, runs the selected
-                  upscaler at 2x on Replicate, and returns the enhanced image. recraft-crisp-upscale has no
-                  scale control, and google/upscaler enlarges small images more aggressively.
-                </p>
-              </div>
-            </div>
-          </div>
-        </SettingsSection>
-
-        <SettingsSection
-          eyebrow="Security"
-          title="Sign-in providers and bearer sessions"
-          description="Authentication settings are organized by provider first, then by token lifecycle. This reduces visual noise, keeps credential state visible, and makes risky configuration changes feel deliberate."
-          icon={LockKeyhole}
-          badges={[
-            { tone: mobileAuth.hasChanges ? "warning" : "success", label: mobileAuth.hasChanges ? "Unsaved edits" : "Synced" },
-            { tone: "neutral", label: "Secrets stay masked" },
-          ]}
-          footer={
-            <SectionFooter
-              status={mobileAuth.status}
-              updatedAt={mobileAuth.updatedAt}
-              canEdit={mobileAuth.canEdit}
-              saving={mobileAuth.saving}
-              hasChanges={mobileAuth.hasChanges}
-              onSave={mobileAuth.save}
-              saveLabel="Save auth settings"
-            />
-          }
-        >
-          <div className="grid gap-4 lg:grid-cols-2">
-            <ProviderCard
-              icon={Globe}
-              title="Google sign-in"
-              description="Manage trusted mobile client IDs for both Android and iOS."
-              toggleId="mobile-google-enabled"
-              toggleLabel="Allow Google sign-in"
-              toggleDescription="Disable this if the app should temporarily stop accepting Google tokens."
-              enabled={mobileAuth.form.googleEnabled}
-              onToggle={(event) =>
-                mobileAuth.setForm((current) => ({
-                  ...current,
-                  googleEnabled: event.target.checked,
-                }))
-              }
-              disabled={mobileAuth.disabled}
-            >
-              <FieldBlock
-                id="mobile-google-android-client-ids"
-                label="Android client IDs"
-                description="Enter one client ID per line."
-              >
-                <Textarea
-                  id="mobile-google-android-client-ids"
-                  value={mobileAuth.form.googleAndroidClientIds}
-                  onChange={(event) =>
-                    mobileAuth.setForm((current) => ({
-                      ...current,
-                      googleAndroidClientIds: event.target.value,
-                    }))
-                  }
-                  disabled={mobileAuth.disabled}
-                  placeholder="com.example.android.apps..."
-                  className="min-h-[112px] text-sm"
-                />
-              </FieldBlock>
-              <FieldBlock
-                id="mobile-google-ios-client-ids"
-                label="iOS client IDs"
-                description="Keep iOS identities separate so platform verification stays explicit."
-              >
-                <Textarea
-                  id="mobile-google-ios-client-ids"
-                  value={mobileAuth.form.googleIosClientIds}
-                  onChange={(event) =>
-                    mobileAuth.setForm((current) => ({
-                      ...current,
-                      googleIosClientIds: event.target.value,
-                    }))
-                  }
-                  disabled={mobileAuth.disabled}
-                  placeholder="com.example.ios.apps..."
-                  className="min-h-[112px] text-sm"
-                />
-              </FieldBlock>
-            </ProviderCard>
-
-            <ProviderCard
-              icon={ShieldEllipsis}
-              title="Facebook sign-in"
-              description="Configure the public app identifier and rotate the secret when needed."
-              toggleId="mobile-facebook-enabled"
-              toggleLabel="Allow Facebook sign-in"
-              toggleDescription="Use this toggle to pause Facebook sign-in without deleting the underlying credentials."
-              enabled={mobileAuth.form.facebookEnabled}
-              onToggle={(event) =>
-                mobileAuth.setForm((current) => ({
-                  ...current,
-                  facebookEnabled: event.target.checked,
-                }))
-              }
-              disabled={mobileAuth.disabled}
-            >
-              <FieldBlock
-                id="mobile-facebook-app-id"
-                label="Facebook app ID"
-                description="Public application identifier used when the mobile SDK returns a Facebook token."
-              >
-                <Input
-                  id="mobile-facebook-app-id"
-                  value={mobileAuth.form.facebookAppId}
-                  onChange={(event) =>
-                    mobileAuth.setForm((current) => ({
-                      ...current,
-                      facebookAppId: event.target.value,
-                    }))
-                  }
-                  disabled={mobileAuth.disabled}
-                  placeholder="Enter Facebook App ID"
-                />
-              </FieldBlock>
-              <FieldBlock
-                id="mobile-facebook-app-secret"
-                label="Facebook app secret"
-                description="Leave empty to keep the current secret. Paste a new value only when rotating credentials."
-              >
-                <Input
-                  id="mobile-facebook-app-secret"
-                  type="password"
-                  value={mobileAuth.form.facebookAppSecret}
-                  onChange={(event) =>
-                    mobileAuth.setForm((current) => ({
-                      ...current,
-                      facebookAppSecret: event.target.value,
-                    }))
-                  }
-                  disabled={mobileAuth.disabled}
-                  placeholder={
-                    mobileAuth.form.facebookAppSecretConfigured
-                      ? "Enter new secret to replace existing"
-                      : "Enter Facebook App Secret"
-                  }
-                />
-              </FieldBlock>
-              <CredentialState
-                configured={mobileAuth.form.facebookAppSecretConfigured}
-                maskedValue={mobileAuth.form.facebookAppSecretMasked}
-                emptyCopy="No Facebook secret is stored yet."
-              />
-            </ProviderCard>
-          </div>
-
-          <div className="grid gap-4 lg:grid-cols-[minmax(0,0.95fr)_minmax(0,1.05fr)]">
-            <ProviderCard
-              icon={Apple}
-              title="Apple sign-in"
-              description="Restrict Apple login to the bundle identifiers your mobile app actually uses."
-              toggleId="mobile-apple-enabled"
-              toggleLabel="Allow Apple sign-in"
-              toggleDescription="Recommended for iOS only. Keep bundle IDs up to date when shipping new app flavors."
-              enabled={mobileAuth.form.appleEnabled}
-              onToggle={(event) =>
-                mobileAuth.setForm((current) => ({
-                  ...current,
-                  appleEnabled: event.target.checked,
-                }))
-              }
-              disabled={mobileAuth.disabled}
-            >
-              <FieldBlock
-                id="mobile-apple-bundle-ids"
-                label="Allowed iOS bundle IDs"
-                description="Enter one bundle ID per line."
-              >
-                <Textarea
-                  id="mobile-apple-bundle-ids"
-                  value={mobileAuth.form.appleIosBundleIds}
-                  onChange={(event) =>
-                    mobileAuth.setForm((current) => ({
-                      ...current,
-                      appleIosBundleIds: event.target.value,
-                    }))
-                  }
-                  disabled={mobileAuth.disabled}
-                  placeholder="com.example.ios"
-                  className="min-h-[140px] text-sm"
-                />
-              </FieldBlock>
-            </ProviderCard>
-
-            <SurfaceCard
-              icon={KeyRound}
-              title="Bearer session security"
-              description="Sensitive token settings are separated from social login to make high-risk changes visually distinct."
-            >
-              <div className="space-y-4">
-                <div className="rounded-[22px] border border-amber-200/80 bg-amber-50/90 px-4 py-4 text-sm leading-6 text-amber-800">
-                  Rotate these secrets carefully. Existing sessions may stop refreshing after a
-                  token secret change if the mobile client is still holding older tokens.
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2">
-                  <FieldBlock
-                    id="mobile-access-token-secret"
-                    label="Access token secret"
-                    description="Leave empty to keep the current access token signing secret."
-                  >
-                    <Input
-                      id="mobile-access-token-secret"
-                      type="password"
-                      value={mobileAuth.form.accessTokenSecret}
-                      onChange={(event) =>
-                        mobileAuth.setForm((current) => ({
-                          ...current,
-                          accessTokenSecret: event.target.value,
-                        }))
-                      }
-                      disabled={mobileAuth.disabled}
-                      placeholder={
-                        mobileAuth.form.accessTokenSecretConfigured
-                          ? "Enter new secret to replace existing"
-                          : "Enter access token secret"
-                      }
-                    />
-                  </FieldBlock>
-                  <FieldBlock
-                    id="mobile-access-token-ttl"
-                    label="Access token TTL"
-                    description="Lifetime in minutes for newly issued access tokens."
-                  >
-                    <Input
-                      id="mobile-access-token-ttl"
-                      type="number"
-                      min="1"
-                      inputMode="numeric"
-                      value={mobileAuth.form.accessTokenTtlMinutes}
-                      onChange={(event) =>
-                        mobileAuth.setForm((current) => ({
-                          ...current,
-                          accessTokenTtlMinutes: event.target.value,
-                        }))
-                      }
-                      disabled={mobileAuth.disabled}
-                    />
-                  </FieldBlock>
-                  <FieldBlock
-                    id="mobile-refresh-token-secret"
-                    label="Refresh token secret"
-                    description="Leave empty to keep the current refresh token signing secret."
-                  >
-                    <Input
-                      id="mobile-refresh-token-secret"
-                      type="password"
-                      value={mobileAuth.form.refreshTokenSecret}
-                      onChange={(event) =>
-                        mobileAuth.setForm((current) => ({
-                          ...current,
-                          refreshTokenSecret: event.target.value,
-                        }))
-                      }
-                      disabled={mobileAuth.disabled}
-                      placeholder={
-                        mobileAuth.form.refreshTokenSecretConfigured
-                          ? "Enter new secret to replace existing"
-                          : "Enter refresh token secret"
-                      }
-                    />
-                  </FieldBlock>
-                  <FieldBlock
-                    id="mobile-refresh-token-ttl"
-                    label="Refresh token TTL"
-                    description="Lifetime in days for mobile refresh sessions."
-                  >
-                    <Input
-                      id="mobile-refresh-token-ttl"
-                      type="number"
-                      min="1"
-                      inputMode="numeric"
-                      value={mobileAuth.form.refreshTokenTtlDays}
-                      onChange={(event) =>
-                        mobileAuth.setForm((current) => ({
-                          ...current,
-                          refreshTokenTtlDays: event.target.value,
-                        }))
-                      }
-                      disabled={mobileAuth.disabled}
-                    />
-                  </FieldBlock>
-                </div>
-
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <CredentialState
-                    configured={mobileAuth.form.accessTokenSecretConfigured}
-                    maskedValue={mobileAuth.form.accessTokenSecretMasked}
-                    emptyCopy="No access token secret is stored yet."
-                  />
-                  <CredentialState
-                    configured={mobileAuth.form.refreshTokenSecretConfigured}
-                    maskedValue={mobileAuth.form.refreshTokenSecretMasked}
-                    emptyCopy="No refresh token secret is stored yet."
-                  />
-                </div>
-              </div>
-            </SurfaceCard>
-          </div>
-        </SettingsSection>
+    <div className="mx-auto flex max-w-4xl flex-col gap-5 px-4 pb-10 sm:px-6 lg:px-8">
+      <div>
+        <h1 className="text-xl font-semibold tracking-[-0.02em] text-[color:var(--ds-text)]">
+          Mobile settings
+        </h1>
+        <p className="mt-1 text-sm text-[color:var(--ds-text-muted)]">
+          Release gating, AI model routing, and sign-in for the mobile app.
+        </p>
       </div>
+
+      <SettingsSection
+        title="App release"
+        icon={ShieldCheck}
+        badge={statusBadge(releaseControls)}
+        footer={
+          <SectionFooter
+            status={releaseControls.status}
+            updatedAt={releaseControls.updatedAt}
+            canEdit={releaseControls.canEdit}
+            saving={releaseControls.saving}
+            hasChanges={releaseControls.hasChanges}
+            onSave={releaseControls.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <PlatformCard
+            platform="Android"
+            versionId="mobile-android-version-code"
+            toggleId="mobile-android-enable-cache"
+            redirectId="mobile-android-redirect-link"
+            versionValue={releaseControls.form.androidMinimumSupportedVersion}
+            onVersionChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                androidMinimumSupportedVersion: event.target.value,
+              }))
+            }
+            cacheEnabled={releaseControls.form.androidEnableCache}
+            onCacheChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                androidEnableCache: event.target.checked,
+              }))
+            }
+            redirectValue={releaseControls.form.androidRedirectLink}
+            onRedirectChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                androidRedirectLink: event.target.value,
+              }))
+            }
+            disabled={releaseControls.disabled}
+          />
+          <PlatformCard
+            platform="iOS"
+            versionId="mobile-ios-version-code"
+            toggleId="mobile-ios-enable-cache"
+            redirectId="mobile-ios-redirect-link"
+            versionValue={releaseControls.form.iosMinimumSupportedVersion}
+            onVersionChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                iosMinimumSupportedVersion: event.target.value,
+              }))
+            }
+            cacheEnabled={releaseControls.form.iosEnableCache}
+            onCacheChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                iosEnableCache: event.target.checked,
+              }))
+            }
+            redirectValue={releaseControls.form.iosRedirectLink}
+            onRedirectChange={(event) =>
+              releaseControls.setForm((current) => ({
+                ...current,
+                iosRedirectLink: event.target.value,
+              }))
+            }
+            disabled={releaseControls.disabled}
+          />
+        </div>
+      </SettingsSection>
+
+      <SettingsSection
+        title="Object removal"
+        icon={ShieldEllipsis}
+        badge={statusBadge(objectRemovalSettings)}
+        footer={
+          <SectionFooter
+            status={objectRemovalSettings.status}
+            updatedAt={objectRemovalSettings.updatedAt}
+            canEdit={objectRemovalSettings.canEdit}
+            saving={objectRemovalSettings.saving}
+            hasChanges={objectRemovalSettings.hasChanges}
+            onSave={objectRemovalSettings.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <ModelSelect
+          id="mobile-object-remove-model"
+          label="Model"
+          value={objectRemovalSettings.form.objectRemovalModel}
+          onChange={(event) =>
+            objectRemovalSettings.setForm((current) => ({
+              ...current,
+              objectRemovalModel: event.target.value,
+            }))
+          }
+          disabled={objectRemovalSettings.disabled}
+          options={OBJECT_REMOVAL_MODEL_OPTIONS}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="AI Expand"
+        icon={ShieldEllipsis}
+        badge={statusBadge(aiExpandSettings)}
+        footer={
+          <SectionFooter
+            status={aiExpandSettings.status}
+            updatedAt={aiExpandSettings.updatedAt}
+            canEdit={aiExpandSettings.canEdit}
+            saving={aiExpandSettings.saving}
+            hasChanges={aiExpandSettings.hasChanges}
+            onSave={aiExpandSettings.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <ModelSelect
+          id="mobile-ai-expand-model"
+          label="Model"
+          value={aiExpandSettings.form.aiExpandModel}
+          onChange={(event) =>
+            aiExpandSettings.setForm((current) => ({
+              ...current,
+              aiExpandModel: event.target.value,
+            }))
+          }
+          disabled={aiExpandSettings.disabled}
+          options={AI_EXPAND_MODEL_OPTIONS}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Image upscaling"
+        icon={ShieldEllipsis}
+        badge={statusBadge(imageUpscaleSettings)}
+        footer={
+          <SectionFooter
+            status={imageUpscaleSettings.status}
+            updatedAt={imageUpscaleSettings.updatedAt}
+            canEdit={imageUpscaleSettings.canEdit}
+            saving={imageUpscaleSettings.saving}
+            hasChanges={imageUpscaleSettings.hasChanges}
+            onSave={imageUpscaleSettings.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <ModelSelect
+          id="mobile-image-upscale-model"
+          label="Model"
+          value={imageUpscaleSettings.form.upscaleModel}
+          onChange={(event) =>
+            imageUpscaleSettings.setForm((current) => ({
+              ...current,
+              upscaleModel: event.target.value,
+            }))
+          }
+          disabled={imageUpscaleSettings.disabled}
+          options={IMAGE_UPSCALE_MODEL_OPTIONS}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Edit by prompt"
+        icon={Wand2}
+        badge={statusBadge(imageEditSettings)}
+        footer={
+          <SectionFooter
+            status={imageEditSettings.status}
+            updatedAt={imageEditSettings.updatedAt}
+            canEdit={imageEditSettings.canEdit}
+            saving={imageEditSettings.saving}
+            hasChanges={imageEditSettings.hasChanges}
+            onSave={imageEditSettings.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <ModelSelect
+          id="mobile-edit-image-model"
+          label="Default model"
+          value={imageEditSettings.form.editImageModel}
+          onChange={(event) =>
+            imageEditSettings.setForm((current) => ({
+              ...current,
+              editImageModel: event.target.value,
+            }))
+          }
+          disabled={imageEditSettings.disabled}
+          options={IMAGE_EDIT_MODEL_OPTIONS}
+        />
+      </SettingsSection>
+
+      <SettingsSection
+        title="Sign-in & sessions"
+        icon={LockKeyhole}
+        badge={statusBadge(mobileAuth)}
+        footer={
+          <SectionFooter
+            status={mobileAuth.status}
+            updatedAt={mobileAuth.updatedAt}
+            canEdit={mobileAuth.canEdit}
+            saving={mobileAuth.saving}
+            hasChanges={mobileAuth.hasChanges}
+            onSave={mobileAuth.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <div className="grid gap-4 lg:grid-cols-2">
+          <ProviderCard
+            icon={Globe}
+            title="Google"
+            toggleId="mobile-google-enabled"
+            toggleLabel="Allow Google sign-in"
+            enabled={mobileAuth.form.googleEnabled}
+            onToggle={(event) =>
+              mobileAuth.setForm((current) => ({
+                ...current,
+                googleEnabled: event.target.checked,
+              }))
+            }
+            disabled={mobileAuth.disabled}
+          >
+            <FieldBlock
+              id="mobile-google-android-client-ids"
+              label="Android client IDs"
+              hint="One per line."
+            >
+              <Textarea
+                id="mobile-google-android-client-ids"
+                value={mobileAuth.form.googleAndroidClientIds}
+                onChange={(event) =>
+                  mobileAuth.setForm((current) => ({
+                    ...current,
+                    googleAndroidClientIds: event.target.value,
+                  }))
+                }
+                disabled={mobileAuth.disabled}
+                placeholder="com.example.android.apps..."
+                className="min-h-[96px] text-sm"
+              />
+            </FieldBlock>
+            <FieldBlock
+              id="mobile-google-ios-client-ids"
+              label="iOS client IDs"
+              hint="One per line."
+            >
+              <Textarea
+                id="mobile-google-ios-client-ids"
+                value={mobileAuth.form.googleIosClientIds}
+                onChange={(event) =>
+                  mobileAuth.setForm((current) => ({
+                    ...current,
+                    googleIosClientIds: event.target.value,
+                  }))
+                }
+                disabled={mobileAuth.disabled}
+                placeholder="com.example.ios.apps..."
+                className="min-h-[96px] text-sm"
+              />
+            </FieldBlock>
+          </ProviderCard>
+
+          <ProviderCard
+            icon={ShieldEllipsis}
+            title="Facebook"
+            toggleId="mobile-facebook-enabled"
+            toggleLabel="Allow Facebook sign-in"
+            enabled={mobileAuth.form.facebookEnabled}
+            onToggle={(event) =>
+              mobileAuth.setForm((current) => ({
+                ...current,
+                facebookEnabled: event.target.checked,
+              }))
+            }
+            disabled={mobileAuth.disabled}
+          >
+            <FieldBlock id="mobile-facebook-app-id" label="App ID">
+              <Input
+                id="mobile-facebook-app-id"
+                value={mobileAuth.form.facebookAppId}
+                onChange={(event) =>
+                  mobileAuth.setForm((current) => ({
+                    ...current,
+                    facebookAppId: event.target.value,
+                  }))
+                }
+                disabled={mobileAuth.disabled}
+                placeholder="Enter Facebook App ID"
+              />
+            </FieldBlock>
+            <FieldBlock
+              id="mobile-facebook-app-secret"
+              label="App secret"
+              hint="Leave empty to keep the current secret."
+            >
+              <Input
+                id="mobile-facebook-app-secret"
+                type="password"
+                value={mobileAuth.form.facebookAppSecret}
+                onChange={(event) =>
+                  mobileAuth.setForm((current) => ({
+                    ...current,
+                    facebookAppSecret: event.target.value,
+                  }))
+                }
+                disabled={mobileAuth.disabled}
+                placeholder={
+                  mobileAuth.form.facebookAppSecretConfigured
+                    ? "Enter new secret to replace existing"
+                    : "Enter Facebook App Secret"
+                }
+              />
+            </FieldBlock>
+            <CredentialState
+              configured={mobileAuth.form.facebookAppSecretConfigured}
+              maskedValue={mobileAuth.form.facebookAppSecretMasked}
+              emptyCopy="No Facebook secret stored yet."
+            />
+          </ProviderCard>
+
+          <ProviderCard
+            icon={Apple}
+            title="Apple"
+            toggleId="mobile-apple-enabled"
+            toggleLabel="Allow Apple sign-in"
+            enabled={mobileAuth.form.appleEnabled}
+            onToggle={(event) =>
+              mobileAuth.setForm((current) => ({
+                ...current,
+                appleEnabled: event.target.checked,
+              }))
+            }
+            disabled={mobileAuth.disabled}
+          >
+            <FieldBlock
+              id="mobile-apple-bundle-ids"
+              label="Allowed iOS bundle IDs"
+              hint="One per line."
+            >
+              <Textarea
+                id="mobile-apple-bundle-ids"
+                value={mobileAuth.form.appleIosBundleIds}
+                onChange={(event) =>
+                  mobileAuth.setForm((current) => ({
+                    ...current,
+                    appleIosBundleIds: event.target.value,
+                  }))
+                }
+                disabled={mobileAuth.disabled}
+                placeholder="com.example.ios"
+                className="min-h-[96px] text-sm"
+              />
+            </FieldBlock>
+          </ProviderCard>
+
+          <div className="rounded-xl border border-border/70 bg-white p-4">
+            <div className="mb-4 flex items-center gap-2.5">
+              <KeyRound className="h-4 w-4 text-[color:var(--ds-primary)]" aria-hidden="true" />
+              <h3 className="text-sm font-semibold text-[color:var(--ds-text)]">Bearer sessions</h3>
+            </div>
+            <div className="space-y-3.5">
+              <p className="rounded-lg border border-amber-200/80 bg-amber-50/90 px-3 py-2 text-xs leading-5 text-amber-800">
+                Rotating a token secret can sign out clients holding older tokens.
+              </p>
+              <div className="grid gap-3.5 sm:grid-cols-2">
+                <FieldBlock
+                  id="mobile-access-token-secret"
+                  label="Access token secret"
+                  hint="Leave empty to keep current."
+                >
+                  <Input
+                    id="mobile-access-token-secret"
+                    type="password"
+                    value={mobileAuth.form.accessTokenSecret}
+                    onChange={(event) =>
+                      mobileAuth.setForm((current) => ({
+                        ...current,
+                        accessTokenSecret: event.target.value,
+                      }))
+                    }
+                    disabled={mobileAuth.disabled}
+                    placeholder={
+                      mobileAuth.form.accessTokenSecretConfigured
+                        ? "Enter new secret to replace existing"
+                        : "Enter access token secret"
+                    }
+                  />
+                </FieldBlock>
+                <FieldBlock id="mobile-access-token-ttl" label="Access token TTL (min)">
+                  <Input
+                    id="mobile-access-token-ttl"
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={mobileAuth.form.accessTokenTtlMinutes}
+                    onChange={(event) =>
+                      mobileAuth.setForm((current) => ({
+                        ...current,
+                        accessTokenTtlMinutes: event.target.value,
+                      }))
+                    }
+                    disabled={mobileAuth.disabled}
+                  />
+                </FieldBlock>
+                <FieldBlock
+                  id="mobile-refresh-token-secret"
+                  label="Refresh token secret"
+                  hint="Leave empty to keep current."
+                >
+                  <Input
+                    id="mobile-refresh-token-secret"
+                    type="password"
+                    value={mobileAuth.form.refreshTokenSecret}
+                    onChange={(event) =>
+                      mobileAuth.setForm((current) => ({
+                        ...current,
+                        refreshTokenSecret: event.target.value,
+                      }))
+                    }
+                    disabled={mobileAuth.disabled}
+                    placeholder={
+                      mobileAuth.form.refreshTokenSecretConfigured
+                        ? "Enter new secret to replace existing"
+                        : "Enter refresh token secret"
+                    }
+                  />
+                </FieldBlock>
+                <FieldBlock id="mobile-refresh-token-ttl" label="Refresh token TTL (days)">
+                  <Input
+                    id="mobile-refresh-token-ttl"
+                    type="number"
+                    min="1"
+                    inputMode="numeric"
+                    value={mobileAuth.form.refreshTokenTtlDays}
+                    onChange={(event) =>
+                      mobileAuth.setForm((current) => ({
+                        ...current,
+                        refreshTokenTtlDays: event.target.value,
+                      }))
+                    }
+                    disabled={mobileAuth.disabled}
+                  />
+                </FieldBlock>
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <CredentialState
+                  configured={mobileAuth.form.accessTokenSecretConfigured}
+                  maskedValue={mobileAuth.form.accessTokenSecretMasked}
+                  emptyCopy="No access token secret stored yet."
+                />
+                <CredentialState
+                  configured={mobileAuth.form.refreshTokenSecretConfigured}
+                  maskedValue={mobileAuth.form.refreshTokenSecretMasked}
+                  emptyCopy="No refresh token secret stored yet."
+                />
+              </div>
+            </div>
+          </div>
+        </div>
+      </SettingsSection>
     </div>
   );
 }

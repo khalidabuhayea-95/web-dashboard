@@ -4421,6 +4421,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                       const selected = selectedIds.includes(layer.id);
                       const dragOverLayer = dragOver.id === layer.id;
                       const displayName = layerDisplayName(layer, activePage);
+                      const typeLabel = layerTypeLabel(layer);
                       const textColor =
                         layer.type === "text" && String(layer.color || "").trim()
                           ? String(layer.color || "")
@@ -4464,9 +4465,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               className="min-w-0 flex-1 text-left"
                               onClick={(event) => handleLayerSelect(event, layer.id)}
                             >
-                              <div className="flex items-center gap-2 text-[13px]">
-                                <span className="truncate font-semibold" style={{ color: textColor }}>
+                              <div className="flex min-w-0 flex-col">
+                                <span className="truncate text-[13px] font-semibold" style={{ color: textColor }}>
                                   {displayName}
+                                </span>
+                                <span className="truncate text-[10px] font-semibold uppercase tracking-wide text-[#8a93a6]">
+                                  {typeLabel}
                                 </span>
                               </div>
                             </button>

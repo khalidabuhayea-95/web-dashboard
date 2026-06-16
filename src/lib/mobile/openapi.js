@@ -2566,6 +2566,147 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           },
         },
       },
+      "/api/mobile/media/edit-image": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Edit image by prompt",
+          description:
+            "Accepts a single PNG or JPEG image (max 15 MB) plus a natural-language `prompt` (1–2000 characters) describing the change, stages the input privately for Replicate, runs the selected prompt-based image-editing model, and returns the edited image directly in the response. Optionally pass `model` to choose between the supported editors (default `google/nano-banana`; also `qwen/qwen-image-edit-plus` and `black-forest-labs/flux-kontext-pro`). Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.\n\n**Limits:** PNG/JPEG input only; upload max 15 MB; the source image is downscaled so its longest edge is ≤1536px before editing (output is typically ~1MP — chain the upscale endpoint for higher resolution). `prompt` is required, trimmed, and capped at 2000 characters. Rate limited to 6 requests per 5 minutes per user. Provider safety filters may reject some prompts (returned as 422).\n\n**Processing time:** the request is synchronous. It usually completes in 5–15s but can take up to ~4 minutes during Replicate queue spikes (the server waits up to 240s, then returns 503). Set your client/HTTP request timeout to at least 4 minutes so the connection is not dropped while the edit is still running.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["image", "prompt"],
+                  properties: {
+                    image: {
+                      type: "string",
+                      format: "binary",
+                      description:
+                        "Source image to edit. PNG or JPEG only, max 15 MB. Larger images are downscaled so the longest edge is ≤1536px before editing.",
+                    },
+                    prompt: {
+                      type: "string",
+                      minLength: 1,
+                      maxLength: 2000,
+                      description:
+                        "Natural-language instruction describing the edit to apply. Required and trimmed; 1–2000 characters (empty or >2000 chars is rejected with 400).",
+                    },
+                    model: {
+                      type: "string",
+                      enum: [
+                        "google/nano-banana",
+                        "qwen/qwen-image-edit-plus",
+                        "black-forest-labs/flux-kontext-pro",
+                      ],
+                      default: "google/nano-banana",
+                      description:
+                        "Replicate model to use. Defaults to google/nano-banana when omitted or unrecognized.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Edited image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/jpeg": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+                "image/webp": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload, empty upload, or missing prompt",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Image could not be edited with this prompt",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Replicate image edit is unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/mobile/fonts": {
         get: {
           tags: ["Mobile Fonts"],

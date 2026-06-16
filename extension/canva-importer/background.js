@@ -1055,10 +1055,23 @@ async function layerToFabricObject(layer, index) {
         forceRasterize: shouldForceRasterizeThinSvg,
       });
       if (trimmedImage?.trimmed) {
-        const sourceScaleX =
-          width / Math.max(1, Math.round(intrinsicWidth || trimmedImage.originalWidth || width));
-        const sourceScaleY =
-          height / Math.max(1, Math.round(intrinsicHeight || trimmedImage.originalHeight || height));
+        // trimmedImage.{width,height,offsetX,offsetY} are measured in the NATURAL
+        // pixel space of the decoded source (originalWidth/Height). Map that space to
+        // the layer's displayed design frame (width/height) using originalWidth/Height
+        // as the denominator — NOT intrinsicWidth. For masked / preserve-pixels layers
+        // intrinsicWidth (= layer.sourceWidth) is the design frame itself, which would
+        // make the scale 1.0 and blow the image up to its full natural resolution
+        // (e.g. a 1126px frame rendered at the image's native 2400px → 2.1x oversize).
+        const naturalSourceWidth = Math.max(
+          1,
+          Math.round(trimmedImage.originalWidth || intrinsicWidth || width)
+        );
+        const naturalSourceHeight = Math.max(
+          1,
+          Math.round(trimmedImage.originalHeight || intrinsicHeight || height)
+        );
+        const sourceScaleX = width / naturalSourceWidth;
+        const sourceScaleY = height / naturalSourceHeight;
         left += trimmedImage.offsetX * sourceScaleX;
         top += trimmedImage.offsetY * sourceScaleY;
         width = Math.max(1, Math.round(trimmedImage.width * sourceScaleX));
@@ -1132,6 +1145,11 @@ async function buildHybridFabricObjects(
       .filter(Boolean)
   );
   const dpr = Math.max(0.1, Number(devicePixelRatio || 1));
+  // Optional screenshot with editable-text layers hidden. Image layers that fall back
+  // to screenshot raster crops are cropped from THIS bitmap so overlapping foreground
+  // text isn't baked into the image (the text is emitted separately as an editable
+  // layer; baking it would render the text twice). Falls back to the normal screenshot.
+  const screenshotBitmapNoText = options?.screenshotBitmapNoText || null;
   const canvasWidth = Math.max(
     1,
     Math.round(
@@ -1302,8 +1320,10 @@ async function buildHybridFabricObjects(
       continue;
     }
     try {
+      // Crop image layers from the text-hidden screenshot so overlapping editable text
+      // isn't baked into the raster (it is re-added as an editable text layer).
       const cropped = await cropBitmapToDataUrl(
-        screenshotBitmap,
+        screenshotBitmapNoText || screenshotBitmap,
         viewportRect,
         {
           dpr,
@@ -2553,9 +2573,20 @@ async function importActiveCanvaTab(message, options = {}) {
           .map((layer) => String(layer?.id || "").trim())
           .filter(Boolean);
         let hiddenAllBitmap = null;
+        // Editable text is re-added as its own layer, so hide it for every isolation
+        // capture. Otherwise overlapping (often semi-transparent) text blends against
+        // the layer in the "visible" shot but the background in the "hidden" shot, so
+        // the visible-vs-hidden diff keeps a faint ghost copy baked into the snapshot.
+        const isolationTextLayerIds = extractedLayers
+          .filter((l) => String(l?.kind || "").toLowerCase() === "text")
+          .map((l) => String(l?.id || "").trim())
+          .filter((id) => id.startsWith("LB"));
 
         try {
           await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, true);
+          if (isolationTextLayerIds.length > 0) {
+            await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, true).catch(() => {});
+          }
           await sleep(180);
           const allHiddenScreenshotDataUrl = await timePhase("captureLayersAllHidden", () =>
             chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
@@ -2611,6 +2642,9 @@ async function importActiveCanvaTab(message, options = {}) {
           }
         } finally {
           await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, false).catch(() => {});
+          if (isolationTextLayerIds.length > 0) {
+            await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, false).catch(() => {});
+          }
         }
 
         if (isolatedSnapshotsById.size > 0) {
@@ -2730,6 +2764,33 @@ async function importActiveCanvaTab(message, options = {}) {
       const screenshotBitmap = await timePhase("decodeScreenshotBitmap", () =>
         decodeDataUrlToBitmap(screenshotDataUrl)
       );
+      // Capture a parallel screenshot with editable text hidden, so image layers that
+      // fall back to raster screenshot crops don't bake in overlapping foreground text
+      // (which is also emitted as an editable text layer — otherwise it renders twice).
+      let screenshotBitmapNoText = null;
+      if (textLayerIds.length > 0) {
+        try {
+          reportProgress("Capturing text-free snapshot for image layers...");
+          await setCanvaLayerVisibility(tab.id, textLayerIds, true);
+          await sleep(180);
+          const noTextScreenshotDataUrl = await timePhase("captureVisibleTabHybridNoText", () =>
+            chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
+          );
+          if (String(noTextScreenshotDataUrl || "").startsWith("data:image/")) {
+            screenshotBitmapNoText = await timePhase("decodeScreenshotBitmapNoText", () =>
+              decodeDataUrlToBitmap(noTextScreenshotDataUrl)
+            );
+          }
+        } catch (noTextError) {
+          logger.warn(
+            "Text-hidden screenshot capture failed; image crops may include text",
+            {},
+            noTextError
+          );
+        } finally {
+          await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
+        }
+      }
       fabricObjects = await timePhase("buildHybridFabricObjects", () =>
         buildHybridFabricObjects(
           extractedLayers,
@@ -2739,6 +2800,7 @@ async function importActiveCanvaTab(message, options = {}) {
           sourceHeight || Number(captureMeta.designHeight || 0),
           {
             unsupportedTextFamilies,
+            screenshotBitmapNoText,
           }
         )
       );

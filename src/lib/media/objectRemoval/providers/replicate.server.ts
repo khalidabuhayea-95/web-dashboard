@@ -12,9 +12,12 @@ import {
 
 const REPLICATE_API_BASE = "https://api.replicate.com/v1";
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
-const DEFAULT_WAIT_TIMEOUT_MS = 150_000;
+// Wait well past running time to absorb Replicate queue spikes; kept under the
+// route's maxDuration (300s) with headroom for the output download.
+const DEFAULT_WAIT_TIMEOUT_MS = 240_000;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
-const DEFAULT_CANCEL_AFTER = "2m";
+// Backstop must exceed the wait timeout so queue spikes aren't cancelled early.
+const DEFAULT_CANCEL_AFTER = "5m";
 const PNG_SIGNATURE = [0x89, 0x50, 0x4e, 0x47];
 const JPEG_SIGNATURE = [0xff, 0xd8];
 const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46];

@@ -550,7 +550,13 @@ function CanvasImageNode({
       shadowOffsetY={element.shadowOffsetY}
       crop={crop}
       hitFunc={(context, shape) => {
-        if (alphaOutlinePoints) {
+        // Once selected (canTransform), make the whole bounding box grabbable so
+        // the layer can be dragged/resized. Otherwise mostly-transparent images
+        // (line art, thin decorations) are nearly impossible to move because only
+        // the non-transparent outline is hittable. Unselected layers keep the
+        // alpha-outline hit area so clicks pass through transparent gaps to
+        // whatever is behind.
+        if (alphaOutlinePoints && !canTransform) {
           context.beginPath();
           alphaOutlinePoints.forEach((value, index) => {
             if (index % 2 !== 0) return;
@@ -1844,6 +1850,166 @@ export default function CanvasEditor() {
   const duplicateSelected = useEditorStore((state) => state.duplicateSelected);
   const moveLayer = useEditorStore((state) => state.moveLayer);
   const replaceSelectedWithImageLayer = useEditorStore((state) => state.replaceSelectedWithImageLayer);
+
+  // One-time auto-fit for single-line text. Imported text boxes (and some authored
+  // ones) carry a lot of empty padding: the box is far wider than the glyph and
+  // decorative fonts use a tall line-height, so the selection box dwarfs the letter.
+  // Tighten the box to the rendered text and clamp the line-height, shifting x/y so the
+  // glyph stays in the exact same visual spot (only the box shrinks — the design looks
+  // identical, just with a snug bounding box). Multi-line text is left untouched
+  // because it needs its wrapping width and line spacing.
+  const fittedTextIdsRef = useRef<Set<string>>(new Set());
+  const autofitDoneRef = useRef(false);
+  useEffect(() => {
+    if (autofitDoneRef.current) return;
+    let disposed = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const MAX_LINE_HEIGHT = 1.15;
+
+    const measureInk = (cfg: Konva.TextConfig) => {
+      const node = new Konva.Text(cfg);
+      let result: { left: number; top: number; w: number; h: number } | null = null;
+      try {
+        const canvas = node.toCanvas({ pixelRatio: 1 });
+        const ctx = canvas.getContext("2d");
+        if (ctx && canvas.width > 0 && canvas.height > 0) {
+          const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+          let minX = canvas.width;
+          let minY = canvas.height;
+          let maxX = -1;
+          let maxY = -1;
+          for (let y = 0; y < canvas.height; y += 1) {
+            for (let x = 0; x < canvas.width; x += 1) {
+              if (data[(y * canvas.width + x) * 4 + 3] > 20) {
+                if (x < minX) minX = x;
+                if (x > maxX) maxX = x;
+                if (y < minY) minY = y;
+                if (y > maxY) maxY = y;
+              }
+            }
+          }
+          if (maxX >= minX && maxY >= minY) {
+            result = { left: minX, top: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+          }
+        }
+      } catch {
+        result = null;
+      }
+      node.destroy();
+      return result;
+    };
+
+    const run = async () => {
+      try {
+        await (document as Document & { fonts?: { ready?: Promise<unknown> } }).fonts?.ready;
+      } catch {
+        /* ignore */
+      }
+      if (disposed) return;
+      const snapshot = useEditorStore.getState().pages;
+
+      // Preload every text font up-front so the measurement pass below is fully
+      // synchronous: calling updateElement mid-pass would churn `pages` and could
+      // abort us, so we measure everything first and apply all fits at the end.
+      const fontShorthands = new Set<string>();
+      snapshot.forEach((page) => {
+        (page.elements || []).forEach((element) => {
+          const fontSize = Number(element.fontSize) || 0;
+          if (element.type === "text" && fontSize > 0) {
+            fontShorthands.add(`${fontSize}px ${resolveCssFontFamily(element.fontFamily)}`);
+          }
+        });
+      });
+      try {
+        await Promise.all([...fontShorthands].map((f) => document.fonts.load(f).catch(() => undefined)));
+      } catch {
+        /* ignore */
+      }
+      if (disposed) return;
+
+      const fits: Array<{ id: string; patch: Partial<EditorElement> }> = [];
+      snapshot.forEach((page) => {
+        (page.elements || []).forEach((element) => {
+          if (element.type !== "text") return;
+          if (fittedTextIdsRef.current.has(element.id)) return;
+          const text = String(element.text || "");
+          if (!text.trim() || /[\r\n]/.test(text)) return;
+          if (Math.abs((element.scaleX ?? 1) - 1) > 0.01 || Math.abs((element.scaleY ?? 1) - 1) > 0.01) return;
+          const fontSize = Number(element.fontSize) || 0;
+          if (fontSize <= 0) return;
+          const fontFamily = resolveCssFontFamily(element.fontFamily);
+          try {
+            if (!document.fonts.check(`${fontSize}px ${fontFamily}`)) return; // font not ready
+          } catch {
+            /* proceed if check unsupported */
+          }
+          const fontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
+          const letterSpacing = Number(element.letterSpacing) || 0;
+          const lineHeight = Number(element.lineHeight) || 1.1;
+          const direction = resolveTextDirection(text); // Arabic/Hebrew render RTL
+          const baseCfg: Konva.TextConfig = {
+            text, fontSize, fontFamily, fontStyle, letterSpacing, direction,
+            lineHeight, align: element.align, width: element.width, height: element.height,
+          };
+          const cur = measureInk(baseCfg);
+          if (!cur) return;
+
+          const widthNode = new Konva.Text({ text, fontSize, fontFamily, fontStyle, letterSpacing, direction });
+          const textWidth = widthNode.getTextWidth();
+          widthNode.destroy();
+          const newWidth = Math.max(1, Math.ceil(textWidth) + 2);
+          const newLineHeight = Math.min(lineHeight, MAX_LINE_HEIGHT);
+
+          const horizontallyPadded = element.width > newWidth * 1.12;
+          const verticallyPadded = cur.top > fontSize * 0.18 || lineHeight > MAX_LINE_HEIGHT + 0.05;
+          if (!horizontallyPadded && !verticallyPadded) {
+            fittedTextIdsRef.current.add(element.id);
+            return;
+          }
+
+          let newHeight = Math.max(Math.ceil(fontSize * newLineHeight), Math.ceil(cur.h) + 2);
+          let newInk = measureInk({ ...baseCfg, width: newWidth, height: newHeight, lineHeight: newLineHeight });
+          if (newInk && newInk.top + newInk.h > newHeight) {
+            newHeight = newInk.top + newInk.h + 2;
+            newInk = measureInk({ ...baseCfg, width: newWidth, height: newHeight, lineHeight: newLineHeight });
+          }
+          if (!newInk) {
+            fittedTextIdsRef.current.add(element.id);
+            return;
+          }
+
+          // Keep the glyph's rendered position fixed; only the box changes.
+          fittedTextIdsRef.current.add(element.id);
+          fits.push({
+            id: element.id,
+            patch: {
+              width: newWidth,
+              height: newHeight,
+              x: element.x + cur.left - newInk.left,
+              y: element.y + cur.top - newInk.top,
+              lineHeight: newLineHeight,
+            },
+          });
+        });
+      });
+
+      if (disposed) return;
+      autofitDoneRef.current = true;
+      fits.forEach((fit) => updateElement(fit.id, fit.patch));
+    };
+
+    // Debounce until the template load settles (pages stop churning), then fit once.
+    const hasElements = pages.some((page) => (page.elements || []).length > 0);
+    if (hasElements) {
+      timer = setTimeout(() => {
+        void run();
+      }, 350);
+    }
+    return () => {
+      disposed = true;
+      if (timer) clearTimeout(timer);
+    };
+  }, [pages, updateElement]);
 
   const [containerSize, setContainerSize] = useState({ width: 1200, height: 800 });
   const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
@@ -3747,6 +3913,12 @@ export default function CanvasEditor() {
             }}
             rotateEnabled
             flipEnabled={false}
+            // Let the selected layer be dragged by grabbing anywhere inside its
+            // bounding box (even transparent areas), with priority over any
+            // overlapping layer underneath. Without this, mostly-transparent
+            // layers (line art) and layers sitting under a full-page shape can't
+            // be moved on the canvas.
+            shouldOverdrawWholeArea
             enabledAnchors={[
               "top-left",
               "top-center",

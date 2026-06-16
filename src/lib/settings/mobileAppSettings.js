@@ -3,6 +3,10 @@ import {
   normalizeAiExpandModelId,
 } from "../media/aiExpand/models.js";
 import {
+  DEFAULT_EDIT_IMAGE_MODEL_ID,
+  normalizeEditImageModelId,
+} from "../media/editImageByPrompt/models.js";
+import {
   DEFAULT_IMAGE_UPSCALE_MODEL_ID,
   normalizeImageUpscaleModelId,
 } from "../media/imageUpscale/models.js";
@@ -26,6 +30,7 @@ const ROOT_SETTING_KEYS = new Set([
   "objectRemovalModel",
   "aiExpandModel",
   "upscaleModel",
+  "editImageModel",
   "updatedAt",
 ]);
 
@@ -61,6 +66,11 @@ function sanitizeAiExpandModel(value) {
 
 function sanitizeUpscaleModel(value) {
   const normalized = normalizeImageUpscaleModelId(value);
+  return normalized || null;
+}
+
+function sanitizeEditImageModel(value) {
+  const normalized = normalizeEditImageModelId(value);
   return normalized || null;
 }
 
@@ -179,12 +189,14 @@ export function normalizeStoredMobileAppSettings(value = {}) {
     resolveLegacyPlatformObjectRemovalModel(source);
   const aiExpandModel = sanitizeAiExpandModel(source.aiExpandModel);
   const upscaleModel = sanitizeUpscaleModel(source.upscaleModel);
+  const editImageModel = sanitizeEditImageModel(source.editImageModel);
   return {
     android: normalizeStoredPlatformSettings(source.android),
     ios: normalizeStoredPlatformSettings(source.ios),
     objectRemovalModel,
     aiExpandModel,
     upscaleModel,
+    editImageModel,
     updatedAt: sanitizeString(source.updatedAt) || new Date().toISOString(),
   };
 }
@@ -209,6 +221,10 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
       "upscaleModel" in input
         ? sanitizeUpscaleModel(input.upscaleModel)
         : current.upscaleModel,
+    editImageModel:
+      "editImageModel" in input
+        ? sanitizeEditImageModel(input.editImageModel)
+        : current.editImageModel,
     updatedAt: new Date().toISOString(),
   };
 }
@@ -295,5 +311,17 @@ export function resolveMobileUpscaleModel(
     sanitizeUpscaleModel(normalizedSettings.upscaleModel) ||
     sanitizeUpscaleModel(defaultUpscaleModel) ||
     DEFAULT_IMAGE_UPSCALE_MODEL_ID
+  );
+}
+
+export function resolveMobileEditImageModel(
+  settings,
+  { defaultEditImageModel = DEFAULT_EDIT_IMAGE_MODEL_ID } = {}
+) {
+  const normalizedSettings = normalizeStoredMobileAppSettings(settings);
+  return (
+    sanitizeEditImageModel(normalizedSettings.editImageModel) ||
+    sanitizeEditImageModel(defaultEditImageModel) ||
+    DEFAULT_EDIT_IMAGE_MODEL_ID
   );
 }
