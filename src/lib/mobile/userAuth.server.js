@@ -4,6 +4,7 @@ import prisma from "@/lib/prisma";
 import { createOpaqueToken, hashOpaqueToken } from "@/lib/auth/tokens";
 import { normalizeEmail, sanitizeDisplayName } from "@/lib/auth/utils";
 import { getMobileAuthSettings } from "@/lib/settings/mobileAuthSettings.server";
+import { upsertDeviceToken } from "@/lib/push/deviceTokens.server";
 
 const MOBILE_ACCESS_ISSUER = "web-dashboard-mobile-auth";
 const MOBILE_ACCESS_AUDIENCE = "mobile-app";
@@ -44,7 +45,14 @@ export async function getMobileAuthConfig() {
   return buildMobileAuthConfig(settings);
 }
 
-export async function issueMobileSession({ mobileUser, userAgent, ipAddress }) {
+export async function issueMobileSession({
+  mobileUser,
+  userAgent,
+  ipAddress,
+  deviceToken,
+  devicePlatform,
+  appVersion,
+}) {
   const settings = await getMobileAuthConfig();
   const accessTokenSecret = String(settings.bearer.accessTokenSecret || "").trim();
   const refreshTokenSecret = String(settings.bearer.refreshTokenSecret || "").trim();
@@ -85,6 +93,17 @@ export async function issueMobileSession({ mobileUser, userAgent, ipAddress }) {
     .setIssuedAt(nowSeconds)
     .setExpirationTime(accessTokenExpiresAt)
     .sign(encodeSecret(accessTokenSecret));
+
+  // Persist the device's FCM token for push targeting (best-effort; never
+  // breaks the auth flow — upsertDeviceToken swallows its own errors).
+  if (deviceToken) {
+    await upsertDeviceToken({
+      mobileUserId: mobileUser.id,
+      token: deviceToken,
+      platform: devicePlatform,
+      appVersion,
+    });
+  }
 
   return {
     tokenType: "Bearer",
@@ -191,7 +210,14 @@ export async function resolveMobileBearerUser(request) {
   }
 }
 
-export async function refreshMobileSession({ refreshToken, userAgent, ipAddress }) {
+export async function refreshMobileSession({
+  refreshToken,
+  userAgent,
+  ipAddress,
+  deviceToken,
+  devicePlatform,
+  appVersion,
+}) {
   const settings = await getMobileAuthConfig();
   const refreshTokenSecret = String(settings.bearer.refreshTokenSecret || "").trim();
   if (!refreshTokenSecret) {
@@ -225,6 +251,9 @@ export async function refreshMobileSession({ refreshToken, userAgent, ipAddress 
     mobileUser: storedToken.mobileUser,
     userAgent,
     ipAddress,
+    deviceToken,
+    devicePlatform,
+    appVersion,
   });
 }
 

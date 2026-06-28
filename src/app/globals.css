@@ -55,8 +55,8 @@
   --card-foreground: oklch(0.145 0 0);
   --popover: oklch(1 0 0);
   --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
+  --primary: #22828c; /* brand teal */
+  --primary-foreground: #ffffff;
   --secondary: oklch(0.97 0 0);
   --secondary-foreground: oklch(0.205 0 0);
   --muted: oklch(0.97 0 0);
@@ -66,20 +66,20 @@
   --destructive: oklch(0.577 0.245 27.325);
   --border: oklch(0.922 0 0);
   --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
+  --ring: #22828c;
+  --chart-1: #22828c; /* brand teal (primary) */
+  --chart-2: #e95e57; /* brand coral (accent) */
+  --chart-3: #104d6f; /* brand navy */
+  --chart-4: #e0a23b; /* support amber */
+  --chart-5: #6fb3ba; /* light teal */
   --sidebar: oklch(0.985 0 0);
   --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #22828c;
+  --sidebar-primary-foreground: #ffffff;
   --sidebar-accent: oklch(0.97 0 0);
   --sidebar-accent-foreground: oklch(0.205 0 0);
   --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
+  --sidebar-ring: #22828c;
 
   --ds-bg: #f5f6fa;
   --ds-surface: #ffffff;
@@ -87,9 +87,9 @@
   --ds-border: #e2e5ec;
   --ds-text: #0f172a;
   --ds-text-muted: #5b6475;
-  --ds-primary: #3b5bdb;
+  --ds-primary: #22828c;
   --ds-primary-foreground: #ffffff;
-  --ds-accent: #dbe1ff;
+  --ds-accent: #d6ebec;
   --ds-destructive: oklch(0.6 0.2 28);
   --ds-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
   --ds-shadow-md: 0 12px 24px rgba(15, 23, 42, 0.12);
@@ -112,8 +112,8 @@
   --card-foreground: oklch(0.985 0 0);
   --popover: oklch(0.205 0 0);
   --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
+  --primary: #3db2bd; /* brand teal, lightened for dark */
+  --primary-foreground: #0f1116;
   --secondary: oklch(0.269 0 0);
   --secondary-foreground: oklch(0.985 0 0);
   --muted: oklch(0.269 0 0);
@@ -123,20 +123,20 @@
   --destructive: oklch(0.704 0.191 22.216);
   --border: oklch(1 0 0 / 10%);
   --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
+  --ring: #3db2bd;
+  --chart-1: #3db2bd; /* brand teal, lightened for dark */
+  --chart-2: #f26e66; /* brand coral, lightened for dark */
+  --chart-3: #4f93b8; /* brand navy, lightened for dark */
+  --chart-4: #e8b056; /* support amber */
+  --chart-5: #7fc3c9; /* light teal */
   --sidebar: oklch(0.205 0 0);
   --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-primary: #3db2bd;
+  --sidebar-primary-foreground: #0f1116;
   --sidebar-accent: oklch(0.269 0 0);
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  --sidebar-ring: #3db2bd;
 
   --ds-bg: #0f1116;
   --ds-surface: #151821;
@@ -144,9 +144,9 @@
   --ds-border: #2a2f3d;
   --ds-text: #f1f5f9;
   --ds-text-muted: #9aa4b2;
-  --ds-primary: #8aa2ff;
+  --ds-primary: #3db2bd;
   --ds-primary-foreground: #0f1116;
-  --ds-accent: #273153;
+  --ds-accent: #14333a;
   --ds-destructive: oklch(0.7 0.2 28);
   --ds-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
   --ds-shadow-md: 0 12px 24px oklch(0 0 0 / 0.35);
@@ -167,12 +167,12 @@
 .app-shell {
   background: radial-gradient(
       1200px 400px at 20% -10%,
-      oklch(0.92 0.04 265 / 0.4),
+      oklch(0.9 0.05 195 / 0.38),
       transparent
     ),
     radial-gradient(
       900px 600px at 100% 0%,
-      oklch(0.88 0.05 210 / 0.25),
+      oklch(0.86 0.06 230 / 0.22),
       transparent
     ),
     var(--ds-bg);

@@ -23,6 +23,7 @@ import {
 
 import {
   createElementFromAsset,
+  isBackgroundLayerElement,
   useEditorStore,
   type EditorElement,
   type EditorPage,
@@ -254,11 +255,18 @@ function resolveKonvaImageCrop(
     : undefined;
 }
 
-function computeAlphaOutlinePoints(
+// Builds a hit-area mask that follows the image's non-transparent pixels, as a
+// list of local-space rects ([x, y, w, h]) — one per run of opaque pixels on
+// each scanned row. Used so that clicking a visible part of a layer always
+// selects it, while clicks on genuinely transparent gaps fall through to the
+// layers behind. Returns null when the image is essentially solid (use the full
+// bounding box) or when pixels can't be read (CORS-tainted) — both fall back to
+// the bounding box so the layer is never un-clickable.
+function computeAlphaHitRects(
   element: EditorElement,
   sourceImage: HTMLImageElement | null | undefined,
   crop: { x: number; y: number; width: number; height: number } | undefined
-) {
+): number[][] | null {
   if (!sourceImage || typeof document === "undefined") return null;
   const renderedWidth = Math.max(1, Number(element.width) || 1);
   const renderedHeight = Math.max(1, Number(element.height) || 1);
@@ -279,66 +287,42 @@ function computeAlphaOutlinePoints(
 
   try {
     context.clearRect(0, 0, scanWidth, scanHeight);
-    context.drawImage(
-      sourceImage,
-      cropX,
-      cropY,
-      cropWidth,
-      cropHeight,
-      0,
-      0,
-      scanWidth,
-      scanHeight
-    );
+    context.drawImage(sourceImage, cropX, cropY, cropWidth, cropHeight, 0, 0, scanWidth, scanHeight);
     const pixels = context.getImageData(0, 0, scanWidth, scanHeight).data;
-    const rows: Array<{ y: number; left: number; right: number; width: number }> = [];
+
+    const cellW = renderedWidth / scanWidth;
+    const cellH = renderedHeight / scanHeight;
+    const pad = Math.max(cellW, cellH) * 0.75; // overlap to avoid antialiased seams
+
+    const rects: number[][] = [];
+    let opaquePixels = 0;
+    let opaqueRows = 0;
+
     for (let y = 0; y < scanHeight; y += 1) {
-      let left = scanWidth;
-      let right = -1;
+      let runStart = -1;
+      let rowHadOpaque = false;
       for (let x = 0; x < scanWidth; x += 1) {
-        const alpha = pixels[(y * scanWidth + x) * 4 + 3];
-        if (alpha < 16) continue;
-        if (x < left) left = x;
-        if (x > right) right = x;
+        const opaque = pixels[(y * scanWidth + x) * 4 + 3] >= 16;
+        if (opaque) {
+          opaquePixels += 1;
+          rowHadOpaque = true;
+          if (runStart < 0) runStart = x;
+        } else if (runStart >= 0) {
+          rects.push([runStart * cellW - pad, y * cellH - pad, (x - runStart) * cellW + pad * 2, cellH + pad * 2]);
+          runStart = -1;
+        }
       }
-      if (right >= left) rows.push({ y, left, right, width: right - left + 1 });
+      if (runStart >= 0) {
+        rects.push([runStart * cellW - pad, y * cellH - pad, (scanWidth - runStart) * cellW + pad * 2, cellH + pad * 2]);
+      }
+      if (rowHadOpaque) opaqueRows += 1;
     }
-    if (rows.length < 4) return null;
 
-    const minY = rows[0].y;
-    const maxY = rows[rows.length - 1].y;
-    const band = Math.max(2, Math.round((maxY - minY + 1) * 0.06));
-    const topRows = rows.filter((row) => row.y <= minY + band);
-    const bottomRows = rows.filter((row) => row.y >= maxY - band);
-    const median = (values: number[]) => {
-      const sorted = [...values].sort((a, b) => a - b);
-      return sorted[Math.floor(sorted.length / 2)] || 0;
-    };
-    const topLeft = median(topRows.map((row) => row.left));
-    const topRight = median(topRows.map((row) => row.right));
-    const bottomLeft = median(bottomRows.map((row) => row.left));
-    const bottomRight = median(bottomRows.map((row) => row.right));
-    const fullRectLike =
-      topLeft <= scanWidth * 0.015 &&
-      bottomLeft <= scanWidth * 0.015 &&
-      topRight >= scanWidth * 0.985 &&
-      bottomRight >= scanWidth * 0.985 &&
-      minY <= scanHeight * 0.015 &&
-      maxY >= scanHeight * 0.985;
-    if (fullRectLike) return null;
+    if (opaqueRows < 4 || rects.length === 0) return null;
+    // Essentially solid → the bounding box is the same hit area and far cheaper.
+    if (opaquePixels / (scanWidth * scanHeight) >= 0.92) return null;
 
-    const toLocalX = (value: number) => (value / Math.max(1, scanWidth - 1)) * renderedWidth;
-    const toLocalY = (value: number) => (value / Math.max(1, scanHeight - 1)) * renderedHeight;
-    return [
-      toLocalX(topLeft),
-      toLocalY(minY),
-      toLocalX(topRight),
-      toLocalY(minY),
-      toLocalX(bottomRight),
-      toLocalY(maxY),
-      toLocalX(bottomLeft),
-      toLocalY(maxY),
-    ];
+    return rects;
   } catch {
     return null;
   }
@@ -518,8 +502,8 @@ function CanvasImageNode({
   }, [isGif, image]);
 
   const crop = useMemo(() => resolveKonvaImageCrop(element, image || undefined), [element, image]);
-  const alphaOutlinePoints = useMemo(
-    () => computeAlphaOutlinePoints(element, image || undefined, crop),
+  const alphaHitRects = useMemo(
+    () => computeAlphaHitRects(element, image || undefined, crop),
     [crop, element, image]
   );
 
@@ -551,20 +535,15 @@ function CanvasImageNode({
       crop={crop}
       hitFunc={(context, shape) => {
         // Once selected (canTransform), make the whole bounding box grabbable so
-        // the layer can be dragged/resized. Otherwise mostly-transparent images
-        // (line art, thin decorations) are nearly impossible to move because only
-        // the non-transparent outline is hittable. Unselected layers keep the
-        // alpha-outline hit area so clicks pass through transparent gaps to
-        // whatever is behind.
-        if (alphaOutlinePoints && !canTransform) {
+        // the layer can be dragged/resized from anywhere — even transparent areas.
+        // While unselected, hit only the non-transparent pixels (alpha mask) so
+        // any visible part of the layer is directly selectable, yet clicks on
+        // genuinely transparent gaps fall through to the layers behind.
+        if (alphaHitRects && !canTransform) {
           context.beginPath();
-          alphaOutlinePoints.forEach((value, index) => {
-            if (index % 2 !== 0) return;
-            const x = Number(value || 0);
-            const y = Number(alphaOutlinePoints[index + 1] || 0);
-            if (index === 0) context.moveTo(x, y);
-            else context.lineTo(x, y);
-          });
+          for (const [rx, ry, rw, rh] of alphaHitRects) {
+            context.rect(rx, ry, rw, rh);
+          }
           context.closePath();
           context.fillStrokeShape(shape);
           return;
@@ -3257,10 +3236,14 @@ export default function CanvasEditor() {
     [selectedIds, setSelectedIds]
   );
 
+  const inlineEditActiveRef = useRef(false);
+
   const beginInlineTextEdit = useCallback(
     (node: Konva.Node, element: EditorElement) => {
       const stage = stageRef.current;
       if (!stage || !containerRef.current) return;
+      if (inlineEditActiveRef.current) return; // a textarea is already open
+      inlineEditActiveRef.current = true;
 
       const textPosition = node.absolutePosition();
       const containerRect = stage.container().getBoundingClientRect();
@@ -3303,6 +3286,7 @@ export default function CanvasEditor() {
 
       let finalized = false;
       const cleanup = () => {
+        inlineEditActiveRef.current = false;
         textarea.removeEventListener("keydown", handleKeyDown);
         textarea.removeEventListener("blur", handleBlur);
         if (textarea.parentNode) {
@@ -3342,6 +3326,19 @@ export default function CanvasEditor() {
     },
     [updateElement, viewport.scale]
   );
+
+  // Fallback so double-clicking a selected text always opens the inline editor —
+  // even if the click lands on a Transformer anchor/border rather than the text
+  // node itself. The guard in beginInlineTextEdit prevents a duplicate textarea
+  // when the text node's own onDblClick also fires.
+  const handleStageDoubleClick = useCallback(() => {
+    if (selectedIds.length !== 1) return;
+    const id = selectedIds[0];
+    const element = elements.find((item) => item.id === id);
+    if (!element || element.type !== "text") return;
+    const node = nodeRefs.current[id];
+    if (node) beginInlineTextEdit(node, element);
+  }, [selectedIds, elements, beginInlineTextEdit]);
 
   const handleStageMouseDown = useCallback(
     (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => {
@@ -3759,6 +3756,8 @@ export default function CanvasEditor() {
         onTouchMove={handleStageMouseMove}
         onMouseUp={handleStageMouseUp}
         onTouchEnd={handleStageMouseUp}
+        onDblClick={handleStageDoubleClick}
+        onDblTap={handleStageDoubleClick}
       >
         <Layer>
           <CanvasPageScene
@@ -3918,7 +3917,18 @@ export default function CanvasEditor() {
             // overlapping layer underneath. Without this, mostly-transparent
             // layers (line art) and layers sitting under a full-page shape can't
             // be moved on the canvas.
-            shouldOverdrawWholeArea
+            // Exceptions (overdraw disabled): a full-canvas background layer would
+            // overdraw the whole canvas and block selecting any other layer; and a
+            // text layer must let a double-click reach the text node so inline
+            // editing can start (the overdraw rect would otherwise swallow it).
+            shouldOverdrawWholeArea={(() => {
+              if (selectedIds.length !== 1) return true;
+              const selected = elements.find((element) => element.id === selectedIds[0]);
+              if (!selected) return true;
+              if (isBackgroundLayerElement(selected, activePage)) return false;
+              if (selected.type === "text") return false;
+              return true;
+            })()}
             enabledAnchors={[
               "top-left",
               "top-center",

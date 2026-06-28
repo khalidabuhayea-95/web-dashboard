@@ -8,6 +8,7 @@ import {
   authErrorResponse,
   authSuccessResponse,
   getClientIp,
+  getDeviceFields,
   getUserAgent,
   handleMissingBody,
   parseJsonBody,
@@ -29,6 +30,7 @@ export async function POST(request: Request) {
       mobileUser,
       userAgent: getUserAgent(request),
       ipAddress: getClientIp(request),
+      ...getDeviceFields(body),
     });
     return authSuccessResponse(session);
   } catch (error) {

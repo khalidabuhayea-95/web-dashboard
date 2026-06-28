@@ -1026,13 +1026,13 @@
                 targetHeight,
                 cropRegion
               );
-              if (fitted) {
+              if (fitted && String(fitted.dataUrl || "").startsWith("data:image/")) {
                 return {
-                  src: fitted,
-                  dataUrl: fitted,
+                  src: fitted.dataUrl,
+                  dataUrl: fitted.dataUrl,
                   provenance: "fetch-fit",
-                  sourceWidth: Math.max(1, Math.round(targetWidth || 1)),
-                  sourceHeight: Math.max(1, Math.round(targetHeight || 1)),
+                  sourceWidth: fitted.width,
+                  sourceHeight: fitted.height,
                 };
               }
             }
@@ -2246,8 +2246,20 @@
         };
       };
 
+      // Crop a fetched ORIGINAL asset to the region that is actually displayed while
+      // preserving the source's native pixel density. The output is sized to the
+      // cropped source resolution (capped, never upscaled) — NOT the small displayed
+      // design box — so the imported image keeps Canva's real resolution. Fabric's
+      // scaleX/scaleY downsamples it for on-canvas display while the full-resolution
+      // pixels survive for export. targetWidth/targetHeight only define the crop
+      // ASPECT, not the output size. Returns { dataUrl, width, height } or null.
       const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null) => {
-        if (!String(dataUrl || "").startsWith("data:image/")) return "";
+        if (!String(dataUrl || "").startsWith("data:image/")) return null;
+        const MAX_FITTED_IMAGE_SIDE = 1920;
+        // A JPEG source is opaque, so re-encode the (now full-resolution) crop as JPEG to
+        // keep the payload small; anything else may carry alpha, so stay lossless PNG.
+        const sourceMimeType = (String(dataUrl).match(/^data:(image\/[^;,]+)/i)?.[1] || "").toLowerCase();
+        const encodeAsJpeg = sourceMimeType === "image/jpeg";
         try {
           const image = await new Promise((resolve, reject) => {
             const element = new Image();
@@ -2257,8 +2269,8 @@
           });
           const sourceWidth = Math.max(1, Number(image?.naturalWidth || image?.width || 0) || 1);
           const sourceHeight = Math.max(1, Number(image?.naturalHeight || image?.height || 0) || 1);
-          const width = Math.max(1, Math.round(targetWidth || sourceWidth));
-          const height = Math.max(1, Math.round(targetHeight || sourceHeight));
+          const boxWidth = Math.max(1, Math.round(targetWidth || sourceWidth));
+          const boxHeight = Math.max(1, Math.round(targetHeight || sourceHeight));
           let sx = 0;
           let sy = 0;
           let sw = sourceWidth;
@@ -2275,7 +2287,7 @@
             sw = Math.max(1, Math.min(sourceWidth - sx, cropRegion.width * sourceWidth));
             sh = Math.max(1, Math.min(sourceHeight - sy, cropRegion.height * sourceHeight));
           } else {
-            const targetRatio = width / Math.max(1, height);
+            const targetRatio = boxWidth / Math.max(1, boxHeight);
             const sourceRatio = sourceWidth / Math.max(1, sourceHeight);
             if (sourceRatio > targetRatio) {
               sw = sourceHeight * targetRatio;
@@ -2285,15 +2297,27 @@
               sy = (sourceHeight - sh) / 2;
             }
           }
+          // Output at the cropped source resolution, capped to bound payload size.
+          // outScale is clamped to <= 1 so we never upscale beyond the real pixels.
+          const nativeWidth = Math.max(1, Math.round(sw));
+          const nativeHeight = Math.max(1, Math.round(sh));
+          const outScale = Math.min(1, MAX_FITTED_IMAGE_SIDE / Math.max(nativeWidth, nativeHeight, 1));
+          const width = Math.max(1, Math.round(nativeWidth * outScale));
+          const height = Math.max(1, Math.round(nativeHeight * outScale));
           const canvas = document.createElement("canvas");
           canvas.width = width;
           canvas.height = height;
           const context = canvas.getContext("2d");
-          if (!context) return "";
+          if (!context) return null;
+          context.imageSmoothingEnabled = true;
+          context.imageSmoothingQuality = "high";
           context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
-          return canvas.toDataURL("image/png");
+          const outDataUrl = encodeAsJpeg
+            ? canvas.toDataURL("image/jpeg", 0.92)
+            : canvas.toDataURL("image/png");
+          return { dataUrl: outDataUrl, width, height };
         } catch (_error) {
-          return "";
+          return null;
         }
       };
 
@@ -3090,15 +3114,37 @@
           const hasCompanionText =
             kind === "image" &&
             Boolean(text && textStyleElement);
+          const prefersRenderedImageSnapshot =
+            Boolean(imageElement) &&
+            kind === "image" &&
+            shouldPreferRenderedImageSnapshot(node, imageElement);
           const shouldPreserveRenderedImagePixels =
             imageElement &&
             kind === "image" &&
             (
               shouldUseVisibleGeometry ||
-              shouldPreferRenderedImageSnapshot(node, imageElement) ||
+              prefersRenderedImageSnapshot ||
               overflowsContainer ||
               aspectMismatch
             );
+          // A genuine mask / composite (clip-path, shaped frame, layered compositing)
+          // needs the screenshot snapshot because the raw asset doesn't represent the
+          // final appearance. A plain overflow/aspect-ratio crop does NOT: the fetched
+          // original cropped to the visible region is both correct AND far higher
+          // resolution than an on-screen screenshot, so for those layers the snapshot
+          // is only a lossy fallback. (shouldUseVisibleGeometry already encodes
+          // detectMaskedImageLayer for non-background layers; backgrounds gate it off,
+          // so probe the mask detector directly for them.)
+          const hasGenuineMaskOrComposite =
+            Boolean(imageElement) &&
+            kind === "image" &&
+            (
+              shouldUseVisibleGeometry ||
+              prefersRenderedImageSnapshot ||
+              (isBackgroundNode && detectMaskedImageLayer(node, imageElement, viewportRect))
+            );
+          const snapshotIsLossyFallback =
+            Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
           if (shouldPreserveRenderedImagePixels && imageAcquisitionJob?.kind === "element") {
             imageAcquisitionJob = {
@@ -3144,6 +3190,7 @@
             imageProvenance,
             imageAcquisitionJob,
             preferSnapshot,
+            snapshotIsLossyFallback,
             sourceWidth:
               shouldPreserveRenderedImagePixels
                 ? roundedWidth

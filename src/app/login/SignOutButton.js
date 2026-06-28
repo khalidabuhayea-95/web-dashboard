@@ -2,6 +2,7 @@
 
 import { useTransition } from "react";
 import { signOut } from "next-auth/react";
+import { LogOut } from "lucide-react";
 
 import Button from "@/components/ui/button";
 
@@ -15,7 +16,14 @@ export default function SignOutButton() {
   }
 
   return (
-    <Button variant="secondary" type="button" disabled={pending} onClick={handleClick}>
+    <Button
+      variant="secondary"
+      type="button"
+      disabled={pending}
+      onClick={handleClick}
+      className="inline-flex items-center gap-1.5"
+    >
+      <LogOut size={16} strokeWidth={2.25} aria-hidden="true" />
       {pending ? "Signing out..." : "Sign out"}
     </Button>
   );

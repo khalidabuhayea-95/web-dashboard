@@ -749,6 +749,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     transform: textTransformFromFabric(item, canvasSize),
     type: "TEXT",
     text: String(item.text || ""),
+    ...(typeof item.isRtl === "boolean" ? { isRtl: item.isRtl } : {}),
     fontName,
     size: numberOr(item.fontSize, 42),
     bold: textFormat.bold,

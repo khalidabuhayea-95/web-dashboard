@@ -37,6 +37,7 @@ model Template {
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   revisions         TemplateRevision[]
+  favorites         MobileFavoriteTemplate[]
 
   @@unique([ownerId, name])
   @@index([ownerId])
@@ -165,6 +166,8 @@ model MobileUser {
   updatedAt       DateTime             @updatedAt
   identities      MobileIdentity[]
   refreshTokens   MobileRefreshToken[]
+  deviceTokens    MobileDeviceToken[]
+  favorites       MobileFavoriteTemplate[]
 
   @@index([normalizedEmail])
   @@index([createdAt])
@@ -203,4 +206,52 @@ model MobileRefreshToken {
 
   @@index([mobileUserId])
   @@index([expiresAt])
+}
+
+model MobileDeviceToken {
+  id           String     @id @default(uuid()) @db.Uuid
+  mobileUserId String     @db.Uuid
+  token        String     @unique
+  platform     String     @default("android")
+  appVersion   String?
+  disabledAt   DateTime?
+  lastSeenAt   DateTime   @default(now())
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@index([mobileUserId])
+  @@index([disabledAt])
+}
+
+model MobileFavoriteTemplate {
+  id           String     @id @default(uuid()) @db.Uuid
+  mobileUserId String     @db.Uuid
+  templateId   String     @db.Uuid
+  createdAt    DateTime   @default(now())
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+  template     Template   @relation(fields: [templateId], references: [id], onDelete: Cascade)
+
+  @@unique([mobileUserId, templateId])
+  @@index([mobileUserId, createdAt(sort: Desc)])
+  @@index([templateId])
+}
+
+model PushCampaign {
+  id           String   @id @default(uuid()) @db.Uuid
+  title        String
+  body         String
+  audienceType String
+  audienceRef  Json
+  messageType  String   @default("notification")
+  payload      Json
+  targetCount  Int      @default(0)
+  successCount Int      @default(0)
+  failureCount Int      @default(0)
+  status       String   @default("sent")
+  error        String?
+  sentByUserId String   @db.Uuid
+  createdAt    DateTime @default(now())
+
+  @@index([createdAt(sort: Desc)])
 }

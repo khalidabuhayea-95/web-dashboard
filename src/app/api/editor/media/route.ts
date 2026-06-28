@@ -331,7 +331,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    let uploadBody: Buffer | File = fileEntry;
+    // Buffer the upload up front. Passing a web File/Blob straight to the S3
+    // PutObject Body makes the AWS SDK treat it as a flowing ReadableStream it
+    // can't hash ("Unable to calculate hash for flowing readable stream"), which
+    // broke default image uploads (e.g. merging layers). A Buffer has a known
+    // length, so the checksum/signature can be computed.
+    let uploadBody: Buffer = Buffer.from(await fileEntry.arrayBuffer());
     let uploadMimeType = resolvedMimeType || "application/octet-stream";
     let uploadSize = fileSize;
     let templatePreviewContext:
@@ -370,7 +375,7 @@ export async function POST(request: NextRequest) {
             : String(template.previewPosterUrl || "").trim() || null,
       };
 
-      const sourceBytes = Buffer.from(await fileEntry.arrayBuffer());
+      const sourceBytes = uploadBody;
       if (variant === "template-preview-video" && kind === "video") {
         const optimized = await resizeVideoPreviewBuffer({
           bytes: sourceBytes,

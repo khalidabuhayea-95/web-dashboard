@@ -1208,8 +1208,24 @@ async function buildHybridFabricObjects(
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
     const layerKind = String(layer?.kind || "").toLowerCase();
+    // Plain overflow/aspect crops (snapshotIsLossyFallback) keep the high-resolution
+    // fetched asset that the scraper already cropped to the visible region, so skip the
+    // lossy on-screen screenshot snapshot whenever we actually captured the asset pixels.
+    // Require real data-URL pixels (not a bare remote URL whose fetch may have failed) so
+    // a failed asset fetch safely falls back to the snapshot. Genuine masks/composites
+    // have snapshotIsLossyFallback=false and still snapshot.
+    const hasCapturedImagePixels =
+      String(layer?.imageDataUrl || "").startsWith("data:image/") ||
+      String(layer?.imageSrc || "").startsWith("data:image/");
+    const directAssetPreferredOverSnapshot =
+      layerKind === "image" &&
+      Boolean(layer?.snapshotIsLossyFallback) &&
+      hasCapturedImagePixels;
     const shouldForceSnapshotForLayer =
-      layerKind === "image" && Boolean(layer?.preferSnapshot) && !layer?.hasCompanionText;
+      layerKind === "image" &&
+      Boolean(layer?.preferSnapshot) &&
+      !layer?.hasCompanionText &&
+      !directAssetPreferredOverSnapshot;
     const layerFontFamily = normalizeFontFamilyName(layer?.fontFamily).toLowerCase();
     const shouldRasterizeUnsupportedText =
       layerKind === "text" &&
@@ -2556,6 +2572,17 @@ async function importActiveCanvaTab(message, options = {}) {
       .filter((layer) => String(layer?.kind || "").toLowerCase() === "image")
       .filter((layer) => Boolean(layer?.preferSnapshot))
       .filter((layer) => !layer?.hasCompanionText)
+      // Plain overflow/aspect crops keep the high-res fetched asset, so don't waste an
+      // isolation screenshot on them when we actually captured the asset pixels. Layers
+      // whose asset fetch failed (no data-URL pixels) fall through and still get the
+      // screenshot safety net.
+      .filter((layer) => {
+        if (!layer?.snapshotIsLossyFallback) return true;
+        const hasCapturedPixels =
+          String(layer?.imageDataUrl || "").startsWith("data:image/") ||
+          String(layer?.imageSrc || "").startsWith("data:image/");
+        return !hasCapturedPixels;
+      })
       .filter((layer) => String(layer?.id || "").trim().startsWith("LB"))
       .filter((layer) => layer?.viewportRect)
       .sort((a, b) => {

@@ -1,3 +1,22 @@
+// Optional push-registration fields accepted by the mobile auth endpoints so a
+// device's FCM token can be captured during login/refresh/logout.
+const DEVICE_PUSH_FIELDS = {
+  deviceToken: {
+    type: "string",
+    description:
+      "Optional FCM registration token. When present, the backend registers this device for push notifications.",
+  },
+  devicePlatform: {
+    type: "string",
+    enum: ["android", "ios"],
+    description: "Optional device platform for the FCM token (defaults to android).",
+  },
+  appVersion: {
+    type: "string",
+    description: "Optional app version string for diagnostics.",
+  },
+};
+
 function normalizeServerUrl(url) {
   const raw = String(url || "").trim();
   if (!raw) return "";
@@ -97,6 +116,28 @@ const reusableParameters = {
     description: "Template UUID (slug is accepted for backward compatibility).",
     schema: {
       type: "string",
+    },
+  },
+  favoriteTemplateIdPath: {
+    name: "templateId",
+    in: "path",
+    required: true,
+    description: "Template UUID to favorite, check, or remove.",
+    schema: {
+      type: "string",
+      format: "uuid",
+    },
+  },
+  favoritesPageSize: {
+    name: "pageSize",
+    in: "query",
+    required: false,
+    description: "Results per page (default 50, min 1, max 100). Aliases: `page_size`, `per_page`, `limit`.",
+    schema: {
+      type: "integer",
+      minimum: 1,
+      maximum: 100,
+      default: 50,
     },
   },
   categoryId: {
@@ -1362,6 +1403,130 @@ const schemas = {
       hasPrevPage: { type: "boolean" },
     },
   },
+  MobileFavoriteTemplateSummary: {
+    type: "object",
+    required: [
+      "id",
+      "title",
+      "status",
+      "category",
+      "subCategory",
+      "canvasWidth",
+      "canvasHeight",
+      "thumbnailUrl",
+      "updatedAt",
+    ],
+    properties: {
+      id: { type: "string", format: "uuid" },
+      title: { type: "string" },
+      status: {
+        type: "string",
+        description: "Template lifecycle status (for example `published`).",
+      },
+      category: {
+        type: "string",
+        description: "Raw template category value (not localized).",
+      },
+      subCategory: {
+        type: "string",
+        description: "Raw template sub category value (not localized).",
+      },
+      canvasWidth: { type: "number" },
+      canvasHeight: { type: "number" },
+      thumbnailUrl: {
+        type: "string",
+        description: "URL to the template thumbnail asset.",
+      },
+      updatedAt: {
+        type: "integer",
+        format: "int64",
+        description: "Template last-updated time (epoch milliseconds).",
+      },
+    },
+  },
+  MobileFavorite: {
+    type: "object",
+    required: ["id", "templateId", "favoritedAt", "template"],
+    properties: {
+      id: { type: "string", format: "uuid", description: "Favorite record id." },
+      templateId: {
+        type: "string",
+        format: "uuid",
+        description: "Favorited template id.",
+      },
+      favoritedAt: {
+        type: "integer",
+        format: "int64",
+        description: "When the template was favorited (epoch milliseconds).",
+      },
+      template: {
+        allOf: [{ $ref: "#/components/schemas/MobileFavoriteTemplateSummary" }],
+        nullable: true,
+        description: "Lightweight template summary; null when the template is no longer available.",
+      },
+    },
+  },
+  MobileFavoritesListResponse: {
+    type: "object",
+    required: [
+      "favorites",
+      "page",
+      "pageSize",
+      "total",
+      "totalPages",
+      "hasNextPage",
+      "hasPrevPage",
+    ],
+    properties: {
+      favorites: {
+        type: "array",
+        items: {
+          $ref: "#/components/schemas/MobileFavorite",
+        },
+      },
+      page: { type: "integer", minimum: 1 },
+      pageSize: { type: "integer", minimum: 1 },
+      total: { type: "integer", minimum: 0 },
+      totalPages: { type: "integer", minimum: 1 },
+      hasNextPage: { type: "boolean" },
+      hasPrevPage: { type: "boolean" },
+    },
+  },
+  MobileFavoriteMutationResponse: {
+    type: "object",
+    required: ["favorite", "created"],
+    properties: {
+      favorite: {
+        $ref: "#/components/schemas/MobileFavorite",
+      },
+      created: {
+        type: "boolean",
+        description: "True when this request created the favorite; false when it already existed.",
+      },
+    },
+  },
+  MobileFavoriteStatusResponse: {
+    type: "object",
+    required: ["isFavorite", "favorite"],
+    properties: {
+      isFavorite: { type: "boolean" },
+      favorite: {
+        allOf: [{ $ref: "#/components/schemas/MobileFavorite" }],
+        nullable: true,
+      },
+    },
+  },
+  MobileFavoriteDeleteResponse: {
+    type: "object",
+    required: ["ok", "removed"],
+    properties: {
+      ok: { type: "boolean", example: true },
+      removed: {
+        type: "boolean",
+        description: "True when a favorite was removed; false when the template was not favorited.",
+      },
+    },
+  },
 };
 
 export function buildMobileOpenApiSpec(serverOrigin) {
@@ -1378,6 +1543,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile App Settings" },
       { name: "Mobile Auth" },
       { name: "Mobile Templates" },
+      { name: "Mobile Favorites" },
       { name: "Mobile Fonts" },
       { name: "Mobile Elements" },
       { name: "Mobile Shapes" },
@@ -1400,6 +1566,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                       type: "string",
                       description: "Google ID token returned by the mobile app SDK.",
                     },
+                    ...DEVICE_PUSH_FIELDS,
                   },
                 },
               },
@@ -1445,6 +1612,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                       type: "string",
                       description: "Facebook access token returned by the mobile app SDK.",
                     },
+                    ...DEVICE_PUSH_FIELDS,
                   },
                 },
               },
@@ -1494,6 +1662,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                       type: "string",
                       description: "Optional display name sent by the app on first consent.",
                     },
+                    ...DEVICE_PUSH_FIELDS,
                   },
                 },
               },
@@ -1538,6 +1707,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                     refreshToken: {
                       type: "string",
                     },
+                    ...DEVICE_PUSH_FIELDS,
                   },
                 },
               },
@@ -1579,6 +1749,10 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                   type: "object",
                   properties: {
                     refreshToken: { type: "string" },
+                    deviceToken: {
+                      type: "string",
+                      description: "Optional FCM token to deactivate for this device on logout.",
+                    },
                   },
                 },
               },
@@ -1631,6 +1805,82 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                   schema: {
                     $ref: "#/components/schemas/ErrorResponse",
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/devices/token": {
+        post: {
+          tags: ["Mobile Auth"],
+          summary: "Register or refresh the current device's FCM push token",
+          description:
+            "Authenticated endpoint for the app to register or rotate its FCM token (e.g. on FirebaseMessaging onNewToken). Associates the token with the signed-in user. A user signed in on multiple devices keeps one active token per device.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["deviceToken"],
+                  properties: {
+                    deviceToken: {
+                      type: "string",
+                      description: "Current FCM registration token for this device.",
+                    },
+                    devicePlatform: {
+                      type: "string",
+                      enum: ["android", "ios"],
+                      description: "Device platform (defaults to android).",
+                    },
+                    appVersion: {
+                      type: "string",
+                      description: "Optional app version string for diagnostics.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Device token registered/refreshed",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["ok"],
+                    properties: {
+                      ok: { type: "boolean", example: true },
+                      registered: { type: "boolean", example: true },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Missing or invalid deviceToken",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
                 },
               },
             },
@@ -2186,6 +2436,181 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             503: {
               description: "Background removal engine unavailable",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/image-to-layers": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Decompose an image into editable layers",
+          description:
+            "Accepts a single flat image, runs it through the Replicate layered-decomposition model (qwen/qwen-image-layered), persists each resulting RGBA layer, and returns an editable project in the same shape as GET /api/mobile/templates/{id}. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["image"],
+                  properties: {
+                    image: {
+                      type: "string",
+                      format: "binary",
+                    },
+                    includeText: {
+                      type: "boolean",
+                      description:
+                        "Defaults to true. Set false for movable image layers only (text stays baked into the raster).",
+                    },
+                    model: {
+                      type: "string",
+                      description: "Optional model id override.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description:
+                "Decomposed editable layers to insert in place of the source layer",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["canvasWidth", "canvasHeight", "sourceWidth", "sourceHeight", "layers", "meta"],
+                    properties: {
+                      canvasWidth: {
+                        type: "number",
+                        description:
+                          "Width of the coordinate space the layer transforms live in. The client maps this group onto the source layer's region (position, scale, rotation).",
+                      },
+                      canvasHeight: { type: "number" },
+                      sourceWidth: {
+                        type: "integer",
+                        description: "Original uploaded image width in pixels.",
+                      },
+                      sourceHeight: { type: "integer" },
+                      layers: {
+                        type: "array",
+                        description:
+                          "Decomposed layers ordered bottom→top, in the same format as a template project's `layers`. IMAGE layers carry `imageUri`, `frameWidth`, `frameHeight`, `cropRect`, and `filters`; TEXT layers carry `text`, `fontName`, `size`, `colorHex`, `alignment`, and `isRtl`. Every layer has a center-based `transform` ({x, y, scale, scaleX, scaleY, rotation}), `opacity`, `zIndex`, and `animation`.",
+                        items: {
+                          type: "object",
+                          additionalProperties: true,
+                          properties: {
+                            id: { type: "string" },
+                            type: {
+                              type: "string",
+                              enum: ["IMAGE", "TEXT"],
+                              description: "Layer kind produced by this endpoint.",
+                            },
+                            zIndex: { type: "integer" },
+                            transform: {
+                              type: "object",
+                              additionalProperties: true,
+                              description:
+                                "Center-based transform: x, y, scale, scaleX, scaleY, rotation.",
+                            },
+                            animation: { $ref: "#/components/schemas/MobileLayerAnimation" },
+                          },
+                        },
+                      },
+                      meta: {
+                        type: "object",
+                        properties: {
+                          layerCount: { type: "integer" },
+                          textBlockCount: {
+                            type: "integer",
+                            description: "Number of editable text layers extracted via OCR.",
+                          },
+                          textRemoved: {
+                            type: "boolean",
+                            description:
+                              "Whether baked-in text was inpainted out of the raster layers.",
+                          },
+                          provider: { type: "string", example: "replicate" },
+                          model: { type: "string", example: "qwen/qwen-image-layered" },
+                          predictionId: { type: "string" },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid multipart payload or empty upload",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            413: {
+              description: "Image file is too large",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            415: {
+              description: "Unsupported image type",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            422: {
+              description: "Image could not be processed safely",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            503: {
+              description: "Replicate image layering is unavailable",
               content: {
                 "application/json": {
                   schema: {
@@ -2790,6 +3215,262 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                   schema: {
                     $ref: "#/components/schemas/ErrorResponse",
                   },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/favorites": {
+        get: {
+          tags: ["Mobile Favorites"],
+          summary: "List the signed-in user's favorite templates",
+          description:
+            "Returns the authenticated mobile user's favorited templates, newest first, each with a lightweight template summary. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          parameters: [
+            reusableParameters.templatesPage,
+            reusableParameters.favoritesPageSize,
+          ],
+          responses: {
+            200: {
+              description: "Paginated list of favorites",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoritesListResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ["Mobile Favorites"],
+          summary: "Add a template to favorites",
+          description:
+            "Saves a template id to the signed-in user's favorites. Idempotent: re-favoriting an already-favorited template returns the existing favorite with `created: false`. Only published templates can be favorited. Requires a logged-in mobile user.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["templateId"],
+                  properties: {
+                    templateId: {
+                      type: "string",
+                      format: "uuid",
+                      description: "UUID of the template to favorite.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Template was already in favorites",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteMutationResponse",
+                  },
+                },
+              },
+            },
+            201: {
+              description: "Favorite created",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteMutationResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Missing or invalid templateId",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            404: {
+              description: "Template not found or not published",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/favorites/{templateId}": {
+        get: {
+          tags: ["Mobile Favorites"],
+          summary: "Check whether a template is favorited",
+          description:
+            "Returns whether the given template is in the signed-in user's favorites. Always 200 with an `isFavorite` flag. Requires a logged-in mobile user.",
+          security: [{ bearerAuth: [] }],
+          parameters: [reusableParameters.favoriteTemplateIdPath],
+          responses: {
+            200: {
+              description: "Favorite status for the template",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteStatusResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid templateId",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+        put: {
+          tags: ["Mobile Favorites"],
+          summary: "Ensure a template is favorited (idempotent upsert)",
+          description:
+            "Adds the template (addressed by URL) to the signed-in user's favorites if not already present. Validates that the template exists and is published. Requires a logged-in mobile user.",
+          security: [{ bearerAuth: [] }],
+          parameters: [reusableParameters.favoriteTemplateIdPath],
+          responses: {
+            200: {
+              description: "Template was already in favorites",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteMutationResponse",
+                  },
+                },
+              },
+            },
+            201: {
+              description: "Favorite created",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteMutationResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid templateId",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            404: {
+              description: "Template not found or not published",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+        delete: {
+          tags: ["Mobile Favorites"],
+          summary: "Remove a template from favorites",
+          description:
+            "Removes the template from the signed-in user's favorites. Idempotent: `removed` is false when the template was not favorited. Requires a logged-in mobile user.",
+          security: [{ bearerAuth: [] }],
+          parameters: [reusableParameters.favoriteTemplateIdPath],
+          responses: {
+            200: {
+              description: "Favorite removed (or was not present)",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileFavoriteDeleteResponse",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Invalid templateId",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
                 },
               },
             },
