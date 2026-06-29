@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Konva from "konva";
 import useImage from "use-image";
-import { Copy, Minus, Plus, SlidersHorizontal, Trash2 } from "lucide-react";
+import { Minus, Plus } from "lucide-react";
 import {
   Arrow,
   Circle,
@@ -23,7 +23,6 @@ import {
 
 import {
   createElementFromAsset,
-  isBackgroundLayerElement,
   useEditorStore,
   type EditorElement,
   type EditorPage,
@@ -292,7 +291,15 @@ function computeAlphaHitRects(
 
     const cellW = renderedWidth / scanWidth;
     const cellH = renderedHeight / scanHeight;
-    const pad = Math.max(cellW, cellH) * 0.75; // overlap to avoid antialiased seams
+    // Dilate the hit mask outward from the opaque pixels so sparse/thin art
+    // (calligraphy, line art, scattered glyphs) is selectable by clicking on OR
+    // near a stroke — not only on the exact 1–2px the stroke occupies. Without
+    // this, the wide transparent gaps between strokes make the layer feel
+    // unclickable (clicks fall through to whatever is behind). Empty margins of
+    // the bounding box, further than `pad` from any stroke, still fall through.
+    const antiAliasPad = Math.max(cellW, cellH) * 0.75; // cover antialiased seams
+    const dilatePad = Math.min(30, Math.max(8, Math.max(renderedWidth, renderedHeight) * 0.05));
+    const pad = Math.max(antiAliasPad, dilatePad);
 
     const rects: number[][] = [];
     let opaquePixels = 0;
@@ -534,12 +541,12 @@ function CanvasImageNode({
       shadowOffsetY={element.shadowOffsetY}
       crop={crop}
       hitFunc={(context, shape) => {
-        // Once selected (canTransform), make the whole bounding box grabbable so
-        // the layer can be dragged/resized from anywhere — even transparent areas.
-        // While unselected, hit only the non-transparent pixels (alpha mask) so
-        // any visible part of the layer is directly selectable, yet clicks on
-        // genuinely transparent gaps fall through to the layers behind.
-        if (alphaHitRects && !canTransform) {
+        // Hit only the non-transparent pixels (alpha mask) so any visible part of
+        // the layer is directly selectable, while clicks on genuinely transparent
+        // gaps fall through to the layer visible behind. This holds whether or not
+        // the layer is selected, so a selected (e.g. full-canvas) layer never traps
+        // clicks meant for the layers showing through its transparent regions.
+        if (alphaHitRects) {
           context.beginPath();
           for (const [rx, ry, rw, rh] of alphaHitRects) {
             context.rect(rx, ry, rw, rh);
@@ -1813,7 +1820,6 @@ export default function CanvasEditor() {
   const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
   const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
   const setSelectedIds = useEditorStore((state) => state.setSelectedIds);
-  const setShowRightSidebar = useEditorStore((state) => state.setShowRightSidebar);
   const clearSelection = useEditorStore((state) => state.clearSelection);
   const addTextElement = useEditorStore((state) => state.addTextElement);
   const addShapeElement = useEditorStore((state) => state.addShapeElement);
@@ -2887,29 +2893,6 @@ export default function CanvasEditor() {
     };
   }, [availableFontFamilies, elements]);
 
-  const selectionMenuPos = useMemo(() => {
-    if (isRenderingPreview) return null;
-    if (selectedIds.length === 0) return null;
-
-    const active = elements.find((element) => element.id === selectedIds[0]);
-    if (!active) return null;
-    if (!isElementVisibleAtPlayhead(active, effectiveActivePagePlayheadMs, activePageDurationMs)) return null;
-
-    return {
-      x: viewport.x + (active.x + active.width * 0.5) * viewport.scale,
-      y: viewport.y + active.y * viewport.scale - 40,
-    };
-  }, [
-    isRenderingPreview,
-    activePageDurationMs,
-    effectiveActivePagePlayheadMs,
-    elements,
-    selectedIds,
-    viewport.scale,
-    viewport.x,
-    viewport.y,
-  ]);
-
   useEffect(() => {
     setStageApi({
       zoomIn: () => zoomBy(1.12),
@@ -3912,22 +3895,31 @@ export default function CanvasEditor() {
             }}
             rotateEnabled
             flipEnabled={false}
-            // Let the selected layer be dragged by grabbing anywhere inside its
-            // bounding box (even transparent areas), with priority over any
-            // overlapping layer underneath. Without this, mostly-transparent
-            // layers (line art) and layers sitting under a full-page shape can't
-            // be moved on the canvas.
-            // Exceptions (overdraw disabled): a full-canvas background layer would
-            // overdraw the whole canvas and block selecting any other layer; and a
-            // text layer must let a double-click reach the text node so inline
-            // editing can start (the overdraw rect would otherwise swallow it).
+            // Overdraw makes the Transformer capture every click inside the
+            // selected layer's bounds (drawn on top of all layers). Kept OFF for
+            // on-canvas layers — otherwise it traps clicks meant for other layers;
+            // with it off a click always resolves to the top-most *visible* layer
+            // under the cursor (see the alpha-mask hitFunc above), and a layer is
+            // dragged by grabbing its visible pixels / resized via the anchors.
+            // EXCEPTION: when the layer's center sits outside the page (it's been
+            // moved into the pasteboard) it has no visible pixels on the canvas to
+            // grab, so enable whole-area drag to let it be picked up and moved back.
+            // An off-canvas layer doesn't overlap canvas layers, so it can't trap
+            // their clicks.
             shouldOverdrawWholeArea={(() => {
-              if (selectedIds.length !== 1) return true;
+              if (selectedIds.length !== 1) return false;
               const selected = elements.find((element) => element.id === selectedIds[0]);
-              if (!selected) return true;
-              if (isBackgroundLayerElement(selected, activePage)) return false;
-              if (selected.type === "text") return false;
-              return true;
+              if (!selected) return false;
+              const renderedWidth = (Number(selected.width) || 0) * (Number(selected.scaleX) || 1);
+              const renderedHeight = (Number(selected.height) || 0) * (Number(selected.scaleY) || 1);
+              const centerX = (Number(selected.x) || 0) + renderedWidth / 2;
+              const centerY = (Number(selected.y) || 0) + renderedHeight / 2;
+              return (
+                centerX < 0 ||
+                centerY < 0 ||
+                centerX > activePage.width ||
+                centerY > activePage.height
+              );
             })()}
             enabledAnchors={[
               "top-left",
@@ -4054,26 +4046,6 @@ export default function CanvasEditor() {
             }}
           >
             Delete
-          </button>
-        </div>
-      ) : null}
-      {selectionMenuPos ? (
-        <div
-          className="absolute z-20 flex -translate-x-1/2 items-center gap-1 rounded-md border border-[#d0d7e1] bg-white px-2 py-1 text-[#304055] shadow"
-          style={{ left: selectionMenuPos.x, top: selectionMenuPos.y }}
-        >
-          <button type="button" className="rounded p-1 hover:bg-[#eef3f8]" onClick={duplicateSelected}>
-            <Copy size={14} />
-          </button>
-          <button type="button" className="rounded p-1 hover:bg-[#eef3f8]" onClick={deleteSelected}>
-            <Trash2 size={14} />
-          </button>
-          <button
-            type="button"
-            className="flex items-center gap-1 rounded px-2 py-1 text-[13px] hover:bg-[#eef3f8]"
-            onClick={() => setShowRightSidebar(true)}
-          >
-            <SlidersHorizontal size={14} /> Properties
           </button>
         </div>
       ) : null}

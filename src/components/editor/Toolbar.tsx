@@ -12,6 +12,7 @@ import {
   ChevronDown,
   Download,
   FlipHorizontal,
+  FlipVertical,
   Italic,
   Layers,
   Menu,
@@ -1805,8 +1806,21 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
               >
                 <Layers size={14} /> Merge
               </button>
-              <button type="button" className={topActionClass} onClick={() => flipSelected("x")}>
-                <FlipHorizontal size={14} /> Flip
+              <button
+                type="button"
+                className={topActionClass}
+                onClick={() => flipSelected("x")}
+                title="Flip horizontally"
+              >
+                <FlipHorizontal size={14} /> Flip H
+              </button>
+              <button
+                type="button"
+                className={topActionClass}
+                onClick={() => flipSelected("y")}
+                title="Flip vertically"
+              >
+                <FlipVertical size={14} /> Flip V
               </button>
               <button
                 type="button"
@@ -1846,56 +1860,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
               >
                 Fit to canvas
               </button>
-              {hasSingleImageSelection ? (
-                <div className="flex max-w-[380px] items-center gap-1 overflow-x-auto rounded border border-[#d7dbe1] bg-white px-1 py-1">
-                  {activeRasterPaletteLoading ? (
-                    <span className="px-2 text-xs text-[#667085]">Analyzing colors...</span>
-                  ) : activeRasterPalette.length > 0 ? (
-                    <div className="flex items-center gap-1.5 px-1">
-                      {activeRasterPalette.map((originalColor) => {
-                        const mappedColor = activeRasterColorMap[originalColor] || originalColor;
-                        return (
-                          <label
-                            key={`toolbar-raster-color-${originalColor}`}
-                            className="group relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded border border-[#d7dbe1]"
-                            title={`${originalColor} → ${mappedColor}`}
-                          >
-                            <span
-                              className="h-5 w-5 rounded-sm border border-black/10"
-                              style={{ backgroundColor: mappedColor }}
-                            />
-                            <input
-                              type="color"
-                              className="absolute inset-0 cursor-pointer opacity-0"
-                              value={mappedColor}
-                              onChange={(event) => {
-                                const nextColor = normalizeHexColor(event.target.value) || originalColor;
-                                const nextMap = { ...activeRasterColorMap };
-                                if (nextColor === originalColor) {
-                                  delete nextMap[originalColor];
-                                } else {
-                                  nextMap[originalColor] = nextColor;
-                                }
-                                updateElement(activeImageId, { rasterColorMap: nextMap });
-                              }}
-                            />
-                          </label>
-                        );
-                      })}
-                      <button
-                        type="button"
-                        className="whitespace-nowrap px-1 text-[11px] text-[#667085] underline underline-offset-2"
-                        onClick={() => updateElement(activeImageId, { rasterColorMap: {} })}
-                        disabled={Object.keys(activeRasterColorMap).length === 0}
-                      >
-                        Reset
-                      </button>
-                    </div>
-                  ) : (
-                    <span className="px-2 text-xs text-[#667085]">No palette</span>
-                  )}
-                </div>
-              ) : null}
             </>
           ) : null}
         </div>
@@ -1973,6 +1937,62 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           </Button>
         </div>
       </div>
+
+      {hasSingleImageSelection ? (
+        <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-2">
+          <div className="flex min-w-0 items-center gap-3 overflow-x-auto whitespace-nowrap px-1">
+            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-[#667085]">
+              Colors
+            </span>
+            {activeRasterPaletteLoading ? (
+              <span className="px-2 text-xs text-[#667085]">Analyzing colors...</span>
+            ) : activeRasterPalette.length > 0 ? (
+              <div className="flex items-center gap-1.5">
+                {activeRasterPalette.map((originalColor) => {
+                  const mappedColor = activeRasterColorMap[originalColor] || originalColor;
+                  return (
+                    <label
+                      key={`toolbar-raster-color-${originalColor}`}
+                      className="group relative inline-flex h-7 w-7 shrink-0 cursor-pointer items-center justify-center rounded border border-[#d7dbe1]"
+                      title={`${originalColor} → ${mappedColor}`}
+                    >
+                      <span
+                        className="h-5 w-5 rounded-sm border border-black/10"
+                        style={{ backgroundColor: mappedColor }}
+                      />
+                      <input
+                        type="color"
+                        className="absolute inset-0 cursor-pointer opacity-0"
+                        value={mappedColor}
+                        onChange={(event) => {
+                          const nextColor = normalizeHexColor(event.target.value) || originalColor;
+                          const nextMap = { ...activeRasterColorMap };
+                          if (nextColor === originalColor) {
+                            delete nextMap[originalColor];
+                          } else {
+                            nextMap[originalColor] = nextColor;
+                          }
+                          updateElement(activeImageId, { rasterColorMap: nextMap });
+                        }}
+                      />
+                    </label>
+                  );
+                })}
+                <button
+                  type="button"
+                  className="whitespace-nowrap px-1 text-[11px] text-[#667085] underline underline-offset-2"
+                  onClick={() => updateElement(activeImageId, { rasterColorMap: {} })}
+                  disabled={Object.keys(activeRasterColorMap).length === 0}
+                >
+                  Reset
+                </button>
+              </div>
+            ) : (
+              <span className="px-2 text-xs text-[#667085]">No palette</span>
+            )}
+          </div>
+        </div>
+      ) : null}
 
       {hasOnlyTextSelection && activeTextElement ? (
         <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-2">

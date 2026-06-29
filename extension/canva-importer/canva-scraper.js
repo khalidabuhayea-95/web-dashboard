@@ -779,6 +779,34 @@
         return false;
       };
 
+      // Like hasMeaningfulTransformBetween but IGNORES pure scale. A rectangular crop
+      // that merely zooms/pans the photo inside its frame is faithfully reproducible
+      // from the original asset cropped to the visible rect, so scale alone must NOT
+      // force the rendered snapshot. Rotation / flip / reflection still must.
+      const hasRotationOrFlipBetween = (element, stopAtNode) => {
+        let node = element?.parentElement || null;
+        let depth = 0;
+        while (node && node !== stopAtNode && depth < 12) {
+          const styleText = node.getAttribute?.("style") || "";
+          const computedStyle = window.getComputedStyle(node);
+          const computedTransform = parseComputedTransform(computedStyle.transform || styleText);
+          const inlineTransform = parseStyleTransform(styleText);
+          const hasMeaningfulAngle =
+            Math.abs(Number(computedTransform.angle || 0)) > 0.2 || inlineTransform.hasAngle;
+          if (
+            hasMeaningfulAngle ||
+            Boolean(computedTransform.flipX) ||
+            Boolean(computedTransform.flipY) ||
+            Boolean(computedTransform.hasReflection)
+          ) {
+            return true;
+          }
+          node = node.parentElement;
+          depth += 1;
+        }
+        return false;
+      };
+
       const getNumericZIndex = (element, stopAtNode) => {
         let best = null;
         let node = element;
@@ -957,12 +985,23 @@
         "canva-apps.com",
       ];
 
+      // Public Canva asset CDNs serve with `Access-Control-Allow-Origin: *` and NO
+      // `Access-Control-Allow-Credentials`, so a CREDENTIALED cross-origin fetch is rejected
+      // by the browser — the asset then silently falls back to a low-res raster. These must
+      // be fetched anonymously, so they take precedence over the credentialed suffixes above.
+      const CANVA_PUBLIC_CDN_HOST_SUFFIXES = [
+        "media-public.canva.com",
+        "media.canva.com",
+      ];
+
+      const matchesHostSuffix = (host, suffixes) =>
+        suffixes.some((suffix) => host === suffix || host.endsWith(`.${suffix}`));
+
       const shouldSendCredentialsForUrl = (urlString) => {
         try {
           const host = new URL(urlString, location.href).hostname.toLowerCase();
-          return CANVA_CREDENTIALED_HOST_SUFFIXES.some(
-            (suffix) => host === suffix || host.endsWith(`.${suffix}`)
-          );
+          if (matchesHostSuffix(host, CANVA_PUBLIC_CDN_HOST_SUFFIXES)) return false;
+          return matchesHostSuffix(host, CANVA_CREDENTIALED_HOST_SUFFIXES);
         } catch (_error) {
           return false;
         }
@@ -972,21 +1011,31 @@
         const normalizedUrl = normalizeAssetUrl(sourceUrl);
         if (!normalizedUrl) return "";
         if (/^data:/i.test(normalizedUrl) || /^blob:/i.test(normalizedUrl)) return "";
-        try {
-          const response = await fetch(normalizedUrl, {
-            credentials: shouldSendCredentialsForUrl(normalizedUrl) ? "include" : "omit",
-            cache: "force-cache",
-          });
-          if (!response.ok) return "";
-          const blob = await response.blob();
-          if (!blob || blob.size <= 0 || blob.size > maxBytes) return "";
-          const mimeType = String(blob.type || "").trim().toLowerCase();
-          if (mimeType && !mimeType.startsWith("image/")) return "";
-          const dataUrl = await toDataUrlFromBlob(blob);
-          return String(dataUrl).startsWith("data:image/") ? dataUrl : "";
-        } catch (_error) {
-          return "";
+        // Try the preferred credentials mode, then fall back to the other. Public CDNs need
+        // anonymous (ACAO:*), user-scoped hosts may need cookies — trying both makes the
+        // asset fetch succeed regardless of which list a host lands in, instead of silently
+        // degrading to a display-resolution raster.
+        const modes = shouldSendCredentialsForUrl(normalizedUrl)
+          ? ["include", "omit"]
+          : ["omit", "include"];
+        for (let index = 0; index < modes.length; index += 1) {
+          try {
+            const response = await fetch(normalizedUrl, {
+              credentials: modes[index],
+              cache: "force-cache",
+            });
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            if (!blob || blob.size <= 0 || blob.size > maxBytes) continue;
+            const mimeType = String(blob.type || "").trim().toLowerCase();
+            if (mimeType && !mimeType.startsWith("image/")) continue;
+            const dataUrl = await toDataUrlFromBlob(blob);
+            if (String(dataUrl).startsWith("data:image/")) return dataUrl;
+          } catch (_error) {
+            // Try the next credentials mode.
+          }
         }
+        return "";
       };
 
       // Acquire an image for a given <img>/<image> element by trying strategies
@@ -1615,6 +1664,43 @@
         return 0;
       };
 
+      // A GENUINE mask = the frame actually clips the image: the image extends BEYOND its own
+      // layer frame, OR a shape clip (clip-path / mask-image / rounded corners), OR an
+      // object-fit crop. Plain `overflow:hidden` where the image == its frame is NOT a mask —
+      // that's a bleed element whose frame merely extends past the canvas, and it must keep its
+      // full asset + full geometry (the editor clips it for display, like Canva). Used for the
+      // geometry/crop decision; the broader detectMaskedImageLayer still drives snapshot logic.
+      const isGenuinelyMaskedImageLayer = (layerNode, imageElement) => {
+        if (!layerNode || !imageElement) return false;
+        const imageStyle = window.getComputedStyle(imageElement);
+        if (imageStyle.objectFit === "cover" || imageStyle.objectFit === "contain") return true;
+        let node = imageElement;
+        let depth = 0;
+        while (node && depth < 10) {
+          const style = window.getComputedStyle(node);
+          if (
+            style.clipPath !== "none" ||
+            style.maskImage !== "none" ||
+            (style.webkitMaskImage && style.webkitMaskImage !== "none") ||
+            parseNumericPx(style.borderRadius) > 2
+          ) {
+            return true;
+          }
+          if (node === layerNode) break;
+          node = node.parentElement;
+          depth += 1;
+        }
+        const imgRect = imageElement.getBoundingClientRect();
+        const frameRect = layerNode.getBoundingClientRect();
+        const margin = 2;
+        return (
+          imgRect.left < frameRect.left - margin ||
+          imgRect.top < frameRect.top - margin ||
+          imgRect.right > frameRect.right + margin ||
+          imgRect.bottom > frameRect.bottom + margin
+        );
+      };
+
       const detectMaskedImageLayer = (layerNode, imageElement, viewportRect) => {
         if (!layerNode || !imageElement || !viewportRect) return false;
         const layerStyle = window.getComputedStyle(layerNode);
@@ -1687,6 +1773,53 @@
           .map((candidate) => getImageElementSource(candidate))
           .filter(Boolean);
         return siblingSources.some((candidate) => candidate !== primarySource);
+      };
+
+      // True when the layer's final look CANNOT be faithfully reproduced by cropping the
+      // original fetched asset to its visible rectangle — i.e. the rendered snapshot is
+      // genuinely required, not just a lossy fallback. Covers: shaped masks / clip-paths /
+      // rounded corners, rotation / flip / reflection, multi-source compositing, and baked
+      // pixel effects (CSS filter / backdrop-filter / blend mode) that the raw asset lacks.
+      // A plain rectangular (possibly zoomed/panned) crop of an unmodified photo returns
+      // false, so it can use the high-resolution asset crop instead of a low-res screenshot.
+      const snapshotRequiredForLayer = (layerNode, imageElement) => {
+        if (!layerNode || !imageElement) return false;
+        if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
+        let node = imageElement;
+        let depth = 0;
+        while (node && depth < 12) {
+          const style = window.getComputedStyle(node);
+          if (
+            style.clipPath !== "none" ||
+            style.maskImage !== "none" ||
+            style.webkitMaskImage !== "none" ||
+            parseNumericPx(style.borderRadius) > 2 ||
+            (style.filter && style.filter !== "none") ||
+            (style.backdropFilter && style.backdropFilter !== "none") ||
+            (style.mixBlendMode && style.mixBlendMode !== "normal")
+          ) {
+            return true;
+          }
+          if (node === layerNode) break;
+          node = node.parentElement;
+          depth += 1;
+        }
+        const renderableDescendants = Array.from(
+          layerNode.querySelectorAll("img, image, svg, canvas")
+        ).filter(
+          (candidate) =>
+            !isInsideForeignLayer(candidate, layerNode) &&
+            candidate !== imageElement &&
+            !candidate.contains?.(imageElement)
+        );
+        if (renderableDescendants.length > 0) return true;
+        if (findCssImageUrl(layerNode)) return true;
+        const primaryImageSource = getImageElementSource(imageElement);
+        const otherImageSources = getScopedImageElements(layerNode)
+          .filter((candidate) => candidate !== imageElement)
+          .map((candidate) => getImageElementSource(candidate))
+          .filter(Boolean);
+        return otherImageSources.some((candidate) => candidate !== primaryImageSource);
       };
 
       const resolveThinVectorStrokeStyle = (layerNode) => {
@@ -2253,6 +2386,70 @@
       // scaleX/scaleY downsamples it for on-canvas display while the full-resolution
       // pixels survive for export. targetWidth/targetHeight only define the crop
       // ASPECT, not the output size. Returns { dataUrl, width, height } or null.
+      // Detect an asset that has the page background composited INTO it (e.g. a decoration
+      // exported with its teal backdrop baked in). Such an asset renders wrong on any other
+      // surface, so the caller should fall back to the isolation snapshot which subtracts the
+      // page background. Heuristic: a large, opaque, MUTED, single flat-colour region — that's
+      // a baked backdrop, not a clean cut-out decoration (which is mostly transparent) nor a
+      // varied photo (no single dominant colour).
+      const isBackgroundBakedAsset = async (dataUrl) => {
+        if (!String(dataUrl || "").startsWith("data:image/")) return false;
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("image-load-failed"));
+            element.src = dataUrl;
+          });
+          const sw = Math.max(1, Number(image?.naturalWidth || image?.width || 0) || 1);
+          const sh = Math.max(1, Number(image?.naturalHeight || image?.height || 0) || 1);
+          const scale = Math.min(1, 160 / Math.max(sw, sh));
+          const w = Math.max(1, Math.round(sw * scale));
+          const h = Math.max(1, Math.round(sh * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const context = canvas.getContext("2d");
+          if (!context) return false;
+          context.drawImage(image, 0, 0, w, h);
+          const data = context.getImageData(0, 0, w, h).data;
+          const total = w * h;
+          let opaque = 0;
+          const histogram = new Map();
+          for (let i = 0; i < data.length; i += 4) {
+            if (data[i + 3] < 200) continue;
+            opaque += 1;
+            const key =
+              ((data[i] >> 5) << 6) | ((data[i + 1] >> 5) << 3) | (data[i + 2] >> 5);
+            histogram.set(key, (histogram.get(key) || 0) + 1);
+          }
+          if (opaque < total * 0.35) return false; // mostly transparent → clean cut-out
+          let dominantKey = 0;
+          let dominantCount = 0;
+          for (const [key, count] of histogram) {
+            if (count > dominantCount) {
+              dominantCount = count;
+              dominantKey = key;
+            }
+          }
+          const dominantFraction = dominantCount / opaque;
+          const r = ((dominantKey >> 6) & 7) * 36;
+          const g = ((dominantKey >> 3) & 7) * 36;
+          const b = (dominantKey & 7) * 36;
+          const maxChannel = Math.max(r, g, b);
+          const minChannel = Math.min(r, g, b);
+          const saturation = maxChannel > 0 ? (maxChannel - minChannel) / maxChannel : 0;
+          return (
+            dominantFraction > 0.28 &&
+            saturation < 0.6 &&
+            maxChannel > 25 &&
+            maxChannel < 220
+          );
+        } catch (_error) {
+          return false;
+        }
+      };
+
       const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null) => {
         if (!String(dataUrl || "").startsWith("data:image/")) return null;
         const MAX_FITTED_IMAGE_SIDE = 1920;
@@ -2844,10 +3041,16 @@
               .map((element) => ({ element, rect: element.getBoundingClientRect() }))
               .sort((a, b) => rectArea(b.rect) - rectArea(a.rect))[0]?.element || null;
           const imageTitleHint = getImageElementTitleHint(imageElement);
-          const shouldUseVisibleGeometry =
+          // Only a genuinely MASKED image (clipped by a frame / clip-path) uses the
+          // page-clipped visible rect + a crop. A non-masked image that merely bleeds past
+          // the canvas edge (e.g. a full-bleed photo) keeps its FULL asset and FULL geometry
+          // — the editor clips the off-canvas part for display, exactly like Canva — so it
+          // stays repositionable instead of being permanently cropped to the canvas.
+          const isMaskedImage =
             !isBackgroundNode &&
             Boolean(imageElement) &&
-            detectMaskedImageLayer(node, imageElement, viewportRect);
+            isGenuinelyMaskedImageLayer(node, imageElement);
+          const shouldUseVisibleGeometry = isMaskedImage;
           const rawRect = shouldUseVisibleGeometry
             ? viewportRect
             : viewportInfo.rawRect || viewportRect;
@@ -3127,22 +3330,15 @@
               overflowsContainer ||
               aspectMismatch
             );
-          // A genuine mask / composite (clip-path, shaped frame, layered compositing)
-          // needs the screenshot snapshot because the raw asset doesn't represent the
-          // final appearance. A plain overflow/aspect-ratio crop does NOT: the fetched
-          // original cropped to the visible region is both correct AND far higher
-          // resolution than an on-screen screenshot, so for those layers the snapshot
-          // is only a lossy fallback. (shouldUseVisibleGeometry already encodes
-          // detectMaskedImageLayer for non-background layers; backgrounds gate it off,
-          // so probe the mask detector directly for them.)
+          // The rendered snapshot is only genuinely needed for shaped masks / rotation /
+          // flip / compositing / baked pixel effects (see snapshotRequiredForLayer). A
+          // plain rectangular crop — even one zoomed/panned inside its frame — is faithfully
+          // reproduced by the fetched original cropped to the visible region, at far higher
+          // resolution and without the screenshot's overlap artifacts, so for those layers
+          // the snapshot is only a lossy fallback.
           const hasGenuineMaskOrComposite =
-            Boolean(imageElement) &&
-            kind === "image" &&
-            (
-              shouldUseVisibleGeometry ||
-              prefersRenderedImageSnapshot ||
-              (isBackgroundNode && detectMaskedImageLayer(node, imageElement, viewportRect))
-            );
+            Boolean(shouldPreserveRenderedImagePixels) &&
+            snapshotRequiredForLayer(node, imageElement);
           const snapshotIsLossyFallback =
             Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
@@ -3150,7 +3346,12 @@
             imageAcquisitionJob = {
               ...imageAcquisitionJob,
               fitFetchedToTarget: true,
-              cropRegion: buildDisplayedImageCropRegion(imageElement, viewportRect),
+              // Crop the asset to the visible region ONLY for masked images (a frame clips
+              // them). A non-masked bleed image keeps its full asset (no crop) so its
+              // off-canvas part survives; fitDataUrlToDisplayedBox then only matches aspect.
+              cropRegion: isMaskedImage
+                ? buildDisplayedImageCropRegion(imageElement, viewportRect)
+                : null,
             };
           }
           if (shouldPreserveRenderedImagePixels && !hasCompanionText) {
@@ -3334,6 +3535,19 @@
             if (acquired.provenance) layer.imageProvenance = acquired.provenance;
             if (acquired.sourceWidth) layer.sourceWidth = acquired.sourceWidth;
             if (acquired.sourceHeight) layer.sourceHeight = acquired.sourceHeight;
+            // If Canva served a background-baked version of this decoration (the page colour
+            // composited into the asset), the raw asset looks wrong on its own. Drop the
+            // lossy-fallback flag so background.js keeps its isolation snapshot, which
+            // subtracts the page background and yields a clean cut-out. The genuine
+            // full-page background is exempt — it SHOULD keep its baked colour.
+            if (
+              layer.snapshotIsLossyFallback &&
+              !layer.isFullPageBackground &&
+              !layer.isBackgroundNode &&
+              (await isBackgroundBakedAsset(layer.imageDataUrl))
+            ) {
+              layer.snapshotIsLossyFallback = false;
+            }
           } else if (job.kind === "url") {
             let dataUrl = "";
             if (String(job.url).startsWith("blob:")) {

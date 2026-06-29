@@ -1,6 +1,25 @@
-/* global chrome, OffscreenCanvas, createImageBitmap, btoa */
+/* global chrome, OffscreenCanvas, createImageBitmap, btoa, self */
 importScripts("logger.js");
 importScripts("shared-constants.js");
+
+// Take over immediately on update so a reloaded extension runs the NEW service-worker code
+// instead of Chrome keeping the previously-running (stale) worker alive. Without this, the
+// manifest/popup/injected-scraper update but the worker logic (e.g. the import build) stays
+// on the old version until it naturally terminates.
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
+// Build marker — sourced from the manifest (bump version/version_name there). Confirms a
+// reload took effect, shown both here and as the popup version badge.
+const EXTENSION_BUILD = (() => {
+  try {
+    const m = chrome.runtime.getManifest();
+    return String(m.version_name || m.version || "?");
+  } catch (_error) {
+    return "?";
+  }
+})();
+console.log(`[CanvaImporter] build ${EXTENSION_BUILD} loaded`);
 
 const logger =
   typeof globalThis.createExtensionLogger === "function"
@@ -314,6 +333,29 @@ async function decodeDataUrlToBitmap(dataUrl) {
   return createImageBitmap(blob);
 }
 
+// Fraction of (downsampled) pixels that are opaque (alpha > 200). Returns -1 on failure.
+async function imageOpaqueFraction(dataUrl) {
+  try {
+    if (!String(dataUrl || "").startsWith("data:image/")) return -1;
+    const bitmap = await decodeDataUrlToBitmap(dataUrl);
+    if (!bitmap) return -1;
+    const w = Math.max(1, Math.min(120, bitmap.width));
+    const h = Math.max(1, Math.min(120, bitmap.height));
+    const canvas = new OffscreenCanvas(w, h);
+    const context = canvas.getContext("2d");
+    if (!context) return -1;
+    context.drawImage(bitmap, 0, 0, w, h);
+    const data = context.getImageData(0, 0, w, h).data;
+    let opaque = 0;
+    for (let i = 3; i < data.length; i += 4) {
+      if (data[i] > 200) opaque += 1;
+    }
+    return opaque / (w * h);
+  } catch (_error) {
+    return -1;
+  }
+}
+
 const TRIMMABLE_IMAGE_MIME_TYPES = new Set([
   "image/png",
   "image/webp",
@@ -613,6 +655,9 @@ function annotateImportMetadata(object, layer, fallbackOverride) {
     ...(layer && typeof layer.imageProvenance === "string" && layer.imageProvenance
       ? { imageProvenance: layer.imageProvenance }
       : {}),
+    // Permanent build stamp — lets the DB prove which service-worker version produced an
+    // import (the worker can stay cached on an old version even when the badge updates).
+    extBuild: EXTENSION_BUILD,
   };
 }
 
@@ -1121,6 +1166,38 @@ async function layerToFabricObject(layer, index) {
   return annotateImportMetadata(imageObject, layer);
 }
 
+// A full-page OPAQUE solid-color rect stacked ABOVE an image is almost always a
+// mis-ordered page background — it paints over the real (image) background, so the
+// import renders as a flat color. Move such rects to the bottom of the z-order so the
+// decorative background image shows. Semi-transparent overlays (opacity < 0.98) are
+// left alone — those are intentional tints.
+function reorderBackgroundRectsToBottom(objects, canvasWidth, canvasHeight) {
+  if (!Array.isArray(objects) || objects.length < 2) return objects;
+  const pageArea = Math.max(1, Number(canvasWidth || 0) * Number(canvasHeight || 0));
+  const firstImageIndex = objects.findIndex(
+    (object) => String(object?.type || "").toLowerCase() === "image"
+  );
+  if (firstImageIndex < 0) return objects;
+  const isFullPageOpaqueRect = (object) => {
+    if (String(object?.type || "").toLowerCase() !== "rect") return false;
+    if (Math.max(0, Math.min(1, numberOr(object?.opacity, 1))) < 0.98) return false;
+    const width = Math.max(1, numberOr(object?.width, 1) * Math.abs(numberOr(object?.scaleX, 1)));
+    const height = Math.max(1, numberOr(object?.height, 1) * Math.abs(numberOr(object?.scaleY, 1)));
+    return (width * height) / pageArea >= 0.92;
+  };
+  const movedRects = [];
+  const rest = [];
+  objects.forEach((object, index) => {
+    if (index > firstImageIndex && isFullPageOpaqueRect(object)) {
+      movedRects.push(object);
+    } else {
+      rest.push(object);
+    }
+  });
+  if (movedRects.length === 0) return objects;
+  return [...movedRects, ...rest];
+}
+
 async function buildFabricObjects(layers) {
   const result = [];
   for (let index = 0; index < layers.length; index += 1) {
@@ -1217,10 +1294,23 @@ async function buildHybridFabricObjects(
     const hasCapturedImagePixels =
       String(layer?.imageDataUrl || "").startsWith("data:image/") ||
       String(layer?.imageSrc || "").startsWith("data:image/");
-    const directAssetPreferredOverSnapshot =
+    let directAssetPreferredOverSnapshot =
       layerKind === "image" &&
       Boolean(layer?.snapshotIsLossyFallback) &&
       hasCapturedImagePixels;
+    // Auto-pick: if the captured asset has the page background baked into it (markedly more
+    // opaque than the clean isolation snapshot), use the snapshot instead — it diffs the
+    // background out. Genuine cut-outs keep their high-res asset.
+    if (directAssetPreferredOverSnapshot) {
+      const snapshotDataUrl = String(layer?.isolatedImageDataUrl || "");
+      const hadSnapshot = snapshotDataUrl.startsWith("data:image/");
+      const assetOpaque = await imageOpaqueFraction(String(layer?.imageDataUrl || ""));
+      const snapshotOpaque = hadSnapshot ? await imageOpaqueFraction(snapshotDataUrl) : -1;
+      const useSnapshot = hadSnapshot && snapshotOpaque >= 0.03 && assetOpaque - snapshotOpaque > 0.15;
+      if (useSnapshot) {
+        directAssetPreferredOverSnapshot = false;
+      }
+    }
     const shouldForceSnapshotForLayer =
       layerKind === "image" &&
       Boolean(layer?.preferSnapshot) &&
@@ -1287,12 +1377,20 @@ async function buildHybridFabricObjects(
     const layerWidth = Math.max(1, Math.round(numberOr(layer?.width, 1)));
     const layerHeight = Math.max(1, Math.round(numberOr(layer?.height, 1)));
     const layerArea = layerWidth * layerHeight;
+    // This gate culls near-full-page images that would blanket the design — meant for
+    // redundant flattened SCREENSHOT layers. A full-page image backed by a real fetched
+    // asset (data/blob/fetch/shape-svg) is legit content — typically a textured paper
+    // background — so keep it; only raster (screenshot) full-page layers stay droppable.
+    const hasRealAssetProvenance = ["data", "blob", "fetch", "fetch-fit", "shape-svg"].includes(
+      String(layer?.imageProvenance || "")
+    );
     if (
       resolvableImageLayerCount > 0 &&
       layerArea > canvasArea * 0.8 &&
       !layer?.isBackgroundNode &&
       !layer?.isFullPageBackground &&
-      !looksLikeDecorativeFrameLayer(layer)
+      !looksLikeDecorativeFrameLayer(layer) &&
+      !hasRealAssetProvenance
     ) {
       continue;
     }
@@ -2572,17 +2670,10 @@ async function importActiveCanvaTab(message, options = {}) {
       .filter((layer) => String(layer?.kind || "").toLowerCase() === "image")
       .filter((layer) => Boolean(layer?.preferSnapshot))
       .filter((layer) => !layer?.hasCompanionText)
-      // Plain overflow/aspect crops keep the high-res fetched asset, so don't waste an
-      // isolation screenshot on them when we actually captured the asset pixels. Layers
-      // whose asset fetch failed (no data-URL pixels) fall through and still get the
-      // screenshot safety net.
-      .filter((layer) => {
-        if (!layer?.snapshotIsLossyFallback) return true;
-        const hasCapturedPixels =
-          String(layer?.imageDataUrl || "").startsWith("data:image/") ||
-          String(layer?.imageSrc || "").startsWith("data:image/");
-        return !hasCapturedPixels;
-      })
+      // Compute the isolation snapshot for ALL prefer-snapshot image layers (including
+      // plain crops that captured an asset). buildHybridFabricObjects compares the asset
+      // against this snapshot and uses the snapshot only when the asset has the page
+      // background baked in; otherwise it keeps the high-res asset.
       .filter((layer) => String(layer?.id || "").trim().startsWith("LB"))
       .filter((layer) => layer?.viewportRect)
       .sort((a, b) => {
@@ -2841,6 +2932,12 @@ async function importActiveCanvaTab(message, options = {}) {
       buildFabricObjects(extractedLayers)
     );
   }
+  // Keep a full-page opaque background rect from painting over the real background image.
+  fabricObjects = reorderBackgroundRectsToBottom(
+    fabricObjects,
+    Math.round(sourceWidth || Number(captureMeta.designWidth || 1080)),
+    Math.round(sourceHeight || Number(captureMeta.designHeight || 1920))
+  );
   const fallbackWidth = Math.max(1, Math.round(sourceWidth || 1080));
   const fallbackHeight = Math.max(1, Math.round(sourceHeight || 1080));
   const hasMeaningfulDrawableLayers = fabricObjects.some((object) => {

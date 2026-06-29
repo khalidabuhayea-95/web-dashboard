@@ -903,7 +903,7 @@ const schemas = {
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform`, `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, and `animation`. TEXT layers expose a slim `font` object. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, and `animation`. Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
             items: {
               type: "object",
               additionalProperties: true,
@@ -2504,7 +2504,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                       layers: {
                         type: "array",
                         description:
-                          "Decomposed layers ordered bottom→top, in the same format as a template project's `layers`. IMAGE layers carry `imageUri`, `frameWidth`, `frameHeight`, `cropRect`, and `filters`; TEXT layers carry `text`, `fontName`, `size`, `colorHex`, `alignment`, and `isRtl`. Every layer has a center-based `transform` ({x, y, scale, scaleX, scaleY, rotation}), `opacity`, `zIndex`, and `animation`.",
+                          "Decomposed layers ordered bottom→top, in the same format as a template project's `layers`. IMAGE layers carry `imageUri`, `frameWidth`, `frameHeight`, `cropRect`, and `filters`; TEXT layers carry `text`, `fontName`, `size`, `colorHex`, `alignment`, and `isRtl`. Every layer has a center-based `transform` ({x, y, scale, scaleX, scaleY, rotation, flipX, flipY}), `opacity`, `zIndex`, and `animation`. Flip lives on the sign of scaleX/scaleY; `flipX`/`flipY` booleans restate it (flipX === scaleX < 0) — apply one, not both.",
                         items: {
                           type: "object",
                           additionalProperties: true,
@@ -2520,7 +2520,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                               type: "object",
                               additionalProperties: true,
                               description:
-                                "Center-based transform: x, y, scale, scaleX, scaleY, rotation.",
+                                "Center-based transform: x, y, scale, scaleX, scaleY, rotation, flipX, flipY. Flip is authoritative on the sign of scaleX/scaleY (negative = mirrored); flipX/flipY are booleans restating that sign (flipX === scaleX < 0). Apply one representation, not both.",
                             },
                             animation: { $ref: "#/components/schemas/MobileLayerAnimation" },
                           },

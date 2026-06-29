@@ -1974,8 +1974,28 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...activePage,
         elements: activePage.elements.map((element) => {
           if (!selectedSet.has(element.id)) return element;
-          if (axis === "x") return { ...element, flipX: !element.flipX, scaleX: element.scaleX * -1 };
-          return { ...element, flipY: !element.flipY, scaleY: element.scaleY * -1 };
+          // Negating a scale flips the node about its top-left origin, which
+          // shifts it sideways by its rendered size. Compensate x/y so the layer
+          // flips in place (its center stays put), accounting for any rotation.
+          const radians = ((element.rotation || 0) * Math.PI) / 180;
+          if (axis === "x") {
+            const shift = element.width * element.scaleX;
+            return {
+              ...element,
+              flipX: !element.flipX,
+              scaleX: element.scaleX * -1,
+              x: element.x + shift * Math.cos(radians),
+              y: element.y + shift * Math.sin(radians),
+            };
+          }
+          const shift = element.height * element.scaleY;
+          return {
+            ...element,
+            flipY: !element.flipY,
+            scaleY: element.scaleY * -1,
+            x: element.x - shift * Math.sin(radians),
+            y: element.y + shift * Math.cos(radians),
+          };
         }),
       })),
     }));

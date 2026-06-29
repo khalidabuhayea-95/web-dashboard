@@ -18,6 +18,19 @@ function $(id) {
   return document.getElementById(id);
 }
 
+// Show the loaded extension build in the popup so a reload can be confirmed at a glance.
+// Sourced from the manifest (version_name, falling back to version) — bump it there.
+function renderBuildVersion() {
+  try {
+    const node = $("buildVersion");
+    if (!node) return;
+    const manifest = chrome.runtime.getManifest();
+    node.textContent = `v${manifest.version_name || manifest.version || "?"}`;
+  } catch (_error) {
+    // Non-fatal: the badge is a diagnostic aid only.
+  }
+}
+
 function setStatus(message, type = "") {
   const node = $("status");
   node.textContent = message || "";
@@ -195,6 +208,7 @@ async function importActiveTab() {
 
 async function main() {
   logger.info("Popup initialized");
+  renderBuildVersion();
   await loadSettings();
 
   $("saveButton").addEventListener("click", async () => {

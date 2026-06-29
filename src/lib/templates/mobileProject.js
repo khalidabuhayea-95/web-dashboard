@@ -655,6 +655,12 @@ function buildTransform({
     scaleX: signX * clamp(effectiveScaleX / Math.max(scaleMagnitude, 0.0001), 0.1, 16),
     scaleY: signY * clamp(effectiveScaleY / Math.max(scaleMagnitude, 0.0001), 0.1, 16),
     rotation: numberOr(item.angle, numberOr(item.rotation, 0)),
+    // Flip is authoritative on the SIGN of scaleX/scaleY (a negative scale means
+    // mirrored). flipX/flipY restate that same sign as booleans for clients that
+    // prefer a flag. Consumers must apply ONE representation, not both, or the
+    // image double-flips. Invariant: flipX === (scaleX < 0).
+    flipX: signX < 0,
+    flipY: signY < 0,
   };
 }
 
@@ -704,6 +710,10 @@ function textTransformFromFabric(item, canvasSize) {
     scaleX: signX * clamp(absScaleX, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
     scaleY: signY * clamp(absScaleY, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
     rotation: numberOr(item.angle, numberOr(item.rotation, 0)),
+    // See buildTransform: flipX/flipY mirror the sign of scaleX/scaleY. Apply one,
+    // not both. Invariant: flipX === (scaleX < 0).
+    flipX: signX < 0,
+    flipY: signY < 0,
   };
 }
 
