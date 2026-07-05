@@ -1943,6 +1943,34 @@ export default function CanvasEditor() {
           const textWidth = widthNode.getTextWidth();
           widthNode.destroy();
           const newWidth = Math.max(1, Math.ceil(textWidth) + 2);
+          // If the text is wider than its box, the box is intentionally WRAPPING the text
+          // across multiple lines (e.g. a centered two-line heading imported from Canva).
+          // Autofit only tightens genuine single-line boxes — widening this box to the full
+          // one-line width would collapse the wrap onto one line and break the layout.
+          // BUT Konva truncates wrapped lines that overflow a FIXED box height, so an imported
+          // two-line heading in a box sized for ~1.8 lines silently loses its 2nd line. So grow
+          // the box height to fit all wrapped lines, keeping the width and lineHeight.
+          if (newWidth > element.width + 2) {
+            fittedTextIdsRef.current.add(element.id);
+            const wrapNode = new Konva.Text({
+              text,
+              fontSize,
+              fontFamily,
+              fontStyle,
+              letterSpacing,
+              direction,
+              lineHeight,
+              align: element.align,
+              width: element.width,
+              wrap: "word",
+            });
+            const wrappedHeight = Math.ceil(wrapNode.height());
+            wrapNode.destroy();
+            if (wrappedHeight > element.height + 1) {
+              fits.push({ id: element.id, patch: { height: wrappedHeight + 2 } });
+            }
+            return;
+          }
           const newLineHeight = Math.min(lineHeight, MAX_LINE_HEIGHT);
 
           const horizontallyPadded = element.width > newWidth * 1.12;

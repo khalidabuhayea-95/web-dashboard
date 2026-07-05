@@ -1751,17 +1751,41 @@
         );
       };
 
+      // Canva renders ONE logical image as several stacked <img> at IDENTICAL geometry
+      // (responsive srcset variants: e.g. a 200px, 1600px and 2400px copy of the same art).
+      // Those are NOT a composite — treating them as one forced every image layer down the
+      // rendered-snapshot path, which crops any layer that bleeds off the canvas to its visible
+      // slice. A genuine composite/overlay sits at a DIFFERENT rect than the main image.
+      const occupiesSameRectAsMain = (candidate, mainRect) => {
+        if (!candidate || !mainRect) return false;
+        const r = candidate.getBoundingClientRect();
+        return (
+          Math.abs(r.left - mainRect.left) <= 2 &&
+          Math.abs(r.top - mainRect.top) <= 2 &&
+          Math.abs(r.width - mainRect.width) <= 2 &&
+          Math.abs(r.height - mainRect.height) <= 2
+        );
+      };
+
       const shouldPreferRenderedImageSnapshot = (layerNode, imageElement) => {
         if (!layerNode || !imageElement) return false;
-        if (hasMeaningfulTransformBetween(imageElement, layerNode)) return true;
+        // Only rotation / flip / reflection genuinely need the rendered snapshot. Canva sizes
+        // EVERY image with a CSS transform:scale(...), and a pure scale is faithfully
+        // reproduced by the fetched asset at the layer's geometry — using the scale-sensitive
+        // hasMeaningfulTransformBetween here forced every image layer down the snapshot path,
+        // which crops any layer that bleeds off the canvas to its on-screen slice.
+        if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
 
+        const mainRect = imageElement.getBoundingClientRect();
         const renderableDescendants = Array.from(
           layerNode.querySelectorAll("img, image, svg, canvas")
         ).filter(
           (candidate) =>
             !isInsideForeignLayer(candidate, layerNode) &&
             candidate !== imageElement &&
-            !candidate.contains?.(imageElement)
+            !candidate.contains?.(imageElement) &&
+            // ignore stacked responsive <img> duplicates of the same image
+            !(candidate.tagName === "IMG" && occupiesSameRectAsMain(candidate, mainRect))
         );
         if (renderableDescendants.length > 0) return true;
 
@@ -1769,7 +1793,10 @@
 
         const primarySource = getImageElementSource(imageElement);
         const siblingSources = getScopedImageElements(layerNode)
-          .filter((candidate) => candidate !== imageElement)
+          .filter(
+            (candidate) =>
+              candidate !== imageElement && !occupiesSameRectAsMain(candidate, mainRect)
+          )
           .map((candidate) => getImageElementSource(candidate))
           .filter(Boolean);
         return siblingSources.some((candidate) => candidate !== primarySource);
@@ -2844,7 +2871,22 @@
           if (String(node?.id || "").startsWith("LB")) return false;
           if (node.closest('[id^="LB"]')) return false;
           const nodeRect = node.getBoundingClientRect();
-          if (!isVisible(node, nodeRect)) return false;
+          const bgStyle = window.getComputedStyle(node);
+          if (
+            bgStyle.display === "none" ||
+            Number(bgStyle.opacity || 1) <= 0.01 ||
+            nodeRect.width < 80 ||
+            nodeRect.height < 80
+          ) {
+            return false;
+          }
+          // Canva paints its design from a `visibility:hidden` logical tree (the LB-layer path
+          // reads those regardless of visibility). Allow a hidden NON-LB element too WHEN it
+          // carries a real image — e.g. a full-page pattern overlay at reduced opacity, which
+          // otherwise gets dropped entirely. Paint-only (no-image) hidden elements stay rejected.
+          if (bgStyle.visibility === "hidden" && !getNodeVisualAssetKey(node)) {
+            return false;
+          }
           const intersection = intersectRects(nodeRect, {
             left: rect.x,
             top: rect.y,
@@ -2897,6 +2939,7 @@
         const selectedBackgroundCandidates = [];
         for (let index = 0; index < scoredBackgroundCandidates.length; index += 1) {
           const candidate = scoredBackgroundCandidates[index];
+          const candidateRect = candidate.node.getBoundingClientRect();
           const overlapsExisting = selectedBackgroundCandidates.some(
             (existing) => {
               const overlaps =
@@ -2904,6 +2947,17 @@
                 existing.node.contains(candidate.node) ||
                 candidate.node.contains(existing.node);
               if (!overlaps) return false;
+              // Canva stacks responsive-resolution copies of ONE layer, nested at the SAME rect
+              // with different image URLs. Merge those (same logical layer) so a single overlay
+              // isn't imported 2-3×. Distinct stacked backgrounds (paper vs pattern) differ in
+              // rect, so they fall through to the asset-based rule and both survive.
+              const er = existing.node.getBoundingClientRect();
+              const sameRect =
+                Math.abs(er.width - candidateRect.width) < 4 &&
+                Math.abs(er.height - candidateRect.height) < 4 &&
+                Math.abs(er.left - candidateRect.left) < 4 &&
+                Math.abs(er.top - candidateRect.top) < 4;
+              if (sameRect) return true;
               const sameAsset =
                 Boolean(existing.assetKey && candidate.assetKey) &&
                 existing.assetKey === candidate.assetKey;
@@ -3051,6 +3105,23 @@
             Boolean(imageElement) &&
             isGenuinelyMaskedImageLayer(node, imageElement);
           const shouldUseVisibleGeometry = isMaskedImage;
+          // A non-masked image whose FULL frame extends past the canvas edge can NEVER be
+          // faithfully captured by a rendered snapshot (the snapshot/isolation pass only sees
+          // on-canvas pixels), so it must keep the full fetched asset — otherwise the bleeding
+          // part is permanently cropped (this sliced the full-bleed pattern bands to ~57%).
+          // Decided HERE, before preferSnapshot, so BOTH the snapshot preference AND the
+          // preserve-pixels/fit path skip it. Genuine masks still snapshot (they need the clip).
+          const nodeFrameRect = viewportInfo.rawRect || null;
+          const frameBleedsOffCanvas =
+            !isBackgroundNode &&
+            Boolean(nodeFrameRect) &&
+            ((nodeFrameRect.left ?? nodeFrameRect.x ?? 0) < rect.x - 1 ||
+              (nodeFrameRect.top ?? nodeFrameRect.y ?? 0) < rect.y - 1 ||
+              (nodeFrameRect.left ?? nodeFrameRect.x ?? 0) + nodeFrameRect.width >
+                rect.x + rect.width + 1 ||
+              (nodeFrameRect.top ?? nodeFrameRect.y ?? 0) + nodeFrameRect.height >
+                rect.y + rect.height + 1);
+          const forceFullAssetOverSnapshot = frameBleedsOffCanvas && !isMaskedImage;
           const rawRect = shouldUseVisibleGeometry
             ? viewportRect
             : viewportInfo.rawRect || viewportRect;
@@ -3149,7 +3220,13 @@
             }
           }
 
-          const effectiveOpacity = getEffectiveOpacity(node, bestPage.node);
+          // Measure opacity from the IMAGE element (deepest rendered node) up to the page, not
+          // just the layer node. Canva applies a layer's transparency (الشفافية) at whatever
+          // level holds the artwork — for regular LB layers that's the layer DIV (caught either
+          // way), but for a background IMAGE the opacity sits on an inner element the outer
+          // background-candidate node doesn't include, so node-only measurement wrongly returned
+          // 1 and imported a semi-transparent paper background as fully opaque.
+          const effectiveOpacity = getEffectiveOpacity(imageElement || node, bestPage.node);
           const zIndex = getNumericZIndex(node, bestPage.node);
           let imageSrc = "";
           let imageDataUrl = "";
@@ -3200,7 +3277,8 @@
 
           if (imageElement && (imageSrc || imageDataUrl)) {
             preferSnapshot =
-              shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement);
+              !forceFullAssetOverSnapshot &&
+              (shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement));
           }
           if (
             !preferSnapshot &&
@@ -3300,19 +3378,34 @@
           const normalizedLayerFlipX = isThinVectorDividerLayer ? false : layerFlipX;
           const normalizedLayerFlipY = isThinVectorDividerLayer ? false : layerFlipY;
           const imageRect = imageElement?.getBoundingClientRect?.() || null;
+          // Compare the image against its FULL (unclipped) layer frame, NOT the page-clipped
+          // viewportRect. Otherwise any image that merely bleeds past the CANVAS edge (a
+          // full-bleed decorative pattern/photo) looks like it "overflows its container" and
+          // has a mismatched aspect versus the clipped slice — a false positive that forces the
+          // lossy snapshot/fit-to-visible path and permanently crops off the bleeding part.
+          // A genuine mask (image larger than its frame) still overflows the full frame → true.
+          const rawFrame = viewportInfo.rawRect || null;
+          const frameRect = rawFrame
+            ? {
+                x: rawFrame.left ?? rawFrame.x ?? viewportRect.x,
+                y: rawFrame.top ?? rawFrame.y ?? viewportRect.y,
+                width: rawFrame.width,
+                height: rawFrame.height,
+              }
+            : viewportRect;
           const overflowsContainer =
             imageRect &&
-            (imageRect.left < viewportRect.x - 0.5 ||
-              imageRect.top < viewportRect.y - 0.5 ||
-              imageRect.right > viewportRect.x + viewportRect.width + 0.5 ||
-              imageRect.bottom > viewportRect.y + viewportRect.height + 0.5);
+            (imageRect.left < frameRect.x - 0.5 ||
+              imageRect.top < frameRect.y - 0.5 ||
+              imageRect.right > frameRect.x + frameRect.width + 0.5 ||
+              imageRect.bottom > frameRect.y + frameRect.height + 0.5);
           const aspectMismatch =
             imageRect &&
             imageRect.width > 0.01 &&
             imageRect.height > 0.01 &&
             Math.abs(
               imageRect.width / imageRect.height -
-                viewportRect.width / Math.max(0.01, viewportRect.height)
+                frameRect.width / Math.max(0.01, frameRect.height)
             ) > 0.01;
           const hasCompanionText =
             kind === "image" &&
@@ -3324,6 +3417,7 @@
           const shouldPreserveRenderedImagePixels =
             imageElement &&
             kind === "image" &&
+            !forceFullAssetOverSnapshot &&
             (
               shouldUseVisibleGeometry ||
               prefersRenderedImageSnapshot ||

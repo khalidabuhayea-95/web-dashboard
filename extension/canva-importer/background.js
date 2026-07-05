@@ -1473,10 +1473,30 @@ async function buildHybridFabricObjects(
   return result;
 }
 
+// The dashboard import POST is sent as MULTIPART: createDashboardMultipartPayload() moves every
+// externalizable data: URL (keys src/imageDataUrl/dataUrl/thumbnailDataUrl) into its own binary
+// part, leaving only a tiny {__canvaMultipartAssetRef} placeholder in the JSON manifest. So the
+// real transport size is the manifest WITHOUT the inlined image bytes. Measure that — not the
+// fully-inlined base64 JSON — otherwise a design multipart can comfortably carry gets needlessly
+// flattened to a single snapshot just because its images are large.
+function estimateExternalizedTransportLength(body) {
+  try {
+    const serialized = JSON.stringify(body, (key, value) =>
+      shouldExternalizeMultipartAsset(key, value) ? "__canvaMultipartAssetRef__" : value
+    );
+    return serialized ? serialized.length : 0;
+  } catch (_error) {
+    try {
+      return JSON.stringify(body).length;
+    } catch (_secondError) {
+      return Number.MAX_SAFE_INTEGER;
+    }
+  }
+}
+
 function compactRequestBody(body, fallbackImageDataUrl, fallbackWidth, fallbackHeight) {
   let nextBody = { ...body };
-  let serialized = JSON.stringify(nextBody);
-  if (serialized.length <= MAX_TRANSPORT_JSON_LENGTH) {
+  if (estimateExternalizedTransportLength(nextBody) <= MAX_TRANSPORT_JSON_LENGTH) {
     return nextBody;
   }
 
@@ -1501,8 +1521,7 @@ function compactRequestBody(body, fallbackImageDataUrl, fallbackWidth, fallbackH
     };
   }
 
-  serialized = JSON.stringify(nextBody);
-  if (serialized.length <= MAX_TRANSPORT_JSON_LENGTH) {
+  if (estimateExternalizedTransportLength(nextBody) <= MAX_TRANSPORT_JSON_LENGTH) {
     return nextBody;
   }
 
@@ -1544,8 +1563,7 @@ function compactRequestBody(body, fallbackImageDataUrl, fallbackWidth, fallbackH
     }
   }
 
-  serialized = JSON.stringify(nextBody);
-  if (serialized.length <= MAX_TRANSPORT_JSON_LENGTH) {
+  if (estimateExternalizedTransportLength(nextBody) <= MAX_TRANSPORT_JSON_LENGTH) {
     return nextBody;
   }
 
@@ -1567,8 +1585,7 @@ function compactRequestBody(body, fallbackImageDataUrl, fallbackWidth, fallbackH
     };
   }
 
-  serialized = JSON.stringify(nextBody);
-  if (serialized.length <= MAX_TRANSPORT_JSON_LENGTH) {
+  if (estimateExternalizedTransportLength(nextBody) <= MAX_TRANSPORT_JSON_LENGTH) {
     return nextBody;
   }
 

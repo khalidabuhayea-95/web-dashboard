@@ -219,6 +219,37 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
             <div className="text-slate-500">{activeElement.type}</div>
           </div>
 
+          <div className="space-y-1">
+            <div className="flex items-center justify-between">
+              <Label className="m-0">Opacity</Label>
+              <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                {Math.round((activeElement.opacity ?? 1) * 100)}%
+              </span>
+            </div>
+            <div className="flex items-center gap-2">
+              <input
+                type="range"
+                min={0}
+                max={100}
+                value={Math.round((activeElement.opacity ?? 1) * 100)}
+                onChange={(event) => {
+                  const value = Math.max(0, Math.min(100, numberOr(event.target.value, 100))) / 100;
+                  updateElement(activeElement.id, { opacity: value });
+                }}
+                aria-label="Layer opacity"
+                className="h-2 flex-1 cursor-pointer accent-slate-700 dark:accent-slate-300"
+              />
+              <Input
+                className="w-16"
+                value={Math.round((activeElement.opacity ?? 1) * 100)}
+                onChange={(event) => {
+                  const value = Math.max(0, Math.min(100, numberOr(event.target.value, 100))) / 100;
+                  updateElement(activeElement.id, { opacity: value });
+                }}
+              />
+            </div>
+          </div>
+
           {activeMediaElement ? (
             <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
               <Button
