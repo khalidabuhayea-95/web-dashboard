@@ -879,6 +879,18 @@ export async function upsertEditorCustomFont({
   storageBucket,
   storagePath,
   sizeBytes,
+  // Optional passthroughs so bulk importers (e.g. Google Fonts) can reuse this
+  // whole materialize→store→upsert pipeline while tagging a non-custom source.
+  // Defaults preserve the original custom-upload behavior.
+  source = FONT_SOURCE_CUSTOM,
+  sourceId,
+  removable = true,
+  includeFontList = true,
+  // When true (default), skip re-importing/overwriting a font that already
+  // exists in the library (matched by family name, alias, or — for synthetic
+  // Canva names — the real family name embedded in the file). Set false to
+  // force a replace/update.
+  skipIfExists = true,
 }) {
   const normalizedFamily = normalizeFontFamilyName(family);
   if (!normalizedFamily) {
@@ -890,6 +902,39 @@ export async function upsertEditorCustomFont({
   const safeFileUrl = sanitizeFileUrl(fileUrl);
   if (!safeDataUrl && !safeFileUrl) {
     throw new Error("Invalid font data.");
+  }
+
+  // De-duplicate across every import path (Google, manual upload, Canva). If the
+  // font already exists, skip before any download/convert/upload/overwrite. For
+  // Canva's opaque synthetic ids, also check the real family name embedded in the
+  // font file so e.g. a scraped "Poppins" won't duplicate an existing Poppins.
+  if (skipIfExists) {
+    const dedupeNames = [normalizedFamily, familyKey];
+    if (isSyntheticFontFamily(normalizedFamily) && safeDataUrl) {
+      const parsedForName = parseDataUri(safeDataUrl);
+      const realName = parsedForName?.bytes?.length ? extractFontFamilyName(parsedForName.bytes) : "";
+      if (realName && !isSyntheticFontFamily(realName)) dedupeNames.push(realName);
+    }
+    const existingLookup = await findFontFamiliesByNames(dedupeNames);
+    let existingMatch = null;
+    for (const name of dedupeNames) {
+      const found = existingLookup.get(normalizeFontStorageKey(name));
+      if (found) {
+        existingMatch = found;
+        break;
+      }
+    }
+    if (existingMatch) {
+      return {
+        font: toEditorFontRecord(existingMatch),
+        fonts: includeFontList ? await getEditorCustomFonts() : [],
+        conversionStatus: FONT_CONVERSION_STATUS_READY,
+        conversionError: "",
+        conversionAttempts: 0,
+        lastConversionAt: null,
+        skippedDuplicate: true,
+      };
+    }
   }
 
   const resolvedMimeType = normalizeMimeType(
@@ -1033,7 +1078,8 @@ export async function upsertEditorCustomFont({
     id: fontId,
     family: normalizedFamily,
     displayName: resolvedDisplayName,
-    source: FONT_SOURCE_CUSTOM,
+    source,
+    sourceId,
     status:
       conversionStatus === FONT_CONVERSION_STATUS_READY
         ? FONT_STATUS_READY
@@ -1045,7 +1091,7 @@ export async function upsertEditorCustomFont({
         ? resolveFontCategories(providedCategories, normalizedFamily)
         : resolveFontCategories(categories, normalizedFamily),
     cssFontFamily: `'${normalizedFamily}'`,
-    removable: true,
+    removable,
     files: [mobileFile],
     aliases: [normalizedFamily, familyKey, ...extraAliases],
   });
@@ -1058,7 +1104,7 @@ export async function upsertEditorCustomFont({
     createdAt: stored?.createdAt || nowIso,
     updatedAt: stored?.updatedAt || nowIso,
   });
-  const fonts = await getEditorCustomFonts();
+  const fonts = includeFontList ? await getEditorCustomFonts() : [];
   return {
     font: editorFont,
     fonts,

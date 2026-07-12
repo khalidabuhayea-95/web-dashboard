@@ -137,7 +137,16 @@ export function isSvgDataUrlSource(sourceInput: string) {
   return /^data:image\/svg\+xml(?:;[^,]+)?,/i.test(String(sourceInput || "").trim());
 }
 
-export async function rasterizeSvgDataUrlToPngDataUrl(sourceInput: string) {
+// Supersample factor for baking built-in shape / icon SVGs into PNGs. SVG is
+// vector, so 4x keeps shapes crisp when the layer is enlarged on the (much
+// larger) design canvas — a 120px shape bakes at 480px. Shared by the shapes
+// panel (click-to-add) and the canvas drop handler (drag-to-add).
+export const SVG_SHAPE_RASTER_SCALE = 4;
+
+export async function rasterizeSvgDataUrlToPngDataUrl(
+  sourceInput: string,
+  options?: { scale?: number }
+) {
   const source = String(sourceInput || "").trim();
   if (!source) {
     throw new Error("Image source is required.");
@@ -149,9 +158,16 @@ export async function rasterizeSvgDataUrlToPngDataUrl(sourceInput: string) {
     throw new Error("SVG rasterization is only available in the browser.");
   }
 
+  // SVG is vector, so drawing it onto a larger canvas re-rasterizes it crisply.
+  // A >1 scale bakes the shape at a higher pixel resolution so it stays sharp
+  // when the layer is enlarged on the (much larger) design canvas.
+  const scale = Math.max(1, Math.min(8, Number(options?.scale) || 1));
+
   const image = await loadBrowserImage(source);
-  const width = Math.max(1, Math.round(Number(image.naturalWidth) || 1));
-  const height = Math.max(1, Math.round(Number(image.naturalHeight) || 1));
+  const naturalWidth = Math.max(1, Math.round(Number(image.naturalWidth) || 1));
+  const naturalHeight = Math.max(1, Math.round(Number(image.naturalHeight) || 1));
+  const width = Math.max(1, Math.round(naturalWidth * scale));
+  const height = Math.max(1, Math.round(naturalHeight * scale));
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;

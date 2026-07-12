@@ -1,11 +1,17 @@
 function parseLocaleCandidate(value) {
   const raw = String(value || "").trim().toLowerCase();
   if (!raw) return "";
-  const first = raw.split(",")[0]?.split(";")[0]?.trim() || "";
-  if (!first) return "";
-  const base = first.split("-")[0]?.trim() || "";
-  if (base === "ar") return "ar";
-  if (base === "en") return "en";
+  // A locale/Accept-Language value can list several ranges, e.g.
+  // "fr-FR,ar-SA;q=0.9,en;q=0.8". Scan them in order and return the first
+  // Arabic/English base we recognize. The region separator may be a hyphen
+  // (iOS / BCP-47: "ar-SA") or an underscore (Android Locale.toString(): "ar_SA").
+  for (const part of raw.split(",")) {
+    const tag = part.split(";")[0]?.trim() || "";
+    if (!tag) continue;
+    const base = tag.split(/[-_]/)[0]?.trim() || "";
+    if (base === "ar") return "ar";
+    if (base === "en") return "en";
+  }
   return "";
 }
 

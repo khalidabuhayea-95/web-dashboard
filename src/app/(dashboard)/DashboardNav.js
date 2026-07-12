@@ -9,10 +9,12 @@ import {
   BarChart3,
   Files,
   Home,
+  Layers,
   Pencil,
   SlidersHorizontal,
   Smartphone,
   Tags,
+  Type,
   Users,
 } from "lucide-react";
 
@@ -27,6 +29,8 @@ const ICONS = {
   push: BellRing,
   designSystem: Files,
   freepikImport: Download,
+  psdImport: Layers,
+  fonts: Type,
   categories: Tags,
 };
 

@@ -15,11 +15,13 @@ export default async function EditorLayout({ children }) {
     { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
     { href: "/categories", label: "Categories", icon: "categories" },
     { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
+    { href: "/psd-import", label: "PSD Import", icon: "psdImport" },
     { href: "/editor-pro", label: "Editor", icon: "editor" },
   ];
 
   if (role === Roles.ADMIN) {
     navItems.push(
+      { href: "/fonts", label: "Fonts", icon: "fonts" },
       { href: "/users", label: "Users", icon: "users" },
       { href: "/analytics", label: "Analytics", icon: "analytics" },
       { href: "/notifications", label: "Push", icon: "push" }

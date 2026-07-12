@@ -182,7 +182,7 @@ function inferCategoriesFromSubsets(subsets = []) {
 function pickPreviewText(categories, displayName) {
   const values = Array.isArray(categories) ? categories : [];
   if (values.includes(CATEGORY_ARABIC)) {
-    return "رمضان ليس شهراً في التقويم،";
+    return "أبجد هوز حطي";
   }
   const fallback = sanitizeText(displayName);
   return fallback || "The quick brown fox";

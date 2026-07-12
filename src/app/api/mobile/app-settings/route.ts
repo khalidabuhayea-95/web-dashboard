@@ -13,6 +13,7 @@ import {
   resolveMobileAppSettingsDecision,
 } from "@/lib/settings/mobileAppSettings.server";
 import { getReplicateDefaultObjectRemovalModelId } from "@/lib/media/objectRemoval/providers/replicate.server";
+import { getFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
 
 const logger = createLogger("api.mobile.app-settings");
 
@@ -54,9 +55,14 @@ export async function GET(request: NextRequest) {
       ...publicResponsePayload
     } = responsePayload;
 
-    requestLogger.info("Resolved mobile app settings", publicResponsePayload);
+    // Font catalog version — mobile app caches the full font list keyed by this
+    // and only re-fetches /api/mobile/fonts when it changes.
+    const fontsVersion = await getFontCatalogVersion();
+    const publicResponseWithFonts = { ...publicResponsePayload, fontsVersion };
 
-    const response = NextResponse.json(publicResponsePayload, {
+    requestLogger.info("Resolved mobile app settings", publicResponseWithFonts);
+
+    const response = NextResponse.json(publicResponseWithFonts, {
       headers: {
         "Cache-Control": "no-store",
       },

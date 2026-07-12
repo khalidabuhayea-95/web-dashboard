@@ -49,6 +49,7 @@ import {
 import {
   computeTrimTransparentPaddingPatch,
   rasterizeSvgDataUrlToPngDataUrl,
+  SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
 import {
   BUILTIN_SHAPE_ASSETS,
@@ -1500,7 +1501,12 @@ function guessFontFormat(mimeType: string) {
   return "";
 }
 
-async function ensureCustomFontFaceInDocument(font: CustomFontRecord) {
+const FONT_PAGE_SIZE = 20;
+
+async function ensureCustomFontFaceInDocument(
+  font: CustomFontRecord,
+  options?: { load?: boolean }
+) {
   if (typeof document === "undefined") return;
   if (!font?.id || !font?.family) return;
   const sourceUrl = String(font.fileUrl || font.dataUrl || "").trim();
@@ -1519,7 +1525,11 @@ async function ensureCustomFontFaceInDocument(font: CustomFontRecord) {
           return nextStyle;
         })();
 
-  if (sourceType === "google") {
+  // Prefer a self-hosted, same-origin @font-face — it is LAZY: the browser only
+  // fetches the file when the font is actually rendered. Imported Google fonts are
+  // re-hosted and expose a fileUrl, so only fall back to Google's EAGER CSS
+  // @import for legacy google records that have no self-hosted file.
+  if (sourceType === "google" && !sourceUrl) {
     const familyParam = encodeURIComponent(String(font.family || "").trim()).replace(/%20/g, "+");
     style.textContent = `@import url("https://fonts.googleapis.com/css2?family=${familyParam}:wght@400&display=swap");`;
   } else {
@@ -1534,6 +1544,11 @@ async function ensureCustomFontFaceInDocument(font: CustomFontRecord) {
   font-display: swap;
 }`;
   }
+
+  // Bulk preloads pass { load: false } to only DECLARE the face (cheap + lazy) so
+  // opening the editor with a large library doesn't eagerly fetch ~2k font files.
+  // Callers that need the font ready now (apply-to-text, visible previews) load it.
+  if (options?.load === false) return;
 
   const fontsApi = (document as Document & { fonts?: FontFaceSet }).fonts;
   if (!fontsApi || typeof fontsApi.load !== "function") return;
@@ -1630,6 +1645,9 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [fontSearchQuery, setFontSearchQuery] = useState("");
   const [customFontFamilyInput, setCustomFontFamilyInput] = useState("");
   const [fontLanguageTab, setFontLanguageTab] = useState<"arabic" | "english">("arabic");
+  const [visibleFontCount, setVisibleFontCount] = useState(FONT_PAGE_SIZE);
+  const fontListSentinelRef = useRef<HTMLDivElement | null>(null);
+  const loadedFontPreviewIdsRef = useRef<Set<string>>(new Set());
   const [uploadingCustomFont, setUploadingCustomFont] = useState(false);
   const [deletingCustomFontId, setDeletingCustomFontId] = useState("");
   const [taxonomySettings, setTaxonomySettings] = useState<TaxonomyCategorySetting[]>([]);
@@ -2063,16 +2081,24 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const addBuiltInShapeToCanvas = useCallback(
     async (shape: BuiltInShapeAsset) => {
       let resolvedSrc = shape.src;
+      let rasterScale = 1;
       try {
-        resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(shape.src);
+        resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(shape.src, {
+          scale: SVG_SHAPE_RASTER_SCALE,
+        });
+        rasterScale = SVG_SHAPE_RASTER_SCALE;
       } catch {
-        // Keep the original source if rasterization fails.
+        // Keep the original source (unscaled SVG) if rasterization fails.
       }
 
       const payload = {
         ...createBuiltInShapePayload(shape),
         src: resolvedSrc,
         rasterOriginalSrc: resolvedSrc,
+        // Match the source pixel dimensions to the baked resolution so crop/alpha
+        // math uses the real raster size (the placed width/height are unchanged).
+        sourceWidth: shape.width * rasterScale,
+        sourceHeight: shape.height * rasterScale,
       };
       const elementId = addImageElement(resolvedSrc, payload);
       rememberBuiltInShape(shape.id);
@@ -2870,7 +2896,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         if (cancelled) return;
         const fonts = Array.isArray(payload?.fonts) ? (payload.fonts as CustomFontRecord[]) : [];
         setCustomFonts(fonts);
-        fonts.forEach((font) => void ensureCustomFontFaceInDocument(font));
+        fonts.forEach((font) => void ensureCustomFontFaceInDocument(font, { load: false }));
         registerFontFamilies(fonts.map((font) => font.family));
       } catch {
         if (cancelled) return;
@@ -2910,7 +2936,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           if (!response.ok) return;
           const fonts = Array.isArray(payload?.fonts) ? (payload.fonts as CustomFontRecord[]) : [];
           setCustomFonts(fonts);
-          fonts.forEach((font) => void ensureCustomFontFaceInDocument(font));
+          fonts.forEach((font) => void ensureCustomFontFaceInDocument(font, { load: false }));
           registerFontFamilies(fonts.map((font) => font.family));
         } catch (_error) {
           // Keep template import resilient; user can refresh fonts from My fonts.
@@ -3052,7 +3078,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       if (savedFont) {
         void ensureCustomFontFaceInDocument(savedFont);
       } else {
-        fonts.forEach((font) => void ensureCustomFontFaceInDocument(font));
+        fonts.forEach((font) => void ensureCustomFontFaceInDocument(font, { load: false }));
       }
       registerFontFamilies(fonts.map((font) => font.family));
       setCustomFontFamilyInput(family);
@@ -3089,6 +3115,44 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       setDeletingCustomFontId("");
     }
   };
+
+  const activeFontList =
+    fontLanguageTab === "arabic"
+      ? filteredGroupedCustomFonts.arabic
+      : filteredGroupedCustomFonts.english;
+
+  // Reset the visible window when the tab or search changes.
+  useEffect(() => {
+    setVisibleFontCount(FONT_PAGE_SIZE);
+  }, [fontLanguageTab, fontSearchQuery]);
+
+  // Grow the window by one page when the sentinel scrolls into view (infinite
+  // scroll). Re-running on visibleFontCount re-checks intersection, so it keeps
+  // filling until the sentinel is pushed out of the viewport.
+  useEffect(() => {
+    const sentinel = fontListSentinelRef.current;
+    if (!sentinel || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          setVisibleFontCount((count) => count + FONT_PAGE_SIZE);
+        }
+      },
+      { rootMargin: "240px" }
+    );
+    observer.observe(sentinel);
+    return () => observer.disconnect();
+  }, [visibleFontCount, activeFontList]);
+
+  // Load faces for the fonts currently visible in the panel (crisp previews),
+  // once each — bulk preloading only declares faces lazily.
+  useEffect(() => {
+    activeFontList.slice(0, visibleFontCount).forEach((font) => {
+      if (!font?.id || loadedFontPreviewIdsRef.current.has(font.id)) return;
+      loadedFontPreviewIdsRef.current.add(font.id);
+      void ensureCustomFontFaceInDocument(font);
+    });
+  }, [activeFontList, visibleFontCount]);
 
   const renderFontCard = (font: CustomFontRecord) => {
     const fontDisplay = deriveReadableFontLabel(font);
@@ -3387,10 +3451,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                       </button>
                     </div>
                     <div className="space-y-2">
-                      {(fontLanguageTab === "arabic"
-                        ? filteredGroupedCustomFonts.arabic
-                        : filteredGroupedCustomFonts.english
-                      ).map(renderFontCard)}
+                      {activeFontList.slice(0, visibleFontCount).map(renderFontCard)}
+                      {visibleFontCount < activeFontList.length ? (
+                        <div ref={fontListSentinelRef} className="h-4 w-full" aria-hidden="true" />
+                      ) : null}
                     </div>
                   </div>
 

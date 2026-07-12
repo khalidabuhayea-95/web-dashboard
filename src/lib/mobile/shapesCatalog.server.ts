@@ -7,6 +7,17 @@ import {
   localizeBuiltInShapeName,
 } from "@/lib/mobile/shapeLocalization";
 
+// Server-side rasterization size (px, longest edge) for built-in shape assets
+// served to mobile. Shapes are flat-fill vectors, so a large size stays small on
+// disk while keeping them crisp when the app shows them large / on high-DPI
+// screens. Rendered from vector at this size (not upscaled), so it's true detail.
+export const MOBILE_SHAPE_RASTER_SIZE = 2048;
+
+// Version tag appended to every shape asset URL. Bump it to force all clients and
+// CDNs to re-fetch (regenerate) every shape at the current resolution instead of
+// serving a cached lower-res copy.
+export const MOBILE_SHAPE_ASSET_VERSION = "3";
+
 export interface MobileShapeItem {
   id: string;
   name: string;
@@ -69,7 +80,10 @@ export function resolveMobileBuiltInShapeById(shapeId: string) {
 
 export function buildMobileShapeFileUrl(request: Request | URL, shapeId: string) {
   const baseUrl = getBaseUrl(request);
-  return new URL(`/api/mobile/shapes/${encodeURIComponent(shapeId)}/file`, baseUrl).toString();
+  const url = new URL(`/api/mobile/shapes/${encodeURIComponent(shapeId)}/file`, baseUrl);
+  // Version the URL so bumping MOBILE_SHAPE_ASSET_VERSION regenerates all shapes.
+  url.searchParams.set("v", MOBILE_SHAPE_ASSET_VERSION);
+  return url.toString();
 }
 
 function toMobileShapeItem(shape: BuiltInShapeAsset, request: Request | URL): MobileShapeItem {

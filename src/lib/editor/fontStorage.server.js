@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { deriveReadableFontLabel } from "@/lib/editor/customFontLabel";
+import { bumpFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
 
 export const FONT_SOURCE_CUSTOM = "custom";
 export const FONT_STATUS_READY = "ready";
@@ -163,6 +164,9 @@ export function toEditorFontRecord(font) {
     conversionAttempts: Number(record.conversionAttempts) || 0,
     lastConversionAt: record.lastConversionAt || null,
     mobileCompatible: isMobileCompatibleFontFile(preferredFile),
+    previewImageUrl: String(record.previewImageUrl || "").trim() || null,
+    previewImageDarkUrl: String(record.previewImageDarkUrl || "").trim() || null,
+    previewImageUpdatedAt: record.previewImageUpdatedAt || null,
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -182,16 +186,28 @@ export function toMobileFontRecord(request, font) {
   const displayName =
     String(record.displayName || "").trim() ||
     deriveReadableFontLabel({ family: record.family });
+  const categories = normalizeFontCategories(record.categories, record.family);
+  // Arabic-vs-English sample is chosen by the font's script support (categories),
+  // not its name — most Arabic fonts have Latin names (Rubik, Cairo, …).
+  const isArabicFont = categories.includes("ARABIC") || containsArabicScript(displayName);
   return {
     id: String(record.id || ""),
     fontName: String(record.family || "").trim(),
     displayName,
     previewText:
       String(record.previewText || "").trim() ||
-      (containsArabicScript(displayName) ? "رمضان ليس شهراً في التقويم،" : "The quick brown fox"),
-    categories: normalizeFontCategories(record.categories, record.family),
+      (isArabicFont ? "أبجد هوز حطي" : "The quick brown fox"),
+    categories,
     previewWeight: Number(record.previewWeight) || 400,
     cssFontFamily: String(record.cssFontFamily || "").trim() || `'${record.family}'`,
+    previewImage:
+      record.previewImageUrl || record.previewImageDarkUrl
+        ? {
+            light: String(record.previewImageUrl || "").trim() || null,
+            dark: String(record.previewImageDarkUrl || "").trim() || null,
+            updatedAt: record.previewImageUpdatedAt || null,
+          }
+        : null,
     downloadUrl: mobileCompatible ? routeUrl : null,
     mobileDownloadUrl: mobileCompatible ? routeUrl : null,
     mobileCompatible,
@@ -436,6 +452,9 @@ export async function upsertFontFamilyWithFiles({
     }
   });
 
+  // Catalog changed — advance the version so mobile clients re-fetch.
+  await bumpFontCatalogVersion();
+
   return getFontFamilyById(font.id);
 }
 
@@ -461,6 +480,10 @@ export async function deleteFontFamily({ id, family, source = FONT_SOURCE_CUSTOM
     };
   }
   await prisma.fontFamily.delete({ where: { id: existing.id } });
+
+  // Catalog changed — advance the version so mobile clients re-fetch.
+  await bumpFontCatalogVersion();
+
   return {
     deleted: true,
     font: existing,

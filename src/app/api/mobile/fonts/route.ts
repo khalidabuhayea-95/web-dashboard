@@ -4,6 +4,7 @@ import {
   buildMobileFontCatalog,
   normalizeMobileFontCategory,
 } from "@/lib/mobile/fontsCatalog.server";
+import { getFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -15,8 +16,6 @@ import { MOBILE_PUBLIC_JSON_CACHE_CATALOG } from "@/lib/mobile/cacheControl";
 
 export const runtime = "nodejs";
 const logger = createLogger("api.mobile.fonts");
-
-const FONTS_PAGE_SIZE = 100;
 
 function parsePositiveInt(value: unknown, fallback = 1): number {
   const parsed = Number.parseInt(String(value || ""), 10);
@@ -46,6 +45,10 @@ export async function GET(request: NextRequest) {
       searchParams.get("language") || searchParams.get("lang")
     );
     const page = parsePositiveInt(searchParams.get("page"), 1);
+    const pageSizeParam =
+      searchParams.get("pageSize") ||
+      searchParams.get("page_size") ||
+      searchParams.get("limit");
 
     const allFonts = await buildMobileFontCatalog(request);
     const fonts = allFonts.filter((font: any) => {
@@ -70,24 +73,33 @@ export async function GET(request: NextRequest) {
     });
 
     const total = fonts.length;
-    const totalPages = Math.max(1, Math.ceil(total / FONTS_PAGE_SIZE));
+    // Default: return the whole catalog in one shot (the mobile app caches it
+    // locally, keyed by `version`, and only re-fetches when the version changes).
+    // An explicit pageSize still enables backward-compatible pagination.
+    const pageSize = pageSizeParam ? parsePositiveInt(pageSizeParam, total) : Math.max(total, 1);
+    const totalPages = Math.max(1, Math.ceil(total / pageSize));
     const safePage = Math.min(page, totalPages);
-    const start = (safePage - 1) * FONTS_PAGE_SIZE;
-    const paginatedFonts = fonts.slice(start, start + FONTS_PAGE_SIZE);
+    const start = (safePage - 1) * pageSize;
+    const paginatedFonts = fonts.slice(start, start + pageSize);
+    const version = await getFontCatalogVersion();
 
     requestLogger.info("Mobile fonts retrieved", {
       search,
       category,
       language,
       page: safePage,
+      pageSize,
+      total,
+      version,
       count: paginatedFonts.length,
     });
 
     const response = NextResponse.json(
       {
+        version,
         fonts: paginatedFonts,
         page: safePage,
-        pageSize: FONTS_PAGE_SIZE,
+        pageSize,
         total,
         totalPages,
         hasNextPage: safePage < totalPages,

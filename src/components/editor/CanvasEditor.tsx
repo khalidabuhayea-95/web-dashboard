@@ -42,7 +42,10 @@ import {
   recolorRasterSourceToDataUrl,
   serializeRasterColorMap,
 } from "@/lib/editor/imagePalette";
-import { rasterizeSvgDataUrlToPngDataUrl } from "@/lib/editor/imageCrop";
+import {
+  rasterizeSvgDataUrlToPngDataUrl,
+  SVG_SHAPE_RASTER_SCALE,
+} from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import {
   frameToSampleTimeMs,
@@ -1799,6 +1802,10 @@ export default function CanvasEditor() {
   const stageRef = useRef<Konva.Stage | null>(null);
   const exportStageRef = useRef<Konva.Stage | null>(null);
   const transformerRef = useRef<Konva.Transformer | null>(null);
+  // The transformer anchor currently being dragged (e.g. "top-left",
+  // "middle-right"). Captured during transform so transform-end can branch text
+  // resize (corners) vs. reflow (side handles).
+  const activeAnchorRef = useRef<string>("");
   const nodeRefs = useRef<Record<string, Konva.Node | null>>({});
 
   const pages = useEditorStore((state) => state.pages);
@@ -2876,6 +2883,8 @@ export default function CanvasEditor() {
   const syncTransformerVisuals = useCallback(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
+    const anchor = transformer.getActiveAnchor?.();
+    if (anchor) activeAnchorRef.current = anchor;
     transformer.forceUpdate();
     transformer.getLayer()?.batchDraw();
   }, []);
@@ -3109,6 +3118,60 @@ export default function CanvasEditor() {
       const node = event.target;
       const scaleX = node.scaleX();
       const scaleY = node.scaleY();
+      const signX = scaleX < 0 ? -1 : 1;
+      const signY = scaleY < 0 ? -1 : 1;
+
+      // Text has two distinct resize behaviors, chosen by which handle is dragged:
+      //   • corner handles → RESIZE the text: scale fontSize + box by one factor,
+      //     so the wrapping / line breaks stay identical — just bigger or smaller.
+      //   • middle-left / middle-right → change WIDTH only, which re-wraps (reflows).
+      // top-center / bottom-center fall through to the default height behavior.
+      if (element.type === "text") {
+        const anchor =
+          activeAnchorRef.current || transformerRef.current?.getActiveAnchor?.() || "";
+        const isCorner =
+          anchor === "top-left" ||
+          anchor === "top-right" ||
+          anchor === "bottom-left" ||
+          anchor === "bottom-right";
+        const isSideMiddle = anchor === "middle-left" || anchor === "middle-right";
+
+        if (isCorner) {
+          // One scale factor for font + box preserves wrapping (each line holds the
+          // same characters because glyphs and box widen by the same ratio).
+          const scale = Math.max(Math.abs(scaleX), Math.abs(scaleY)) || 1;
+          updateElement(element.id, {
+            x: node.x(),
+            y: node.y(),
+            rotation: node.rotation(),
+            width: Math.max(2, element.width * scale),
+            height: Math.max(2, element.height * scale),
+            fontSize: Math.max(1, (Number(element.fontSize) || 1) * scale),
+            scaleX: signX,
+            scaleY: signY,
+          });
+          node.scaleX(signX);
+          node.scaleY(signY);
+          setSnapGuides({ x: null, y: null });
+          return;
+        }
+
+        if (isSideMiddle) {
+          // Width only → the text reflows; keep fontSize and let height auto-fit.
+          updateElement(element.id, {
+            x: node.x(),
+            y: node.y(),
+            rotation: node.rotation(),
+            width: Math.max(2, element.width * Math.abs(scaleX)),
+            scaleX: signX,
+            scaleY: 1,
+          });
+          node.scaleX(signX);
+          node.scaleY(1);
+          setSnapGuides({ x: null, y: null });
+          return;
+        }
+      }
 
       const nextWidth = Math.max(2, element.width * Math.abs(scaleX));
       const nextHeight = Math.max(2, element.height * Math.abs(scaleY));
@@ -3119,12 +3182,12 @@ export default function CanvasEditor() {
         rotation: node.rotation(),
         width: nextWidth,
         height: nextHeight,
-        scaleX: scaleX < 0 ? -1 : 1,
-        scaleY: scaleY < 0 ? -1 : 1,
+        scaleX: signX,
+        scaleY: signY,
       });
 
-      node.scaleX(scaleX < 0 ? -1 : 1);
-      node.scaleY(scaleY < 0 ? -1 : 1);
+      node.scaleX(signX);
+      node.scaleY(signY);
       setSnapGuides({ x: null, y: null });
     },
     [updateElement]
@@ -3574,7 +3637,12 @@ export default function CanvasEditor() {
           } else if (next.type === "image") {
             let resolvedSrc = next.src;
             try {
-              resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(next.src);
+              // Bake SVG assets (e.g. built-in shapes dragged onto the canvas) at
+              // a higher resolution so they stay crisp when enlarged — matches the
+              // shapes panel's click-to-add path. Non-SVG sources are unchanged.
+              resolvedSrc = await rasterizeSvgDataUrlToPngDataUrl(next.src, {
+                scale: SVG_SHAPE_RASTER_SCALE,
+              });
             } catch {
               // Keep the original image source if rasterization fails.
             }

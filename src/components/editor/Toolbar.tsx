@@ -9,7 +9,6 @@ import {
   Bold,
   ChevronLeft,
   ChevronRight,
-  ChevronDown,
   Download,
   FlipHorizontal,
   FlipVertical,
@@ -155,7 +154,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
 
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
-  const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
   const activeTemplateId = useEditorStore((state) => state.activeTemplateId);
   const activeTemplateName = useEditorStore((state) => state.activeTemplateName);
   const activeTemplateStatus = useEditorStore((state) => state.activeTemplateStatus);
@@ -280,13 +278,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     () => String(activeVideoElement?.src || ""),
     [activeVideoElement?.src]
   );
-  const fontOptions = useMemo(() => {
-    const set = new Set(availableFontFamilies);
-    if (activeTextElement?.fontFamily) {
-      set.add(activeTextElement.fontFamily);
-    }
-    return Array.from(set);
-  }, [activeTextElement?.fontFamily, availableFontFamilies]);
   const activeFontWeight = String(activeTextElement?.fontWeight || "400");
   const activeFontWeightNumber = Number.parseInt(activeFontWeight.replace(/[^\d]/g, ""), 10);
   const isBold = Number.isFinite(activeFontWeightNumber) ? activeFontWeightNumber >= 600 : /bold/i.test(activeFontWeight);
@@ -1643,21 +1634,6 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
                   })
                 }
               />
-              <div className="relative">
-                <select
-                  aria-label="Font family"
-                  className="h-8 min-w-[150px] rounded border border-[#d7dbe1] bg-white pl-2 pr-7 text-sm text-[#202a38]"
-                  value={activeTextElement.fontFamily}
-                  onChange={(event) => updateSelectedElements({ fontFamily: event.target.value })}
-                >
-                  {fontOptions.map((family) => (
-                    <option key={family} value={family}>
-                      {family}
-                    </option>
-                  ))}
-                </select>
-                <ChevronDown size={14} className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[#667085]" />
-              </div>
               <input
                 type="number"
                 min={8}
