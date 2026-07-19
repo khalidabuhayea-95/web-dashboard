@@ -64,7 +64,6 @@ import { DEFAULT_BACKGROUND_CATEGORY } from "@/lib/backgrounds/categorySettings"
 import {
   DEFAULT_ANIMATION_DURATION_MS,
   DEFAULT_PAGE_DURATION_MS,
-  EDITOR_ANIMATION_OPTIONS,
   getAnimationPreset,
   isAnimationInfiniteActive,
   type EditorAnimationType,
@@ -77,6 +76,20 @@ import {
   normalizeAnimationMode,
   normalizeAnimationType,
 } from "@/lib/editor/animationTimeline";
+import {
+  ANIMATION_CATALOG,
+  ANIMATION_DIRECTIONS,
+  ANIMATION_EASINGS,
+  getAnimationLabel,
+  supportsInfinite,
+  type AnimationCategory,
+} from "@/lib/editor/animationSpec";
+import {
+  makeAnimationSpec,
+  resolveElementAnimations,
+  type EditorAnimationSlots,
+} from "@/lib/editor/animationSlots";
+import type { AnimationSpecInput } from "@/lib/editor/animationVisual";
 import { FRAME_PRESETS, type FramePreset } from "@/lib/editor/frames";
 import { getPublishablePageElements } from "@/lib/editor/publishableElements";
 import {
@@ -87,6 +100,18 @@ import {
   type EditorElement,
   type SidebarTab,
 } from "@/store/editorStore";
+
+const ANIMATION_SLOT_KEY: Record<AnimationCategory, keyof EditorAnimationSlots> = {
+  ENTRANCE: "entrance",
+  EXIT: "exit",
+  LOOP: "loop",
+};
+
+const ANIMATION_SLOT_TABS: Array<{ key: AnimationCategory; label: string; hint: string }> = [
+  { key: "ENTRANCE", label: "Entrance", hint: "Plays once as the layer appears." },
+  { key: "LOOP", label: "Loop", hint: "Runs continuously between the entrance and the exit." },
+  { key: "EXIT", label: "Exit", hint: "Plays once as the layer leaves (its entrance, reversed)." },
+];
 
 const TOOL_TABS: Array<{ key: SidebarTab; label: string; icon: ComponentType<{ size?: number; className?: string }> }> = [
   { key: "templates", label: "Templates", icon: LayoutGrid },
@@ -212,6 +237,14 @@ function getAnimationPreviewClass(type: EditorAnimationType) {
       return "animation-sample-rise";
     case "PAN":
       return "animation-sample-pan";
+    case "SHIFT":
+      return "animation-sample-shift";
+    case "SKATE":
+      return "animation-sample-skate";
+    case "ASCEND":
+      return "animation-sample-ascend";
+    case "BLOCK":
+      return "animation-sample-block";
     case "FADE":
       return "animation-sample-fade";
     case "POP":
@@ -320,6 +353,44 @@ function AnimationSampleGlyph({ type }: { type: EditorAnimationType }) {
           {renderAnimationSquare({ x: 14, y: 12, size: 18, fill: purpleSoft, opacity: 0.75 })}
           {renderAnimationSquare({ x: 20, y: 12, size: 18, fill: purpleMid })}
           {renderAnimationArrow("M16 35h14m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+        </svg>
+      );
+    // SHIFT is RISE mirrored — the block settles DOWNWARD, so the stack and arrow point down.
+    case "SHIFT":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 16, y: 8, size: 16, fill: purpleMid, opacity: 0.28 })}
+          {renderAnimationSquare({ x: 16, y: 15, size: 16, fill: purpleMid, opacity: 0.52 })}
+          {renderAnimationSquare({ x: 16, y: 22, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M36 19v11m0 0-3.5-3.5M36 30l3.5-3.5", stroke)}
+        </svg>
+      );
+    // SKATE is PAN mirrored — the block glides in from the right, travelling left.
+    case "SKATE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 24, y: 12, size: 18, fill: purpleSoft, opacity: 0.55 })}
+          {renderAnimationSquare({ x: 18, y: 12, size: 18, fill: purpleSoft, opacity: 0.75 })}
+          {renderAnimationSquare({ x: 12, y: 12, size: 18, fill: purpleMid })}
+          {renderAnimationArrow("M32 35H18m0 0 3.5-3.5M18 35l3.5 3.5", stroke)}
+        </svg>
+      );
+    // ASCEND is the per-WORD rise: two word-bars lifting in, one leading the other.
+    case "ASCEND":
+      return (
+        <svg {...baseProps}>
+          <rect x="9" y="27" width="14" height="5" rx="2.5" fill={purpleMid} opacity="0.4" />
+          <rect x="9" y="19" width="14" height="5" rx="2.5" fill={purpleMid} />
+          {renderAnimationArrow("M15 15v-1M31 33v-14m0 0-3.5 3.5M31 19l3.5 3.5", stroke)}
+        </svg>
+      );
+    // BLOCK: a solid bar sweeps across and uncovers the frame behind it.
+    case "BLOCK":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 10, y: 13, size: 16, fill: purpleSoft, opacity: 0.5 })}
+          <rect x="22" y="9" width="9" height="30" rx="2" fill={purpleMid} />
+          <rect x="32" y="9" width="4" height="30" rx="1.5" fill={purpleSoft} opacity="0.55" />
         </svg>
       );
     case "FADE":
@@ -1112,6 +1183,20 @@ function toEditorDesignFromTemplate(
         mediaAnimationDurationMs: normalizeAnimationDurationMs(
           item.mediaAnimationDurationMs ?? item.animationDurationMs ?? item.animationDuration
         ),
+        ...(Number(item.mediaAnimationOutDurationMs) > 0
+          ? { mediaAnimationOutDurationMs: normalizeAnimationDurationMs(item.mediaAnimationOutDurationMs) }
+          : {}),
+        ...(Array.isArray(item.mediaMotionPath) && (item.mediaMotionPath as unknown[]).length >= 2
+          ? {
+              mediaMotionPath: (item.mediaMotionPath as Array<Record<string, unknown>>)
+                .map((point) => ({
+                  t: Math.max(0, toNumber(point?.t, 0)),
+                  x: toNumber(point?.x, 0),
+                  y: toNumber(point?.y, 0),
+                }))
+                .slice(0, 256),
+            }
+          : {}),
         mediaAnimationDelayMs: normalizeAnimationDelayMs(item.mediaAnimationDelayMs ?? item.animationDelayMs ?? item.animationDelay),
         mediaAnimationDirection: normalizeAnimationDirection(
           item.mediaAnimationDirection ?? item.animationDirection,
@@ -1363,13 +1448,26 @@ function toEditorDesignFromTemplate(
   }
 
   const backgroundColor = parseColor(fabric?.backgroundColor, "#ffffff");
+  // Derive the page/timeline duration from the imported elements' timeline windows. A sequenced
+  // timeline/video design sets each element's timelineEndMs up to its real length (e.g. a 44s
+  // wedding video), so the page stretches to fit instead of clamping to the flat 15s default.
+  // Static designs leave every element at the default end, so this stays at DEFAULT_PAGE_DURATION_MS.
+  const maxElementEndMs = sortedElements.reduce(
+    (max, element) => Math.max(max, Number(element.timelineEndMs) || 0),
+    0
+  );
+  const derivedPageDurationMs = Math.min(
+    600000,
+    Math.max(DEFAULT_PAGE_DURATION_MS, Math.round(maxElementEndMs))
+  );
+  const isTimelineImport = derivedPageDurationMs > DEFAULT_PAGE_DURATION_MS;
   return {
     version: 2,
     activePageId: pageId,
     timeline: {
       enabled: true,
       fps: 30,
-      totalDurationMs: DEFAULT_PAGE_DURATION_MS,
+      totalDurationMs: derivedPageDurationMs,
       preview: {
         status: "not_requested",
         url: null,
@@ -1379,7 +1477,7 @@ function toEditorDesignFromTemplate(
       },
       source: {
         origin: isCanvaTemplate ? "canva" : "manual",
-        animatedImport: false,
+        animatedImport: isTimelineImport,
       },
     },
     pages: [
@@ -1388,7 +1486,7 @@ function toEditorDesignFromTemplate(
         name: template.name || "Template",
         width,
         height,
-        durationMs: DEFAULT_PAGE_DURATION_MS,
+        durationMs: derivedPageDurationMs,
         background: {
           type: "color",
           color: backgroundColor,
@@ -1756,35 +1854,90 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     () => selectedElements.find((element) => element.type === "frame") || null,
     [selectedElements]
   );
-  const selectedAnimationType = useMemo(() => {
-    if (selectedElements.length === 0) return null;
-    const values = new Set(selectedElements.map((element) => normalizeAnimationType(element.mediaAnimationType)));
-    return values.size === 1 ? Array.from(values)[0] : null;
-  }, [selectedElements]);
-  const selectedAnimationInfinite = useMemo(() => {
-    if (selectedElements.length === 0) return null;
-    const values = new Set(
-      selectedElements.map((element) =>
-        isAnimationInfiniteActive(
-          element.mediaAnimationType,
-          element.mediaAnimationInfinite,
-          element.mediaAnimationMode
-        )
-      )
-    );
-    return values.size === 1 ? Array.from(values)[0] : null;
-  }, [selectedElements]);
+  // Which of the three slots the animation panel is editing. Entrance/Exit play once at the
+  // layer's start/end; Loop runs continuously in between. Each is independent.
+  const [animationSlot, setAnimationSlot] = useState<AnimationCategory>("ENTRANCE");
+  const animationSlotKey = ANIMATION_SLOT_KEY[animationSlot];
+
+  /** The slot's spec for each selected element, migrating legacy fields when needed. */
+  const selectedSlotSpecs = useMemo(
+    () => selectedElements.map((element) => resolveElementAnimations(element)[animationSlotKey]),
+    [selectedElements, animationSlotKey]
+  );
+  /** A value shared by the whole selection, or null when the selection disagrees ("Mixed"). */
+  const sharedSlotValue = useCallback(
+    <T,>(read: (spec: AnimationSpecInput | null) => T): T | null => {
+      if (selectedSlotSpecs.length === 0) return null;
+      const values = new Set(selectedSlotSpecs.map(read));
+      return values.size === 1 ? (Array.from(values)[0] as T) : null;
+    },
+    [selectedSlotSpecs]
+  );
+
+  const selectedAnimationType = useMemo(
+    () => sharedSlotValue((spec) => spec?.type ?? "NONE"),
+    [sharedSlotValue]
+  );
+  const selectedAnimationInfinite = useMemo(
+    () => sharedSlotValue((spec) => spec?.infinite ?? false),
+    [sharedSlotValue]
+  );
+  // Only the Loop slot runs infinite, and only for types the spec marks supportsInfinite.
   const selectedAnimationCanLoop = useMemo(() => {
-    if (!selectedAnimationType) return false;
-    return getAnimationPreset(selectedAnimationType).category === "loop";
-  }, [selectedAnimationType]);
-  const selectedAnimationDurationMs = useMemo(() => {
-    if (selectedElements.length === 0) return null;
-    const values = new Set(
-      selectedElements.map((element) => normalizeAnimationDurationMs(element.mediaAnimationDurationMs))
-    );
-    return values.size === 1 ? Array.from(values)[0] : null;
-  }, [selectedElements]);
+    if (!selectedAnimationType || selectedAnimationType === "NONE") return false;
+    return animationSlot === "LOOP" && supportsInfinite(selectedAnimationType);
+  }, [selectedAnimationType, animationSlot]);
+  const selectedAnimationDurationMs = useMemo(
+    () => sharedSlotValue((spec) => spec?.durationMs ?? null),
+    [sharedSlotValue]
+  );
+  const selectedAnimationDelayMs = useMemo(
+    () => sharedSlotValue((spec) => spec?.delayMs ?? 0),
+    [sharedSlotValue]
+  );
+  const selectedAnimationDirection = useMemo(
+    () => sharedSlotValue((spec) => spec?.direction ?? "DEFAULT"),
+    [sharedSlotValue]
+  );
+  const selectedAnimationEasing = useMemo(
+    () => sharedSlotValue((spec) => spec?.easing ?? "DEFAULT"),
+    [sharedSlotValue]
+  );
+  const selectedAnimationIntensity = useMemo(
+    () => sharedSlotValue((spec) => spec?.intensity ?? 1),
+    [sharedSlotValue]
+  );
+
+  /**
+   * Writes a patch into the ACTIVE slot of every selected element, leaving the other two slots
+   * untouched. Legacy fields are migrated in first (via resolveElementAnimations) so an element
+   * that only ever had the old single animation keeps it when you edit a different slot.
+   */
+  const updateAnimationSlot = useCallback(
+    (patch: Partial<AnimationSpecInput> & { type?: string }) => {
+      selectedElements.forEach((element) => {
+        const slots = resolveElementAnimations(element);
+        const current = slots[animationSlotKey];
+        const nextType = patch.type ?? current?.type ?? "NONE";
+        if (nextType === "NONE") {
+          updateElement(element.id, {
+            animations: { ...slots, [animationSlotKey]: null },
+          });
+          return;
+        }
+        // Picking a NEW type resets the slot to that type's own defaults; tweaking a control
+        // keeps the rest of the spec as-is.
+        const base = current && current.type === nextType ? current : { type: nextType };
+        updateElement(element.id, {
+          animations: {
+            ...slots,
+            [animationSlotKey]: makeAnimationSpec({ ...base, ...patch, type: nextType }, animationSlot),
+          },
+        });
+      });
+    },
+    [selectedElements, animationSlotKey, animationSlot, updateElement]
+  );
   const primarySelectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const [animationDurationDraft, setAnimationDurationDraft] = useState("");
   const activeBackgroundColor = String(activePage?.background?.color || "#ffffff").trim();
@@ -4667,6 +4820,41 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   </div>
                 ) : (
                   <>
+                    {/* Three independent slots — a layer can have an entrance, a loop AND an exit. */}
+                    <div className="space-y-1.5">
+                      <div className="flex gap-1 rounded-xl bg-[#eef1f6] p-1">
+                        {ANIMATION_SLOT_TABS.map((tab) => {
+                          const active = animationSlot === tab.key;
+                          const slotSpec = selectedElements.length
+                            ? resolveElementAnimations(selectedElements[0])[ANIMATION_SLOT_KEY[tab.key]]
+                            : null;
+                          const isSet = Boolean(slotSpec && slotSpec.type !== "NONE");
+                          return (
+                            <button
+                              key={tab.key}
+                              type="button"
+                              onClick={() => setAnimationSlot(tab.key)}
+                              className={`relative flex-1 rounded-lg px-2 py-1.5 text-[11px] font-semibold transition ${
+                                active
+                                  ? "bg-white text-[#243041] shadow-sm"
+                                  : "text-[#64748b] hover:text-[#243041]"
+                              }`}
+                            >
+                              {tab.label}
+                              {/* A dot marks a slot that already has an effect, so the other two
+                                  tabs don't look empty when only one is configured. */}
+                              {isSet ? (
+                                <span className="absolute right-1.5 top-1.5 h-1.5 w-1.5 rounded-full bg-[#fb7185]" />
+                              ) : null}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <div className="text-[11px] text-[#94a3b8]">
+                        {ANIMATION_SLOT_TABS.find((tab) => tab.key === animationSlot)?.hint}
+                      </div>
+                    </div>
+
                     <div className="space-y-3">
                       <div className="space-y-2">
                         <Label className="text-xs font-semibold text-[#5b6472]">Animation time (ms)</Label>
@@ -4690,8 +4878,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               if (event.key !== "Enter") return;
                               const nextValue = String(animationDurationDraft || "").trim();
                               if (!nextValue) return;
-                              updateSelectedElements({
-                                mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                              updateAnimationSlot({
+                                durationMs: normalizeAnimationDurationMs(nextValue),
                               });
                             }}
                           />
@@ -4703,8 +4891,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             onClick={() => {
                               const nextValue = String(animationDurationDraft || "").trim();
                               if (!nextValue) return;
-                              updateSelectedElements({
-                                mediaAnimationDurationMs: normalizeAnimationDurationMs(nextValue),
+                              updateAnimationSlot({
+                                durationMs: normalizeAnimationDurationMs(nextValue),
                               });
                             }}
                             className={`absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-white shadow-sm transition ${
@@ -4728,9 +4916,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                           disabled={!selectedAnimationCanLoop}
                           onClick={() =>
                             selectedAnimationCanLoop &&
-                            updateSelectedElements({
-                              mediaAnimationInfinite: !(selectedAnimationInfinite ?? false),
-                              mediaAnimationMode: selectedAnimationInfinite ? "IN" : "LOOP",
+                            updateAnimationSlot({
+                              infinite: !(selectedAnimationInfinite ?? false),
                             })
                           }
                           className={`flex h-10 w-full items-center justify-between rounded-xl border px-3 text-sm font-semibold transition ${
@@ -4764,24 +4951,20 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         </button>
                         {!selectedAnimationCanLoop ? (
                           <div className="text-[11px] text-[#94a3b8]">
-                            Infinite is only available for loop animations.
+                            Infinite is only available on the Loop slot, for effects that support it.
                           </div>
                         ) : null}
                       </div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
-                      {EDITOR_ANIMATION_OPTIONS.map((option) => {
-                        const active = selectedAnimationType === option.value;
+                      {ANIMATION_CATALOG[animationSlot].map((type) => {
+                        const active = selectedAnimationType === type;
                         return (
                           <button
-                            key={option.value}
+                            key={type}
                             type="button"
-                            onClick={() =>
-                              updateSelectedElements({
-                                mediaAnimationType: option.value as EditorAnimationType,
-                              })
-                            }
+                            onClick={() => updateAnimationSlot({ type })}
                             className={`group rounded-2xl border p-2 text-center transition ${
                               active
                                 ? "border-[#fb7185] bg-[#fff1f4] shadow-[inset_0_0_0_1px_rgba(251,113,133,0.12)]"
@@ -4789,10 +4972,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             }`}
                           >
                             <div className="flex justify-center">
-                              <AnimationSampleTile type={option.value as EditorAnimationType} />
+                              <AnimationSampleTile type={type as EditorAnimationType} />
                             </div>
                             <div className="mt-2 text-[11px] font-semibold leading-tight text-[#243041]">
-                              {option.label}
+                              {getAnimationLabel(type, "en", animationSlot)}
                             </div>
                           </button>
                         );
@@ -4832,6 +5015,18 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
         .editor-animation-panel .animation-sample-pan {
           animation-name: samplePan;
+        }
+        .editor-animation-panel .animation-sample-shift {
+          animation-name: sampleShift;
+        }
+        .editor-animation-panel .animation-sample-skate {
+          animation-name: sampleSkate;
+        }
+        .editor-animation-panel .animation-sample-ascend {
+          animation-name: sampleAscend;
+        }
+        .editor-animation-panel .animation-sample-block {
+          animation-name: sampleBlock;
         }
 
         .editor-animation-panel .animation-sample-fade {
@@ -4940,6 +5135,50 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           }
           50% {
             transform: translateX(7px);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleShift {
+          0%,
+          100% {
+            transform: translateY(-7px);
+            opacity: 0.52;
+          }
+          50% {
+            transform: translateY(5px);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleSkate {
+          0%,
+          100% {
+            transform: translateX(7px);
+            opacity: 0.45;
+          }
+          50% {
+            transform: translateX(-7px);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleAscend {
+          0%,
+          100% {
+            transform: translateY(6px);
+            opacity: 0.4;
+          }
+          50% {
+            transform: translateY(-3px);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleBlock {
+          0%,
+          100% {
+            transform: translateX(-9px);
+            opacity: 0.85;
+          }
+          50% {
+            transform: translateX(9px);
             opacity: 1;
           }
         }

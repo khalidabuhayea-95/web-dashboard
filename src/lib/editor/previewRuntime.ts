@@ -1,20 +1,16 @@
 "use client";
 
+import { resolveTimelineWindow } from "@/lib/editor/animationTimeline";
 import {
-  getAnimationPreset,
-  isAnimationInfiniteActive,
-  normalizeAnimationDelayMs,
-  normalizeAnimationDirection,
-  normalizeAnimationDurationMs,
-  normalizeAnimationEasing,
-  normalizeAnimationIntensity,
-  normalizeAnimationMode,
-  normalizeAnimationType,
-  resolveTimelineWindow,
-  type EditorAnimationDirection,
-  type EditorAnimationEasing,
-  type EditorAnimationPreset,
-} from "@/lib/editor/animationTimeline";
+  resolveElementAnimations,
+  resolveTimelinePlaybackState,
+} from "@/lib/editor/animationSlots";
+import {
+  applyAnimationEasing,
+  pingPongProgress,
+  resolveAnimationVisualState,
+  type AnimationSpecInput,
+} from "@/lib/editor/animationVisual";
 import type { EditorElement } from "@/store/editorStore";
 
 export const PREVIEW_RENDER_FPS = 60;
@@ -26,16 +22,8 @@ export interface ElementRenderPose {
   scaleX: number;
   scaleY: number;
   opacity: number;
-}
-
-interface AnimationState {
-  preset: EditorAnimationPreset;
-  progress: number;
-  cycleProgress: number;
-  cycleWave: number;
-  direction: EditorAnimationDirection;
-  intensity: number;
-  isInfinite: boolean;
+  /** Gaussian blur radius in design px (Canva-parity BLUR); 0 = no blur. */
+  blurRadius: number;
 }
 
 function clamp(value: number, min: number, max: number) {
@@ -104,55 +92,17 @@ export function getFrameAlignedPlayheadFrame(playheadMs: number, fps: number, du
   return Math.min(totalFrames, msToOffsetFrames(playheadMs, fps));
 }
 
-function resolveEffectiveAnimationType(element: EditorElement) {
-  const normalizedType = normalizeAnimationType(element.mediaAnimationType);
-  return normalizedType === "RANDOM"
-    ? (["FADE", "PAN", "POP", "BASELINE", "WIGGLE", "PULSE"][
-        Array.from(String(element.id || "random")).reduce((sum, char) => sum + char.charCodeAt(0), 0) % 6
-      ] as ReturnType<typeof normalizeAnimationType>)
-    : normalizedType;
-}
-
-function applyAnimationEasing(progress: number, easing: EditorAnimationEasing) {
-  const value = clamp(progress, 0, 1);
-  switch (easing) {
-    case "LINEAR":
-      return value;
-    case "EASE_OUT":
-      return 1 - Math.pow(1 - value, 3);
-    case "EASE_IN_OUT":
-      return value < 0.5 ? 4 * value * value * value : 1 - Math.pow(-2 * value + 2, 3) / 2;
-    case "SOFT_OUT":
-      return 1 - Math.pow(1 - value, 4);
-    case "SOFT_IN_OUT":
-      return 0.5 - Math.cos(Math.PI * value) / 2;
-    default:
-      return value;
-  }
-}
-
-function getDirectionalVector(direction: EditorAnimationDirection) {
-  switch (direction) {
-    case "LEFT":
-      return { x: -1, y: 0, spin: -1 };
-    case "RIGHT":
-      return { x: 1, y: 0, spin: 1 };
-    case "UP":
-      return { x: 0, y: -1, spin: -1 };
-    case "DOWN":
-      return { x: 0, y: 1, spin: 1 };
-    case "COUNTERCLOCKWISE":
-      return { x: 0, y: 0, spin: -1 };
-    case "CLOCKWISE":
-      return { x: 0, y: 0, spin: 1 };
-    default:
-      return { x: 0, y: 0, spin: 1 };
-  }
-}
-
-function pingPong(progress: number) {
-  const normalized = ((progress % 1) + 1) % 1;
-  return 0.5 - Math.cos(normalized * Math.PI * 2) / 2;
+/**
+ * The animation active at [currentFrame], resolved from the element's three slots.
+ *
+ * `progress` keeps the historical meaning: EASED, and ping-ponged when infinite — i.e. what the
+ * analytic formulas consume. `cycleProgress` is the raw 0..1 the authored keyframes are read at.
+ */
+export interface AnimationState {
+  spec: AnimationSpecInput;
+  progress: number;
+  cycleProgress: number;
+  isExiting: boolean;
 }
 
 export function resolveAnimationStateAtFrame(
@@ -161,83 +111,68 @@ export function resolveAnimationStateAtFrame(
   fps: number,
   pageDurationMs: number
 ): AnimationState | null {
-  const type = resolveEffectiveAnimationType(element);
-  const preset = getAnimationPreset(type);
-  if (type === "NONE") return null;
-
-  const legacyMode = normalizeAnimationMode(element.mediaAnimationMode);
-  const direction = normalizeAnimationDirection(element.mediaAnimationDirection, type);
-  const easing = normalizeAnimationEasing(element.mediaAnimationEasing, type);
-  const intensity = normalizeAnimationIntensity(element.mediaAnimationIntensity);
+  const slots = resolveElementAnimations(element);
   const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
   const sampleTimeMs = Math.min(
     Math.max(0, Number(pageDurationMs) || 0),
     frameToSampleTimeMs(currentFrame, fps)
   );
-  const layerDurationMs = Math.max(1, timelineWindow.endMs - timelineWindow.startMs);
-  const delayMs = Math.min(
-    Math.max(0, layerDurationMs - 1),
-    normalizeAnimationDelayMs(element.mediaAnimationDelayMs)
+  const playback = resolveTimelinePlaybackState(
+    false,
+    timelineWindow.startMs,
+    timelineWindow.endMs,
+    slots,
+    sampleTimeMs,
+    pageDurationMs
   );
-  const isInfinite = isAnimationInfiniteActive(
-    type,
-    element.mediaAnimationInfinite,
-    element.mediaAnimationMode
-  );
-  const requestedDurationMs = isInfinite
-    ? preset.defaultDurationMs
-    : normalizeAnimationDurationMs(element.mediaAnimationDurationMs || preset.defaultDurationMs);
-  const durationMs = Math.max(1, Math.min(layerDurationMs, requestedDurationMs));
-  const activeTimeMs = sampleTimeMs - (timelineWindow.startMs + delayMs);
-  const cycleProgress =
-    activeTimeMs <= 0
-      ? 0
-      : isInfinite
-        ? ((activeTimeMs % durationMs) + durationMs) % durationMs / durationMs
-        : clamp(activeTimeMs / durationMs, 0, 1);
-  const cycleWave = applyAnimationEasing(pingPong(cycleProgress), easing);
+  const spec = playback.animation;
+  if (!playback.isVisible || !spec || spec.type === "NONE") return null;
 
-  if (preset.category === "loop") {
-    const oneShot = applyAnimationEasing(clamp(activeTimeMs / durationMs, 0, 1), easing);
+  const cycleProgress = clamp(playback.progress, 0, 1);
+  const progress = spec.infinite
+    ? applyAnimationEasing(pingPongProgress(cycleProgress), spec.easing)
+    : applyAnimationEasing(cycleProgress, spec.easing);
+  return { spec, progress, cycleProgress, isExiting: playback.isExiting };
+}
+
+// Keyframed position offset (Canva custom "create an animation" motion paths). The element's
+// mediaMotionPath is [{t, x, y}] — t in ms from the element's timeline-window start, x/y cumulative
+// design-px offsets from the element's base position. Before the first point → first offset; after
+// the last point → HOLD the last offset (e.g. doors slide apart over ~3s then stay parted). Linear
+// interpolation between points (the path is densely sampled at capture time).
+function resolveMotionPathOffset(
+  element: EditorElement,
+  currentFrame: number,
+  fps: number,
+  pageDurationMs: number
+): { x: number; y: number } | null {
+  const path = (element as { mediaMotionPath?: Array<{ t: number; x: number; y: number }> })
+    .mediaMotionPath;
+  if (!Array.isArray(path) || path.length < 2) return null;
+  const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
+  const sampleTimeMs = Math.min(
+    Math.max(0, Number(pageDurationMs) || 0),
+    frameToSampleTimeMs(currentFrame, fps)
+  );
+  const elapsed = sampleTimeMs - timelineWindow.startMs;
+  const first = path[0];
+  const last = path[path.length - 1];
+  if (elapsed <= Number(first.t)) return { x: Number(first.x) || 0, y: Number(first.y) || 0 };
+  if (elapsed >= Number(last.t)) return { x: Number(last.x) || 0, y: Number(last.y) || 0 };
+  for (let i = 1; i < path.length; i += 1) {
+    const prev = path[i - 1];
+    const next = path[i];
+    const t0 = Number(prev.t) || 0;
+    const t1 = Number(next.t) || 0;
+    if (elapsed > t1) continue;
+    const span = Math.max(1e-6, t1 - t0);
+    const f = clamp((elapsed - t0) / span, 0, 1);
     return {
-      preset,
-      progress: isInfinite ? cycleWave : oneShot,
-      cycleProgress,
-      cycleWave,
-      direction,
-      intensity,
-      isInfinite,
+      x: (Number(prev.x) || 0) + ((Number(next.x) || 0) - (Number(prev.x) || 0)) * f,
+      y: (Number(prev.y) || 0) + ((Number(next.y) || 0) - (Number(prev.y) || 0)) * f,
     };
   }
-
-  if (isInfinite) {
-    return {
-      preset,
-      progress: cycleWave,
-      cycleProgress,
-      cycleWave,
-      direction,
-      intensity,
-      isInfinite: true,
-    };
-  }
-
-  const introProgress = applyAnimationEasing(clamp(activeTimeMs / durationMs, 0, 1), easing);
-  const outroProgress = applyAnimationEasing(
-    clamp((timelineWindow.endMs - delayMs - sampleTimeMs) / durationMs, 0, 1),
-    easing
-  );
-  const progress = legacyMode === "OUT" ? outroProgress : introProgress;
-
-  return {
-    preset,
-    progress,
-    cycleProgress,
-    cycleWave,
-    direction,
-    intensity,
-    isInfinite: false,
-  };
+  return { x: Number(last.x) || 0, y: Number(last.y) || 0 };
 }
 
 export function resolveAnimatedElementPoseAtFrame(
@@ -253,147 +188,42 @@ export function resolveAnimatedElementPoseAtFrame(
     scaleX: element.scaleX,
     scaleY: element.scaleY,
     opacity: element.opacity,
+    blurRadius: 0,
   };
 
-  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs);
-  const type = resolveEffectiveAnimationType(element);
-  if (!state) return base;
-
-  const vector = getDirectionalVector(state.direction);
-  const progress = clamp(state.progress, 0, 1);
-  const intensity = state.intensity;
-
-  let opacityFactor = 1;
-  let scaleXFactor = 1;
-  let scaleYFactor = 1;
-  let offsetX = 0;
-  let offsetY = 0;
-  let rotationOffset = 0;
-
-  switch (type) {
-    case "FADE":
-      opacityFactor = 0.04 + progress * 0.96;
-      break;
-    case "BLUR":
-      opacityFactor = 0.05 + progress * 0.95;
-      scaleXFactor = 0.92 + progress * 0.08;
-      scaleYFactor = 0.92 + progress * 0.08;
-      break;
-    case "RISE":
-      offsetY = Math.max(16, element.height * 0.22) * (1 - progress) * intensity;
-      opacityFactor = 0.12 + progress * 0.88;
-      break;
-    case "PAN":
-      offsetX = vector.x * (1 - progress) * Math.max(22, element.width * 0.28) * intensity;
-      opacityFactor = 0.16 + progress * 0.84;
-      break;
-    case "DRIFT":
-      offsetX = vector.x * (1 - progress) * Math.max(14, element.width * 0.18) * intensity;
-      offsetY = vector.y * (1 - progress) * Math.max(8, element.height * 0.12) * intensity;
-      opacityFactor = 0.1 + progress * 0.9;
-      break;
-    case "TECTONIC":
-      offsetX = vector.x * (1 - progress) * Math.max(28, element.width * 0.34) * intensity;
-      scaleXFactor = 0.9 + progress * 0.1;
-      opacityFactor = 0.08 + progress * 0.92;
-      break;
-    case "WIPE":
-      if (Math.abs(vector.x) > 0) {
-        scaleXFactor = Math.max(0.001, progress);
-        offsetX = vector.x < 0 ? element.width * (1 - progress) : 0;
-      } else {
-        scaleYFactor = Math.max(0.001, progress);
-        offsetY = vector.y < 0 ? element.height * (1 - progress) : 0;
-      }
-      break;
-    case "POP":
-      scaleXFactor = 0.7 + progress * 0.3;
-      scaleYFactor = 0.7 + progress * 0.3;
-      opacityFactor = 0.12 + progress * 0.88;
-      break;
-    case "SUCCESSION":
-      scaleXFactor = 0.82 + progress * 0.18;
-      scaleYFactor = 0.82 + progress * 0.18;
-      opacityFactor = 0.06 + progress * 0.94;
-      break;
-    case "STOMP":
-      scaleXFactor = 0.78 + progress * 0.22;
-      scaleYFactor = 0.78 + progress * 0.22;
-      rotationOffset = (1 - progress) * 18 * vector.spin * intensity;
-      opacityFactor = 0.1 + progress * 0.9;
-      break;
-    case "BREATHE": {
-      const breathWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + breathWave * 0.06 * intensity;
-      scaleYFactor = 1 + breathWave * 0.06 * intensity;
-      opacityFactor = 0.86 + breathWave * 0.14;
-      break;
-    }
-    case "BASELINE": {
-      const bounceWave = Math.abs(Math.sin(state.cycleProgress * Math.PI * 2));
-      offsetY = -bounceWave * Math.max(10, element.height * 0.1) * intensity;
-      scaleYFactor = 1 - bounceWave * 0.06 * intensity;
-      scaleXFactor = 1 + bounceWave * 0.04 * intensity;
-      break;
-    }
-    case "TUMBLE":
-      rotationOffset = (1 - progress) * 26 * vector.spin * intensity;
-      offsetX = vector.spin * (1 - progress) * Math.max(18, element.width * 0.18) * intensity;
-      offsetY = -(1 - progress) * Math.max(18, element.height * 0.22) * intensity;
-      opacityFactor = 0.08 + progress * 0.92;
-      break;
-    case "NEON": {
-      const pulseWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + pulseWave * 0.05 * intensity;
-      scaleYFactor = 1 + pulseWave * 0.05 * intensity;
-      opacityFactor = clamp(0.8 + pulseWave * 0.2 + Math.sin(state.cycleProgress * Math.PI * 6) * 0.04, 0.72, 1);
-      break;
-    }
-    case "SCRAPBOOK": {
-      const scrapbookWave = Math.sin(state.cycleProgress * Math.PI * 2);
-      rotationOffset = scrapbookWave * 6.5 * intensity;
-      offsetX = scrapbookWave * Math.max(5, element.width * 0.024) * intensity;
-      offsetY = Math.cos(state.cycleProgress * Math.PI * 2) * Math.max(3, element.height * 0.018) * intensity;
-      break;
-    }
-    case "ROTATE":
-      rotationOffset = state.cycleProgress * 360 * vector.spin * intensity;
-      break;
-    case "FLICKER": {
-      const irregular =
-        0.4 +
-        0.34 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 9.2)) +
-        0.22 * Math.abs(Math.sin(state.cycleProgress * Math.PI * 23.6));
-      opacityFactor = clamp(
-        state.isInfinite ? irregular : 1 - state.progress + irregular * state.progress,
-        0.16,
-        1
-      );
-      break;
-    }
-    case "PULSE": {
-      const pulseWave = pingPong(state.cycleProgress);
-      scaleXFactor = 1 + pulseWave * 0.12 * intensity;
-      scaleYFactor = 1 + pulseWave * 0.12 * intensity;
-      break;
-    }
-    case "WIGGLE": {
-      const wiggleWave = Math.sin(state.cycleProgress * Math.PI * 2);
-      rotationOffset = wiggleWave * 4.5 * intensity;
-      offsetX = wiggleWave * Math.max(3, element.width * 0.018) * intensity;
-      break;
-    }
-    default:
-      break;
+  // Motion paths compose additively with (or without) a preset animation.
+  const motionOffset = resolveMotionPathOffset(element, currentFrame, fps, pageDurationMs);
+  if (motionOffset) {
+    base.x += motionOffset.x;
+    base.y += motionOffset.y;
   }
 
+  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs);
+  if (!state) return base;
+
+  const visual = resolveAnimationVisualState(
+    state.spec,
+    state.cycleProgress,
+    Math.max(1, element.width),
+    Math.max(1, element.height),
+    state.isExiting
+  );
+
+  // scaleMultiplier is uniform and composes on top of the per-axis multipliers.
+  const scaleX = base.scaleX * visual.scaleMultiplier * visual.scaleXMultiplier;
+  const scaleY = base.scaleY * visual.scaleMultiplier * visual.scaleYMultiplier;
+
+  // Phase 1 renders the reveal families through their alpha fallback: this surface has no mask
+  // channel and no per-glyph text path yet, which is the documented behaviour for a surface
+  // that can't honour revealMask / textReveal / glyphMotion.
   return {
-    x: base.x + offsetX,
-    y: base.y + offsetY,
-    rotation: base.rotation + rotationOffset,
-    scaleX: base.scaleX * scaleXFactor,
-    scaleY: base.scaleY * scaleYFactor,
-    opacity: clamp(base.opacity * opacityFactor, 0, 1),
+    x: base.x + visual.translationX,
+    y: base.y + visual.translationY,
+    rotation: base.rotation + visual.rotationDeltaDegrees,
+    scaleX,
+    scaleY,
+    opacity: clamp(base.opacity * visual.alphaMultiplier, 0, 1),
+    blurRadius: Math.max(0, visual.blurRadiusPx),
   };
 }
 

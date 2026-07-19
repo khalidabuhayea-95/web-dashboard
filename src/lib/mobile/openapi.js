@@ -615,7 +615,7 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, and an `animation` object for mobile timeline rendering. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source). FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
+          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
         items: {
           type: "object",
           additionalProperties: true,
@@ -632,6 +632,9 @@ const schemas = {
             },
             animation: {
               $ref: "#/components/schemas/MobileLayerAnimation",
+            },
+            animations: {
+              $ref: "#/components/schemas/MobileLayerAnimations",
             },
           },
         },
@@ -717,13 +720,118 @@ const schemas = {
       delayMs: { type: "integer", format: "int32" },
       direction: {
         type: "string",
-        enum: ["LEFT", "RIGHT", "UP", "DOWN", "CENTER", "CLOCKWISE", "COUNTERCLOCKWISE"],
+        // CENTER is legacy-only: the spec calls the same thing DEFAULT. Both are accepted here
+        // because the legacy object keeps emitting CENTER for older app builds.
+        enum: ["LEFT", "RIGHT", "UP", "DOWN", "CENTER", "DEFAULT", "CLOCKWISE", "COUNTERCLOCKWISE"],
       },
       easing: {
         type: "string",
-        enum: ["LINEAR", "EASE_OUT", "EASE_IN_OUT", "SOFT_OUT", "SOFT_IN_OUT"],
+        enum: ["DEFAULT", "LINEAR", "EASE_OUT", "EASE_IN", "EASE_IN_OUT", "SOFT_OUT", "SOFT_IN_OUT"],
       },
       intensity: { type: "number" },
+    },
+  },
+  MobileLayerAnimationSlot: {
+    type: "object",
+    required: ["type", "infinite", "durationMs", "delayMs", "direction", "easing", "intensity"],
+    description:
+      "One animation slot. `type` accepts every type the app knows, including the enum-only ones that are never offered in a picker but must still deserialize for old projects.",
+    properties: {
+      type: {
+        type: "string",
+        enum: [
+          "NONE",
+          "RISE",
+          "PAN",
+          "FADE",
+          "POP",
+          "WIPE",
+          "BLUR",
+          "SUCCESSION",
+          "BREATHE",
+          "BASELINE",
+          "DRIFT",
+          "TECTONIC",
+          "TUMBLE",
+          "NEON",
+          "SCRAPBOOK",
+          "STOMP",
+          "ROTATE",
+          "FLICKER",
+          "PULSE",
+          "WIGGLE",
+          "STATIC",
+          "ONE_WORD",
+          "TYPEWRITER_CHARS",
+          "TYPEWRITER_CURSOR",
+          "TYPEWRITER_WORDS",
+          "ZOOM",
+          "ZOOM_FADE",
+          "SLIDE",
+          "DROP",
+          "GRADIENT_WIPE",
+          "RADIAL",
+          "RADIAL_GRADIENT",
+          "DIAGONAL",
+          "DIAGONAL_GRADIENT",
+          "DISSOLVE",
+          "WOBBLE",
+          "BOUNCE",
+          "SHAKE",
+          "WAVE",
+          "RANDOM",
+          "CIRCUAL",
+          "CIRCUAL_GRADIENT",
+          "ZOOM_LOOP",
+          "CH_POSITION_FADE",
+          "CH_SCALE_FADE",
+          "CH_WIGGLE_Y",
+        ],
+      },
+      infinite: {
+        type: "boolean",
+        description:
+          "Only ever true on the `loop` slot, and only for types whose spec marks supportsInfinite. Infinite playback PING-PONGS progress 0->1->0.",
+      },
+      durationMs: { type: "integer", format: "int32" },
+      delayMs: { type: "integer", format: "int32" },
+      direction: {
+        type: "string",
+        enum: [
+          "DEFAULT",
+          "UP",
+          "DOWN",
+          "LEFT",
+          "RIGHT",
+          "CLOCKWISE",
+          "COUNTERCLOCKWISE",
+        ],
+      },
+      easing: {
+        type: "string",
+        description:
+          "Honoured only by the analytic effects. Keyframe-authored effects carry their own per-keyframe beziers and ignore this.",
+        enum: [
+          "DEFAULT",
+          "LINEAR",
+          "SOFT_OUT",
+          "SOFT_IN_OUT",
+          "EASE_IN",
+          "EASE_OUT",
+          "EASE_IN_OUT",
+        ],
+      },
+      intensity: { type: "number" },
+    },
+  },
+  MobileLayerAnimations: {
+    type: "object",
+    description:
+      "The three independent animation slots. Entrance plays once as the layer appears, loop runs continuously in between, exit plays once as it leaves (reusing the entrance mapping in REVERSE). Slots are mutually exclusive at any instant, resolved exit -> entrance -> loop -> hold. Emitted ALONGSIDE the legacy single `animation` object, never instead of it: prefer `animations` when present and fall back to `animation`. Absent when no slot is set.",
+    properties: {
+      entrance: { $ref: "#/components/schemas/MobileLayerAnimationSlot" },
+      exit: { $ref: "#/components/schemas/MobileLayerAnimationSlot" },
+      loop: { $ref: "#/components/schemas/MobileLayerAnimationSlot" },
     },
   },
   MobileTemplatePreview: {
@@ -910,7 +1018,7 @@ const schemas = {
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, and `animation`. Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
             items: {
               type: "object",
               additionalProperties: true,

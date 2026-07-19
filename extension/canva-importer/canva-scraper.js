@@ -242,6 +242,351 @@
         };
       };
 
+      // Per-element animation config from Canva's LIVE design-document model, which hangs off the
+      // React fiber. The rendered DOM layers are static (Canva animates in its own compositor), so
+      // the ONLY reliable source is this model. Returns { [elementId]: { canvaPreset, family, mode,
+      // inMs, outMs, loopMs, durationMs, delayMs, easing } } keyed by the SAME LB ids the layer
+      // records use. Defensive: minified keys churn across Canva releases, so we walk by SHAPE
+      // (structural search), never hardcoded keys, and return {} on any failure. Replaces the old
+      // DOM-label-matching extractLayerAnimationMeta, which never fired (labels are obfuscated).
+      const usToMs = (us) =>
+        Number.isFinite(Number(us)) && Number(us) > 0 ? Math.round(Number(us) / 1000) : undefined;
+
+      // Full per-element design model from Canva's LIVE document (hangs off the React fiber). This
+      // is a SUPERSET of the DOM: a timeline/video design renders only the current frame's layers,
+      // but the model holds ALL elements with geometry, text, image refs, and animation — the only
+      // way to import a video design's complete layer set. Returns { [elementId]: { type, left, top,
+      // width, height, rotation, transparency, startUs, durationUs, animation, text, image } } keyed
+      // by the SAME LB ids the DOM layer records use, so model + DOM captures merge by id. Geometry
+      // is in design px with the page top-left as origin — identical to the scraper's record space
+      // (verified: model↔DOM scale == 1/zoom, model (0,0) == page origin). Defensive structural walk
+      // (no hardcoded minified chains); returns {} on any failure.
+      const buildFiberElementModel = () => {
+        const result = {};
+        try {
+          const seed = document.querySelector('[id^="LB"]');
+          if (!seed) return result;
+          const fiberKey = Object.keys(seed).find((k) => k.startsWith("__reactFiber$"));
+          if (!fiberKey) return result;
+          let fiber = seed[fiberKey];
+          let doc = null;
+          let hops = 0;
+          while (fiber && hops < 120) {
+            const props = fiber.memoizedProps;
+            if (
+              props &&
+              props.document &&
+              (props.document.doctype !== undefined || props.document.pages !== undefined)
+            ) {
+              doc = props.document;
+              break;
+            }
+            fiber = fiber.return;
+            hops += 1;
+          }
+          if (!doc) return result;
+          // structural DFS for the elements array (items with an LB id + animation field)
+          const seen = new Set();
+          let elementsArray = null;
+          const findElements = (obj, depth) => {
+            if (elementsArray || !obj || typeof obj !== "object" || depth > 14 || seen.has(obj)) return;
+            seen.add(obj);
+            if (Array.isArray(obj)) {
+              if (
+                obj.length &&
+                obj.some(
+                  (it) => it && typeof it.id === "string" && /^LB/.test(it.id) && "animation" in it
+                )
+              ) {
+                elementsArray = obj;
+                return;
+              }
+              for (const it of obj) findElements(it, depth + 1);
+            } else {
+              for (const key in obj) {
+                try {
+                  findElements(obj[key], depth + 1);
+                } catch (_error) {
+                  /* observable getters can throw */
+                }
+              }
+            }
+          };
+          findElements(doc, 0);
+          if (!elementsArray) return result;
+          // flatten groups → every element
+          const allElements = [];
+          const collected = new Set();
+          const collect = (items, depth) => {
+            if (!Array.isArray(items) || depth > 10) return;
+            for (const el of items) {
+              if (!el || typeof el !== "object" || collected.has(el)) continue;
+              collected.add(el);
+              allElements.push(el);
+              for (const key in el) {
+                try {
+                  const val = el[key];
+                  if (
+                    Array.isArray(val) &&
+                    val.some((it) => it && typeof it === "object" && "type" in it)
+                  ) {
+                    collect(val, depth + 1);
+                  }
+                } catch (_error) {
+                  /* ignore */
+                }
+              }
+            }
+          };
+          collect(elementsArray, 0);
+
+          // Track container + track/array names are MINIFIED and ROTATE between Canva deploys
+          // (observed: Sv→Tv, tf→sf, Acb→Lcb, eGd→SGd, gGd→UGd; Wf/dts survived one rotation).
+          // Everything is therefore resolved STRUCTURALLY, mirroring background.js's
+          // extractCanvaFiberModel — keep the two in sync.
+          const decodeMotionPath = (track) => {
+            try {
+              if (!track || typeof track !== "object") return null;
+              const arrays = Object.keys(track).filter(
+                (k) => Array.isArray(track[k]) && track[k].length >= 2 && track[k].every((v) => Number.isFinite(Number(v)))
+              );
+              if (arrays.length < 2) return null;
+              const durationMsTarget = Number(track.durationUs) > 0 ? Number(track.durationUs) / 1000 : null;
+              const sums = {};
+              for (const k of arrays) sums[k] = track[k].reduce((a, v) => a + (Number(v) || 0), 0);
+              let timeKey = null;
+              let bestScore = Infinity;
+              for (const k of arrays) {
+                if (!track[k].every((v) => Number(v) >= 0)) continue;
+                const score = durationMsTarget ? Math.abs(sums[k] - durationMsTarget) : -sums[k];
+                if (score < bestScore) {
+                  bestScore = score;
+                  timeKey = k;
+                }
+              }
+              if (!timeKey) return null;
+              const rest = arrays.filter((k) => k !== timeKey);
+              if (!rest.length) return null;
+              const X_NAMES = ["eGd", "SGd"];
+              const Y_NAMES = ["gGd", "UGd"];
+              let xKey = rest.find((k) => X_NAMES.includes(k));
+              let yKey = rest.find((k) => Y_NAMES.includes(k));
+              if (!xKey || !yKey) {
+                const ordered = [...rest].sort();
+                xKey = xKey || ordered.find((k) => k !== yKey);
+                yKey = yKey || ordered.find((k) => k !== xKey) || null;
+              }
+              const dts = track[timeKey];
+              const xs = track[xKey];
+              const ys = yKey ? track[yKey] : null;
+              const n = Math.min(dts.length, xs.length, ys ? ys.length : xs.length);
+              let t = 0;
+              let x = 0;
+              let y = 0;
+              const raw = [];
+              for (let i = 0; i < n; i += 1) {
+                t += Number(dts[i]) || 0;
+                x += Number(xs[i]) || 0;
+                y += Number(ys ? ys[i] : 0) || 0;
+                raw.push({ t: Math.round(t), x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+              }
+              if (raw.length < 2) return null;
+              let span = 0;
+              for (const p of raw) span = Math.max(span, Math.abs(p.x), Math.abs(p.y));
+              if (span < 2) return null;
+              const MAX_POINTS = 48;
+              if (raw.length <= MAX_POINTS) return raw;
+              const sampled = [];
+              for (let i = 0; i < MAX_POINTS; i += 1) {
+                sampled.push(raw[Math.round((i * (raw.length - 1)) / (MAX_POINTS - 1))]);
+              }
+              return sampled;
+            } catch (_e) {
+              return null;
+            }
+          };
+          const extractAnimation = (el) => {
+            const anim = el && el.animation;
+            if (!anim || typeof anim !== "object") return null;
+            let container = null;
+            for (const key of Object.keys(anim)) {
+              const v = anim[key];
+              if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+              for (const kk of Object.keys(v)) {
+                const t = v[kk];
+                if (t && typeof t === "object" && Number(t.durationUs) > 0) {
+                  container = v;
+                  break;
+                }
+              }
+              if (container) break;
+            }
+            let inTrack = null;
+            let outTrack = null;
+            let kfCandidate = null;
+            if (container) {
+              const plain = [];
+              for (const kk of Object.keys(container)) {
+                const t = container[kk];
+                if (!t || typeof t !== "object" || !(Number(t.durationUs) > 0)) continue;
+                const arrayCount = Object.keys(t).filter((a) => Array.isArray(t[a]) && t[a].length >= 2).length;
+                if (arrayCount >= 2) kfCandidate = t;
+                else plain.push({ key: kk, track: t });
+              }
+              const inPlain = plain.find((p) => ["Wf", "in", "enter"].includes(p.key)) || plain[0] || null;
+              const outPlain =
+                plain.find((p) => ["tf", "sf", "out", "exit"].includes(p.key)) ||
+                plain.find((p) => p !== inPlain) ||
+                null;
+              inTrack = inPlain ? inPlain.track : null;
+              outTrack = outPlain && outPlain !== inPlain ? outPlain.track : null;
+            }
+            const motionPath = kfCandidate ? decodeMotionPath(kfCandidate) : null;
+            const loopTrack = motionPath ? null : kfCandidate;
+            let mode;
+            let durationMs;
+            let easingRaw;
+            if (inTrack) {
+              mode = "IN";
+              durationMs = usToMs(inTrack.durationUs);
+              easingRaw = inTrack.easing;
+            } else if (loopTrack) {
+              mode = "LOOP";
+              durationMs = usToMs(loopTrack.durationUs);
+              easingRaw = loopTrack.easing;
+            } else if (outTrack) {
+              mode = "OUT";
+              durationMs = usToMs(outTrack.durationUs);
+              easingRaw = outTrack.easing;
+            }
+            const canvaPreset = Number.isFinite(Number(anim.animation)) ? Number(anim.animation) : null;
+            if (canvaPreset === null && !mode && !motionPath) return null;
+            return {
+              canvaPreset,
+              family: typeof anim.type === "string" ? anim.type : undefined,
+              mode,
+              inMs: inTrack ? usToMs(inTrack.durationUs) : undefined,
+              outMs: outTrack ? usToMs(outTrack.durationUs) : undefined,
+              loopMs: loopTrack ? usToMs(loopTrack.durationUs) : undefined,
+              durationMs,
+              delayMs: usToMs(el.startUs),
+              easing: Number.isFinite(Number(easingRaw)) ? Number(easingRaw) : undefined,
+              ...(motionPath ? { motionPath } : {}),
+            };
+          };
+
+          // Plaintext + run style from a text element's rich-text stream. Minified names ROTATE
+          // between Canva deploys (style bag observed as j7→q7 / Pdb→Xdb), so both the run-strings
+          // array and the style bag are resolved STRUCTURALLY; the style bag's INNER keys ("color",
+          // "font-family", "font-size", …) are stable CSS-ish names. Mirrors background.js.
+          const extractText = (el) => {
+            try {
+              const stream = el.text && el.text.stream;
+              if (!stream) return null;
+              let plaintext = "";
+              const cells = stream.cells || {};
+              let runs = Array.isArray(cells.xc) ? cells.xc : null;
+              if (!runs) {
+                for (const k of Object.keys(cells)) {
+                  const v = cells[k];
+                  if (Array.isArray(v) && v.length && v.every((x) => typeof x === "string")) {
+                    runs = v;
+                    break;
+                  }
+                }
+              }
+              if (Array.isArray(runs)) plaintext = runs.join("");
+              plaintext = String(plaintext == null ? "" : plaintext);
+              const items = stream.attrs && stream.attrs.items;
+              let style = {};
+              if (Array.isArray(items) && items.length) {
+                // Mixed-script text splits into runs whose first run may lack font/size —
+                // merge across ALL runs, first defined value per property wins.
+                const merged = {};
+                for (const item of items) {
+                  if (!item || typeof item !== "object") continue;
+                  let bag = null;
+                  for (const k of Object.keys(item)) {
+                    const v = item[k];
+                    if (!v || typeof v !== "object") continue;
+                    if (!("font-family" in v) && !("color" in v) && !("font-size" in v)) continue;
+                    if (!bag || typeof v["font-size"] === "number") bag = v;
+                  }
+                  if (!bag) continue;
+                  for (const prop of ["color", "font-family", "font-size", "text-align", "direction"]) {
+                    if (merged[prop] === undefined && bag[prop] !== undefined) merged[prop] = bag[prop];
+                  }
+                }
+                style = {
+                  color: typeof merged.color === "string" ? merged.color : undefined,
+                  fontFamilyToken: typeof merged["font-family"] === "string" ? merged["font-family"] : undefined,
+                  fontSize: Number(merged["font-size"]) > 0 ? Number(merged["font-size"]) : undefined,
+                  textAlign: typeof merged["text-align"] === "string" ? merged["text-align"] : undefined,
+                  direction: typeof merged.direction === "string" ? merged.direction : undefined,
+                };
+              }
+              return { plaintext, ...style };
+            } catch (_e) {
+              return null;
+            }
+          };
+
+          // Image media reference + in-frame crop from a rect's fill. media.id is shared across every
+          // instance of the same image (Canva instances one media many times), so one rendered
+          // instance resolves the pixels for all — each element supplies its own crop (fill.sb).
+          const extractImage = (el) => {
+            try {
+              const img = el.fill && el.fill.image;
+              const media = img && img.media;
+              if (!media || typeof media.id !== "string") return null;
+              const sb = img.sb && typeof img.sb === "object" ? img.sb : null;
+              return {
+                mediaId: media.id,
+                version: Number(media.version) || undefined,
+                crop: sb
+                  ? {
+                      top: Number(sb.top) || 0,
+                      left: Number(sb.left) || 0,
+                      width: Number(sb.width) || 0,
+                      height: Number(sb.height) || 0,
+                      rotation: Number(sb.rotation) || 0,
+                    }
+                  : null,
+                transparency: Number(img.transparency) || 0,
+                // fill-level mirroring (e.g. paired corner decorations) — lost = wrong orientation
+                flipX: Boolean(el.fill && el.fill.flipX),
+                flipY: Boolean(el.fill && el.fill.flipY),
+              };
+            } catch (_e) {
+              return null;
+            }
+          };
+
+          const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+          for (const el of allElements) {
+            const id = String((el && el.id) || "");
+            if (!id || !/^LB/.test(id)) continue;
+            result[id] = {
+              type: typeof el.type === "string" ? el.type : "",
+              left: num(el.left),
+              top: num(el.top),
+              width: num(el.width),
+              height: num(el.height),
+              rotation: num(el.rotation),
+              transparency: num(el.transparency),
+              startUs: num(el.startUs),
+              durationUs: num(el.durationUs),
+              animation: extractAnimation(el),
+              text: el.type === "text" ? extractText(el) : null,
+              image: el.type === "rect" ? extractImage(el) : null,
+            };
+          }
+        } catch (_error) {
+          /* fiber shape changed — best-effort, return whatever we have */
+        }
+        return result;
+      };
+
       const normalizeMetadataKey = (value) =>
         sanitizeMetadataText(value)
           .toLowerCase()
@@ -2828,6 +3173,9 @@
       }
 
       const layers = [];
+      // Filled by the timeline-supplement pass; surfaced in the result so background.js can warn
+      // when off-screen elements were skipped (their media had no rendered instance to capture).
+      let timelineSupplementSummary = null;
       const documentFontAssets = collectDocumentFontAssets();
       const isDuplicateLayerEntry = (candidate) => {
         const tolerance = 1.5;
@@ -2993,6 +3341,19 @@
         ];
 
         const imageMetadataCandidates = [];
+        // Full design-model element map: id → { geometry, text, image ref, animation }. Superset of
+        // the DOM; the loop below captures the current frame, then an additive supplement appends the
+        // model's off-screen elements (timeline/video designs). Canva's React fiber is ONLY reachable
+        // from the MAIN world, so background.js extracts the model there and passes it in via
+        // runtimeOptions.fiberModel — content scripts run in an ISOLATED world where DOM nodes don't
+        // expose __reactFiber$, so the in-page buildFiberElementModel() only works as a MAIN-world
+        // fallback (returns {} here). Raw animation is mapped to the editor's model in background.js.
+        const passedModel =
+          runtimeOptions && runtimeOptions.fiberModel && typeof runtimeOptions.fiberModel === "object"
+            ? runtimeOptions.fiberModel
+            : null;
+        const fiberModelById =
+          passedModel && Object.keys(passedModel).length ? passedModel : buildFiberElementModel();
 
         for (let layerIndex = 0; layerIndex < layerNodes.length; layerIndex += 1) {
           const node = layerNodes[layerIndex];
@@ -3375,8 +3736,14 @@
                 : "";
 
           const normalizedLayerAngle = isThinVectorDividerLayer ? 0 : layerAngle;
-          const normalizedLayerFlipX = isThinVectorDividerLayer ? false : layerFlipX;
-          const normalizedLayerFlipY = isThinVectorDividerLayer ? false : layerFlipY;
+          // Canva applies mirroring at the FILL level (inner media element), invisible to the LB
+          // node's transform matrix — merge the model's fill flips in or mirrored decorations
+          // import un-mirrored (e.g. paired corner flowers, one flipX + rot180).
+          const modelFillImage = (fiberModelById[String(node.id || "")] || {}).image || null;
+          const normalizedLayerFlipX =
+            (isThinVectorDividerLayer ? false : layerFlipX) || Boolean(modelFillImage?.flipX);
+          const normalizedLayerFlipY =
+            (isThinVectorDividerLayer ? false : layerFlipY) || Boolean(modelFillImage?.flipY);
           const imageRect = imageElement?.getBoundingClientRect?.() || null;
           // Compare the image against its FULL (unclipped) layer frame, NOT the page-clipped
           // viewportRect. Otherwise any image that merely bleeds past the CANVAS edge (a
@@ -3437,6 +3804,22 @@
             Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
           if (shouldPreserveRenderedImagePixels && imageAcquisitionJob?.kind === "element") {
+            // buildDisplayedImageCropRegion maps the visible region in SCREEN space; for a layer
+            // rendered rotated ~180° (and/or fill-mirrored) that region must be remapped into the
+            // UN-rotated source's coordinate space or the crop picks the OPPOSITE corner of the
+            // media (symptom: corner bouquets sliced mid-flower). rot180 mirrors both axes; a fill
+            // flip mirrors X once more; the editor re-applies angle+flip at render, so the slice
+            // must be cut from the pre-image location.
+            const remapRegionForOrientation = (region) => {
+              if (!region) return region;
+              const near180 = Math.abs(Math.abs(normalizedLayerAngle) - 180) <= 1;
+              const mirrorX = near180 !== Boolean(normalizedLayerFlipX);
+              const mirrorY = near180 !== Boolean(normalizedLayerFlipY);
+              const next = { ...region };
+              if (mirrorX) next.x = Math.max(0, Math.min(1, 1 - region.x - region.width));
+              if (mirrorY) next.y = Math.max(0, Math.min(1, 1 - region.y - region.height));
+              return next;
+            };
             imageAcquisitionJob = {
               ...imageAcquisitionJob,
               fitFetchedToTarget: true,
@@ -3444,7 +3827,7 @@
               // them). A non-masked bleed image keeps its full asset (no crop) so its
               // off-canvas part survives; fitDataUrlToDisplayedBox then only matches aspect.
               cropRegion: isMaskedImage
-                ? buildDisplayedImageCropRegion(imageElement, viewportRect)
+                ? remapRegionForOrientation(buildDisplayedImageCropRegion(imageElement, viewportRect))
                 : null,
             };
           }
@@ -3452,6 +3835,7 @@
             preferSnapshot = true;
           }
 
+          const layerAnimation = (fiberModelById[String(node.id || "")] || {}).animation || null;
           const layerRecord = {
             id: String(node.id || `layer-${layerIndex + 1}`),
             parentId: parentId || null,
@@ -3461,6 +3845,7 @@
               imageTitleHint ||
               `${kind === "text" ? "Text" : shapeImageDataUrl ? "Shape" : kind === "shape" ? "Shape" : "Image"} ${layerIndex + 1}`,
             kind,
+            ...(layerAnimation ? { animation: layerAnimation } : {}),
             x,
             y,
             width: roundedWidth,
@@ -3658,6 +4043,355 @@
           }
         });
         for (const layer of layers) delete layer.imageAcquisitionJob;
+
+        // ── Additive supplement: append the model's OFF-SCREEN elements ─────────────────────────
+        // A timeline/video design renders only the current frame in the DOM, so the loop above
+        // captured just that frame. The fiber model is a SUPERSET — append every model element not
+        // already captured, built from model data (design-px geometry, animation, text content+style,
+        // or a shared-media image). Static designs (model ⊆ DOM) add nothing here, so the proven DOM
+        // path is untouched. Canva instances one media across many elements, so a single rendered
+        // instance resolves the pixels for all off-screen instances of that media.
+        try {
+          const sx = Number(designScaleX) || 1;
+          const sy = Number(designScaleY) || 1;
+          const capturedIds = new Set(layers.map((l) => String(l.id || "")));
+          const capturedByMedia = {};
+          for (const l of layers) {
+            const m = fiberModelById[String(l.id || "")];
+            const mediaId = m && m.image && m.image.mediaId;
+            if (!mediaId || capturedByMedia[mediaId]) continue;
+            const url = String(l.imageSrc || "");
+            const data = String(l.imageDataUrl || "");
+            if ((url && /^https?:\/\//i.test(url)) || data.startsWith("data:image/")) {
+              capturedByMedia[mediaId] = {
+                imageSrc: /^https?:\/\//i.test(url) ? url : "",
+                imageDataUrl: data.startsWith("data:image/") ? data : "",
+              };
+            }
+          }
+          // Canva font token "X,0" → CSS family "X_0" (Canva loads each design font under the
+          // underscore name; the existing font-asset collector captures the loaded FontFaces).
+          const fontTokenToFamily = (token) => String(token || "").trim().replace(/,/g, "_");
+          const clampOpacity = (transparency) => {
+            let t = Number(transparency) || 0;
+            if (t > 1) t /= 100;
+            return Math.max(0, Math.min(1, 1 - t));
+          };
+
+          const supplementImages = [];
+          let supplementText = 0;
+          let unresolvedMedia = 0;
+          let unresolvedAnimated = 0;
+          let backgroundPosterAdded = false;
+          for (const id of Object.keys(fiberModelById)) {
+            if (id.startsWith("__")) continue; // meta entries (e.g. __background), not elements
+            if (capturedIds.has(id)) continue;
+            const el = fiberModelById[id];
+            if (!el || !el.type) continue;
+            const w = Math.max(1, Math.round(el.width));
+            const h = Math.max(1, Math.round(el.height));
+            if (w <= 1 || h <= 1) continue;
+            const x = el.left;
+            const y = el.top;
+            const base = {
+              id,
+              parentId: null,
+              x,
+              y,
+              width: w,
+              height: h,
+              angle: Number(el.rotation) || 0,
+              flipX: false,
+              flipY: false,
+              viewportRect: { x: rect.x + x / sx, y: rect.y + y / sy, width: w / sx, height: h / sy },
+              pageRelativeRect: { x, y, width: w, height: h },
+              zIndex: 1000 + supplementText + supplementImages.length,
+              opacity: clampOpacity(el.transparency),
+              fallback: false,
+              fallbackReason: "",
+              hasCompanionText: false,
+              fromModel: true,
+              ...(el.animation ? { animation: el.animation } : {}),
+            };
+            if (el.type === "text" && el.text && String(el.text.plaintext || "").trim()) {
+              const t = el.text;
+              const plainText = String(t.plaintext).replace(/[\r\n]+$/, "");
+              layers.push({
+                ...base,
+                name: plainText.trim().slice(0, 40) || `Text ${supplementText + 1}`,
+                kind: "text",
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text: plainText,
+                textAlign: t.textAlign || "center",
+                color: t.color || "#111827",
+                fontFamily: fontTokenToFamily(t.fontFamilyToken) || "sans-serif",
+                fontSize: Number(t.fontSize) > 0 ? Number(t.fontSize) : Math.max(12, Math.round(h * 0.6)),
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+              });
+              supplementText += 1;
+            } else if (el.type === "rect" && el.image && el.image.mediaId) {
+              const captured = capturedByMedia[el.image.mediaId];
+              if (!captured || (!captured.imageSrc && !captured.imageDataUrl)) {
+                unresolvedMedia += 1;
+                if (el.animation && (el.animation.motionPath || el.animation.mode)) {
+                  unresolvedAnimated += 1;
+                }
+                continue;
+              }
+              const record = {
+                ...base,
+                name: `Image ${supplementImages.length + 1}`,
+                kind: "image",
+                flipX: Boolean(el.image.flipX),
+                flipY: Boolean(el.image.flipY),
+                imageSrc: captured.imageSrc || captured.imageDataUrl,
+                imageDataUrl: captured.imageDataUrl || "",
+                imageProvenance: "model-shared-media",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                // model in-frame crop (fill.sb); applied downstream in a later pass, kept so the
+                // per-instance framing isn't lost when one media is reused across many elements.
+                sourceCrop: el.image.crop || null,
+                text: "",
+                textAlign: "left",
+                color: "#111827",
+                fontFamily: "",
+                fontSize: 0,
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+              };
+              layers.push(record);
+              supplementImages.push(record);
+            }
+          }
+
+          // Fetch full-media bytes for shared-media images that only resolved to a URL, so the
+          // template is self-contained (survives multipart transport like the DOM-captured layers).
+          const needBytes = supplementImages.filter(
+            (l) => !String(l.imageDataUrl || "").startsWith("data:image/") && /^https?:\/\//i.test(String(l.imageSrc || ""))
+          );
+          if (needBytes.length) {
+            await runWithConcurrency(needBytes, 6, async (layer) => {
+              try {
+                const dataUrl = await readRemoteImageAssetAsDataUrl(layer.imageSrc);
+                if (dataUrl && dataUrl.startsWith("data:image/")) layer.imageDataUrl = dataUrl;
+              } catch (_e) {
+                /* keep the URL as a fallback */
+              }
+            });
+          }
+
+          // Per-instance crop: when the model's fill.sb (media draw rect in element-frame coords)
+          // differs from the frame, the element shows a SLICE of the media, not all of it — crop the
+          // shared media to the visible region so reused media renders each instance's own slice.
+          // Most instanced decorations have sb == frame (full image, no crop) and skip untouched.
+          await runWithConcurrency(supplementImages, 4, async (layer) => {
+            const crop = layer.sourceCrop;
+            if (!crop || !(crop.width > 0) || !(crop.height > 0)) return;
+            if (Math.abs(Number(crop.rotation) || 0) > 0.5) return; // rotated fills: keep full media
+            const frameW = Number(layer.width) || 0;
+            const frameH = Number(layer.height) || 0;
+            if (frameW < 1 || frameH < 1) return;
+            const matchesFrame =
+              Math.abs(crop.left) < 1 &&
+              Math.abs(crop.top) < 1 &&
+              Math.abs(crop.width - frameW) < 2 &&
+              Math.abs(crop.height - frameH) < 2;
+            if (matchesFrame) return;
+            const dataUrl = String(layer.imageDataUrl || "");
+            if (!dataUrl.startsWith("data:image/")) return;
+            // visible region = media rect ∩ frame rect, expressed as fractions of the media rect
+            const visX = Math.max(0, crop.left);
+            const visY = Math.max(0, crop.top);
+            const visRight = Math.min(frameW, crop.left + crop.width);
+            const visBottom = Math.min(frameH, crop.top + crop.height);
+            if (visRight - visX < 1 || visBottom - visY < 1) return;
+            const region = {
+              x: (visX - crop.left) / crop.width,
+              y: (visY - crop.top) / crop.height,
+              width: (visRight - visX) / crop.width,
+              height: (visBottom - visY) / crop.height,
+            };
+            try {
+              const cropped = await fitDataUrlToDisplayedBox(
+                dataUrl,
+                Math.max(1, Math.round(visRight - visX)),
+                Math.max(1, Math.round(visBottom - visY)),
+                region
+              );
+              if (cropped?.dataUrl && cropped.dataUrl.startsWith("data:image/")) {
+                layer.imageDataUrl = cropped.dataUrl;
+                layer.imageSrc = cropped.dataUrl;
+                layer.imageProvenance = "model-shared-media-crop";
+                layer.sourceWidth = cropped.width;
+                layer.sourceHeight = cropped.height;
+              }
+            } catch (_cropError) {
+              /* keep the uncropped media */
+            }
+          });
+
+          // ── Page background VIDEO → static poster-frame layer ─────────────────────────────────
+          // Canva video files are signed/protected, but the poster JPG is public and its URL was
+          // harvested from resource timing (background.js __background extraction). Import it as a
+          // bottom-most full-canvas image with the clip's own transparency so the wash matches
+          // Canva; all 6 scenes reuse one video here, so a single poster spans the whole timeline.
+          try {
+            const bg = fiberModelById.__background;
+            const firstVideoClip =
+              bg && Array.isArray(bg.clips) ? bg.clips.find((c) => c && c.video) : null;
+            const posterUrl =
+              firstVideoClip && firstVideoClip.video && bg.posters
+                ? bg.posters[firstVideoClip.video.videoId] || ""
+                : "";
+            if (posterUrl) {
+              const posterDataUrl = await readRemoteImageAssetAsDataUrl(posterUrl);
+              if (posterDataUrl && posterDataUrl.startsWith("data:image/")) {
+                const pageW = Math.max(1, Math.round(Number(designWidth || rect.width)));
+                const pageH = Math.max(1, Math.round(Number(designHeight || rect.height)));
+                const rb = firstVideoClip.video.rb;
+                let finalDataUrl = posterDataUrl;
+                if (rb && rb.width > 0 && rb.height > 0) {
+                  // the clip covers the page from a larger video rect — crop the poster to the
+                  // page-visible region so the framing matches
+                  const region = {
+                    x: Math.max(0, Math.min(1, (0 - rb.left) / rb.width)),
+                    y: Math.max(0, Math.min(1, (0 - rb.top) / rb.height)),
+                    width: Math.max(0.01, Math.min(1, pageW / rb.width)),
+                    height: Math.max(0.01, Math.min(1, pageH / rb.height)),
+                  };
+                  try {
+                    const fitted = await fitDataUrlToDisplayedBox(posterDataUrl, pageW, pageH, region);
+                    if (fitted?.dataUrl) finalDataUrl = fitted.dataUrl;
+                  } catch (_fitError) {
+                    /* keep the full poster */
+                  }
+                }
+                const totalMs = (bg.clips || []).reduce((a, c) => a + (Number(c.durationMs) || 0), 0);
+                layers.push({
+                  id: "model-background-video-poster",
+                  parentId: null,
+                  name: "Background video (poster frame)",
+                  kind: "image",
+                  x: 0,
+                  y: 0,
+                  width: pageW,
+                  height: pageH,
+                  angle: 0,
+                  flipX: false,
+                  flipY: false,
+                  viewportRect: { x: rect.x, y: rect.y, width: rect.width, height: rect.height },
+                  pageRelativeRect: { x: 0, y: 0, width: pageW, height: pageH },
+                  imageSrc: finalDataUrl,
+                  imageDataUrl: finalDataUrl,
+                  imageProvenance: "background-video-poster",
+                  preferSnapshot: false,
+                  sourceWidth: undefined,
+                  sourceHeight: undefined,
+                  text: "",
+                  textAlign: "left",
+                  color: "#111827",
+                  fontFamily: "",
+                  fontSize: 0,
+                  fontStyle: "normal",
+                  fontWeight: 400,
+                  lineHeight: 1.2,
+                  letterSpacing: 0,
+                  textDecoration: "none",
+                  textBackgroundColor: "",
+                  textBackgroundRadius: 0,
+                  fill: "",
+                  zIndex: -10,
+                  opacity: Math.max(
+                    0.05,
+                    Math.min(1, 1 - (Number(firstVideoClip.video.transparency) || 0))
+                  ),
+                  titleEn: "",
+                  tagsEn: [],
+                  labelsEn: [],
+                  isBackgroundNode: true,
+                  isFullPageBackground: true,
+                  fallback: true,
+                  fallbackReason: "background-video-poster",
+                  fromModel: true,
+                  ...(totalMs > 0 ? { timelineStartMs: 0, timelineEndMs: totalMs } : {}),
+                });
+                backgroundPosterAdded = true;
+              }
+            }
+          } catch (_bgPosterError) {
+            /* best-effort */
+          }
+
+          if (supplementText || supplementImages.length || unresolvedMedia || backgroundPosterAdded) {
+            console.log(
+              `[canva-scraper] timeline supplement: +${supplementText} text, +${supplementImages.length} image (off-screen model layers); ${unresolvedMedia} media unresolved; bgPoster=${backgroundPosterAdded}`
+            );
+          }
+          timelineSupplementSummary = {
+            addedText: supplementText,
+            addedImages: supplementImages.length,
+            unresolvedMedia,
+            unresolvedAnimated,
+            backgroundVideoPoster: backgroundPosterAdded,
+          };
+        } catch (supplementError) {
+          console.warn("[canva-scraper] timeline supplement failed:", supplementError);
+        }
+
+        // ── Timeline positioning ────────────────────────────────────────────────────────────────
+        // Map each layer's model timing (startUs/durationUs) → the editor's per-element timeline
+        // window (timelineStartMs/EndMs). Without this, a timeline/video design's elements — which
+        // Canva SEQUENCES over the timeline (text flies in one after another) — all render at t=0 in
+        // the editor and pile into an unreadable stack. Layers with no model timing (or 0 duration)
+        // keep the editor's defaults (full page). The page duration is derived editor-side from the
+        // max end so it stretches to fit (a 44s video shows 0:44, not the 15s default).
+        try {
+          const usToMsFloor = (us) => {
+            const n = Number(us);
+            return Number.isFinite(n) && n > 0 ? Math.round(n / 1000) : 0;
+          };
+          for (const layer of layers) {
+            const model = fiberModelById[String((layer && layer.id) || "")];
+            if (!model) continue;
+            const startMs = usToMsFloor(model.startUs);
+            const durMs = usToMsFloor(model.durationUs);
+            if (durMs > 0) {
+              layer.timelineStartMs = startMs;
+              layer.timelineEndMs = startMs + durMs;
+            }
+          }
+        } catch (timelineError) {
+          console.warn("[canva-scraper] timeline positioning failed:", timelineError);
+        }
 
         const imageMetadataById = shouldCollectLayerMetadata
           ? await collectCanvaLayerMetadata(
@@ -4000,6 +4734,7 @@
         sourceType: selectedCanvas ? "canvas" : "page-frame",
         layers,
         fontAssets: resolvedFontAssets,
+        timelineSupplement: timelineSupplementSummary,
       };
       
   }

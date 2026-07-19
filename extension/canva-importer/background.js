@@ -634,6 +634,91 @@ function buildSingleImageFabricObject(imageDataUrl, width, height, options = {})
   };
 }
 
+// Canva numeric animation-preset id → the editor's animation type (a name the editor's
+// normalizeAnimationType / ANIMATION_TYPE_ALIASES understands). CALIBRATED 2026-07-13 by applying
+// each animation in Canva's Animate panel to a scratch element and reading
+// `element.animation.animation` off the React fiber after each click (two passes, cross-checked).
+// Unmapped presets fall back to a sensible type by mode below.
+const CANVA_ANIMATION_PRESET_TO_TYPE = {
+  1: "BASELINE", // Baseline
+  2: "BREATHE", // ظهور بطيء (Breathe / slow reveal)
+  3: "DRIFT", // انجراف (Drift)
+  4: "FADE", // تلاشي (Fade)
+  5: "NEON", // نيون (Neon)
+  6: "PAN", // تأرجح (Pan)
+  7: "POP", // انبثاق (Pop)
+  8: "RISE", // ارتقاء (Ascend/Rise)
+  9: "SCRAPBOOK", // سجل قصاصات (Scrapbook)
+  11: "STOMP", // سقوط هوائي (Stomp / aerial drop)
+  12: "TECTONIC", // حركة تكتونية (Tectonic)
+  13: "TUMBLE", // دوران (Tumble)
+  // 14-16, 30, 38-42: PHOTO panel presets (calibrated 2026-07-14 on an image element).
+  14: "DRIFT", // انسيابية الصورة (Image flow — slow photo drift)
+  15: "BREATHE", // تكبير الصورة (Photo zoom / Ken Burns — closest editor motion is the slow scale wave)
+  16: "RISE", // ارتقاء الصور (Photo rise)
+  17: "WIPE", // Block (text block reveal — closest editor motion)
+  26: "WIPE", // المسح (Wipe)
+  // 28 is NOT a panel preset: it's the id Canva assigns to CUSTOM "create an animation" motion
+  // paths (baked Acb keyframes) — imported exactly via mediaMotionPath, never via this table.
+  29: "BLUR", // تمويه (Blur)
+  30: "WIPE", // اسحب الفرشاة (Brush reveal — progressive reveal, closest is wipe)
+  31: "SUCCESSION", // التتابع (Succession)
+  38: "PULSE", // تكبير اهتزازي (Shake zoom)
+  39: "PAN", // انزلاق سريع (Quick slide)
+  41: "FLICKER", // موجة الانحراف اللوني (Chromatic aberration wave — glitch-like)
+  42: "FLICKER", // التلفزيون القديم (Old TV — glitch/static)
+};
+
+// Canva easing enum → editor easing (best-effort; editor also has its own per-type defaults).
+const CANVA_ANIMATION_EASING_TO_EDITOR = { 0: "LINEAR", 1: "EASE_OUT", 2: "EASE_IN_OUT" };
+
+// Map the scraper's raw fiber animation ({canvaPreset, mode, durationMs, easing}) to the editor's
+// mediaAnimation* element fields. Type uses the calibrated preset table when known, else a
+// mode-based fallback so the layer still animates (entrance/exit → FADE, emphasis → PULSE).
+function buildEditorAnimationFields(animation) {
+  if (!animation || typeof animation !== "object") return {};
+  const fields = {
+    // keep the raw Canva preset on the object for DB verification + future re-calibration
+    canvaAnimationPreset: Number.isFinite(Number(animation.canvaPreset)) ? Number(animation.canvaPreset) : null,
+  };
+  // Custom "create an animation" motion path (e.g. wedding doors sliding apart) — keyframed
+  // position offsets the editor's previewRuntime interpolates. Composes with a preset when the
+  // element also has entrance/exit tracks; a PURE motion path gets NO preset type (a fabricated
+  // FADE/PULSE would play motion Canva never authored).
+  const hasMotionPath = Array.isArray(animation.motionPath) && animation.motionPath.length >= 2;
+  if (hasMotionPath) fields.mediaMotionPath = animation.motionPath;
+  const hasIn = Number(animation.inMs) > 0;
+  const hasOut = Number(animation.outMs) > 0;
+  let mode = ["IN", "OUT", "LOOP"].includes(animation.mode) ? animation.mode : undefined;
+  // Canva elements with BOTH tracks animate in at window start AND out at window end.
+  if (hasIn && hasOut) mode = "IN_OUT";
+  // SAFETY NET — un-baked animations: when a design's animations were edited in the OPEN Canva
+  // session, the model holds the preset id but EMPTY Sv tracks (no durations/keyframes) until the
+  // page is reloaded from the server. Rather than importing a dead element, emit the mapped type
+  // as a default entrance so the animation is at least present. (A Canva page refresh + reimport
+  // recovers the exact durations and custom-path keyframes.)
+  if (!mode && !hasMotionPath && fields.canvaAnimationPreset !== null) {
+    mode = "IN";
+    if (!Number(animation.durationMs)) animation = { ...animation, durationMs: 1500 };
+  }
+  if (!mode && !hasMotionPath) return fields.canvaAnimationPreset === null ? {} : fields;
+  if (mode) {
+    const mappedType = CANVA_ANIMATION_PRESET_TO_TYPE[animation.canvaPreset];
+    fields.mediaAnimationType = mappedType || (mode === "LOOP" ? "PULSE" : "FADE");
+    fields.mediaAnimationMode = mode;
+    const durationMs = Number(animation.durationMs) > 0 ? Math.round(Number(animation.durationMs)) : undefined;
+    if (durationMs) fields.mediaAnimationDurationMs = durationMs;
+    if (mode === "IN_OUT") {
+      fields.mediaAnimationDurationMs = Math.round(Number(animation.inMs));
+      fields.mediaAnimationOutDurationMs = Math.round(Number(animation.outMs));
+    }
+    const easing = CANVA_ANIMATION_EASING_TO_EDITOR[animation.easing];
+    if (easing) fields.mediaAnimationEasing = easing;
+    if (mode === "LOOP") fields.mediaAnimationInfinite = true;
+  }
+  return fields;
+}
+
 function annotateImportMetadata(object, layer, fallbackOverride) {
   const fallbackReason = String(
     fallbackOverride?.reason || layer?.fallbackReason || (layer?.preferSnapshot ? "masked-or-clipped" : "")
@@ -654,6 +739,17 @@ function annotateImportMetadata(object, layer, fallbackOverride) {
     fallbackReason,
     ...(layer && typeof layer.imageProvenance === "string" && layer.imageProvenance
       ? { imageProvenance: layer.imageProvenance }
+      : {}),
+    // Per-element animation captured from Canva's design model (fiber-walk) → editor fields.
+    ...buildEditorAnimationFields(layer?.animation),
+    // Per-element timeline window (when the element appears/disappears) from the model's
+    // startUs/durationUs — so a sequenced timeline/video design plays in order instead of piling
+    // every element at t=0. The editor reads these (SidePanel → resolveTimelineWindow).
+    ...(Number.isFinite(Number(layer?.timelineStartMs))
+      ? { timelineStartMs: Math.max(0, Math.round(Number(layer.timelineStartMs))) }
+      : {}),
+    ...(Number.isFinite(Number(layer?.timelineEndMs))
+      ? { timelineEndMs: Math.max(0, Math.round(Number(layer.timelineEndMs))) }
       : {}),
     // Permanent build stamp — lets the DB prove which service-worker version produced an
     // import (the worker can stay cached on an old version even when the badge updates).
@@ -1320,7 +1416,10 @@ async function buildHybridFabricObjects(
     const shouldRasterizeUnsupportedText =
       layerKind === "text" &&
       Boolean(layerFontFamily) &&
-      unsupportedTextFamilies.has(layerFontFamily);
+      unsupportedTextFamilies.has(layerFontFamily) &&
+      // Off-screen model (timeline supplement) text is NOT in the screenshot, so rasterizing it
+      // from a screenshot crop would yield a blank — keep it as an editable text object instead.
+      !layer?.fromModel;
     if (shouldRasterizeUnsupportedText) {
       const viewportRect = layer?.viewportRect;
       if (viewportRect) {
@@ -1371,6 +1470,12 @@ async function buildHybridFabricObjects(
       }
     }
     if (layerKind !== "image") {
+      continue;
+    }
+    // Off-screen model (timeline supplement) images aren't in the screenshot, so every
+    // screenshot-crop fallback below would bake a blank raster. The direct path above already
+    // used the shared-media pixels; if that failed there's nothing to salvage — skip cleanly.
+    if (layer?.fromModel) {
       continue;
     }
 
@@ -1883,6 +1988,450 @@ async function getBasicCaptureMetaFromTab(tabId) {
   return result && typeof result === "object" ? result : null;
 }
 
+// Extract Canva's full per-element design model from the React fiber. This MUST run in the page's
+// MAIN world — content scripts run in an ISOLATED world where DOM nodes do NOT expose React's
+// __reactFiber$ expando, so the same walk inside canva-scraper.js (isolated) always returns {}. It
+// is injected via chrome.scripting.executeScript({ world: "MAIN", func: extractCanvaFiberModel }) and
+// so must be fully SELF-CONTAINED (no outer references). Returns { [LBid]: { type, left, top, width,
+// height, rotation, transparency, startUs, durationUs, animation, text, image } } — a superset of the
+// DOM used to supplement off-screen layers of timeline/video designs. Mirrors canva-scraper.js's
+// buildFiberElementModel(); keep the two in sync. Best-effort: {} on any failure.
+function extractCanvaFiberModel() {
+  const result = {};
+  try {
+    const usToMs = (us) =>
+      Number.isFinite(Number(us)) && Number(us) > 0 ? Math.round(Number(us) / 1000) : undefined;
+    const seed = document.querySelector('[id^="LB"]');
+    if (!seed) return result;
+    const fiberKey = Object.keys(seed).find((k) => k.startsWith("__reactFiber$"));
+    if (!fiberKey) return result;
+    let fiber = seed[fiberKey];
+    let doc = null;
+    let hops = 0;
+    while (fiber && hops < 120) {
+      const props = fiber.memoizedProps;
+      if (
+        props &&
+        props.document &&
+        (props.document.doctype !== undefined || props.document.pages !== undefined)
+      ) {
+        doc = props.document;
+        break;
+      }
+      fiber = fiber.return;
+      hops += 1;
+    }
+    if (!doc) return result;
+    const seen = new Set();
+    let elementsArray = null;
+    const findElements = (obj, depth) => {
+      if (elementsArray || !obj || typeof obj !== "object" || depth > 14 || seen.has(obj)) return;
+      seen.add(obj);
+      if (Array.isArray(obj)) {
+        if (
+          obj.length &&
+          obj.some((it) => it && typeof it.id === "string" && /^LB/.test(it.id) && "animation" in it)
+        ) {
+          elementsArray = obj;
+          return;
+        }
+        for (const it of obj) findElements(it, depth + 1);
+      } else {
+        for (const key in obj) {
+          try {
+            findElements(obj[key], depth + 1);
+          } catch (_e) {
+            /* observable getters can throw */
+          }
+        }
+      }
+    };
+    findElements(doc, 0);
+    if (!elementsArray) return result;
+    const allElements = [];
+    const collected = new Set();
+    const collect = (items, depth) => {
+      if (!Array.isArray(items) || depth > 10) return;
+      for (const el of items) {
+        if (!el || typeof el !== "object" || collected.has(el)) continue;
+        collected.add(el);
+        allElements.push(el);
+        for (const key in el) {
+          try {
+            const val = el[key];
+            if (Array.isArray(val) && val.some((it) => it && typeof it === "object" && "type" in it)) {
+              collect(val, depth + 1);
+            }
+          } catch (_e) {
+            /* ignore */
+          }
+        }
+      }
+    };
+    collect(elementsArray, 0);
+
+    // Canva custom "create an animation" motion paths are DELTA-encoded keyframe streams: a time
+    // array (per-sample ms deltas, all ≥0, summing ≈ durationUs/1000) + x/y px delta arrays.
+    // MINIFIED NAMES ROTATE BETWEEN CANVA DEPLOYS (observed: dts/eGd/gGd → dts/SGd/UGd), so the
+    // arrays are identified STRUCTURALLY: time = the non-negative array whose sum best matches the
+    // track duration; x/y = the remaining two by known-name priority, else alphabetical order.
+    const decodeMotionPath = (track) => {
+      try {
+        if (!track || typeof track !== "object") return null;
+        const arrays = Object.keys(track).filter(
+          (k) => Array.isArray(track[k]) && track[k].length >= 2 && track[k].every((v) => Number.isFinite(Number(v)))
+        );
+        if (arrays.length < 2) return null;
+        const durationMsTarget = Number(track.durationUs) > 0 ? Number(track.durationUs) / 1000 : null;
+        const sums = {};
+        for (const k of arrays) sums[k] = track[k].reduce((a, v) => a + (Number(v) || 0), 0);
+        // time array: all non-negative; when several qualify, the one closest to the track duration
+        let timeKey = null;
+        let bestScore = Infinity;
+        for (const k of arrays) {
+          if (!track[k].every((v) => Number(v) >= 0)) continue;
+          const score = durationMsTarget ? Math.abs(sums[k] - durationMsTarget) : -sums[k];
+          if (score < bestScore) {
+            bestScore = score;
+            timeKey = k;
+          }
+        }
+        if (!timeKey) return null;
+        const rest = arrays.filter((k) => k !== timeKey);
+        if (!rest.length) return null;
+        const X_NAMES = ["eGd", "SGd"];
+        const Y_NAMES = ["gGd", "UGd"];
+        let xKey = rest.find((k) => X_NAMES.includes(k));
+        let yKey = rest.find((k) => Y_NAMES.includes(k));
+        if (!xKey || !yKey) {
+          const ordered = [...rest].sort();
+          xKey = xKey || ordered.find((k) => k !== yKey);
+          yKey = yKey || ordered.find((k) => k !== xKey) || null;
+        }
+        const dts = track[timeKey];
+        const xs = track[xKey];
+        const ys = yKey ? track[yKey] : null;
+        const n = Math.min(dts.length, xs.length, ys ? ys.length : xs.length);
+        let t = 0;
+        let x = 0;
+        let y = 0;
+        const raw = [];
+        for (let i = 0; i < n; i += 1) {
+          t += Number(dts[i]) || 0;
+          x += Number(xs[i]) || 0;
+          y += Number(ys ? ys[i] : 0) || 0;
+          raw.push({ t: Math.round(t), x: Math.round(x * 10) / 10, y: Math.round(y * 10) / 10 });
+        }
+        if (raw.length < 2) return null;
+        let span = 0;
+        for (const p of raw) span = Math.max(span, Math.abs(p.x), Math.abs(p.y));
+        if (span < 2) return null;
+        const MAX_POINTS = 48;
+        if (raw.length <= MAX_POINTS) return raw;
+        const sampled = [];
+        for (let i = 0; i < MAX_POINTS; i += 1) {
+          sampled.push(raw[Math.round((i * (raw.length - 1)) / (MAX_POINTS - 1))]);
+        }
+        return sampled;
+      } catch (_e) {
+        return null;
+      }
+    };
+    const extractAnimation = (el) => {
+      const anim = el && el.animation;
+      if (!anim || typeof anim !== "object") return null;
+      // Track CONTAINER found structurally (was anim.Sv, now anim.Tv — names rotate): the first
+      // object-valued prop whose children include a track ({durationUs > 0}).
+      let container = null;
+      for (const key of Object.keys(anim)) {
+        const v = anim[key];
+        if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+        for (const kk of Object.keys(v)) {
+          const t = v[kk];
+          if (t && typeof t === "object" && Number(t.durationUs) > 0) {
+            container = v;
+            break;
+          }
+        }
+        if (container) break;
+      }
+      // classify tracks by SHAPE: ≥2 numeric arrays = keyframe/loop track; else plain duration
+      // tracks — entrance/exit resolved by known names first (Wf=in; tf/sf=out), else by order.
+      let inTrack = null;
+      let outTrack = null;
+      let kfCandidate = null;
+      if (container) {
+        const plain = [];
+        for (const kk of Object.keys(container)) {
+          const t = container[kk];
+          if (!t || typeof t !== "object" || !(Number(t.durationUs) > 0)) continue;
+          const arrayCount = Object.keys(t).filter((a) => Array.isArray(t[a]) && t[a].length >= 2).length;
+          if (arrayCount >= 2) kfCandidate = t;
+          else plain.push({ key: kk, track: t });
+        }
+        const inPlain = plain.find((p) => ["Wf", "in", "enter"].includes(p.key)) || plain[0] || null;
+        const outPlain =
+          plain.find((p) => ["tf", "sf", "out", "exit"].includes(p.key)) ||
+          plain.find((p) => p !== inPlain) ||
+          null;
+        inTrack = inPlain ? inPlain.track : null;
+        outTrack = outPlain && outPlain !== inPlain ? outPlain.track : null;
+      }
+      const motionPath = kfCandidate ? decodeMotionPath(kfCandidate) : null;
+      const loopTrack = motionPath ? null : kfCandidate;
+      let mode;
+      let durationMs;
+      let easingRaw;
+      if (inTrack) {
+        mode = "IN";
+        durationMs = usToMs(inTrack.durationUs);
+        easingRaw = inTrack.easing;
+      } else if (loopTrack) {
+        mode = "LOOP";
+        durationMs = usToMs(loopTrack.durationUs);
+        easingRaw = loopTrack.easing;
+      } else if (outTrack) {
+        mode = "OUT";
+        durationMs = usToMs(outTrack.durationUs);
+        easingRaw = outTrack.easing;
+      }
+      const canvaPreset = Number.isFinite(Number(anim.animation)) ? Number(anim.animation) : null;
+      if (canvaPreset === null && !mode && !motionPath) return null;
+      return {
+        canvaPreset,
+        family: typeof anim.type === "string" ? anim.type : undefined,
+        mode,
+        inMs: inTrack ? usToMs(inTrack.durationUs) : undefined,
+        outMs: outTrack ? usToMs(outTrack.durationUs) : undefined,
+        loopMs: loopTrack ? usToMs(loopTrack.durationUs) : undefined,
+        durationMs,
+        delayMs: usToMs(el.startUs),
+        easing: Number.isFinite(Number(easingRaw)) ? Number(easingRaw) : undefined,
+        ...(motionPath ? { motionPath } : {}),
+      };
+    };
+    const extractText = (el) => {
+      try {
+        const stream = el.text && el.text.stream;
+        if (!stream) return null;
+        let plaintext = "";
+        const cells = stream.cells || {};
+        // run-strings array (was cells.xc — minified names rotate): first all-string array
+        let runs = Array.isArray(cells.xc) ? cells.xc : null;
+        if (!runs) {
+          for (const k of Object.keys(cells)) {
+            const v = cells[k];
+            if (Array.isArray(v) && v.length && v.every((x) => typeof x === "string")) {
+              runs = v;
+              break;
+            }
+          }
+        }
+        if (Array.isArray(runs)) plaintext = runs.join("");
+        plaintext = String(plaintext == null ? "" : plaintext);
+        const items = stream.attrs && stream.attrs.items;
+        let style = {};
+        if (Array.isArray(items) && items.length) {
+          // Style bag prop name rotates between deploys (observed j7→q7, Pdb→Xdb) — resolve
+          // STRUCTURALLY: any child object carrying CSS-ish keys; the inner keys ("color",
+          // "font-family", …) are stable. Mixed-script text (Arabic name + Latin year) splits into
+          // runs whose FIRST run may lack font/size — merge across ALL runs, first defined wins.
+          const merged = {};
+          for (const item of items) {
+            if (!item || typeof item !== "object") continue;
+            let bag = null;
+            for (const k of Object.keys(item)) {
+              const v = item[k];
+              if (!v || typeof v !== "object") continue;
+              if (!("font-family" in v) && !("color" in v) && !("font-size" in v)) continue;
+              if (!bag || typeof v["font-size"] === "number") bag = v;
+            }
+            if (!bag) continue;
+            for (const prop of ["color", "font-family", "font-size", "text-align", "direction"]) {
+              if (merged[prop] === undefined && bag[prop] !== undefined) merged[prop] = bag[prop];
+            }
+          }
+          style = {
+            color: typeof merged.color === "string" ? merged.color : undefined,
+            fontFamilyToken: typeof merged["font-family"] === "string" ? merged["font-family"] : undefined,
+            fontSize: Number(merged["font-size"]) > 0 ? Number(merged["font-size"]) : undefined,
+            textAlign: typeof merged["text-align"] === "string" ? merged["text-align"] : undefined,
+            direction: typeof merged.direction === "string" ? merged.direction : undefined,
+          };
+        }
+        return { plaintext, ...style };
+      } catch (_e) {
+        return null;
+      }
+    };
+    const extractImage = (el) => {
+      try {
+        const img = el.fill && el.fill.image;
+        const media = img && img.media;
+        if (!media || typeof media.id !== "string") return null;
+        const sb = img.sb && typeof img.sb === "object" ? img.sb : null;
+        return {
+          mediaId: media.id,
+          version: Number(media.version) || undefined,
+          crop: sb
+            ? {
+                top: Number(sb.top) || 0,
+                left: Number(sb.left) || 0,
+                width: Number(sb.width) || 0,
+                height: Number(sb.height) || 0,
+                rotation: Number(sb.rotation) || 0,
+              }
+            : null,
+          transparency: Number(img.transparency) || 0,
+          // fill-level mirroring (e.g. paired corner decorations) — lost = wrong orientation
+          flipX: Boolean(el.fill && el.fill.flipX),
+          flipY: Boolean(el.fill && el.fill.flipY),
+        };
+      } catch (_e) {
+        return null;
+      }
+    };
+    const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    for (const el of allElements) {
+      const id = String((el && el.id) || "");
+      if (!id || !/^LB/.test(id)) continue;
+      result[id] = {
+        type: typeof el.type === "string" ? el.type : "",
+        left: num(el.left),
+        top: num(el.top),
+        width: num(el.width),
+        height: num(el.height),
+        rotation: num(el.rotation),
+        transparency: num(el.transparency),
+        startUs: num(el.startUs),
+        durationUs: num(el.durationUs),
+        animation: extractAnimation(el),
+        text: el.type === "text" ? extractText(el) : null,
+        image: el.type === "rect" ? extractImage(el) : null,
+      };
+    }
+
+    // ── Page BACKGROUND clip track (video designs) ──────────────────────────────────────────────
+    // The full-canvas backdrop of a Canva video is NOT an LB element — it's a per-scene clip array
+    // on the PAGE object (each item: {durationUs, color, video:{video:"VA…", rb placement,
+    // transparency, trim}}). Video FILES are signed/protected, but the poster JPGs on
+    // video-public.canva.com are public and the editor page has already loaded them — harvest the
+    // exact URLs from resource timing. Found structurally (prop names rotate).
+    try {
+      let pageObj = null;
+      const pseen = new Set();
+      (function findPage(n, depth) {
+        if (pageObj || depth > 12 || !n || typeof n !== "object" || pseen.has(n)) return;
+        pseen.add(n);
+        if (!Array.isArray(n)) {
+          for (const k of Object.keys(n)) {
+            const v = n[k];
+            if (
+              Array.isArray(v) &&
+              v.length &&
+              v.some((it) => it && typeof it.id === "string" && /^LB/.test(it.id))
+            ) {
+              pageObj = n;
+              return;
+            }
+          }
+        }
+        const keys = Array.isArray(n) ? [...n.keys()] : Object.keys(n);
+        for (const k of keys) {
+          try {
+            findPage(n[k], depth + 1);
+          } catch (_e) {
+            /* ignore */
+          }
+        }
+      })(doc, 0);
+      if (pageObj) {
+        let clips = null;
+        for (const k of Object.keys(pageObj)) {
+          const v = pageObj[k];
+          if (!Array.isArray(v) || !v.length) continue;
+          const looksLikeClips = v.every(
+            (it) =>
+              it &&
+              typeof it === "object" &&
+              Number(it.durationUs) > 0 &&
+              !("id" in it && /^LB/.test(String(it.id)))
+          );
+          if (looksLikeClips) {
+            clips = v;
+            break;
+          }
+        }
+        if (clips) {
+          const findVideoRef = (clip) => {
+            for (const k of Object.keys(clip)) {
+              const v = clip[k];
+              if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+              // a video clip object carries a VA… reference + trim/autoplay/volume-ish fields
+              const refKey = Object.keys(v).find(
+                (kk) => typeof v[kk] === "string" && /^VA/.test(v[kk])
+              );
+              if (refKey && ("trim" in v || "autoplay" in v || "volume" in v)) {
+                let rb = null;
+                for (const kk of Object.keys(v)) {
+                  const cand = v[kk];
+                  if (
+                    cand &&
+                    typeof cand === "object" &&
+                    Number.isFinite(Number(cand.width)) &&
+                    Number.isFinite(Number(cand.left)) &&
+                    Number(cand.width) > 0
+                  ) {
+                    rb = {
+                      left: Number(cand.left) || 0,
+                      top: Number(cand.top) || 0,
+                      width: Number(cand.width) || 0,
+                      height: Number(cand.height) || 0,
+                    };
+                    break;
+                  }
+                }
+                return { videoId: v[refKey], transparency: Number(v.transparency) || 0, rb };
+              }
+            }
+            return null;
+          };
+          const outClips = [];
+          for (const clip of clips) {
+            outClips.push({
+              durationMs: Math.round(Number(clip.durationUs) / 1000),
+              color: typeof clip.color === "string" ? clip.color : null,
+              video: findVideoRef(clip),
+            });
+          }
+          const posters = {};
+          try {
+            for (const entry of performance.getEntriesByType("resource")) {
+              const m = String(entry.name || "").match(
+                /https:\/\/video-public\.canva\.com\/([^/]+)\/([pl])\/[^?#]+\.jpe?g/i
+              );
+              if (!m) continue;
+              const [url, vid, tier] = [entry.name, m[1], m[2].toLowerCase()];
+              // prefer the larger /l/ poster over /p/
+              if (!posters[vid] || (tier === "l" && !/\/l\//.test(posters[vid]))) posters[vid] = url;
+            }
+          } catch (_e) {
+            /* resource timing unavailable */
+          }
+          if (outClips.some((c) => c.video)) {
+            result.__background = { clips: outClips, posters };
+          }
+        }
+      }
+    } catch (_bgError) {
+      /* best-effort */
+    }
+  } catch (_e) {
+    /* fiber shape changed — best-effort */
+  }
+  return result;
+}
+
 async function getCaptureMetaFromTab(tabId, options = {}) {
   const shouldCollectLayerMetadata = Boolean(options?.captureMetadata);
   let results = null;
@@ -1892,9 +2441,27 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
       target: { tabId },
       files: ["canva-scraper.js"],
     });
+    // Extract Canva's design model in the MAIN world (the ONLY world that can see React's
+    // __reactFiber$), then hand it to the isolated scraper. This is what makes timeline/video
+    // designs import their full layer set + animations — the isolated content script can't reach
+    // the fiber itself. Best-effort: on failure the scraper still imports the current frame's DOM.
+    let fiberModel = {};
+    try {
+      const fiberResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: extractCanvaFiberModel,
+      });
+      const extracted = Array.isArray(fiberResults)
+        ? fiberResults.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+        : null;
+      if (extracted && typeof extracted === "object") fiberModel = extracted;
+    } catch (_fiberError) {
+      /* MAIN-world injection blocked or fiber shape changed — static designs still import. */
+    }
     results = await chrome.scripting.executeScript({
       target: { tabId },
-      args: [{ captureMetadata: shouldCollectLayerMetadata }],
+      args: [{ captureMetadata: shouldCollectLayerMetadata, fiberModel }],
       func: async (runtimeOptions = {}) => {
         const scraper = globalThis.__canvaImporterGetCaptureMetaFromTab;
         if (typeof scraper !== "function") {
@@ -2834,6 +3401,23 @@ async function importActiveCanvaTab(message, options = {}) {
   }
   if (String(captureMeta?.sourceType || "").toLowerCase().startsWith("fallback")) {
     importWarnings.push("Canvas frame detection used fallback mode.");
+  }
+  // Off-screen model elements are skipped when their image has NO rendered instance at the import
+  // frame (nothing to capture pixels from). Silent skipping loses elements — e.g. a video design's
+  // opening doors imported from a late frame. Tell the user how to get a complete capture.
+  const unresolvedMediaCount = Number(captureMeta?.timelineSupplement?.unresolvedMedia || 0);
+  if (unresolvedMediaCount > 0) {
+    const animatedCount = Number(captureMeta?.timelineSupplement?.unresolvedAnimated || 0);
+    importWarnings.push(
+      `${unresolvedMediaCount} image element(s) were SKIPPED because their image is not visible at the current frame` +
+        (animatedCount > 0 ? ` (${animatedCount} of them animated)` : "") +
+        ". Move the Canva playhead to the START of the video (0:00) and reimport to capture the full design."
+    );
+  }
+  if (captureMeta?.timelineSupplement?.backgroundVideoPoster) {
+    importWarnings.push(
+      "Background video imported as a static poster frame (Canva video files are download-protected); timing and transparency preserved."
+    );
   }
   if (isolatedSnapshotWarnings.length > 0) {
     importWarnings.push(...isolatedSnapshotWarnings);

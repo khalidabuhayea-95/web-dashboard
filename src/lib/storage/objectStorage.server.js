@@ -250,6 +250,17 @@ export function restorePublicObjectUrlFromClient(value) {
   return key ? getPublicObjectUrl(getPublicStorageBucketName(), key) : source;
 }
 
+// Only plain objects get rebuilt key-by-key. Class instances (Date, Decimal, Buffer, …) carry
+// their value internally rather than as enumerable own properties, so `Object.entries` returns
+// [] for them and rebuilding would silently collapse them to {} — a Prisma `updatedAt` Date
+// reached the client as "[object Object]", which froze the editor's template-reload signature.
+// They hold no URLs to rewrite, so pass them through untouched.
+function isPlainObject(value) {
+  if (!value || typeof value !== "object") return false;
+  const prototype = Object.getPrototypeOf(value);
+  return prototype === Object.prototype || prototype === null;
+}
+
 export function rewritePublicObjectUrlsForClient(value) {
   if (typeof value === "string") {
     return rewritePublicObjectUrlForClient(value);
@@ -257,7 +268,7 @@ export function rewritePublicObjectUrlsForClient(value) {
   if (Array.isArray(value)) {
     return value.map((item) => rewritePublicObjectUrlsForClient(item));
   }
-  if (value && typeof value === "object") {
+  if (isPlainObject(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         key,
@@ -275,7 +286,7 @@ export function restorePublicObjectUrlsFromClient(value) {
   if (Array.isArray(value)) {
     return value.map((item) => restorePublicObjectUrlsFromClient(item));
   }
-  if (value && typeof value === "object") {
+  if (isPlainObject(value)) {
     return Object.fromEntries(
       Object.entries(value).map(([key, entry]) => [
         key,

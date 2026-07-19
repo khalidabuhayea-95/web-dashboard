@@ -8,6 +8,13 @@ import {
   DEFAULT_PAGE_DURATION_MS,
   isAnimationInfiniteActive,
 } from "@/lib/editor/animationTimeline";
+import { resolveElementAnimations } from "@/lib/editor/animationSlots";
+import {
+  getAnimationDefaults,
+  normalizeSpecAnimationType,
+  normalizeSpecDirection,
+  normalizeSpecEasing,
+} from "@/lib/editor/animationSpec";
 import {
   getShapeRasterFrame,
   isRasterizableShapeLayer,
@@ -446,15 +453,22 @@ function mapLayerAnimationType(value) {
   return allowed.has(next) ? next : "NONE";
 }
 
+// Legacy direction vocabulary. The spec calls the neutral value DEFAULT; the legacy object has
+// always called the same thing CENTER, so it maps across cleanly.
 function mapLayerAnimationDirection(value) {
   const allowed = new Set(["LEFT", "RIGHT", "UP", "DOWN", "CENTER", "CLOCKWISE", "COUNTERCLOCKWISE"]);
   const next = String(value || "CENTER").toUpperCase();
+  if (next === "DEFAULT") return "CENTER";
   return allowed.has(next) ? next : "CENTER";
 }
 
+// Legacy easing vocabulary — narrower than the spec's. DEFAULT and EASE_IN have no legacy
+// equivalent, so both degrade to LINEAR: an old build showing an un-eased curve is honest,
+// whereas the old catch-all (SOFT_OUT) would turn an accelerating curve into a decelerating one.
 function mapLayerAnimationEasing(value) {
   const allowed = new Set(["LINEAR", "EASE_OUT", "EASE_IN_OUT", "SOFT_OUT", "SOFT_IN_OUT"]);
   const next = String(value || "SOFT_OUT").toUpperCase();
+  if (next === "DEFAULT" || next === "EASE_IN") return "LINEAR";
   return allowed.has(next) ? next : "SOFT_OUT";
 }
 
@@ -465,19 +479,78 @@ function mapLayerTimelineWindow(item) {
   return { startMs, endMs };
 }
 
-function mapLayerAnimation(item) {
+/**
+ * The LEGACY single-animation object, for app builds without three-slot support.
+ *
+ * Reads the element's legacy fields when it has them. When a layer was authored purely in the
+ * three-slot model those fields are NONE, so we back-fill from the slots — otherwise an older
+ * build would receive `type: "NONE"` and render the layer completely static. Only one slot fits
+ * the legacy shape: entrance wins (it's the reveal, and it's what the legacy model encoded),
+ * then loop, then exit. `mapLayerAnimationType` still narrows to the 20 types old builds know,
+ * so a new-only effect degrades to NONE there rather than to something wrong.
+ */
+function mapLayerAnimation(item, slots) {
+  const legacyType = mapLayerAnimationType(item?.mediaAnimationType);
+  if (legacyType !== "NONE") {
+    return {
+      type: legacyType,
+      infinite: isAnimationInfiniteActive(
+        item?.mediaAnimationType,
+        item?.mediaAnimationInfinite,
+        item?.mediaAnimationMode
+      ),
+      durationMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDurationMs, DEFAULT_ANIMATION_DURATION_MS))),
+      delayMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDelayMs, 0))),
+      direction: mapLayerAnimationDirection(item?.mediaAnimationDirection),
+      easing: mapLayerAnimationEasing(item?.mediaAnimationEasing),
+      intensity: clamp(numberOr(item?.mediaAnimationIntensity, 1), 0, 2),
+    };
+  }
+
+  const fallback = slots?.entrance || slots?.loop || slots?.exit || null;
+  const isLoop = Boolean(fallback && fallback === slots?.loop);
   return {
-    type: mapLayerAnimationType(item?.mediaAnimationType),
-    infinite: isAnimationInfiniteActive(
-      item?.mediaAnimationType,
-      item?.mediaAnimationInfinite,
-      item?.mediaAnimationMode
-    ),
-    durationMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDurationMs, DEFAULT_ANIMATION_DURATION_MS))),
-    delayMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDelayMs, 0))),
-    direction: mapLayerAnimationDirection(item?.mediaAnimationDirection),
-    easing: mapLayerAnimationEasing(item?.mediaAnimationEasing),
-    intensity: clamp(numberOr(item?.mediaAnimationIntensity, 1), 0, 2),
+    type: mapLayerAnimationType(fallback?.type),
+    infinite: isLoop && Boolean(fallback?.infinite),
+    durationMs: Math.max(0, Math.round(numberOr(fallback?.durationMs, DEFAULT_ANIMATION_DURATION_MS))),
+    delayMs: Math.max(0, Math.round(numberOr(fallback?.delayMs, 0))),
+    direction: mapLayerAnimationDirection(fallback?.direction),
+    easing: mapLayerAnimationEasing(fallback?.easing),
+    intensity: clamp(numberOr(fallback?.intensity, 1), 0, 2),
+  };
+}
+
+function mapAnimationSlotSpec(spec, category) {
+  if (!spec || typeof spec !== "object") return null;
+  const type = normalizeSpecAnimationType(spec.type);
+  if (type === "NONE") return null;
+  const defaults = getAnimationDefaults(type);
+  return {
+    type,
+    infinite: category === "LOOP" ? Boolean(spec.infinite) && defaults.supportsInfinite : false,
+    durationMs: Math.max(1, Math.round(numberOr(spec.durationMs, defaults.durationMs))),
+    delayMs: Math.max(0, Math.round(numberOr(spec.delayMs, defaults.delayMs))),
+    direction: normalizeSpecDirection(spec.direction ?? defaults.direction),
+    easing: normalizeSpecEasing(spec.easing ?? defaults.easing),
+    intensity: clamp(numberOr(spec.intensity, defaults.intensity), 0, 2),
+  };
+}
+
+/**
+ * The three-slot `animations` object. Emitted ALONGSIDE the legacy single `animation` above,
+ * never instead of it: the app prefers `animations` when non-empty and falls back to `animation`,
+ * so builds without three-slot support keep rendering. Slots are resolved from the element's own
+ * `animations` when present, otherwise migrated from its legacy fields.
+ */
+function mapLayerAnimations(slots) {
+  const entrance = mapAnimationSlotSpec(slots.entrance, "ENTRANCE");
+  const exit = mapAnimationSlotSpec(slots.exit, "EXIT");
+  const loop = mapAnimationSlotSpec(slots.loop, "LOOP");
+  if (!entrance && !exit && !loop) return null;
+  return {
+    ...(entrance ? { entrance } : {}),
+    ...(exit ? { exit } : {}),
+    ...(loop ? { loop } : {}),
   };
 }
 
@@ -492,13 +565,12 @@ function mapTemplateCategory(value) {
 
 const MIN_MEDIA_VISUAL_SCALE = 0.01;
 const MAX_MEDIA_VISUAL_SCALE = 16;
-const MIN_TEXT_VISUAL_SCALE = 0.05;
-const MAX_TEXT_VISUAL_SCALE = 20;
 const MEDIA_LAYER_BASE_MAX_EDGE_DP = 1080;
 const MEDIA_LAYER_BASE_MIN_EDGE_DP = 120;
 const MIN_MEDIA_CROP_SIZE = 0.05;
-const TEXT_LAYER_BASE_WIDTH_DP = 250;
-const TEXT_LAYER_BASE_HEIGHT_DP = 110;
+// Matches the mobile TextLayer.wrapWidth guard (finite, > 0). The cap is a sanity bound on
+// corrupt authoring data, well above any real canvas width.
+const TEXT_WRAP_WIDTH_MAX_DP = 8192;
 
 function readShadow(item) {
   if (item?.shadow && typeof item.shadow === "object") {
@@ -669,8 +741,11 @@ function baseLayer(item, index, canvasSize) {
   const baseWidth = Math.max(numberOr(item.width, 1), 1);
   const baseHeight = Math.max(numberOr(item.height, 1), 1);
   const timelineWindow = mapLayerTimelineWindow(item);
+  const slots = resolveElementAnimations(item || {});
+  const animations = mapLayerAnimations(slots);
 
   return {
+    ...(animations ? { animations } : {}),
     id: String(item.id || item.layerId || `layer-${index + 1}`),
     transform: buildTransform({
       item,
@@ -688,27 +763,38 @@ function baseLayer(item, index, canvasSize) {
     zIndex: index,
     timelineStartMs: timelineWindow.startMs,
     timelineEndMs: timelineWindow.endMs,
-    animation: mapLayerAnimation(item),
+    animation: mapLayerAnimation(item, slots),
   };
+}
+
+// The editor's text box width, in project px — the width the editor word-wraps at.
+// Emitted as the layer's `wrapWidth` so mobile reproduces the same line breaks.
+// Null when the element has no usable width: mobile then keeps its legacy behavior of
+// estimating a never-wrap box from the glyphs, which is the best guess available.
+function textWrapWidthFromFabric(item) {
+  const rawWidth = numberOr(item.width, 0);
+  if (!(rawWidth > 0)) return null;
+  const width = Math.abs(numberOr(item.scaleX, 1)) * rawWidth;
+  if (!Number.isFinite(width) || width <= 0) return null;
+  return Math.round(clamp(width, 1, TEXT_WRAP_WIDTH_MAX_DP) * 100) / 100;
 }
 
 function textTransformFromFabric(item, canvasSize) {
   const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
-  const widthRatio = Math.max(numberOr(item.width, TEXT_LAYER_BASE_WIDTH_DP), 1) / TEXT_LAYER_BASE_WIDTH_DP;
-  const heightRatio =
-    Math.max(numberOr(item.height, TEXT_LAYER_BASE_HEIGHT_DP), 1) / TEXT_LAYER_BASE_HEIGHT_DP;
-  const absScaleX = Math.max(Math.abs(rawScaleX) * widthRatio, 0.0001);
-  const absScaleY = Math.max(Math.abs(rawScaleY) * heightRatio, 0.0001);
   const signX = rawScaleX < 0 ? -1 : 1;
   const signY = rawScaleY < 0 ? -1 : 1;
-  const scale = 1;
 
   return {
     x: clamp(centerX, -canvasSize.width * 4, canvasSize.width * 4),
     y: clamp(centerY, -canvasSize.height * 4, canvasSize.height * 4),
-    scale,
-    scaleX: signX * clamp(absScaleX, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
-    scaleY: signY * clamp(absScaleY, MIN_TEXT_VISUAL_SCALE, MAX_TEXT_VISUAL_SCALE),
+    // Text geometry is carried by `size` (glyph size) + `wrapWidth` (column width), both in
+    // project px. scale/scaleX/scaleY therefore stay at unit magnitude and only carry the flip
+    // sign — a text layer is never graphically stretched. This replaces an older encoding that
+    // smuggled the box size in as scaleX = width / 250, scaleY = height / 110; that ratio was a
+    // stretch factor no renderer could wrap at, so mobile fell back to its never-wrap estimate.
+    scale: 1,
+    scaleX: signX,
+    scaleY: signY,
     rotation: numberOr(item.angle, numberOr(item.rotation, 0)),
     // See buildTransform: flipX/flipY mirror the sign of scaleX/scaleY. Apply one,
     // not both. Invariant: flipX === (scaleX < 0).
@@ -753,6 +839,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
   const bgOpacity = clamp(numberOr(item.textBackgroundOpacity, item.textBackgroundColor ? 1 : 0), 0, 1);
   const fontName = resolveEditorTextFontName(item);
   const font = buildTextLayerFontPayload(fontName, options?.fontLookup);
+  const wrapWidth = textWrapWidthFromFabric(item);
 
   return {
     ...base,
@@ -762,6 +849,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     ...(typeof item.isRtl === "boolean" ? { isRtl: item.isRtl } : {}),
     fontName,
     size: numberOr(item.fontSize, 42),
+    ...(wrapWidth !== null ? { wrapWidth } : {}),
     bold: textFormat.bold,
     italic: textFormat.italic,
     underline: textFormat.underline,
@@ -1680,6 +1768,7 @@ function slimMobileLayer(layer) {
         ...(typeof layer.isRtl === "boolean" ? { isRtl: layer.isRtl } : {}),
         fontName: layer.fontName,
         size: layer.size,
+        ...(typeof layer.wrapWidth === "number" ? { wrapWidth: layer.wrapWidth } : {}),
         colorHex: layer.colorHex,
         shadow: layer.shadow,
         stroke: layer.stroke,

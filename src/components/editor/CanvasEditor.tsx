@@ -1404,8 +1404,11 @@ function CanvasPageScene({
   onUpdateVideoMetadata,
   onBeginInlineTextEdit,
 }: CanvasPageSceneProps) {
+  const sceneNodeRefs = useRef<Map<string, Konva.Node>>(new Map());
   const safeRegisterRef = useCallback(
     (id: string, node: Konva.Node | null) => {
+      if (node) sceneNodeRefs.current.set(id, node);
+      else sceneNodeRefs.current.delete(id);
       registerRef?.(id, node);
     },
     [registerRef]
@@ -1417,6 +1420,51 @@ function CanvasPageScene({
     [registerPreviewMediaController]
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+
+  // Canva-parity gaussian blur (pose.blurRadius, e.g. the BLUR/تمويه entrance): Konva filters need
+  // node.cache(), so blur is applied imperatively AFTER each commit to whatever nodes the render
+  // pass flagged. Nodes are re-cached while their radius changes (playhead moves / content edits)
+  // and un-cached the moment the blur ends so normal editing/rendering is untouched.
+  const blurRadiiThisRenderRef = useRef<Map<string, number>>(new Map());
+  const blurCachedIdsRef = useRef<Set<string>>(new Set());
+  blurRadiiThisRenderRef.current = new Map();
+  useEffect(() => {
+    const radii = blurRadiiThisRenderRef.current;
+    const cached = blurCachedIdsRef.current;
+    let needsDraw = false;
+    let layer: Konva.Layer | null = null;
+    for (const [id, radius] of radii) {
+      const node = sceneNodeRefs.current.get(id);
+      if (!node) continue;
+      try {
+        node.filters([Konva.Filters.Blur]);
+        node.blurRadius(Math.round(radius * 10) / 10);
+        // offset pads the cached region so the gaussian halo isn't clipped at the node bounds
+        node.cache({ pixelRatio: 1, offset: Math.ceil(radius) + 4 });
+        cached.add(id);
+        layer = layer || node.getLayer();
+        needsDraw = true;
+      } catch {
+        /* nodes mid-unmount can throw — skip */
+      }
+    }
+    for (const id of [...cached]) {
+      if (radii.has(id)) continue;
+      cached.delete(id);
+      const node = sceneNodeRefs.current.get(id);
+      if (!node) continue;
+      try {
+        node.filters([]);
+        node.blurRadius(0);
+        node.clearCache();
+        layer = layer || node.getLayer();
+        needsDraw = true;
+      } catch {
+        /* ignore */
+      }
+    }
+    if (needsDraw && layer) layer.batchDraw();
+  });
 
   return (
     <>
@@ -1474,6 +1522,9 @@ function CanvasPageScene({
             previewFps,
             pageDurationMs
           );
+          if (pose.blurRadius >= 0.5) {
+            blurRadiiThisRenderRef.current.set(element.id, pose.blurRadius);
+          }
           const isEditingFrameContent = interactive && frameContentEditId === element.id;
           const isSelected = interactive && selectedIdSet.has(element.id);
           const canTransform =
@@ -2100,7 +2151,10 @@ export default function CanvasEditor() {
     ? activePagePlayheadFrame
     : exportFrameOverride;
   const isRenderingPreview = previewGenerationActive || captureFrameOverride !== null;
-  const showBlockingPreviewOverlay = captureFrameOverride !== null;
+  // Blocking overlay ONLY during real preview generation (save/extract video) — editing mid-recording
+  // would corrupt the recording. The timeline filmstrip renders from the hidden export stage and must
+  // never block the editor (it re-runs on load and on every element change).
+  const showBlockingPreviewOverlay = previewGenerationActive;
   const forceTimelineMediaSync = Boolean(designTimeline.enabled) || captureFrameOverride !== null || previewGenerationActive;
 
   const registerPreviewMediaController = useCallback(
@@ -2638,8 +2692,16 @@ export default function CanvasEditor() {
 
   const captureTimelineStripDataUrls = useCallback(
     async (playheadsMs: number[]) => {
-      const stage = stageRef.current;
+      // Render filmstrip frames from the HIDDEN export stage (exportFrameOverride), never the main
+      // stage: hijacking the main stage (captureFrameOverride) blanked the editor behind a blocking
+      // "Generating preview" overlay on every load/edit — and on long timeline imports that capture
+      // takes long enough to read as a hang. The export stage mirrors the same elements offscreen.
+      const stage = exportStageRef.current;
       if (!stage || !activePage || !Array.isArray(playheadsMs) || playheadsMs.length === 0) {
+        return [];
+      }
+      if (previewGenerationActive) {
+        // The export stage is busy recording the real preview video — skip this strip pass.
         return [];
       }
 
@@ -2658,31 +2720,61 @@ export default function CanvasEditor() {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
       };
 
+      // Filmstrip thumbs are tiny — capture downscaled so 10-24 frames stay cheap.
+      const thumbnailPixelRatio = Math.min(
+        1,
+        Math.max(0.05, 160 / Math.max(exportCanvasSpec.height, exportCanvasSpec.width, 1))
+      );
+
       const captures: string[] = [];
       try {
         for (const playhead of playheadsMs) {
-          setCaptureFrameOverride(
-            getFrameAlignedPlayheadFrame(
-              clamp(Number(playhead) || 0, 0, activePageDurationMs),
-              previewRenderFps,
-              activePageDurationMs
-            )
-          );
+          flushSync(() => {
+            setExportFrameOverride(
+              getFrameAlignedPlayheadFrame(
+                clamp(Number(playhead) || 0, 0, activePageDurationMs),
+                previewRenderFps,
+                activePageDurationMs
+              )
+            );
+          });
           await waitForCanvasFrame();
           stage.batchDraw();
           await waitForCanvasFrame();
-          const captured = String(captureThumbnailDataUrl() || "").trim();
-          if (captured) {
-            captures.push(captured);
+          try {
+            const captured = String(
+              stage.toDataURL({
+                x: 0,
+                y: 0,
+                width: exportCanvasSpec.width,
+                height: exportCanvasSpec.height,
+                pixelRatio: thumbnailPixelRatio,
+                mimeType: "image/png",
+              }) || ""
+            ).trim();
+            if (captured) {
+              captures.push(captured);
+            }
+          } catch {
+            // Skip frames that fail to rasterize; the strip tolerates gaps.
           }
         }
       } finally {
-        setCaptureFrameOverride(null);
+        flushSync(() => {
+          setExportFrameOverride(0);
+        });
       }
 
       return captures;
     },
-    [activePage, activePageDurationMs, captureThumbnailDataUrl, previewRenderFps]
+    [
+      activePage,
+      activePageDurationMs,
+      exportCanvasSpec.height,
+      exportCanvasSpec.width,
+      previewGenerationActive,
+      previewRenderFps,
+    ]
   );
 
   const mergeSelectedLayers = useCallback(async () => {
@@ -2904,6 +2996,21 @@ export default function CanvasEditor() {
     );
     if (textFamilies.length === 0) return;
 
+    // Konva measures a text node's lines ONCE (in _setTextData, on construction and on
+    // text-affecting attr changes) and caches the wrap points plus each line's width — a
+    // repaint never re-measures. So when a custom font finishes loading after the nodes were
+    // built, batchDraw alone paints the real glyphs over a layout measured with the FALLBACK
+    // font: the wrap is off, and align is visibly wrong because Konva positions each line by
+    // `totalWidth - line.width` using the stale width. Editing any text attr (align included)
+    // silently repaired it, which is why it only looked broken until the toolbar was touched.
+    // Force the re-measure instead.
+    const remeasureText = () => {
+      stage.find("Text, TextPath").forEach((node) => {
+        (node as unknown as { _setTextData?: () => void })._setTextData?.();
+      });
+      stage.batchDraw();
+    };
+
     let cancelled = false;
     const loadFontsAndRedraw = async () => {
       if (document.fonts?.load) {
@@ -2912,13 +3019,13 @@ export default function CanvasEditor() {
         );
       }
       if (!cancelled) {
-        stage.batchDraw();
+        remeasureText();
       }
     };
 
     void loadFontsAndRedraw();
 
-    const handleLoadingDone = () => stage.batchDraw();
+    const handleLoadingDone = () => remeasureText();
     if (document.fonts?.addEventListener) {
       document.fonts.addEventListener("loadingdone", handleLoadingDone);
     }

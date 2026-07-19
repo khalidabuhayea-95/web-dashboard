@@ -2,6 +2,12 @@ export type EditorAnimationType =
   | "NONE"
   | "RISE"
   | "PAN"
+  // Canva mirrors of RISE/PAN, the per-word ASCEND, and the sweeping BLOCK bar — added to keep
+  // the animation source-of-truth (mobile) and web in sync.
+  | "SHIFT"
+  | "SKATE"
+  | "ASCEND"
+  | "BLOCK"
   | "FADE"
   | "POP"
   | "WIPE"
@@ -38,7 +44,7 @@ export type EditorAnimationType =
   | "FLOAT"
   | "SPIN";
 
-export type EditorAnimationMode = "IN" | "OUT" | "LOOP";
+export type EditorAnimationMode = "IN" | "OUT" | "IN_OUT" | "LOOP";
 export type EditorAnimationCategory = "instant" | "transition" | "loop";
 export type EditorAnimationDirection =
   | "LEFT"
@@ -153,7 +159,9 @@ export const EDITOR_ANIMATION_PRESETS: EditorAnimationPreset[] = [
     defaultDurationMs: 900,
     defaultDelayMs: 0,
     defaultDirection: "CENTER",
-    defaultEasing: "SOFT_IN_OUT",
+    // Measured from Canva's تمويه (paused-frame sampling): opacity follows a strong ease-out
+    // and the gaussian blur radius is its mirror — SOFT_OUT matches the measured curve family.
+    defaultEasing: "SOFT_OUT",
     defaultIntensity: 1,
     supportsInfinite: true,
   },
@@ -310,6 +318,7 @@ export const EDITOR_ANIMATION_OPTIONS = EDITOR_ANIMATION_PRESETS.map(({ value, l
 export const EDITOR_ANIMATION_MODE_OPTIONS: Array<{ value: EditorAnimationMode; label: string }> = [
   { value: "IN", label: "In" },
   { value: "OUT", label: "Out" },
+  { value: "IN_OUT", label: "In & Out" },
   { value: "LOOP", label: "Loop" },
 ];
 
@@ -392,7 +401,7 @@ const SUPPORTED_ANIMATION_TYPES = new Set<EditorAnimationType>([
   "SPIN",
 ]);
 
-const SUPPORTED_ANIMATION_MODES = new Set<EditorAnimationMode>(["IN", "OUT", "LOOP"]);
+const SUPPORTED_ANIMATION_MODES = new Set<EditorAnimationMode>(["IN", "OUT", "IN_OUT", "LOOP"]);
 
 export function normalizeAnimationType(value: unknown): EditorAnimationType {
   const raw = String(value || "").trim();

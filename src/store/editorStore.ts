@@ -29,6 +29,11 @@ import {
   type EditorAnimationType,
 } from "@/lib/editor/animationTimeline";
 import {
+  isEmptyAnimationSlots,
+  normalizeAnimationSlots,
+  type EditorAnimationSlots,
+} from "@/lib/editor/animationSlots";
+import {
   DEFAULT_FRAME_CONTENT_TRANSFORM,
   createFrameShapeFromPreset,
   normalizeFrameContentTransform,
@@ -107,14 +112,25 @@ export interface EditorElement {
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
+  /**
+   * The three independent animation slots, matching the mobile app's model. This is the
+   * authoritative shape; the `mediaAnimation*` fields below are the LEGACY single-slot model,
+   * kept so old templates (and older app builds) still work. `resolveElementAnimations` reads
+   * `animations` when set and otherwise migrates the legacy fields into it.
+   */
+  animations?: EditorAnimationSlots;
   mediaAnimationType?: EditorAnimationType;
   mediaAnimationMode?: EditorAnimationMode;
   mediaAnimationInfinite?: boolean;
   mediaAnimationDurationMs?: number;
+  /** Separate exit duration for IN_OUT mode (Canva imports often blur in slow, out fast). */
+  mediaAnimationOutDurationMs?: number;
   mediaAnimationDelayMs?: number;
   mediaAnimationDirection?: EditorAnimationDirection;
   mediaAnimationEasing?: EditorAnimationEasing;
   mediaAnimationIntensity?: number;
+  /** Keyframed position offsets from Canva custom motion paths: t=ms from window start, x/y=design px. */
+  mediaMotionPath?: Array<{ t: number; x: number; y: number }>;
   sourceAnimationName?: string;
   sourceAnimationLabel?: string;
   videoStart?: number;
@@ -474,6 +490,7 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     color: partial.color ?? "#111827",
     timelineStartMs: partial.timelineStartMs ?? 0,
     timelineEndMs: partial.timelineEndMs ?? DEFAULT_PAGE_DURATION_MS,
+    ...normalizedAnimationSlotsPatch(partial.animations),
     mediaAnimationType: normalizeAnimationType(partial.mediaAnimationType),
     mediaAnimationMode: normalizeAnimationMode(partial.mediaAnimationMode),
     mediaAnimationInfinite: normalizeAnimationInfinite(
@@ -532,6 +549,19 @@ function normalizeTimelinePreview(preview: Partial<EditorTimelinePreview> | null
   };
 }
 
+/**
+ * Normalizes the three-slot `animations` object, omitting the key entirely when no slot is set.
+ * Elements that never used the new model keep their exact stored shape (and their legacy
+ * `mediaAnimation*` fields), so a save can't quietly rewrite every element in a template.
+ */
+function normalizedAnimationSlotsPatch(
+  value: unknown
+): { animations?: EditorAnimationSlots } {
+  if (value === undefined || value === null) return {};
+  const slots = normalizeAnimationSlots(value);
+  return isEmptyAnimationSlots(slots) ? {} : { animations: slots };
+}
+
 function normalizeElementForEditor(
   element: EditorElement,
   pageDurationMs: number,
@@ -549,6 +579,7 @@ function normalizeElementForEditor(
       : {}),
     timelineStartMs: timelineWindow.startMs,
     timelineEndMs: timelineWindow.endMs,
+    ...normalizedAnimationSlotsPatch(element.animations),
     mediaAnimationType: normalizeAnimationType(element.mediaAnimationType),
     mediaAnimationMode: normalizeAnimationMode(element.mediaAnimationMode),
     mediaAnimationInfinite: normalizeAnimationInfinite(

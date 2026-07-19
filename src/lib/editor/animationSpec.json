@@ -1,0 +1,2263 @@
+{
+  "compPx": 700,
+  "enums": {
+    "category": [
+      "ENTRANCE",
+      "EXIT",
+      "LOOP"
+    ],
+    "direction": [
+      "DEFAULT",
+      "UP",
+      "DOWN",
+      "LEFT",
+      "RIGHT",
+      "CLOCKWISE",
+      "COUNTERCLOCKWISE"
+    ],
+    "easing": [
+      "DEFAULT",
+      "LINEAR",
+      "SOFT_OUT",
+      "SOFT_IN_OUT",
+      "EASE_IN",
+      "EASE_OUT",
+      "EASE_IN_OUT"
+    ]
+  },
+  "catalog": {
+    "entrance": [
+      "NONE",
+      "POP",
+      "FADE",
+      "TYPEWRITER_CHARS",
+      "TYPEWRITER_CURSOR",
+      "TYPEWRITER_WORDS",
+      "ONE_WORD",
+      "CH_POSITION_FADE",
+      "CH_SCALE_FADE",
+      "ASCEND",
+      "BLOCK",
+      "DISSOLVE",
+      "WIPE",
+      "GRADIENT_WIPE",
+      "SLIDE",
+      "ZOOM",
+      "ZOOM_FADE",
+      "CIRCUAL",
+      "CIRCUAL_GRADIENT",
+      "RADIAL",
+      "RADIAL_GRADIENT"
+    ],
+    "exit": [
+      "NONE",
+      "DISSOLVE",
+      "FADE",
+      "WIPE",
+      "GRADIENT_WIPE",
+      "SLIDE",
+      "ZOOM",
+      "ZOOM_FADE",
+      "CIRCUAL",
+      "CIRCUAL_GRADIENT",
+      "RADIAL",
+      "RADIAL_GRADIENT",
+      "RISE",
+      "PAN",
+      "BLUR",
+      "SUCCESSION",
+      "DRIFT",
+      "TECTONIC",
+      "TUMBLE",
+      "STOMP",
+      "SHIFT",
+      "SKATE",
+      "ASCEND",
+      "BLOCK"
+    ],
+    "loop": [
+      "NONE",
+      "WAVE",
+      "SHAKE",
+      "FLICKER",
+      "ROTATE",
+      "BOUNCE",
+      "WOBBLE",
+      "ZOOM_LOOP",
+      "PULSE",
+      "RANDOM",
+      "CH_WIGGLE_Y",
+      "RISE",
+      "PAN",
+      "BLUR",
+      "SUCCESSION",
+      "BREATHE",
+      "BASELINE",
+      "DRIFT",
+      "TECTONIC",
+      "TUMBLE",
+      "NEON",
+      "SCRAPBOOK",
+      "STOMP",
+      "WIGGLE",
+      "SHIFT",
+      "SKATE"
+    ]
+  },
+  "types": [
+    {
+      "type": "NONE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 0,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "بدون",
+        "en": "None"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.NONE -> LayerAnimationVisualState()"
+      }
+    },
+    {
+      "type": "RISE",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "UP",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "صعود",
+        "en": "Rise"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }",
+        "sharesBranchWith": "SHIFT"
+      }
+    },
+    {
+      "type": "PAN",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تمرير",
+        "en": "Pan"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }",
+        "sharesBranchWith": "SKATE"
+      }
+    },
+    {
+      "type": "FADE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "opacity": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0,
+                0,
+                0.41,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 25,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تلاشي",
+        "en": "Fade"
+      }
+    },
+    {
+      "type": "POP",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "scale": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0.167,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "rotation": [
+            {
+              "frame": 5,
+              "value": -180,
+              "easing": [
+                0,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "انبثاق",
+        "en": "Pop"
+      }
+    },
+    {
+      "type": "WIPE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "مسح",
+        "en": "Wipe"
+      }
+    },
+    {
+      "type": "BLUR",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "نعومة",
+        "en": "Soften"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.BLUR -> {\n            LayerAnimationVisualState(\n                alphaMultiplier = (0.05f + progress * 0.95f).coerceIn(0f, 1f),\n                scaleXMultiplier = 0.92f + progress * 0.08f,\n                scaleYMultiplier = 0.92f + progress * 0.08f\n            )\n        }"
+      }
+    },
+    {
+      "type": "SUCCESSION",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 950,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تتابع",
+        "en": "Succession"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SUCCESSION -> {\n            LayerAnimationVisualState(\n                scaleMultiplier = 0.82f + progress * 0.18f,\n                alphaMultiplier = (0.06f + progress * 0.94f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "BREATHE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1500,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تنفس",
+        "en": "Breathe"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.BREATHE -> LayerAnimationVisualState(\n            scaleMultiplier = 1f + pingPong * 0.06f * intensity,\n            alphaMultiplier = (0.86f + pingPong * 0.14f).coerceIn(0f, 1f)\n        )"
+      }
+    },
+    {
+      "type": "BASELINE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1300,
+        "delayMs": 0,
+        "direction": "UP",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "أساس",
+        "en": "Baseline"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.BASELINE -> {\n            val bounceWave = abs(sin(cycleProgress * PI.toFloat() * 2f))\n            LayerAnimationVisualState(\n                translationY = -bounceWave * maxOf(10f, height * 0.1f) * intensity,\n                scaleYMultiplier = 1f - bounceWave * 0.06f * intensity,\n                scaleXMultiplier = 1f + bounceWave * 0.04f * intensity\n            )\n        }"
+      }
+    },
+    {
+      "type": "DRIFT",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "انجراف",
+        "en": "Drift"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.DRIFT -> {\n            LayerAnimationVisualState(\n                translationX = vector.x * (1f - progress) * driftX * intensity,\n                translationY = vector.y * (1f - progress) * driftY * intensity,\n                alphaMultiplier = (0.1f + progress * 0.9f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "TECTONIC",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 950,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تكتوني",
+        "en": "Tectonic"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.TECTONIC -> {\n            LayerAnimationVisualState(\n                translationX = vector.x * (1f - progress) * maxOf(28f, width * 0.34f) * intensity,\n                scaleXMultiplier = 0.9f + progress * 0.1f,\n                alphaMultiplier = (0.08f + progress * 0.92f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "TUMBLE",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 950,
+        "delayMs": 0,
+        "direction": "CLOCKWISE",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تدحرج",
+        "en": "Tumble"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.TUMBLE -> {\n            LayerAnimationVisualState(\n                rotationDeltaDegrees = (1f - progress) * 26f * rotationSpin(animation.direction) * intensity,\n                translationX = rotationSpin(animation.direction) * (1f - progress) *\n                    maxOf(18f, width * 0.18f) * intensity,\n                translationY = -(1f - progress) * maxOf(18f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.08f + progress * 0.92f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "NEON",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1200,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "نيون",
+        "en": "Neon"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.NEON -> LayerAnimationVisualState(\n            scaleMultiplier = 1f + pingPong * 0.05f * intensity,\n            alphaMultiplier = (0.8f + pingPong * 0.2f + sin(cycleProgress * PI.toFloat() * 6f) * 0.04f)\n                .coerceIn(0.72f, 1f)\n        )"
+      }
+    },
+    {
+      "type": "SCRAPBOOK",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "LEFT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "قصاصة",
+        "en": "Scrapbook"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SCRAPBOOK -> LayerAnimationVisualState(\n            rotationDeltaDegrees = wave * 6.5f * intensity,\n            translationX = wave * maxOf(5f, width * 0.024f) * intensity,\n            translationY = cos(cycleProgress * PI.toFloat() * 2f) * maxOf(3f, height * 0.018f) * intensity\n        )"
+      }
+    },
+    {
+      "type": "STOMP",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "دمغ",
+        "en": "Stomp"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.STOMP -> {\n            LayerAnimationVisualState(\n                scaleMultiplier = 0.78f + progress * 0.22f,\n                rotationDeltaDegrees = (1f - progress) * 18f * rotationSpin(animation.direction) * intensity,\n                alphaMultiplier = (0.1f + progress * 0.9f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "ROTATE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 5600,
+        "delayMs": 0,
+        "direction": "CLOCKWISE",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "دوران",
+        "en": "Spin"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.ROTATE -> LayerAnimationVisualState(\n            rotationDeltaDegrees = cycleProgress * 360f * rotationSpin(animation.direction) * intensity\n        )"
+      }
+    },
+    {
+      "type": "FLICKER",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "opacity": [
+            {
+              "frame": 0,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 4.429,
+              "value": 0.3,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 8.857,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 13.286,
+              "value": 0.3,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 17.714,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 22.142,
+              "value": 0.3,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 26.571,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 31,
+              "value": 0.3,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 35,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "وميض",
+        "en": "Flicker"
+      }
+    },
+    {
+      "type": "PULSE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1800,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 45,
+        "fps": 25,
+        "durationMs": 1800,
+        "channels": {
+          "scale": [
+            {
+              "frame": 0,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.48,
+                1.178
+              ],
+              "hold": false
+            },
+            {
+              "frame": 3,
+              "value": 1.5,
+              "easing": [
+                0.167,
+                0.133,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 10,
+              "value": 1,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": [
+                0.6,
+                0,
+                0.48,
+                1.178
+              ],
+              "hold": false
+            },
+            {
+              "frame": 23,
+              "value": 1.5,
+              "easing": [
+                0.167,
+                0.133,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 30,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "نبض",
+        "en": "Pulse"
+      }
+    },
+    {
+      "type": "WIGGLE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "LEFT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تمايل",
+        "en": "Wiggle"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.WIGGLE -> LayerAnimationVisualState(\n            rotationDeltaDegrees = wave * 4.5f * intensity,\n            translationX = wave * maxOf(3f, width * 0.018f) * intensity\n        )"
+      }
+    },
+    {
+      "type": "SHIFT",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "DOWN",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "هبوط",
+        "en": "Shift"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "SKATE",
+      "tabs": [
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "LEFT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تزلج",
+        "en": "Skate"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }"
+      }
+    },
+    {
+      "type": "ASCEND",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "UP",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "كلمات صاعدة",
+        "en": "Ascend"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )"
+      }
+    },
+    {
+      "type": "BLOCK",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1200,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "EASE_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "شريط",
+        "en": "Block"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.BLOCK -> {\n            val travel = 1f + BLOCK_WIDTH_FRACTION\n            val left = -BLOCK_WIDTH_FRACTION + progress * travel\n            val swept = (left / 1f).coerceIn(0f, 1f)\n            LayerAnimationVisualState(\n                revealMask = LayerRevealMaskSpec.Wipe(progress = swept),\n                overlayBar = LayerOverlayBarSpec(\n                    leftFraction = left,\n                    widthFraction = BLOCK_WIDTH_FRACTION\n                )\n            )\n        }"
+      }
+    },
+    {
+      "type": "STATIC",
+      "tabs": [],
+      "default": {
+        "durationMs": 1,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "ثابت",
+        "en": "Static"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.STATIC -> LayerAnimationVisualState()"
+      }
+    },
+    {
+      "type": "ONE_WORD",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 650,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "كلمة واحدة",
+        "en": "One word"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.ONE_WORD -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(LayerAnimationType.ONE_WORD, progress, animation.durationMs)\n        )"
+      }
+    },
+    {
+      "type": "TYPEWRITER_CHARS",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "آلة كاتبة (حروف)",
+        "en": "Typewriter (letters)"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.TYPEWRITER_CHARS ->\n            typewriterVisualState(progress, TextRevealMode.CHARS, animation.durationMs)"
+      }
+    },
+    {
+      "type": "TYPEWRITER_CURSOR",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "آلة كاتبة (بمؤشر)",
+        "en": "Typewriter (cursor)"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.TYPEWRITER_CURSOR ->\n            typewriterVisualState(progress, TextRevealMode.CURSOR, animation.durationMs)"
+      }
+    },
+    {
+      "type": "TYPEWRITER_WORDS",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "آلة كاتبة (كلمات)",
+        "en": "Typewriter (words)"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.TYPEWRITER_WORDS ->\n            typewriterVisualState(progress, TextRevealMode.WORDS, animation.durationMs)"
+      }
+    },
+    {
+      "type": "ZOOM",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "scale": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0.167,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 18,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تكبير",
+        "en": "Zoom"
+      }
+    },
+    {
+      "type": "ZOOM_FADE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "opacity": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0,
+                0,
+                0.42,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "scale": [
+            {
+              "frame": 5,
+              "value": 1.3,
+              "easing": [
+                0.6,
+                0,
+                0.42,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تكبير تلاشي",
+        "en": "Zoom fade"
+      }
+    },
+    {
+      "type": "SLIDE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "SOFT_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "translateY": [
+            {
+              "frame": 5,
+              "value": 1.4971429,
+              "easing": [
+                0.167,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 25,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "انزلاق",
+        "en": "Slide"
+      }
+    },
+    {
+      "type": "DROP",
+      "tabs": [],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "DOWN",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "نزول",
+        "en": "Drop"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.DROP -> LayerAnimationVisualState(\n            translationY = -(1f - progress) * maxOf(34f, height * 0.5f) * intensity,\n            alphaMultiplier = (progress * 2f).coerceIn(0f, 1f)\n        )"
+      }
+    },
+    {
+      "type": "GRADIENT_WIPE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0,
+                0,
+                0.7,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "مسح تدرج",
+        "en": "Gradient wipe"
+      }
+    },
+    {
+      "type": "RADIAL",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "قطري",
+        "en": "Radial"
+      }
+    },
+    {
+      "type": "RADIAL_GRADIENT",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            },
+            {
+              "frame": 25,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تدرج قطري",
+        "en": "Radial gradient"
+      }
+    },
+    {
+      "type": "DIAGONAL",
+      "tabs": [],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "قطري",
+        "en": "Diagonal"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.DIAGONAL -> LayerAnimationVisualState(\n            translationX = (1f - progress) * maxOf(18f, width * 0.3f) * intensity,\n            translationY = -(1f - progress) * maxOf(18f, height * 0.3f) * intensity,\n            alphaMultiplier = (0.08f + progress * 0.92f).coerceIn(0f, 1f),\n            revealMask = LayerRevealMaskSpec.Radial(progress = progress, startAngleDegrees = -135f)\n        )"
+      }
+    },
+    {
+      "type": "DIAGONAL_GRADIENT",
+      "tabs": [],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "RIGHT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تدرج قطري",
+        "en": "Diagonal +"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.DIAGONAL_GRADIENT -> LayerAnimationVisualState(\n            translationX = (1f - progress) * maxOf(18f, width * 0.3f) * intensity,\n            translationY = -(1f - progress) * maxOf(18f, height * 0.3f) * intensity,\n            alphaMultiplier = (0.05f + progress * 0.95f).coerceIn(0f, 1f),\n            revealMask = LayerRevealMaskSpec.Radial(progress = progress, startAngleDegrees = -135f)\n        )"
+      }
+    },
+    {
+      "type": "DISSOLVE",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_IN",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "opacity": [
+            {
+              "frame": 5,
+              "value": 0,
+              "easing": [
+                0,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "translateY": [
+            {
+              "frame": 5,
+              "value": 0.53,
+              "easing": [
+                0.167,
+                0.07,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "نزول",
+        "en": "Descend",
+        "exit": {
+          "ar": "اندثار",
+          "en": "Dissolve"
+        }
+      }
+    },
+    {
+      "type": "WOBBLE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1600,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 40,
+        "fps": 25,
+        "durationMs": 1600,
+        "channels": {
+          "rotation": [
+            {
+              "frame": 0,
+              "value": -25,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 10,
+              "value": 25,
+              "easing": [
+                0.5,
+                0,
+                0.833,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 20,
+              "value": -25,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 30,
+              "value": 25,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 40,
+              "value": -25,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تذبذب",
+        "en": "Wobble"
+      }
+    },
+    {
+      "type": "BOUNCE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "scaleX": [
+            {
+              "frame": 11,
+              "value": 1,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                1.042
+              ],
+              "hold": false
+            },
+            {
+              "frame": 12,
+              "value": 1.2,
+              "easing": [
+                0.167,
+                0.028,
+                0.833,
+                0.972
+              ],
+              "hold": false
+            },
+            {
+              "frame": 13,
+              "value": 0.9,
+              "easing": [
+                0.167,
+                -0.25,
+                0.833,
+                0.967
+              ],
+              "hold": false
+            },
+            {
+              "frame": 16,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            },
+            {
+              "frame": 28,
+              "value": 1,
+              "easing": [
+                0.167,
+                0.013,
+                0.833,
+                1.042
+              ],
+              "hold": false
+            },
+            {
+              "frame": 29,
+              "value": 1.2,
+              "easing": [
+                0.167,
+                0.028,
+                0.833,
+                0.972
+              ],
+              "hold": false
+            },
+            {
+              "frame": 30,
+              "value": 0.9,
+              "easing": [
+                0.167,
+                -0.25,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 33,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "scaleY": [
+            {
+              "frame": 11,
+              "value": 1,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                1.042
+              ],
+              "hold": false
+            },
+            {
+              "frame": 12,
+              "value": 0.8,
+              "easing": [
+                0.167,
+                0.028,
+                0.833,
+                0.972
+              ],
+              "hold": false
+            },
+            {
+              "frame": 13,
+              "value": 1.1,
+              "easing": [
+                0.167,
+                -0.25,
+                0.833,
+                0.967
+              ],
+              "hold": false
+            },
+            {
+              "frame": 16,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            },
+            {
+              "frame": 28,
+              "value": 1,
+              "easing": [
+                0.167,
+                0.013,
+                0.833,
+                1.042
+              ],
+              "hold": false
+            },
+            {
+              "frame": 29,
+              "value": 0.8,
+              "easing": [
+                0.167,
+                0.028,
+                0.833,
+                0.972
+              ],
+              "hold": false
+            },
+            {
+              "frame": 30,
+              "value": 1.1,
+              "easing": [
+                0.167,
+                -0.25,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 33,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "translateY": [
+            {
+              "frame": 0,
+              "value": -0.26857144,
+              "easing": [
+                1,
+                0,
+                1,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 12,
+              "value": 0.23285714,
+              "easing": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 18,
+              "value": -0.26857144,
+              "easing": [
+                1,
+                0,
+                1,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 29,
+              "value": 0.23285714,
+              "easing": [
+                0,
+                0,
+                0,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 35,
+              "value": -0.26857144,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "وثب",
+        "en": "Bounce"
+      }
+    },
+    {
+      "type": "SHAKE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "translateX": [
+            {
+              "frame": 0,
+              "value": -0.07285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 3.5,
+              "value": 0.08285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 7,
+              "value": -0.07285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 10.5,
+              "value": 0.08285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 14,
+              "value": -0.07285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 17.499,
+              "value": 0.08285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 21,
+              "value": -0.07285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 24.5,
+              "value": 0.08285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 27.999,
+              "value": -0.07285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 31.5,
+              "value": 0.08285714,
+              "easing": [
+                0.5,
+                0,
+                0.5,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 35,
+              "value": -0.07285714,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "اهتزاز",
+        "en": "Shake"
+      }
+    },
+    {
+      "type": "WAVE",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 50,
+        "fps": 25,
+        "durationMs": 2000,
+        "channels": {
+          "translateX": [
+            {
+              "frame": 0,
+              "value": 0,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 10,
+              "value": -0.12714286,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 26,
+              "value": 0.25201428,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 41,
+              "value": -0.25882855,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 50,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            }
+          ],
+          "translateY": [
+            {
+              "frame": 0,
+              "value": 0,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 10,
+              "value": -0.2293143,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 26,
+              "value": 0.034057144,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 41,
+              "value": 0.22307143,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 50,
+              "value": 0,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "موجة",
+        "en": "Wave"
+      }
+    },
+    {
+      "type": "RANDOM",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 900,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "عشوائي",
+        "en": "Random"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.RANDOM -> {\n            val rx = sin(cycleProgress * PI.toFloat() * 6.6f) + 0.5f * sin(cycleProgress * PI.toFloat() * 15.4f)\n            val ry = cos(cycleProgress * PI.toFloat() * 8.2f) + 0.5f * sin(cycleProgress * PI.toFloat() * 18.6f)\n            LayerAnimationVisualState(\n                translationX = rx * maxOf(4f, width * 0.02f) * intensity,\n                translationY = ry * maxOf(4f, height * 0.02f) * intensity,\n                rotationDeltaDegrees = rx * 3f * intensity\n            )\n        }"
+      }
+    },
+    {
+      "type": "CIRCUAL",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 10,
+              "value": 0,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 25,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "دائري",
+        "en": "Circular"
+      }
+    },
+    {
+      "type": "CIRCUAL_GRADIENT",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "maskProgress": [
+            {
+              "frame": 10,
+              "value": 0,
+              "easing": [
+                0.167,
+                0.167,
+                0.833,
+                0.833
+              ],
+              "hold": false
+            },
+            {
+              "frame": 25,
+              "value": 1,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تدرج دائري",
+        "en": "Circular gradient"
+      }
+    },
+    {
+      "type": "ZOOM_LOOP",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 1400,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": {
+        "durationFrames": 35,
+        "fps": 25,
+        "durationMs": 1400,
+        "channels": {
+          "scale": [
+            {
+              "frame": 0,
+              "value": 0.65,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 17,
+              "value": 1.5,
+              "easing": [
+                0.6,
+                0,
+                0.4,
+                1
+              ],
+              "hold": false
+            },
+            {
+              "frame": 34,
+              "value": 0.65,
+              "easing": null,
+              "hold": false
+            }
+          ]
+        }
+      },
+      "label": {
+        "ar": "تكبير",
+        "en": "Zoom"
+      }
+    },
+    {
+      "type": "CH_POSITION_FADE",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "حروف صاعدة",
+        "en": "Letters rise"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
+        "sharesBranchWith": "ASCEND"
+      }
+    },
+    {
+      "type": "CH_SCALE_FADE",
+      "tabs": [
+        "ENTRANCE"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "EASE_OUT",
+        "intensity": 1,
+        "supportsInfinite": false
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "حروف متكبرة",
+        "en": "Letters grow"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
+        "sharesBranchWith": "ASCEND"
+      }
+    },
+    {
+      "type": "CH_WIGGLE_Y",
+      "tabs": [
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 2000,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "SOFT_IN_OUT",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تموج الحروف",
+        "en": "Letter wave"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.CH_WIGGLE_Y -> LayerAnimationVisualState(\n            glyphMotion = GlyphMotionSpec(animation.type, cycleProgress, animation.durationMs)\n        )\n    }\n    // Exit: fade the whole layer out with the reverse progress so it fully\n    // disappears once the exit animation finishes (on top of its motion).\n    return if (playbackState.isExiting) {\n        base.copy(alphaMultiplier = (base.alphaMultiplier * cycleProgress).coerceIn(0f, 1f))\n    } else {\n        base\n    }\n}\n\n/**\n * The typewriter family. [textReveal] drives the real per-glyph reveal on a text\n * renderer; the fade + Wipe mask are only fallbacks for surfaces that can't do that\n * (curved text, media layers, the native export canvas).\n */\nprivate fun typewriterVisualState(\n    progress: Float,\n    mode: TextRevealMode,\n    durationMs: Long\n): LayerAnimationVisualState = LayerAnimationVisualState(\n    alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f),\n    revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n    textReveal = TextRevealSpec(progress, mode, durationMs)\n)\n\n/**\n * Evaluates an Andalusi-ported effect at [progress] (0..1 across its authored length),\n * reading their keyframes directly. Their translations are authored as a fraction of a\n * 700px comp, so they scale to the real layer here.\n */\nprivate fun evaluateAndalusiSpec(\n    spec: AndalusiEffectSpec,\n    type: LayerAnimationType,\n    progress: Float,\n    width: Float,\n    height: Float\n): LayerAnimationVisualState {\n    val frame = progress.coerceIn(0f, 1f) * spec.durationFrames\n    return LayerAnimationVisualState(\n        scaleMultiplier = spec.scale?.valueAt(frame) ?: 1f,\n        scaleXMultiplier = spec.scaleX?.valueAt(frame) ?: 1f,\n        scaleYMultiplier = spec.scaleY?.valueAt(frame) ?: 1f,\n        rotationDeltaDegrees = spec.rotation?.valueAt(frame) ?: 0f,\n        translationX = (spec.translateX?.valueAt(frame) ?: 0f) * width,\n        translationY = (spec.translateY?.valueAt(frame) ?: 0f) * height,\n        alphaMultiplier = (spec.opacity?.valueAt(frame) ?: 1f).coerceIn(0f, 1f),\n        revealMask = spec.maskProgress\n            ?.valueAt(frame)\n            ?.coerceIn(0f, 1f)\n            ?.let { andalusiRevealMask(type, it) }\n    )\n}\n\n/** Which matte Andalusi's art uses for each reveal family. */\nprivate fun andalusiRevealMask(type: LayerAnimationType, progress: Float): LayerRevealMaskSpec? =\n    when (type) {"
+      }
+    }
+  ],
+  "runtime": {
+    "variables": "val animation = playbackState.animation ?: return LayerAnimationVisualState()\nval intensity = animation.intensity.coerceIn(0.4f, 2.4f)\nval width = layerWidthPx.coerceAtLeast(1f)\nval height = layerHeightPx.coerceAtLeast(1f)\nval direction = if (animation.direction == LayerAnimationDirection.DEFAULT) {",
+    "helpers": {
+      "resolveAnimationVector": "fun resolveAnimationVector(direction: LayerAnimationDirection): Offset =\n    when (direction) {\n        LayerAnimationDirection.LEFT -> Offset(-1f, 0f)\n        LayerAnimationDirection.RIGHT -> Offset(1f, 0f)\n        LayerAnimationDirection.DOWN -> Offset(0f, 1f)\n        LayerAnimationDirection.UP -> Offset(0f, -1f)\n        else -> Offset(0f, 0f)\n    }",
+      "rotationSpin": "fun rotationSpin(direction: LayerAnimationDirection): Float =\n    when (direction) {\n        LayerAnimationDirection.COUNTERCLOCKWISE,\n        LayerAnimationDirection.LEFT -> -1f\n        else -> 1f\n    }",
+      "pingPongProgress": "fun pingPongProgress(progress: Float): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return (0.5f - cos(clamped * PI.toFloat() * 2f) / 2f).coerceIn(0f, 1f)\n}",
+      "applyLayerAnimationEasing": "fun applyLayerAnimationEasing(\n    progress: Float,\n    easing: LayerAnimationEasing\n): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return when (easing) {\n        LayerAnimationEasing.LINEAR,\n        LayerAnimationEasing.DEFAULT -> clamped\n        LayerAnimationEasing.SOFT_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_IN -> clamped * clamped\n        LayerAnimationEasing.EASE_IN_OUT -> {\n            if (clamped < 0.5f) {\n                4f * clamped * clamped * clamped\n            } else {\n                val inverse = -2f * clamped + 2f\n                1f - (inverse * inverse * inverse / 2f)\n            }\n        }\n        LayerAnimationEasing.SOFT_IN_OUT -> 0.5f - cos(PI.toFloat() * clamped) / 2f\n    }\n}\n\nprivate data class Offset(\n    val x: Float,\n    val y: Float\n)",
+      "typewriterVisualState": "fun typewriterVisualState(\n    progress: Float,\n    mode: TextRevealMode,\n    durationMs: Long\n): LayerAnimationVisualState = LayerAnimationVisualState(\n    alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f),\n    revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n    textReveal = TextRevealSpec(progress, mode, durationMs)\n)\n\n/**\n * Evaluates an Andalusi-ported effect at [progress] (0..1 across its authored length),\n * reading their keyframes directly. Their translations are authored as a fraction of a\n * 700px comp, so they scale to the real layer here.\n */"
+    },
+    "notes": [
+      "Effects with authoredCurves=null are analytic formulas, verbatim from LayerAnimationVisualRuntime.kt.",
+      "width/height are the LAYER size in px. intensity = spec.intensity. vector = resolveAnimationVector(spec.direction).",
+      "Time bases: progress is eased AND ping-ponged when infinite; cycleProgress is raw 0..1; pingPong is the raised-cosine mirror, NOT eased.",
+      "A DEFAULT direction resolves to a ZERO vector; direction-aware reveals (RISE/SHIFT/PAN/SKATE) fall back to their own axis so they never go motionless.",
+      "BLOCK adds an overlayBar channel (a painted bar in the layer text colour); ASCEND is per-WORD glyph motion. Both need a renderer that honours those channels.",
+      "Layer payload: animations{entrance,exit,loop}. Legacy single animation still migrates (infinite->loop, one-shot->entrance). A LOOP slot MUST be infinite=true."
+    ]
+  },
+  "_meta": {
+    "source": "nayroz mobile shared module — generated from runtime values",
+    "counts": {
+      "types": 50,
+      "offeredInSomeTab": 46,
+      "withAuthoredCurves": 19,
+      "withFormula": 31
+    }
+  }
+}

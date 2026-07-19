@@ -240,7 +240,7 @@ export async function listFontFamilies({ source, excludeSource, search, skip = 0
       files: true,
       aliases: true,
     },
-    orderBy: [{ updatedAt: "desc" }, { family: "asc" }],
+    orderBy: [{ displayName: "asc" }, { family: "asc" }],
     skip: Math.max(0, Number(skip) || 0),
     ...(Number.isFinite(Number(take)) ? { take: Math.max(1, Math.round(Number(take))) } : {}),
   });
