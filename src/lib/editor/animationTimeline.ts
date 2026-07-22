@@ -604,11 +604,29 @@ export function resolveTimelineWindow(
   return clampTimelineWindow(element?.timelineStartMs, element?.timelineEndMs, pageDurationMs);
 }
 
+/**
+ * True when the element's three-slot `animations` object has any active (non-NONE) entrance,
+ * exit, or loop. Kept dependency-free (a plain shape check, not the animationSlots resolver) so
+ * this module stays importable from the server bundle. This is what makes applying an animation
+ * through the new slot UI flip the template to "animated" and reveal the timeline preview.
+ */
+export function hasActiveAnimationSlots(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const slots = value as Record<string, unknown>;
+  return (["entrance", "exit", "loop"] as const).some((key) => {
+    const slot = slots[key];
+    if (!slot || typeof slot !== "object") return false;
+    const type = String((slot as { type?: unknown }).type ?? "").trim().toUpperCase();
+    return type !== "" && type !== "NONE";
+  });
+}
+
 export function hasAnimatedElementContent(
   element:
     | {
         type?: unknown;
         mediaAnimationType?: unknown;
+        animations?: unknown;
         timelineStartMs?: number | null;
         timelineEndMs?: number | null;
         videoDuration?: unknown;
@@ -624,6 +642,7 @@ export function hasAnimatedElementContent(
   const frameContentKind = String(element.frameContent?.kind || "").trim().toLowerCase();
   if (elementType === "video" || frameContentKind === "video") return true;
   if (normalizeAnimationType(element.mediaAnimationType) !== "NONE") return true;
+  if (hasActiveAnimationSlots(element.animations)) return true;
   const window = resolveTimelineWindow(element, pageDurationMs);
   return window.startMs > 0 || window.endMs < pageDurationMs;
 }
@@ -633,6 +652,7 @@ export function hasAnimatedPageContent<
     durationMs?: number | null;
     elements?: Array<{
       mediaAnimationType?: unknown;
+      animations?: unknown;
       timelineStartMs?: number | null;
       timelineEndMs?: number | null;
       type?: unknown;
@@ -654,6 +674,7 @@ export function hasAnimatedTemplateContent<
     durationMs?: number | null;
     elements?: Array<{
       mediaAnimationType?: unknown;
+      animations?: unknown;
       timelineStartMs?: number | null;
       timelineEndMs?: number | null;
     }> | null;

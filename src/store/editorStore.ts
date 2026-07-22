@@ -59,6 +59,35 @@ export type SidebarTab =
   | "resize"
   | "animation";
 export type ShapeType = "rect" | "circle" | "line" | "arrow" | "star";
+
+/** Per-corner enable mask for `cornerRadius`. All true (or the field absent) = uniform rounding. */
+export interface CornerRadiusCorners {
+  topLeft: boolean;
+  topRight: boolean;
+  bottomRight: boolean;
+  bottomLeft: boolean;
+}
+
+/**
+ * Resolve an element's corner radius for renderers: a single number when every corner is rounded
+ * (or no mask is set), else the per-corner list in Konva order [topLeft, topRight, bottomRight,
+ * bottomLeft] with disabled corners at 0.
+ */
+export function resolveCornerRadiusList(
+  cornerRadius: number | undefined,
+  corners: CornerRadiusCorners | undefined
+): number | [number, number, number, number] {
+  const radius = Math.max(0, Number(cornerRadius) || 0);
+  if (!corners || radius <= 0) return radius;
+  const { topLeft, topRight, bottomRight, bottomLeft } = corners;
+  if (topLeft && topRight && bottomRight && bottomLeft) return radius;
+  return [
+    topLeft ? radius : 0,
+    topRight ? radius : 0,
+    bottomRight ? radius : 0,
+    bottomLeft ? radius : 0,
+  ];
+}
 export type ElementType = "text" | "image" | "video" | "frame" | ShapeType;
 export type AlignType = "left" | "center" | "right" | "top" | "middle" | "bottom";
 export type DrawTool = "selection" | "brush" | "highlighter";
@@ -92,8 +121,20 @@ export interface EditorElement {
   flipX: boolean;
   flipY: boolean;
   cornerRadius: number;
+  /**
+   * Which corners `cornerRadius` applies to. Absent/undefined = ALL corners (the default and the
+   * only thing Canva imports produce). Lets the user round a single corner, a pair, or all four
+   * with one size — the renderer zeroes the disabled corners.
+   */
+  cornerRadiusCorners?: CornerRadiusCorners;
   points: number[];
   src: string;
+  /**
+   * Original resolution-independent SVG source (`data:image/svg+xml`) for shapes placed from the
+   * built-in catalog. `src` holds a rasterized PNG for crisp on-canvas display; this preserves the
+   * vector so it can ship to mobile (assetKind:"vector") and stay sharp at any scale.
+   */
+  vectorSrc?: string;
   rasterOriginalSrc?: string;
   rasterPalette?: string[];
   rasterPaletteVersion?: number;

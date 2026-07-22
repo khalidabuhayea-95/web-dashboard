@@ -562,11 +562,103 @@
             }
           };
 
+          // Corner radius of a shape path, in DESIGN px — minified numeric prop on the path
+          // (observed `mb`); known name first, structural numeric fallback. 0 = sharp.
+          const readPathCornerRadius = (p0) => {
+            try {
+              if (!p0 || typeof p0 !== "object") return 0;
+              if (typeof p0.mb === "number" && Number.isFinite(p0.mb)) {
+                return Math.max(0, Math.round(p0.mb));
+              }
+              for (const k of Object.keys(p0)) {
+                const v = p0[k];
+                if (typeof v === "number" && Number.isFinite(v) && v >= 0) {
+                  return Math.max(0, Math.round(v));
+                }
+              }
+            } catch (_e) {
+              /* ignore */
+            }
+            return 0;
+          };
+          // Simple solid-colour circle/rect Canva shapes → editable editor shapes (they render as
+          // protected raster images in the DOM otherwise). Mirrors background.js's extractShape.
+          const extractShape = (el) => {
+            try {
+              const paths = Array.isArray(el.paths) ? el.paths : null;
+              if (!paths || paths.length !== 1) return null;
+              const p0 = paths[0] || {};
+              // Image-filled path = Canva photo-frame (clips a photo), NOT an editable shape.
+              if (p0.fill && typeof p0.fill === "object" && p0.fill.image) return null;
+              const d = String(p0.d || "").trim();
+              let shapeKind = null;
+              if (/^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d)) shapeKind = "rect";
+              else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d)) shapeKind = "circle";
+              if (!shapeKind) return null;
+              // Solid fill AND/OR an outline stroke (frames/pills/dividers are stroke-only).
+              const fillColor = p0.fill && typeof p0.fill.color === "string" ? p0.fill.color : null;
+              const stroke = p0.stroke && typeof p0.stroke === "object" ? p0.stroke : null;
+              const strokeColor = stroke && typeof stroke.color === "string" ? stroke.color : null;
+              const strokeWidth =
+                stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
+              if (!fillColor && !(strokeColor && strokeWidth > 0)) return null;
+              return { shapeKind, fillColor, strokeColor, strokeWidth, cornerRadius: readPathCornerRadius(p0) };
+            } catch (_e) {
+              return null;
+            }
+          };
+          // Border + corner radius for an image-filled shape (Canva photo-frame).
+          const extractBorder = (el) => {
+            try {
+              const paths = Array.isArray(el.paths) ? el.paths : null;
+              const p0 = paths && paths.length === 1 ? paths[0] : null;
+              if (!p0 || !(p0.fill && typeof p0.fill === "object" && p0.fill.image)) return null;
+              const stroke = p0.stroke && typeof p0.stroke === "object" ? p0.stroke : null;
+              const strokeColor = stroke && typeof stroke.color === "string" ? stroke.color : null;
+              const strokeWidth =
+                stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
+              const cornerRadius = readPathCornerRadius(p0);
+              if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0)) return null;
+              // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
+              // rendered snapshot never needed (blob/circle frames stay false).
+              const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(String(p0.d || "").trim());
+              return { strokeColor, strokeWidth, cornerRadius, rectFrame };
+            } catch (_e) {
+              return null;
+            }
+          };
+          // Recover Canva 'line' dividers (thin strokes the DOM gate drops) from the model.
+          const extractLine = (el) => {
+            try {
+              const color =
+                typeof el.color === "string"
+                  ? el.color
+                  : el.fill && typeof el.fill.color === "string"
+                    ? el.fill.color
+                    : null;
+              if (!color) return null;
+              const weight =
+                Number(el.weight) > 0
+                  ? Number(el.weight)
+                  : Number(el.height) > 0
+                    ? Number(el.height)
+                    : 1;
+              return { color, weight: Math.max(1, Math.round(weight)) };
+            } catch (_e) {
+              return null;
+            }
+          };
+
           const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+          // zOrder: Canva's element array order IS the paint order (index 0 = bottom). Stamped
+          // EXPLICITLY because the model crosses executeScript arg serialization, which SORTS
+          // object keys alphabetically — Object.keys() insertion order does NOT survive it.
+          let zOrder = 0;
           for (const el of allElements) {
             const id = String((el && el.id) || "");
             if (!id || !/^LB/.test(id)) continue;
             result[id] = {
+              zOrder: zOrder++,
               type: typeof el.type === "string" ? el.type : "",
               left: num(el.left),
               top: num(el.top),
@@ -579,6 +671,9 @@
               animation: extractAnimation(el),
               text: el.type === "text" ? extractText(el) : null,
               image: el.type === "rect" ? extractImage(el) : null,
+              shape: el.type === "shape" ? extractShape(el) : null,
+              line: el.type === "line" ? extractLine(el) : null,
+              border: el.type === "shape" ? extractBorder(el) : null,
             };
           }
         } catch (_error) {
@@ -2154,9 +2249,20 @@
       // pixel effects (CSS filter / backdrop-filter / blend mode) that the raw asset lacks.
       // A plain rectangular (possibly zoomed/panned) crop of an unmodified photo returns
       // false, so it can use the high-resolution asset crop instead of a low-res screenshot.
-      const snapshotRequiredForLayer = (layerNode, imageElement) => {
+      //
+      // modelBorder: the fiber model's { strokeColor, strokeWidth, cornerRadius, rectFrame }
+      // for photo frames. When the model confirms a PLAIN RECT frame (rectFrame), the editor
+      // reproduces frame + corner radius + stroke exactly from the fetched asset, so NO DOM
+      // signal (SVG clipPath, border-radius, the outline <svg>, responsive <img> duplicates)
+      // justifies the snapshot — critically, the isolation snapshot diffs out any overlapping
+      // layer drawn above the photo (both captures show it → diff = transparent), punching a
+      // hole through the stored pixels right where e.g. a button pill sits on the photo, and
+      // bakes the frame stroke into the edge pixels.
+      const snapshotRequiredForLayer = (layerNode, imageElement, modelBorder) => {
         if (!layerNode || !imageElement) return false;
         if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
+        if (modelBorder && modelBorder.rectFrame) return false;
+        const modelHandlesRoundedCorners = Number(modelBorder?.cornerRadius) > 0;
         let node = imageElement;
         let depth = 0;
         while (node && depth < 12) {
@@ -2165,7 +2271,7 @@
             style.clipPath !== "none" ||
             style.maskImage !== "none" ||
             style.webkitMaskImage !== "none" ||
-            parseNumericPx(style.borderRadius) > 2 ||
+            (!modelHandlesRoundedCorners && parseNumericPx(style.borderRadius) > 2) ||
             (style.filter && style.filter !== "none") ||
             (style.backdropFilter && style.backdropFilter !== "none") ||
             (style.mixBlendMode && style.mixBlendMode !== "normal")
@@ -2764,6 +2870,40 @@
       // page background. Heuristic: a large, opaque, MUTED, single flat-colour region — that's
       // a baked backdrop, not a clean cut-out decoration (which is mostly transparent) nor a
       // varied photo (no single dominant colour).
+      // Mirror of isBackgroundBakedAsset: a fetched asset that is a REAL cut-out — a substantial
+      // share of FULLY-transparent pixels. A shaped-mask photo's rectangular asset crop is ~0%
+      // transparent so it never matches; a product cut-out (shoes, sticker) is 25%+ transparent.
+      const isCleanCutoutAsset = async (dataUrl) => {
+        if (!String(dataUrl || "").startsWith("data:image/png")) return false;
+        try {
+          const image = await new Promise((resolve, reject) => {
+            const element = new Image();
+            element.onload = () => resolve(element);
+            element.onerror = () => reject(new Error("image-load-failed"));
+            element.src = dataUrl;
+          });
+          const sw = Math.max(1, Number(image?.naturalWidth || image?.width || 0) || 1);
+          const sh = Math.max(1, Number(image?.naturalHeight || image?.height || 0) || 1);
+          const scale = Math.min(1, 160 / Math.max(sw, sh));
+          const w = Math.max(1, Math.round(sw * scale));
+          const h = Math.max(1, Math.round(sh * scale));
+          const canvas = document.createElement("canvas");
+          canvas.width = w;
+          canvas.height = h;
+          const context = canvas.getContext("2d");
+          if (!context) return false;
+          context.drawImage(image, 0, 0, w, h);
+          const data = context.getImageData(0, 0, w, h).data;
+          let transparent = 0;
+          for (let i = 3; i < data.length; i += 4) {
+            if (data[i] < 20) transparent += 1;
+          }
+          return transparent >= w * h * 0.25;
+        } catch (_error) {
+          return false;
+        }
+      };
+
       const isBackgroundBakedAsset = async (dataUrl) => {
         if (!String(dataUrl || "").startsWith("data:image/")) return false;
         try {
@@ -3799,7 +3939,11 @@
           // the snapshot is only a lossy fallback.
           const hasGenuineMaskOrComposite =
             Boolean(shouldPreserveRenderedImagePixels) &&
-            snapshotRequiredForLayer(node, imageElement);
+            snapshotRequiredForLayer(
+              node,
+              imageElement,
+              (fiberModelById[String(node.id || "")] || {}).border || null
+            );
           const snapshotIsLossyFallback =
             Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
@@ -4027,6 +4171,21 @@
             ) {
               layer.snapshotIsLossyFallback = false;
             }
+            // MIRROR guard: a genuinely-masked layer normally keeps the isolation snapshot, but
+            // the snapshot-diff BAKES semi-transparent pixels (a product cut-out's soft ground
+            // shadow) against the page background — observed: a clean shoes cut-out gained an
+            // opaque cream halo with the page's topography pattern in it. When the fetched asset
+            // is itself a clean cut-out, flag it lossy-fallback so background.js's opaqueness
+            // auto-pick chooses: it keeps the clean asset here, and still keeps the snapshot for
+            // shaped masks (their rectangular asset crop has ~0% transparency → never flagged).
+            if (
+              !layer.snapshotIsLossyFallback &&
+              layer.preferSnapshot &&
+              String(layer.imageDataUrl || "").startsWith("data:image/") &&
+              (await isCleanCutoutAsset(layer.imageDataUrl))
+            ) {
+              layer.snapshotIsLossyFallback = true;
+            }
           } else if (job.kind === "url") {
             let dataUrl = "";
             if (String(job.url).startsWith("blob:")) {
@@ -4080,6 +4239,7 @@
 
           const supplementImages = [];
           let supplementText = 0;
+          let supplementLines = 0;
           let unresolvedMedia = 0;
           let unresolvedAnimated = 0;
           let backgroundPosterAdded = false;
@@ -4090,7 +4250,8 @@
             if (!el || !el.type) continue;
             const w = Math.max(1, Math.round(el.width));
             const h = Math.max(1, Math.round(el.height));
-            if (w <= 1 || h <= 1) continue;
+            // A hairline divider is legitimately 1px tall — don't drop lines on the thin-axis gate.
+            if (w <= 1 || (h <= 1 && el.type !== "line")) continue;
             const x = el.left;
             const y = el.top;
             const base = {
@@ -4190,6 +4351,41 @@
               };
               layers.push(record);
               supplementImages.push(record);
+            } else if (el.type === "line" && el.line && el.line.color) {
+              // Recover a divider LINE the DOM thin-vector gate dropped. Emit it as a thin solid
+              // rect through the editable-shape path (background.js turns modelShape {shapeKind:
+              // "rect"} into a fill:color rect). `base` already carries the model geometry — for a
+              // line that's length × weight in the element's own frame, plus its rotation.
+              layers.push({
+                ...base,
+                name: `Line ${supplementLines + 1}`,
+                kind: "shape",
+                modelShape: { shapeKind: "rect", fillColor: el.line.color },
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text: "",
+                textAlign: "left",
+                color: "#111827",
+                fontFamily: "",
+                fontSize: 0,
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: el.line.color,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+              });
+              supplementLines += 1;
             }
           }
 
@@ -4388,9 +4584,156 @@
               layer.timelineStartMs = startMs;
               layer.timelineEndMs = startMs + durMs;
             }
+            // Carry the model's simple-shape classification so background.js can emit an editable
+            // circle/rect instead of the DOM's protected raster (which snapshot-crops with a
+            // baked-in background).
+            if (model.shape) layer.modelShape = model.shape;
+            // Canva photo-frame outline: the shape clips the captured photo AND draws a stroke.
+            // Carry it so the emitted IMAGE object gets the border (matches Canva's framed photos).
+            if (model.border) layer.modelBorder = model.border;
+            // ── Model-authoritative TEXT content ──────────────────────────────────────────────
+            // The DOM read loses line breaks when Canva renders a multi-line text without per-line
+            // <p> nodes — a narrow price column "$5\n$5\n$5\n$5" imported as "$5$5$5$5". The model's
+            // stream plaintext carries the exact \n's, so prefer it whenever it's plainly the SAME
+            // content (identical after stripping all whitespace); never clobber a genuinely
+            // different capture.
+            if (
+              String(layer.kind || "") === "text" &&
+              model.text &&
+              typeof model.text.plaintext === "string" &&
+              model.text.plaintext.trim()
+            ) {
+              const modelText = model.text.plaintext.replace(/[\r\n]+$/, "");
+              const stripWs = (s) => String(s || "").replace(/\s+/g, "");
+              if (stripWs(modelText) === stripWs(layer.text) && modelText !== layer.text) {
+                layer.text = modelText;
+              }
+            }
+            // ── Model-authoritative ROTATION (+ frame geometry for rotated layers) ────────────
+            // The DOM transform read is unreliable — it missed a -15.3° ice-cream (imported upright
+            // at 0°) while its +14.7° twin was detected. The capture pipeline fetches the UN-rotated
+            // asset (verified: both ice-cream assets are upright PNGs), so the model angle applies
+            // directly without double-rotating. For a ROTATED element the DOM also measures the
+            // rotated AABB (79×151 element captured as 115×167 → rendered ~45% oversized once the
+            // angle is applied), so take the model's whole frame. And force the DIRECT asset path:
+            // every snapshot branch in the hybrid builder spreads angle:0 (correct for true screen
+            // crops, wrong for upright assets) — preferSnapshot=false keeps rotated layers out of
+            // all of them (also out of the isolation pass, so no angle-0 isolation object either).
+            if (Number.isFinite(Number(model.rotation))) layer.angle = Number(model.rotation);
+            const modelRotationAbs = Math.abs(Number(model.rotation) || 0);
+            if (
+              modelRotationAbs > 0.5 &&
+              String(layer.kind || "") === "image" &&
+              Number(model.width) >= 2 &&
+              Number(model.height) >= 2
+            ) {
+              layer.x = Number(model.left) || 0;
+              layer.y = Number(model.top) || 0;
+              layer.width = Math.max(1, Math.round(Number(model.width)));
+              layer.height = Math.max(1, Math.round(Number(model.height)));
+              layer.pageRelativeRect = {
+                x: layer.x,
+                y: layer.y,
+                width: layer.width,
+                height: layer.height,
+              };
+              layer.preferSnapshot = false;
+              layer.snapshotIsLossyFallback = true;
+            }
           }
         } catch (timelineError) {
           console.warn("[canva-scraper] timeline positioning failed:", timelineError);
+        }
+
+        // ── Model-authoritative z-order ─────────────────────────────────────────────────────────
+        // Canva's element array order IS the paint order (index 0 = bottom). The DOM scan order only
+        // approximates it, and any model-recovered element (e.g. a divider line) would otherwise land
+        // at the END of the array — painted on top of everything. Re-stack every layer by the model's
+        // EXPLICIT zOrder stamp — NOT Object.keys() order, which arrives ALPHABETICALLY sorted after
+        // the executeScript arg-serialization boundary (observed: a whole design re-stacked by id).
+        // Layers with no model entry keep their place: the full-page background sinks to the bottom;
+        // any other DOM-only companion inherits the order of the nearest preceding model layer so it
+        // stays beside its neighbour. Stable on ties. Skips cleanly when the model has no zOrder
+        // stamps (older canva-fiber-main.js) — DOM order is better than alphabetical order.
+        try {
+          const hasZOrderStamps = Object.keys(fiberModelById).some(
+            (modelId) =>
+              !modelId.startsWith("__") && Number.isFinite(Number(fiberModelById[modelId]?.zOrder))
+          );
+          if (hasZOrderStamps) {
+            let lastZ = -1;
+            layers.forEach((layer, i) => {
+              const model = fiberModelById[String((layer && layer.id) || "")];
+              const mo = model ? Number(model.zOrder) : NaN;
+              if (Number.isFinite(mo)) {
+                layer.__zkey = mo;
+                lastZ = mo;
+              } else if (layer && (layer.isFullPageBackground || layer.isBackgroundNode)) {
+                layer.__zkey = -1;
+              } else {
+                layer.__zkey = lastZ + 0.001; // just above the last model layer; keeps DOM adjacency
+              }
+              layer.__zi = i;
+            });
+            layers.sort((a, b) => a.__zkey - b.__zkey || a.__zi - b.__zi);
+            for (const layer of layers) {
+              delete layer.__zkey;
+              delete layer.__zi;
+            }
+          }
+        } catch (zorderError) {
+          console.warn("[canva-scraper] z-order sort failed:", zorderError);
+        }
+
+        // ── Protected / blob image src → bytes (client-side, LAST safety net) ───────────────────
+        // The SERVER re-hosts each image by fetching its URL, but it has NO Canva session — so
+        // protected srcs (media.canva.com/v2, ifs://, signed premium/upload URLs) return 403 and
+        // blob: URLs are unreachable entirely. Either one trips a full flattened-snapshot fallback
+        // (the WHOLE design collapses to one image). These srcs ARE fetchable IN-PAGE (live session
+        // + live blobs — verified), so convert any that the server can't fetch into data URLs here,
+        // before the payload leaves the page. Public CDN srcs (media-public/video-public.canva.com,
+        // our R2) are left as URLs — the server fetches those fine, and keeping them URLs avoids
+        // bloating the payload. Whatever still can't be converted falls back to the server's
+        // per-layer snapshot crop (not a full-design snapshot).
+        try {
+          const serverCanFetchSrc = (url) =>
+            /^https?:\/\/(?:[a-z0-9-]+\.)*(?:media-public|video-public)\.canva\.com\//i.test(url) ||
+            /^https?:\/\/pub-[a-z0-9]+\.r2\.dev\//i.test(url);
+          // Any kind — a shape/graphic can carry a protected src too; the server sanitizes .src
+          // regardless of type. Text layers have an empty src and are filtered out below.
+          const needsInPageBytes = layers.filter((layer) => {
+            if (String(layer.imageDataUrl || "").startsWith("data:image/")) return false;
+            const src = String(layer.imageSrc || "");
+            if (!src || src.startsWith("data:")) return false;
+            if (src.startsWith("blob:")) return true;
+            if (/^https?:\/\//i.test(src)) return !serverCanFetchSrc(src);
+            return false;
+          });
+          if (needsInPageBytes.length) {
+            await runWithConcurrency(needsInPageBytes, 6, async (layer) => {
+              const src = String(layer.imageSrc || "");
+              let dataUrl = "";
+              try {
+                dataUrl = src.startsWith("blob:")
+                  ? await blobUrlToDataUrl(src)
+                  : await readRemoteImageAssetAsDataUrl(src);
+              } catch (_e) {
+                /* leave the URL; server falls back to a per-layer snapshot crop */
+              }
+              if (dataUrl && dataUrl.startsWith("data:image/")) {
+                layer.imageSrc = dataUrl;
+                layer.imageDataUrl = dataUrl;
+                layer.imageProvenance =
+                  layer.imageProvenance ||
+                  (src.startsWith("blob:") ? "blob-normalized" : "fetch-normalized");
+              }
+            });
+            console.log(
+              `[canva-scraper] normalized ${needsInPageBytes.length} protected/blob image src(s) to in-page bytes`
+            );
+          }
+        } catch (normalizeError) {
+          console.warn("[canva-scraper] protected-src normalization failed:", normalizeError);
         }
 
         const imageMetadataById = shouldCollectLayerMetadata

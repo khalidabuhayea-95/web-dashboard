@@ -38,8 +38,11 @@ import {
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import {
   extractImagePaletteFromSource,
+  extractSvgPaletteColors,
+  migrateRasterColorMap,
   normalizeRasterColorMap,
   RASTER_PALETTE_VERSION,
+  serializeRasterColorMap,
 } from "@/lib/editor/imagePalette";
 import { formatTimelineTime, hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { PREVIEW_RENDER_FPS } from "@/lib/editor/previewRuntime";
@@ -257,6 +260,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     : ([] as string[]);
   const activeRasterPaletteVersion = Math.max(0, Number(activeImageElement?.rasterPaletteVersion || 0));
   const activeRasterColorMap = normalizeRasterColorMap(activeImageElement?.rasterColorMap);
+  const activeRasterColorMapKey = serializeRasterColorMap(activeRasterColorMap);
+  const activeVectorSource = String(activeImageElement?.vectorSrc || "").trim();
   const activeRasterPaletteLoading = Boolean(
     hasSingleImageSelection &&
       activeImageId &&
@@ -442,19 +447,33 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
 
     let cancelled = false;
 
-    void extractImagePaletteFromSource(activeRasterSource, 6)
+    // Shapes keep their authored SVG: list its true colours instead of pixel-extracting the
+    // rasterized PNG, whose anti-aliased edges hallucinate phantom near-black palette entries.
+    const svgPalette = extractSvgPaletteColors(activeVectorSource, 6);
+    const palettePromise =
+      svgPalette.length > 0 ? Promise.resolve(svgPalette) : extractImagePaletteFromSource(activeRasterSource, 6);
+
+    void palettePromise
       .then((colors) => {
         if (cancelled) return;
+        const palette = Array.isArray(colors) ? colors : [];
         const patch: {
           rasterOriginalSrc?: string;
           rasterPalette?: string[];
           rasterPaletteVersion?: number;
+          rasterColorMap?: Record<string, string>;
         } = {
           rasterPaletteVersion: RASTER_PALETTE_VERSION,
-          rasterPalette: Array.isArray(colors) ? colors : [],
+          rasterPalette: palette,
         };
         if (!sourceWasPersisted) {
           patch.rasterOriginalSrc = activeRasterSource;
+        }
+        // Carry an existing recolor over to the re-derived palette's keys (nearest colour wins).
+        const currentMap = Object.fromEntries(JSON.parse(activeRasterColorMapKey) as Array<[string, string]>);
+        const migratedMap = migrateRasterColorMap(currentMap, palette);
+        if (serializeRasterColorMap(migratedMap) !== activeRasterColorMapKey) {
+          patch.rasterColorMap = migratedMap;
         }
         updateElement(activeImageId, patch, { recordHistory: false });
       })
@@ -466,9 +485,11 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   }, [
     activeImageId,
     activeImageRasterOriginalSrc,
+    activeRasterColorMapKey,
     activeRasterPalette.length,
     activeRasterPaletteVersion,
     activeRasterSource,
+    activeVectorSource,
     updateElement,
   ]);
 

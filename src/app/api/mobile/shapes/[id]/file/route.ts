@@ -5,6 +5,7 @@ import {
   resolveMobileBuiltInShapeById,
   MOBILE_SHAPE_RASTER_SIZE,
 } from "@/lib/mobile/shapesCatalog.server";
+import { trimShapeSvg } from "@/lib/mobile/shapeSvgTrim.server";
 
 export const runtime = "nodejs";
 
@@ -68,11 +69,33 @@ export async function GET(
       return handleNotFound("Shape");
     }
 
-    const pngBytes = await rasterizeSvgToPng(decodeSvgDataUrl(shape.src));
-
     // The catalog serves versioned URLs (?v=...), so a versioned request is
     // safe to cache immutably for a year; bumping the version busts it.
     const isVersioned = request.nextUrl.searchParams.has("v");
+    const format = String(request.nextUrl.searchParams.get("format") || "")
+      .trim()
+      .toLowerCase();
+
+    // Serve the raw SVG on request. Shapes are flat-fill vectors, so the SVG stays
+    // razor-sharp at any size on the client (rendered via Coil's SvgDecoder) instead
+    // of pixelating like the fixed-size PNG does when the user scales it up. PNG stays
+    // the default so older app builds (no SVG decoder) keep working unchanged.
+    if (format === "svg") {
+      // Crop the viewBox to the shape's content bounds (the authoring SVGs carry transparent
+      // padding) so the vector fills its box like the trimmed PNG does — no floating margin.
+      const trimmed = await trimShapeSvg(shape.src);
+      return new NextResponse(Buffer.from(trimmed.svg, "utf8"), {
+        status: 200,
+        headers: {
+          "Content-Type": "image/svg+xml; charset=utf-8",
+          "Cache-Control": isVersioned
+            ? "public, max-age=31536000, immutable"
+            : "public, max-age=3600",
+        },
+      });
+    }
+
+    const pngBytes = await rasterizeSvgToPng(decodeSvgDataUrl(shape.src));
 
     return new NextResponse(pngBytes, {
       status: 200,

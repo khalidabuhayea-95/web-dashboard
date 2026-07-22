@@ -611,6 +611,8 @@ const schemas = {
       background: {
         type: "object",
         additionalProperties: true,
+        description:
+          "Page background, discriminated by `type`: `solid` (`colorHex`), `gradient` (`startColorHex`, `endColorHex`, `angle`), `image` (`imageUri`), or `transparent` (no fill — the page shows through with real alpha). Clients without a transparent-background variant should treat `transparent` as solid white.",
       },
       layers: {
         type: "array",
@@ -874,6 +876,61 @@ const schemas = {
       mobileCompatible: { type: "boolean", nullable: true },
     },
   },
+  MobileMediaLayerFilters: {
+    type: "object",
+    additionalProperties: true,
+    description:
+      "Visual adjustments for IMAGE / VIDEO / FRAME layers. Besides tone controls, this carries the layer's ROUNDED CORNERS and BORDER: render both so media matches the web editor. `cornerRadius` is a RATIO of the layer's shorter rendered side (radiusPx = cornerRadius × min(width, height)); values come clamped to ≤ 0.5 (0.5 = pill / fully rounded). The BORDER MUST FOLLOW THE CORNER SHAPE: build ONE rounded-rect outline path (honoring `cornerRadiusCorners` — rounded where enabled, sharp where disabled), clip the media to it, then stroke that SAME path centered on the edge — never draw a straight rectangular border over rounded media. `strokeWidth` is in project px and 0 disables it. Render order: clip media → draw media → stroke outline (so the border stays crisp on top). SHAPE layers never need client-side corner/stroke handling — theirs are pre-baked into the served raster.",
+    properties: {
+      filterPresetId: { type: "string", nullable: true },
+      brightness: { type: "number", description: "1 = neutral, range 0–2." },
+      contrast: { type: "number", description: "1 = neutral, range 0–2." },
+      saturation: { type: "number", description: "1 = neutral, range 0–2." },
+      blurRadius: { type: "number", description: "0–40 px." },
+      tintColorHex: { type: "string" },
+      tintStrength: { type: "number", description: "0–1." },
+      blendMode: { type: "string" },
+      shape: {
+        type: "string",
+        enum: ["RECTANGLE", "ROUNDED", "CIRCLE"],
+        description:
+          "Media shape mask. Imported layers are always RECTANGLE — apply `cornerRadius` to RECTANGLE too, not only ROUNDED.",
+      },
+      cornerRadius: {
+        type: "number",
+        minimum: 0,
+        maximum: 0.5,
+        description:
+          "Corner rounding as a ratio of the shorter rendered side: radiusPx = cornerRadius × min(width, height). 0 = sharp corners; 0.5 = pill. Applies to the corners enabled in `cornerRadiusCorners` (all four when that field is absent).",
+      },
+      cornerRadiusCorners: {
+        type: "object",
+        nullable: true,
+        description:
+          "Optional per-corner enable mask for `cornerRadius`. OMITTED = round ALL corners (the common case). When present, apply the radius only to corners set true and keep the others sharp — supports rounding a single corner, a pair, or any combination.",
+        properties: {
+          topLeft: { type: "boolean" },
+          topRight: { type: "boolean" },
+          bottomRight: { type: "boolean" },
+          bottomLeft: { type: "boolean" },
+        },
+      },
+      strokeColorHex: { type: "string", description: "Border color (#RRGGBB)." },
+      strokeOpacity: { type: "number", minimum: 0, maximum: 1, description: "Border alpha; 0 hides the border." },
+      strokeWidth: {
+        type: "number",
+        minimum: 0,
+        maximum: 24,
+        description:
+          "Border thickness in project px, stroked along the SAME (per-corner) rounded outline the media is clipped to — the border curves around every rounded corner. 0 = no border.",
+      },
+      shadowColorHex: { type: "string" },
+      shadowOpacity: { type: "number" },
+      shadowBlurRadius: { type: "number" },
+      shadowOffsetX: { type: "number" },
+      shadowOffsetY: { type: "number" },
+    },
+  },
   MobileTemplateSummary: {
     type: "object",
     required: [
@@ -1014,17 +1071,22 @@ const schemas = {
           background: {
             type: "object",
             additionalProperties: true,
+            description:
+              "Page background, discriminated by `type`: `solid` (`colorHex`), `gradient` (`startColorHex`, `endColorHex`, `angle`), `image` (`imageUri`), or `transparent` (no fill — the page shows through with real alpha). Clients without a transparent-background variant should treat `transparent` as solid white.",
           },
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor.",
             items: {
               type: "object",
               additionalProperties: true,
               properties: {
                 font: {
                   $ref: "#/components/schemas/MobileLayerFontSummary",
+                },
+                filters: {
+                  $ref: "#/components/schemas/MobileMediaLayerFilters",
                 },
               },
             },
@@ -1479,6 +1541,7 @@ const schemas = {
       "tagsEn",
       "tagsAr",
       "assetUrl",
+      "vectorUrl",
       "thumbnailUrl",
       "width",
       "height",
@@ -1500,7 +1563,18 @@ const schemas = {
         type: "array",
         items: { type: "string" },
       },
-      assetUrl: { type: "string", format: "uri" },
+      assetUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "Fixed-size PNG render of the shape (legacy; pixelates when scaled up).",
+      },
+      vectorUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "Resolution-independent SVG source (same endpoint with `?format=svg`). Clients that can render SVG should prefer this so shapes stay crisp at any scale.",
+      },
       thumbnailUrl: { type: "string", format: "uri" },
       width: { type: "integer", minimum: 1 },
       height: { type: "integer", minimum: 1 },
@@ -2435,16 +2509,36 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Shapes"],
           summary: "Resolve built-in shape image",
           description:
-            "Renders a built-in editor shape as a PNG image for mobile clients.",
-          parameters: [reusableParameters.shapeIdPath],
+            "Renders a built-in editor shape for mobile clients. Defaults to a PNG; pass `?format=svg` to get the resolution-independent SVG source, which stays crisp when the shape is scaled up on the client.",
+          parameters: [
+            reusableParameters.shapeIdPath,
+            {
+              name: "format",
+              in: "query",
+              required: false,
+              description:
+                "Output format. `png` (default) returns a rasterized image; `svg` returns the untouched vector source as `image/svg+xml`.",
+              schema: {
+                type: "string",
+                enum: ["png", "svg"],
+                default: "png",
+              },
+            },
+          ],
           responses: {
             200: {
-              description: "Shape PNG image",
+              description:
+                "Shape image (PNG by default, or SVG when `format=svg`).",
               content: {
                 "image/png": {
                   schema: {
                     type: "string",
                     format: "binary",
+                  },
+                },
+                "image/svg+xml": {
+                  schema: {
+                    type: "string",
                   },
                 },
               },

@@ -6,6 +6,7 @@ import {
   localizeBuiltInShapeKeywords,
   localizeBuiltInShapeName,
 } from "@/lib/mobile/shapeLocalization";
+import { trimShapeSvg } from "@/lib/mobile/shapeSvgTrim.server";
 
 // Server-side rasterization size (px, longest edge) for built-in shape assets
 // served to mobile. Shapes are flat-fill vectors, so a large size stays small on
@@ -16,7 +17,7 @@ export const MOBILE_SHAPE_RASTER_SIZE = 2048;
 // Version tag appended to every shape asset URL. Bump it to force all clients and
 // CDNs to re-fetch (regenerate) every shape at the current resolution instead of
 // serving a cached lower-res copy.
-export const MOBILE_SHAPE_ASSET_VERSION = "3";
+export const MOBILE_SHAPE_ASSET_VERSION = "4";
 
 export interface MobileShapeItem {
   id: string;
@@ -27,6 +28,13 @@ export interface MobileShapeItem {
   tagsEn: string[];
   tagsAr: string[];
   assetUrl: string;
+  /**
+   * Crisp, resolution-independent SVG source for this shape. Clients that can render
+   * SVG (Coil's `SvgDecoder`) should prefer this over `assetUrl` (a fixed-size PNG) so
+   * the shape stays sharp at any scale instead of pixelating when enlarged. Older
+   * clients ignore it and keep using `assetUrl`.
+   */
+  vectorUrl: string;
   thumbnailUrl: string;
   width: number;
   height: number;
@@ -86,11 +94,28 @@ export function buildMobileShapeFileUrl(request: Request | URL, shapeId: string)
   return url.toString();
 }
 
-function toMobileShapeItem(shape: BuiltInShapeAsset, request: Request | URL): MobileShapeItem {
+export function buildMobileShapeVectorUrl(request: Request | URL, shapeId: string) {
+  const baseUrl = getBaseUrl(request);
+  const url = new URL(`/api/mobile/shapes/${encodeURIComponent(shapeId)}/file`, baseUrl);
+  url.searchParams.set("v", MOBILE_SHAPE_ASSET_VERSION);
+  // Same endpoint as the PNG, but ?format=svg returns the untouched vector source.
+  url.searchParams.set("format", "svg");
+  return url.toString();
+}
+
+async function toMobileShapeItem(
+  shape: BuiltInShapeAsset,
+  request: Request | URL
+): Promise<MobileShapeItem> {
   const assetUrl = buildMobileShapeFileUrl(request, shape.id);
+  const vectorUrl = buildMobileShapeVectorUrl(request, shape.id);
   const nameAr = localizeBuiltInShapeName(shape.name);
   const tagsEn = Array.isArray(shape.keywords) ? shape.keywords : [];
   const tagsAr = localizeBuiltInShapeKeywords(tagsEn);
+  // Report the shape's tight (trimmed) dimensions, not the padded authoring box, so the mobile
+  // layer hugs the shape. The vector is served trimmed too (same content bounds), so the box
+  // aspect matches and the app's FillBounds fills without distortion or leftover padding.
+  const trimmed = await trimShapeSvg(shape.src);
   return {
     id: shape.id,
     name: nameAr,
@@ -100,13 +125,14 @@ function toMobileShapeItem(shape: BuiltInShapeAsset, request: Request | URL): Mo
     tagsEn,
     tagsAr,
     assetUrl,
+    vectorUrl,
     thumbnailUrl: assetUrl,
-    width: shape.width,
-    height: shape.height,
+    width: trimmed.width,
+    height: trimmed.height,
   };
 }
 
-export function listMobileBuiltInShapes(options: ListMobileShapesOptions) {
+export async function listMobileBuiltInShapes(options: ListMobileShapesOptions) {
   const locale = String(options.locale || "en").trim().toLowerCase() === "ar" ? "ar" : "en";
   const page = Math.max(1, Number(options.page) || 1);
   const pageSize = Math.max(1, Math.min(100, Number(options.pageSize) || 100));
@@ -117,10 +143,9 @@ export function listMobileBuiltInShapes(options: ListMobileShapesOptions) {
   const totalPages = Math.max(1, Math.ceil(total / pageSize));
   const safePage = Math.min(page, totalPages);
   const start = (safePage - 1) * pageSize;
-  const items = filtered
-    .slice(start, start + pageSize)
-    .map((shape) => {
-      const item = toMobileShapeItem(shape, options.request);
+  const items = await Promise.all(
+    filtered.slice(start, start + pageSize).map(async (shape) => {
+      const item = await toMobileShapeItem(shape, options.request);
       if (locale === "ar") {
         return item;
       }
@@ -129,7 +154,8 @@ export function listMobileBuiltInShapes(options: ListMobileShapesOptions) {
         name: item.nameEn,
         tags: item.tagsEn,
       };
-    });
+    })
+  );
 
   return {
     locale,

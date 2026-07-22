@@ -21,6 +21,12 @@ const EXTENSION_BUILD = (() => {
 })();
 console.log(`[CanvaImporter] build ${EXTENSION_BUILD} loaded`);
 
+// Global text scale applied to EVERY imported text layer — Canva's measured font sizes come in a
+// touch large for our editor/mobile rendering, so shrink all text by 5% (0.95). Adjust here to
+// change the amount; 1 disables it. Applied in layerToFabricObject so DOM-captured text and the
+// off-screen model-supplement text (both flow through it) shrink by the same factor.
+const IMPORT_TEXT_FONT_SCALE = 0.95;
+
 const logger =
   typeof globalThis.createExtensionLogger === "function"
     ? globalThis.createExtensionLogger("background")
@@ -138,18 +144,39 @@ function estimateDataUrlBytes(dataUrl) {
 
 function dataUrlToBlob(dataUrl) {
   const source = String(dataUrl || "").trim();
-  const match = source.match(/^data:([^;,]*)(;base64)?,(.*)$/i);
-  if (!match) {
+  const commaIndex = source.indexOf(",");
+  if (commaIndex === -1 || !/^data:/i.test(source)) {
     throw new Error("Invalid data URL.");
   }
-  const mimeType =
-    String(match[1] || "application/octet-stream").trim() || "application/octet-stream";
-  const isBase64 = Boolean(match[2]);
-  const payload = String(match[3] || "");
-  const binaryString = isBase64 ? atob(payload) : decodeURIComponent(payload);
-  const bytes = new Uint8Array(binaryString.length);
-  for (let index = 0; index < binaryString.length; index += 1) {
-    bytes[index] = binaryString.charCodeAt(index);
+  // Parse by hand instead of one regex so this accepts EVERY valid data URL — the previous
+  // /^data:([^;,]*)(;base64)?,(.*)$/i rejected two shapes the extension itself emits:
+  //   • parameters, e.g. `data:image/svg+xml;charset=utf-8,…` (vector shapes, lines 2737/3081), and
+  //   • payloads containing newlines (raw SVG markup, or line-wrapped base64) — `.` skips `\n`.
+  // A single unparseable asset threw here during multipart build and aborted the WHOLE import
+  // ("Invalid data URL") before the POST — even though the server parses these fine.
+  // Header = between "data:" and the first comma: "<mime>[;param=value]*[;base64]".
+  const header = source.slice(5, commaIndex);
+  const payload = source.slice(commaIndex + 1);
+  const headerParts = header.split(";").map((part) => part.trim());
+  const isBase64 = headerParts[headerParts.length - 1].toLowerCase() === "base64";
+  const mimeType = headerParts[0] || "application/octet-stream";
+  let bytes;
+  if (isBase64) {
+    const binaryString = atob(payload.replace(/\s+/g, "")); // base64 may be line-wrapped
+    bytes = new Uint8Array(binaryString.length);
+    for (let index = 0; index < binaryString.length; index += 1) {
+      bytes[index] = binaryString.charCodeAt(index);
+    }
+  } else {
+    // Percent-encoded text (SVG). TextEncoder yields correct UTF-8 bytes for non-ASCII glyphs,
+    // unlike the old charCodeAt loop which truncated code points > 255.
+    let text;
+    try {
+      text = decodeURIComponent(payload);
+    } catch (_error) {
+      text = payload;
+    }
+    bytes = new TextEncoder().encode(text);
   }
   return new Blob([bytes], { type: mimeType });
 }
@@ -1097,9 +1124,13 @@ async function layerToFabricObject(layer, index) {
     (Math.abs(normalizedAngle) <= 0.2 || Math.abs(normalizedAngle - 360) <= 0.2);
   if (layer?.kind === "text" && String(layer?.text || "").trim()) {
     const text = String(layer.text || "").trim();
-    const fontSize = Math.max(8, numberOr(layer?.fontSize, 28));
+    const rawFontSize = Math.max(8, numberOr(layer?.fontSize, 28));
     const letterSpacingPx = numberOr(layer?.letterSpacing, 0);
-    const charSpacing = fontSize > 0 ? (letterSpacingPx / fontSize) * 1000 : 0;
+    // charSpacing is em-based (1/1000 em); derive it from the RAW size, then scale fontSize — so the
+    // glyphs AND their letter-spacing shrink by the same 5%, a uniform reduction (not just smaller
+    // letters with the original px gaps). Floor at 8px so tiny labels stay legible.
+    const charSpacing = rawFontSize > 0 ? (letterSpacingPx / rawFontSize) * 1000 : 0;
+    const fontSize = Math.max(8, rawFontSize * IMPORT_TEXT_FONT_SCALE);
     const textDecoration = String(layer?.textDecoration || "").toLowerCase();
     const underline = textDecoration.includes("underline");
     const linethrough =
@@ -1141,6 +1172,58 @@ async function layerToFabricObject(layer, index) {
       layerLocked: false,
       layerHidden: false,
     }, layer, { value: false, reason: "" });
+  }
+
+  // Editable shape from the MODEL (simple solid-colour circle/rect). Canva renders these as
+  // PROTECTED raster images, so the DOM path snapshot-crops them with a baked-in background; the
+  // model carries the clean vector, so emit a preset circle/rect fabric object (SidePanel turns
+  // type:"circle"/"rect" into an editable editor shape). Runs BEFORE the image path, so no protected
+  // src reaches the server — no 403, no snapshot crop, no baked background. Takes priority over the
+  // legacy kind==="shape" handler because these layers are usually classified as images.
+  if (
+    layer?.modelShape &&
+    (typeof layer.modelShape.fillColor === "string" ||
+      typeof layer.modelShape.strokeColor === "string") &&
+    (layer.modelShape.shapeKind === "circle" || layer.modelShape.shapeKind === "rect")
+  ) {
+    const ms = layer.modelShape;
+    const shapeKind = ms.shapeKind;
+    const hasStroke = typeof ms.strokeColor === "string" && Number(ms.strokeWidth) > 0;
+    const shapeAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
+    return annotateImportMetadata(
+      {
+        type: shapeKind,
+        version: "7.0.0",
+        originX: "left",
+        originY: "top",
+        left: shapeAnchor.left,
+        top: shapeAnchor.top,
+        width,
+        height,
+        scaleX: 1,
+        scaleY: 1,
+        angle,
+        opacity,
+        // Stroke-only outline shapes (photo frames, contact bars, ring dividers) have no fill →
+        // emit a transparent fill so only the outline shows; the editor reads fill/stroke/strokeWidth.
+        fill: typeof ms.fillColor === "string" ? ms.fillColor : "transparent",
+        stroke: hasStroke ? ms.strokeColor : "rgba(0,0,0,0)",
+        strokeWidth: hasStroke ? Number(ms.strokeWidth) : 0,
+        // Rounded rects (pill labels, rounded bars): the editor's rect loader reads max(rx, ry).
+        ...(shapeKind === "rect" && Number(ms.cornerRadius) > 0
+          ? { rx: Math.round(Number(ms.cornerRadius)), ry: Math.round(Number(ms.cornerRadius)) }
+          : {}),
+        flipX,
+        flipY,
+        layerType: "shape",
+        layerName:
+          String(layer?.name || "").trim() ||
+          `${shapeKind === "circle" ? "Circle" : "Rectangle"} ${index + 1}`,
+        layerLocked: false,
+        layerHidden: false,
+      },
+      layer
+    );
   }
 
   if (layer?.kind === "shape") {
@@ -1254,6 +1337,20 @@ async function layerToFabricObject(layer, index) {
     sourceWidth: objectWidth,
     sourceHeight: objectHeight,
   };
+
+  // Canva photo-frame outline + rounded corners → the editor reads stroke/strokeWidth/cornerRadius
+  // on the image object and renders them around the display-sized element (strokeScaleEnabled off),
+  // so both are the Canva design-px values directly. Renderers clamp radius to min(w,h)/2 (pills).
+  const border = layer?.modelBorder;
+  if (border) {
+    if (typeof border.strokeColor === "string" && Number(border.strokeWidth) > 0) {
+      imageObject.stroke = border.strokeColor;
+      imageObject.strokeWidth = Math.max(1, Math.round(Number(border.strokeWidth)));
+    }
+    if (Number(border.cornerRadius) > 0) {
+      imageObject.cornerRadius = Math.round(Number(border.cornerRadius));
+    }
+  }
 
   if (/^https?:\/\//i.test(imageSrc)) {
     imageObject.crossOrigin = "anonymous";
@@ -1380,6 +1477,21 @@ async function buildHybridFabricObjects(
 
   for (let index = 0; index < layers.length; index += 1) {
     const layer = layers[index];
+    // Model-classified simple shape (solid circle/rect): emit the editable preset shape directly and
+    // skip ALL image/snapshot logic below — Canva renders these as protected rasters, so letting
+    // them fall through would snapshot-crop them with a baked background instead.
+    if (
+      layer?.modelShape &&
+      (typeof layer.modelShape.fillColor === "string" ||
+        typeof layer.modelShape.strokeColor === "string") &&
+      (layer.modelShape.shapeKind === "circle" || layer.modelShape.shapeKind === "rect")
+    ) {
+      const shapeObject = await layerToFabricObject(layer, result.length);
+      if (shapeObject) {
+        result.push(shapeObject);
+        continue;
+      }
+    }
     const layerKind = String(layer?.kind || "").toLowerCase();
     // Plain overflow/aspect crops (snapshotIsLossyFallback) keep the high-resolution
     // fetched asset that the scraper already cropped to the visible region, so skip the
@@ -2291,11 +2403,100 @@ function extractCanvaFiberModel() {
         return null;
       }
     };
+    // Corner radius of a shape path, in DESIGN px — minified numeric prop on the path (observed
+    // `mb`); known name first, structural numeric fallback. 0 = sharp.
+    const readPathCornerRadius = (p0) => {
+      try {
+        if (!p0 || typeof p0 !== "object") return 0;
+        if (typeof p0.mb === "number" && Number.isFinite(p0.mb)) return Math.max(0, Math.round(p0.mb));
+        for (const k of Object.keys(p0)) {
+          const v = p0[k];
+          if (typeof v === "number" && Number.isFinite(v) && v >= 0) return Math.max(0, Math.round(v));
+        }
+      } catch (_e) {
+        /* ignore */
+      }
+      return 0;
+    };
+    // Canva 'shape' elements (paths + viewBox + fill) RENDER as protected raster images in the DOM,
+    // so the DOM capture path can only snapshot-crop them (baked background). The model holds the
+    // clean vector — classify a SIMPLE solid-colour circle/rect (the icon-circle & banner-bar cases)
+    // so it imports as an EDITABLE editor shape instead. Complex/image-filled paths → null (image).
+    const extractShape = (el) => {
+      try {
+        const paths = Array.isArray(el.paths) ? el.paths : null;
+        if (!paths || paths.length !== 1) return null;
+        const p0 = paths[0] || {};
+        // A path FILLED WITH AN IMAGE is a Canva photo-frame (the shape clips a photo), NOT an
+        // editable shape — leave it to the image path so the photo is preserved.
+        if (p0.fill && typeof p0.fill === "object" && p0.fill.image) return null;
+        const d = String(p0.d || "").trim();
+        let shapeKind = null;
+        if (/^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d)) shapeKind = "rect";
+        else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d)) shapeKind = "circle";
+        if (!shapeKind) return null;
+        // Solid fill AND/OR an outline stroke — Canva photo frames, pill labels and dividers are
+        // stroke-only rects/circles (no fill). Emit whichever paint(s) the shape carries.
+        const fillColor = p0.fill && typeof p0.fill.color === "string" ? p0.fill.color : null;
+        const stroke = p0.stroke && typeof p0.stroke === "object" ? p0.stroke : null;
+        const strokeColor = stroke && typeof stroke.color === "string" ? stroke.color : null;
+        const strokeWidth =
+          stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
+        if (!fillColor && !(strokeColor && strokeWidth > 0)) return null;
+        return { shapeKind, fillColor, strokeColor, strokeWidth, cornerRadius: readPathCornerRadius(p0) };
+      } catch (_e) {
+        return null;
+      }
+    };
+    // Border + corner radius for an IMAGE-filled shape (Canva photo-frame).
+    const extractBorder = (el) => {
+      try {
+        const paths = Array.isArray(el.paths) ? el.paths : null;
+        const p0 = paths && paths.length === 1 ? paths[0] : null;
+        if (!p0 || !(p0.fill && typeof p0.fill === "object" && p0.fill.image)) return null;
+        const stroke = p0.stroke && typeof p0.stroke === "object" ? p0.stroke : null;
+        const strokeColor = stroke && typeof stroke.color === "string" ? stroke.color : null;
+        const strokeWidth =
+          stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
+        const cornerRadius = readPathCornerRadius(p0);
+        if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0)) return null;
+        // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
+        // rendered snapshot never needed (blob/circle frames stay false).
+        const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(String(p0.d || "").trim());
+        return { strokeColor, strokeWidth, cornerRadius, rectFrame };
+      } catch (_e) {
+        return null;
+      }
+    };
+    // Canva 'line' elements (dividers / rules) are thin strokes the DOM capture's thin-vector gate
+    // often drops entirely, leaving a visible gap. The model always has them: a straight stroke
+    // with a color + weight (thickness). Recover them as a thin filled rect downstream.
+    const extractLine = (el) => {
+      try {
+        const color =
+          typeof el.color === "string"
+            ? el.color
+            : el.fill && typeof el.fill.color === "string"
+              ? el.fill.color
+              : null;
+        if (!color) return null;
+        const weight =
+          Number(el.weight) > 0 ? Number(el.weight) : Number(el.height) > 0 ? Number(el.height) : 1;
+        return { color, weight: Math.max(1, Math.round(weight)) };
+      } catch (_e) {
+        return null;
+      }
+    };
     const num = (v) => (Number.isFinite(Number(v)) ? Number(v) : 0);
+    // zOrder: Canva's element array order IS the paint order (index 0 = bottom). Stamped
+    // EXPLICITLY because the model crosses executeScript arg serialization, which SORTS object
+    // keys alphabetically — Object.keys() insertion order does NOT survive the boundary.
+    let zOrder = 0;
     for (const el of allElements) {
       const id = String((el && el.id) || "");
       if (!id || !/^LB/.test(id)) continue;
       result[id] = {
+        zOrder: zOrder++,
         type: typeof el.type === "string" ? el.type : "",
         left: num(el.left),
         top: num(el.top),
@@ -2308,6 +2509,9 @@ function extractCanvaFiberModel() {
         animation: extractAnimation(el),
         text: el.type === "text" ? extractText(el) : null,
         image: el.type === "rect" ? extractImage(el) : null,
+        shape: el.type === "shape" ? extractShape(el) : null,
+        line: el.type === "line" ? extractLine(el) : null,
+        border: el.type === "shape" ? extractBorder(el) : null,
       };
     }
 
@@ -2432,6 +2636,56 @@ function extractCanvaFiberModel() {
   return result;
 }
 
+// Fetch protected/session-scoped image URLs from the PAGE's MAIN world, where the Canva session
+// cookies apply (the isolated content script's fetch does not carry them, so it 403s on
+// media.canva.com/v2 / signed premium+upload assets). Self-contained (serialized across the world
+// boundary via executeScript world:"MAIN"). Returns { [url]: "data:image/…" } for whatever resolved.
+async function fetchProtectedImagesInMainWorld(urls) {
+  const out = {};
+  const MAX_BYTES = 12_000_000;
+  const list = Array.isArray(urls) ? urls.slice(0, 200) : [];
+  const toDataUrl = (blob) =>
+    new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(new Error("read-failed"));
+      reader.readAsDataURL(blob);
+    });
+  const fetchOne = async (url) => {
+    // "omit" FIRST: signed Canva asset URLs (csig=…) return ACAO:* which forbids credentialed
+    // requests — "include" throws a CORS TypeError. "omit" succeeds (the signature authorizes).
+    for (const credentials of ["omit", "include"]) {
+      try {
+        const response = await fetch(url, { credentials, cache: "force-cache" });
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        if (!blob || blob.size <= 0 || blob.size > MAX_BYTES) continue;
+        const type = String(blob.type || "").toLowerCase();
+        if (type && !type.startsWith("image/")) continue;
+        const dataUrl = await toDataUrl(blob);
+        if (typeof dataUrl === "string" && dataUrl.startsWith("data:image/")) {
+          out[url] = dataUrl;
+          return;
+        }
+      } catch (_e) {
+        /* try the next credentials mode */
+      }
+    }
+  };
+  // small concurrency cap so a big design doesn't open hundreds of parallel fetches
+  const CONCURRENCY = 6;
+  let cursor = 0;
+  const workers = Array.from({ length: Math.min(CONCURRENCY, list.length) }, async () => {
+    while (cursor < list.length) {
+      const index = cursor;
+      cursor += 1;
+      await fetchOne(list[index]);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 async function getCaptureMetaFromTab(tabId, options = {}) {
   const shouldCollectLayerMetadata = Boolean(options?.captureMetadata);
   let results = null;
@@ -2447,14 +2701,44 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
     // the fiber itself. Best-effort: on failure the scraper still imports the current frame's DOM.
     let fiberModel = {};
     try {
-      const fiberResults = await chrome.scripting.executeScript({
-        target: { tabId },
-        world: "MAIN",
-        func: extractCanvaFiberModel,
-      });
-      const extracted = Array.isArray(fiberResults)
-        ? fiberResults.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
-        : null;
+      let extracted = null;
+      // PREFER file injection over the serialized `func` below. A `func` is serialized from THIS
+      // service worker, which Chrome caches hard — so fiber-derived features (animations, text,
+      // editable shapes, flips) silently ran stale until a full Remove+Load-unpacked. canva-fiber-
+      // main.js is re-read from disk on every import (like canva-scraper.js), so it updates on a
+      // plain reload. It stashes its result on globalThis; a trivial (never-changing → cache-immune)
+      // read-back func retrieves it. Falls back to the in-worker func if file injection is blocked.
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          files: ["canva-fiber-main.js"],
+        });
+        const readBack = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: () =>
+            globalThis.__canvaFiberModelResult && typeof globalThis.__canvaFiberModelResult === "object"
+              ? globalThis.__canvaFiberModelResult
+              : null,
+        });
+        const fromFile = Array.isArray(readBack)
+          ? readBack.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+          : null;
+        if (fromFile && typeof fromFile === "object" && Object.keys(fromFile).length) extracted = fromFile;
+      } catch (_fileInjectError) {
+        /* file injection unavailable (older Chrome / blocked) — fall through to the func path */
+      }
+      if (!extracted) {
+        const fiberResults = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: extractCanvaFiberModel,
+        });
+        extracted = Array.isArray(fiberResults)
+          ? fiberResults.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+          : null;
+      }
       if (extracted && typeof extracted === "object") fiberModel = extracted;
     } catch (_fiberError) {
       /* MAIN-world injection blocked or fiber shape changed — static designs still import. */
@@ -2481,6 +2765,58 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
     ? results.find((entry) => entry && typeof entry.result === "object")?.result
     : null;
   if (primaryResult && typeof primaryResult === "object") {
+    // ── Protected images → MAIN-world fetch ─────────────────────────────────────────────────────
+    // The scraper runs in the ISOLATED world, whose fetch has NO Canva session — so protected srcs
+    // (media.canva.com/v2, signed premium/upload) can't be fetched there and stay as URLs. The
+    // SERVER can't fetch them either (403) → the whole design collapses to a flat snapshot. The
+    // MAIN world (like the fiber walk) DOES have the session, so fetch the leftover protected srcs
+    // here and merge the bytes back into the layers before they're sent.
+    try {
+      const isServerFetchable = (url) =>
+        /^https?:\/\/(?:[a-z0-9-]+\.)*(?:media-public|video-public)\.canva\.com\//i.test(url) ||
+        /^https?:\/\/pub-[a-z0-9]+\.r2\.dev\//i.test(url);
+      const layers = Array.isArray(primaryResult.layers) ? primaryResult.layers : [];
+      const protectedUrls = [
+        ...new Set(
+          layers
+            .filter((layer) => {
+              if (String(layer?.imageDataUrl || "").startsWith("data:image/")) return false;
+              const src = String(layer?.imageSrc || "");
+              return /^https?:\/\//i.test(src) && !isServerFetchable(src);
+            })
+            .map((layer) => String(layer.imageSrc))
+        ),
+      ];
+      let merged = 0;
+      if (protectedUrls.length) {
+        const fetchResults = await chrome.scripting.executeScript({
+          target: { tabId },
+          world: "MAIN",
+          func: fetchProtectedImagesInMainWorld,
+          args: [protectedUrls],
+        });
+        const urlToDataUrl =
+          (Array.isArray(fetchResults)
+            ? fetchResults.find((entry) => entry && entry.result && typeof entry.result === "object")
+                ?.result
+            : null) || {};
+        for (const layer of layers) {
+          const src = String(layer?.imageSrc || "");
+          const bytes = urlToDataUrl[src];
+          if (bytes && typeof bytes === "string" && bytes.startsWith("data:image/")) {
+            layer.imageSrc = bytes;
+            layer.imageDataUrl = bytes;
+            layer.imageProvenance = layer.imageProvenance || "mainworld-fetch";
+            merged += 1;
+          }
+        }
+        console.log(
+          `[canva-importer] MAIN-world protected-image fetch: ${merged}/${protectedUrls.length} resolved`
+        );
+      }
+    } catch (_protectedFetchError) {
+      /* best-effort; unresolved layers degrade to the server's per-layer snapshot crop */
+    }
     return primaryResult;
   }
 
@@ -2706,7 +3042,19 @@ async function createDashboardMultipartPayload(body, token) {
 
   const rewriteValue = (value, keyHint = "") => {
     if (typeof value === "string" && shouldExternalizeMultipartAsset(keyHint, value)) {
-      const blob = dataUrlToBlob(value);
+      // Resilience: never let ONE unparseable asset abort the whole import. If dataUrlToBlob still
+      // throws (a genuinely malformed data URL), leave the value INLINE and keep going — the server's
+      // robust sanitizer + snapshot-recovery handle or replace it per-layer instead of failing all.
+      let blob;
+      try {
+        blob = dataUrlToBlob(value);
+      } catch (assetError) {
+        logger.warn("Skipping multipart externalization for unparseable data URL", {
+          keyHint,
+          head: String(value).slice(0, 48),
+        });
+        return value;
+      }
       const assetKey = `${IMPORT_MULTIPART_ASSET_PREFIX}${assetCounter++}`;
       assetEntries.push({
         assetKey,

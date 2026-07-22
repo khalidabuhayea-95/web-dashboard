@@ -143,6 +143,12 @@ export function isSvgDataUrlSource(sourceInput: string) {
 // panel (click-to-add) and the canvas drop handler (drag-to-add).
 export const SVG_SHAPE_RASTER_SCALE = 4;
 
+// Intrinsic (longest-edge) pixel size baked into a shape's render SVG. A browser rasterizes an
+// <svg> <img> at its intrinsic width/height, so this — not the draw size — caps how crisp the
+// live-vector shape looks when enlarged on the canvas. 2048 keeps it sharp up to a full-canvas
+// size while bounding the decoded-bitmap memory per shape.
+export const SHAPE_VECTOR_INTRINSIC_EDGE_PX = 2048;
+
 export async function rasterizeSvgDataUrlToPngDataUrl(
   sourceInput: string,
   options?: { scale?: number }
@@ -179,6 +185,79 @@ export async function rasterizeSvgDataUrlToPngDataUrl(
   context.clearRect(0, 0, width, height);
   context.drawImage(image, 0, 0, width, height);
   return canvas.toDataURL("image/png");
+}
+
+// Given a built-in shape's SVG data URL and the trim crop computed on its baked raster (cropX/Y/W/H
+// in source-pixel space + the source dimensions), returns a new SVG data URL whose viewBox is
+// cropped to the shape's content. This lets the canvas render the shape as a LIVE vector that fills
+// its (trimmed) layer box with no Konva crop and no padding — so it stays razor-sharp at any zoom
+// instead of upscaling the fixed-resolution baked PNG. Returns null when it can't be derived.
+export function buildTrimmedShapeSvgDataUrl(
+  svgSource: string,
+  crop: {
+    cropX?: number;
+    cropY?: number;
+    cropWidth?: number;
+    cropHeight?: number;
+    sourceWidth?: number;
+    sourceHeight?: number;
+  }
+): string | null {
+  try {
+    const raw = String(svgSource || "").trim();
+    if (!isSvgDataUrlSource(raw)) return null;
+    const commaIndex = raw.indexOf(",");
+    if (commaIndex < 0) return null;
+    const svg = decodeURIComponent(raw.slice(commaIndex + 1));
+    const viewBoxMatch = svg.match(
+      /viewBox="\s*([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)[\s,]+([-\d.]+)\s*"/
+    );
+    if (!viewBoxMatch) return null;
+    const vbX = Number(viewBoxMatch[1]);
+    const vbY = Number(viewBoxMatch[2]);
+    const vbW = Number(viewBoxMatch[3]);
+    const vbH = Number(viewBoxMatch[4]);
+    if (!(vbW > 0) || !(vbH > 0)) return null;
+
+    // The baked raster is a scaled copy of the SVG viewBox, so map the pixel crop back to viewBox
+    // units by that scale.
+    const sourceWidth = Number(crop.sourceWidth) || vbW;
+    const sourceHeight = Number(crop.sourceHeight) || vbH;
+    const scaleX = sourceWidth / vbW;
+    const scaleY = sourceHeight / vbH;
+    if (!(scaleX > 0) || !(scaleY > 0)) return null;
+    const cropX = Number(crop.cropX) || 0;
+    const cropY = Number(crop.cropY) || 0;
+    const cropWidth = Number(crop.cropWidth) || sourceWidth;
+    const cropHeight = Number(crop.cropHeight) || sourceHeight;
+    const round = (value: number) => Math.round(value * 100) / 100;
+    const nx = round(vbX + cropX / scaleX);
+    const ny = round(vbY + cropY / scaleY);
+    const nw = round(cropWidth / scaleX);
+    const nh = round(cropHeight / scaleY);
+    if (!(nw > 0) || !(nh > 0)) return null;
+
+    // A browser rasterizes an <svg> <img> at its INTRINSIC width/height and then scales that
+    // bitmap, so the intrinsic size — not the draw size — sets the resolution. Keep the cropped
+    // viewBox (content coords) but give the SVG a large intrinsic size so it decodes at high
+    // resolution and stays crisp when the layer is enlarged on the canvas. Aspect is preserved
+    // (outW/outH == nw/nh), so it still fills its box without distortion.
+    const intrinsicScale = SHAPE_VECTOR_INTRINSIC_EDGE_PX / Math.max(nw, nh);
+    const outW = round(nw * intrinsicScale);
+    const outH = round(nh * intrinsicScale);
+
+    // Rewrite only the opening <svg> tag so width/height on inner elements (e.g. <rect>) are safe.
+    const tagEnd = svg.indexOf(">");
+    if (tagEnd < 0) return null;
+    const head = svg
+      .slice(0, tagEnd)
+      .replace(/\swidth="[^"]*"/, ` width="${outW}"`)
+      .replace(/\sheight="[^"]*"/, ` height="${outH}"`)
+      .replace(/viewBox="[^"]*"/, `viewBox="${nx} ${ny} ${nw} ${nh}"`);
+    return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(head + svg.slice(tagEnd))}`;
+  } catch {
+    return null;
+  }
 }
 
 function rotateScaledLocalOffset(

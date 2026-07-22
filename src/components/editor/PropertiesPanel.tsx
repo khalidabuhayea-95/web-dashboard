@@ -7,13 +7,27 @@ import Button from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/form";
 import {
   extractImagePaletteFromSource,
+  extractSvgPaletteColors,
+  migrateRasterColorMap,
   normalizeRasterColorMap,
   RASTER_PALETTE_VERSION,
+  serializeRasterColorMap,
 } from "@/lib/editor/imagePalette";
 import { computeRemoveEdgeWhiteBackgroundPatch } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
-import { useEditorStore, type EditorElement } from "@/store/editorStore";
+import {
+  useEditorStore,
+  type CornerRadiusCorners,
+  type EditorElement,
+} from "@/store/editorStore";
+
+const ALL_CORNERS: CornerRadiusCorners = {
+  topLeft: true,
+  topRight: true,
+  bottomRight: true,
+  bottomLeft: true,
+};
 
 type ImageEditorElement = EditorElement & { type: "image" };
 type VideoEditorElement = EditorElement & { type: "video" };
@@ -30,6 +44,12 @@ function isImageEditorElement(element: EditorElement | null): element is ImageEd
 
 function isMediaEditorElement(element: EditorElement | null): element is MediaEditorElement {
   return element?.type === "image" || element?.type === "video";
+}
+
+const SHAPE_ELEMENT_TYPES = new Set(["rect", "circle", "line", "arrow", "star"]);
+
+function isShapeEditorElement(element: EditorElement | null): boolean {
+  return Boolean(element && SHAPE_ELEMENT_TYPES.has(element.type));
 }
 
 interface PropertiesPanelProps {
@@ -60,6 +80,37 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   const activeElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const activeMediaElement = isMediaEditorElement(activeElement) ? activeElement : null;
+  // Corners & Border applies to media (image/video — includes vector layers, which are images)
+  // AND to shape elements; the radius slider itself only shows where cornerRadius renders.
+  const activeBorderElement =
+    activeMediaElement || (isShapeEditorElement(activeElement) ? activeElement : null);
+  const activeBorderSupportsRadius =
+    !!activeBorderElement &&
+    (activeBorderElement.type === "image" ||
+      activeBorderElement.type === "video" ||
+      activeBorderElement.type === "rect");
+  const activeCornerMask: CornerRadiusCorners =
+    activeBorderElement?.cornerRadiusCorners ?? ALL_CORNERS;
+  const activeCornerAllOn =
+    activeCornerMask.topLeft &&
+    activeCornerMask.topRight &&
+    activeCornerMask.bottomRight &&
+    activeCornerMask.bottomLeft;
+  const applyCornerMask = (next: CornerRadiusCorners) => {
+    if (!activeBorderElement) return;
+    const allOn = next.topLeft && next.topRight && next.bottomRight && next.bottomLeft;
+    // Store the mask only when it deviates from the all-corners default.
+    updateElement(activeBorderElement.id, { cornerRadiusCorners: allOn ? undefined : next });
+  };
+  const toggleCorner = (key: keyof CornerRadiusCorners) => {
+    // From the "all" state a corner click means "round ONLY this corner" (like the preset row);
+    // afterwards clicks toggle corners individually so pairs/combos are possible.
+    if (activeCornerAllOn) {
+      applyCornerMask({ ...{ topLeft: false, topRight: false, bottomRight: false, bottomLeft: false }, [key]: true });
+      return;
+    }
+    applyCornerMask({ ...activeCornerMask, [key]: !activeCornerMask[key] });
+  };
   const activeImageElement = isImageEditorElement(activeElement) ? activeElement : null;
   const activeImageId = String(activeImageElement?.id || "");
   const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
@@ -74,6 +125,8 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
     : ([] as string[]);
   const activeRasterPaletteVersion = Math.max(0, Number(activeImageElement?.rasterPaletteVersion || 0));
   const activeRasterColorMap = normalizeRasterColorMap(activeImageElement?.rasterColorMap);
+  const activeRasterColorMapKey = serializeRasterColorMap(activeRasterColorMap);
+  const activeVectorSource = String(activeImageElement?.vectorSrc || "").trim();
 
   useEffect(() => {
     if (!activeImageId || !activeRasterSource) {
@@ -89,19 +142,33 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
     let cancelled = false;
 
-    void extractImagePaletteFromSource(activeRasterSource, 6)
+    // Shapes keep their authored SVG: list its true colours instead of pixel-extracting the
+    // rasterized PNG, whose anti-aliased edges hallucinate phantom near-black palette entries.
+    const svgPalette = extractSvgPaletteColors(activeVectorSource, 6);
+    const palettePromise =
+      svgPalette.length > 0 ? Promise.resolve(svgPalette) : extractImagePaletteFromSource(activeRasterSource, 6);
+
+    void palettePromise
       .then((palette) => {
         if (cancelled) return;
+        const colors = Array.isArray(palette) ? palette : [];
         const patch: {
           rasterOriginalSrc?: string;
           rasterPalette?: string[];
           rasterPaletteVersion?: number;
+          rasterColorMap?: Record<string, string>;
         } = {
           rasterPaletteVersion: RASTER_PALETTE_VERSION,
-          rasterPalette: Array.isArray(palette) ? palette : [],
+          rasterPalette: colors,
         };
         if (!sourceWasPersisted) {
           patch.rasterOriginalSrc = activeRasterSource;
+        }
+        // Carry an existing recolor over to the re-derived palette's keys (nearest colour wins).
+        const currentMap = Object.fromEntries(JSON.parse(activeRasterColorMapKey) as Array<[string, string]>);
+        const migratedMap = migrateRasterColorMap(currentMap, colors);
+        if (serializeRasterColorMap(migratedMap) !== activeRasterColorMapKey) {
+          patch.rasterColorMap = migratedMap;
         }
         updateElement(activeImageId, patch, { recordHistory: false });
       })
@@ -113,9 +180,11 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   }, [
     activeImageId,
     activeImageRasterOriginalSrc,
+    activeRasterColorMapKey,
     activeRasterPalette.length,
     activeRasterPaletteVersion,
     activeRasterSource,
+    activeVectorSource,
     updateElement,
   ]);
   const fontFamilies = useMemo(() => {
@@ -389,6 +458,117 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 </div>
               </div>
             </>
+          ) : null}
+
+          {activeBorderElement ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <Label className="m-0">Corners &amp; Border</Label>
+              {activeBorderSupportsRadius ? (
+                <div className="space-y-2">
+                  <div className="flex items-center gap-1.5">
+                    {(
+                      [
+                        { key: "all" as const, title: "All corners", style: { borderRadius: 7 } },
+                        { key: "topLeft" as const, title: "Top left", style: { borderTopLeftRadius: 7 } },
+                        { key: "topRight" as const, title: "Top right", style: { borderTopRightRadius: 7 } },
+                        { key: "bottomLeft" as const, title: "Bottom left", style: { borderBottomLeftRadius: 7 } },
+                        { key: "bottomRight" as const, title: "Bottom right", style: { borderBottomRightRadius: 7 } },
+                      ]
+                    ).map(({ key, title, style }) => {
+                      const active =
+                        key === "all"
+                          ? activeCornerAllOn
+                          : !activeCornerAllOn && activeCornerMask[key];
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          title={title}
+                          aria-pressed={active}
+                          onClick={() =>
+                            key === "all" ? applyCornerMask(ALL_CORNERS) : toggleCorner(key)
+                          }
+                          className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
+                            active
+                              ? "border-sky-500 bg-sky-50 text-sky-600 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300"
+                              : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="block h-4 w-4 border-2 border-current"
+                            style={style}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                      Corner radius
+                    </Label>
+                    <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                      {Math.round(Number(activeBorderElement.cornerRadius) || 0)}px
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={Math.max(
+                      1,
+                      Math.round(
+                        Math.min(
+                          Number(activeBorderElement.width) || 0,
+                          Number(activeBorderElement.height) || 0
+                        ) / 2
+                      )
+                    )}
+                    step={1}
+                    value={Math.round(Number(activeBorderElement.cornerRadius) || 0)}
+                    onChange={(event) =>
+                      updateElement(activeBorderElement.id, {
+                        cornerRadius: Math.max(0, numberOr(event.target.value, 0)),
+                      })
+                    }
+                    className="w-full accent-sky-500"
+                  />
+                </div>
+              ) : null}
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Border width
+                  </Label>
+                  <Input
+                    type="number"
+                    min={0}
+                    value={Math.round(Number(activeBorderElement.strokeWidth) || 0)}
+                    onChange={(event) => {
+                      const nextWidth = Math.max(0, numberOr(event.target.value, 0));
+                      const patch: Partial<EditorElement> = { strokeWidth: nextWidth };
+                      // Give a newly-enabled border a visible colour when the layer has none.
+                      if (nextWidth > 0 && !normalizeHexColor(String(activeBorderElement.stroke || ""))) {
+                        patch.stroke = "#000000";
+                      }
+                      updateElement(activeBorderElement.id, patch);
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Border color
+                  </Label>
+                  <Input
+                    type="color"
+                    className="h-9 cursor-pointer p-1"
+                    value={normalizeHexColor(String(activeBorderElement.stroke || "")) || "#000000"}
+                    onChange={(event) =>
+                      updateElement(activeBorderElement.id, { stroke: event.target.value })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
           ) : null}
 
           {activeElement.type === "image" ? (

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -51,6 +51,7 @@ import {
   rasterizeSvgDataUrlToPngDataUrl,
   SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
+import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import {
   BUILTIN_SHAPE_ASSETS,
   BUILTIN_SHAPE_CATEGORIES,
@@ -65,6 +66,7 @@ import {
   DEFAULT_ANIMATION_DURATION_MS,
   DEFAULT_PAGE_DURATION_MS,
   getAnimationPreset,
+  hasAnimatedTemplateContent,
   isAnimationInfiniteActive,
   type EditorAnimationType,
   normalizeAnimationDelayMs,
@@ -229,59 +231,72 @@ const RESIZE_PRESETS: ResizePresetGroup[] = [
   },
 ];
 
-function getAnimationPreviewClass(type: EditorAnimationType) {
-  switch (type) {
-    case "NONE":
-      return "animation-sample-none";
-    case "RISE":
-      return "animation-sample-rise";
-    case "PAN":
-      return "animation-sample-pan";
-    case "SHIFT":
-      return "animation-sample-shift";
-    case "SKATE":
-      return "animation-sample-skate";
-    case "ASCEND":
-      return "animation-sample-ascend";
-    case "BLOCK":
-      return "animation-sample-block";
-    case "FADE":
-      return "animation-sample-fade";
-    case "POP":
-      return "animation-sample-pop";
-    case "WIPE":
-      return "animation-sample-wipe";
-    case "BLUR":
-      return "animation-sample-blur";
-    case "SUCCESSION":
-      return "animation-sample-succession";
-    case "BREATHE":
-      return "animation-sample-breathe";
-    case "BASELINE":
-      return "animation-sample-baseline";
-    case "DRIFT":
-      return "animation-sample-drift";
-    case "TECTONIC":
-      return "animation-sample-tectonic";
-    case "TUMBLE":
-      return "animation-sample-tumble";
-    case "NEON":
-      return "animation-sample-neon";
-    case "SCRAPBOOK":
-      return "animation-sample-scrapbook";
-    case "STOMP":
-      return "animation-sample-stomp";
-    case "ROTATE":
-      return "animation-sample-rotate";
-    case "FLICKER":
-      return "animation-sample-flicker";
-    case "PULSE":
-      return "animation-sample-pulse";
-    case "WIGGLE":
-      return "animation-sample-wiggle";
-    default:
-      return "animation-sample-fade";
-  }
+// Preview-tile motion class per animation type. Keyed on the SPEC type names the catalog feeds
+// (see ANIMATION_CATALOG). Types that share a motion family reuse one keyframe class — e.g. every
+// zoom variant loops the same scale pulse, the gradient reveals reuse their hard-edged twin's
+// sweep. New effects added here MUST also get a glyph in AnimationSampleGlyph and (if the class is
+// new) a `@keyframes` in the panel's style block.
+const ANIMATION_PREVIEW_CLASS: Record<string, string> = {
+  NONE: "animation-sample-none",
+  // ── original set ─────────────────────────────────────────────────────────
+  RISE: "animation-sample-rise",
+  PAN: "animation-sample-pan",
+  SHIFT: "animation-sample-shift",
+  SKATE: "animation-sample-skate",
+  ASCEND: "animation-sample-ascend",
+  BLOCK: "animation-sample-block",
+  FADE: "animation-sample-fade",
+  POP: "animation-sample-pop",
+  WIPE: "animation-sample-wipe",
+  BLUR: "animation-sample-blur",
+  SUCCESSION: "animation-sample-succession",
+  BREATHE: "animation-sample-breathe",
+  BASELINE: "animation-sample-baseline",
+  DRIFT: "animation-sample-drift",
+  TECTONIC: "animation-sample-tectonic",
+  TUMBLE: "animation-sample-tumble",
+  NEON: "animation-sample-neon",
+  SCRAPBOOK: "animation-sample-scrapbook",
+  STOMP: "animation-sample-stomp",
+  ROTATE: "animation-sample-rotate",
+  FLICKER: "animation-sample-flicker",
+  PULSE: "animation-sample-pulse",
+  WIGGLE: "animation-sample-wiggle",
+  // ── zoom family (scale) ──────────────────────────────────────────────────
+  ZOOM: "animation-sample-zoom",
+  ZOOM_FADE: "animation-sample-zoom",
+  ZOOM_LOOP: "animation-sample-zoom",
+  // ── travel ───────────────────────────────────────────────────────────────
+  SLIDE: "animation-sample-slide",
+  DROP: "animation-sample-drop",
+  DIAGONAL: "animation-sample-diagonal",
+  DIAGONAL_GRADIENT: "animation-sample-diagonal",
+  // ── fade / dissolve ──────────────────────────────────────────────────────
+  DISSOLVE: "animation-sample-dissolve",
+  // ── mask reveals (sweep) ─────────────────────────────────────────────────
+  GRADIENT_WIPE: "animation-sample-wipe",
+  RADIAL: "animation-sample-radial",
+  RADIAL_GRADIENT: "animation-sample-radial",
+  CIRCUAL: "animation-sample-circle",
+  CIRCUAL_GRADIENT: "animation-sample-circle",
+  // ── text reveals (glyph families → alpha reveal) ─────────────────────────
+  TYPEWRITER_CHARS: "animation-sample-type",
+  TYPEWRITER_CURSOR: "animation-sample-type",
+  TYPEWRITER_WORDS: "animation-sample-type",
+  ONE_WORD: "animation-sample-type",
+  CH_POSITION_FADE: "animation-sample-rise",
+  CH_SCALE_FADE: "animation-sample-pop",
+  CH_WIGGLE_Y: "animation-sample-wiggle",
+  // ── loop motions ─────────────────────────────────────────────────────────
+  WAVE: "animation-sample-wave",
+  SHAKE: "animation-sample-shake",
+  BOUNCE: "animation-sample-bounce",
+  WOBBLE: "animation-sample-wobble",
+  RANDOM: "animation-sample-random",
+};
+
+function getAnimationPreviewClass(type: string) {
+  return ANIMATION_PREVIEW_CLASS[type] ?? "animation-sample-fade";
 }
 
 function renderAnimationArrow(d: string, color: string) {
@@ -324,7 +339,7 @@ function renderAnimationSquare(options: {
   );
 }
 
-function AnimationSampleGlyph({ type }: { type: EditorAnimationType }) {
+function AnimationSampleGlyph({ type }: { type: string }) {
   const purple = "#7c3aed";
   const purpleMid = "#8b5cf6";
   const purpleSoft = "#c4b5fd";
@@ -533,6 +548,145 @@ function AnimationSampleGlyph({ type }: { type: EditorAnimationType }) {
           <path d="M39 31c-2-1-2-5-4-6-1-1-1-3 1-4" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
         </svg>
       );
+    // Zoom family — a core square with a ghost ring growing out of it, plus outward corner ticks.
+    case "ZOOM":
+    case "ZOOM_FADE":
+    case "ZOOM_LOOP":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 10, y: 10, size: 28, fill: "none", strokeColor: purpleSoft, radius: 9 })}
+          {renderAnimationSquare({ x: 17, y: 17, size: 14, fill: purpleMid, radius: 5 })}
+          {renderAnimationArrow("M9 9l4 0M9 9l0 4M39 9l-4 0M39 9l0 4M9 39l4 0M9 39l0-4M39 39l-4 0M39 39l0-4", pink)}
+        </svg>
+      );
+    // Slide — the block glides in with two trailing motion streaks.
+    case "SLIDE":
+      return (
+        <svg {...baseProps}>
+          <line x1="8" y1="20" x2="18" y2="20" stroke={purpleSoft} strokeWidth="2" strokeLinecap="round" />
+          <line x1="8" y1="28" x2="18" y2="28" stroke={purpleSoft} strokeWidth="2" strokeLinecap="round" />
+          {renderAnimationSquare({ x: 20, y: 14, size: 18, fill: purpleMid })}
+          {renderAnimationArrow("M14 35h16m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+        </svg>
+      );
+    // Drop — the block falls from above into place.
+    case "DROP":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 16, y: 8, size: 16, fill: purpleMid, opacity: 0.32 })}
+          {renderAnimationSquare({ x: 16, y: 22, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M36 12v14m0 0-3.5-3.5M36 26l3.5-3.5", stroke)}
+        </svg>
+      );
+    // Diagonal — travels along the bottom-left → top-right axis.
+    case "DIAGONAL":
+    case "DIAGONAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 9, y: 21, size: 16, fill: purpleSoft, opacity: 0.5 })}
+          {renderAnimationSquare({ x: 21, y: 9, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M14 34 34 14m0 0-5 .3M34 14l-.3 5", stroke)}
+        </svg>
+      );
+    // Dissolve — the block breaks up into scattered particles as it fades.
+    case "DISSOLVE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 11, y: 13, size: 18, fill: purpleMid })}
+          <circle cx="32" cy="15" r="2" fill={purpleSoft} />
+          <circle cx="36" cy="21" r="1.6" fill={purpleSoft} opacity="0.8" />
+          <circle cx="31" cy="26" r="1.6" fill={purpleSoft} opacity="0.7" />
+          <circle cx="37" cy="30" r="1.3" fill={purpleSoft} opacity="0.55" />
+        </svg>
+      );
+    // Radial — a clock-sweep wedge fills the ring.
+    case "RADIAL":
+    case "RADIAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="24" r="13" fill="none" stroke={purpleSoft} strokeWidth="2.4" />
+          <path d="M24 24V11a13 13 0 0 1 11.3 6.5Z" fill={purpleMid} />
+          <circle cx="24" cy="24" r="2.4" fill={purple} />
+        </svg>
+      );
+    // Circular — a filled disc grows out from the centre.
+    case "CIRCUAL":
+    case "CIRCUAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="24" r="14" fill="none" stroke={purpleSoft} strokeWidth="2" strokeDasharray="3 3" />
+          <circle cx="24" cy="24" r="9" fill={purpleMid} />
+        </svg>
+      );
+    // Typewriter / one-word — text lines revealing left→right, with a caret.
+    case "TYPEWRITER_CHARS":
+    case "TYPEWRITER_CURSOR":
+    case "TYPEWRITER_WORDS":
+    case "ONE_WORD":
+      return (
+        <svg {...baseProps}>
+          <rect x="10" y="15" width="20" height="3.4" rx="1.7" fill={purpleMid} />
+          <rect x="10" y="22.5" width="14" height="3.4" rx="1.7" fill={purpleMid} opacity="0.8" />
+          <rect x="10" y="30" width="9" height="3.4" rx="1.7" fill={purpleSoft} opacity="0.6" />
+          <rect x={type === "TYPEWRITER_CURSOR" ? 26 : 21} y="29" width="2.4" height="6.4" rx="1" fill={pink} />
+        </svg>
+      );
+    // Per-character families — three letter cells, the lead one lifted/emphasised.
+    case "CH_POSITION_FADE":
+    case "CH_SCALE_FADE":
+    case "CH_WIGGLE_Y":
+      return (
+        <svg {...baseProps}>
+          <rect x="10" y="20" width="8" height="12" rx="2.5" fill={purpleSoft} opacity="0.55" />
+          <rect x="20" y="15" width="8" height="12" rx="2.5" fill={purpleMid} />
+          <rect x="30" y="20" width="8" height="12" rx="2.5" fill={purpleSoft} opacity="0.75" />
+        </svg>
+      );
+    // Wave — the block rides a sine curve.
+    case "WAVE":
+      return (
+        <svg {...baseProps}>
+          <path d="M8 26c4-8 8-8 12 0s8 8 12 0" fill="none" stroke={purpleSoft} strokeWidth="2" strokeLinecap="round" />
+          {renderAnimationSquare({ x: 18, y: 12, size: 12, fill: purpleMid, radius: 4 })}
+        </svg>
+      );
+    // Shake — the block jitters sideways, streaks on both flanks.
+    case "SHAKE":
+      return (
+        <svg {...baseProps}>
+          <line x1="7" y1="24" x2="12" y2="24" stroke={purpleSoft} strokeWidth="2" strokeLinecap="round" />
+          <line x1="36" y1="24" x2="41" y2="24" stroke={purpleSoft} strokeWidth="2" strokeLinecap="round" />
+          {renderAnimationSquare({ x: 16, y: 15, size: 16, fill: purpleMid })}
+        </svg>
+      );
+    // Bounce — a ball hopping off a baseline.
+    case "BOUNCE":
+      return (
+        <svg {...baseProps}>
+          <circle cx="24" cy="19" r="9" fill={purpleMid} />
+          <line x1="11" y1="35" x2="37" y2="35" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          {renderAnimationArrow("M36 15v8", pinkSoft)}
+        </svg>
+      );
+    // Wobble — a tilted block with a rocking arc.
+    case "WOBBLE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 16, y: 16, size: 18, fill: purpleMid, rotate: -12 })}
+          <path d="M12 13a16 16 0 0 1 24 0" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+        </svg>
+      );
+    // Random — the block scattered by stray jitter ticks.
+    case "RANDOM":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 17, y: 17, size: 14, fill: purpleMid, radius: 5 })}
+          <circle cx="12" cy="14" r="1.7" fill={purpleSoft} />
+          <circle cx="37" cy="17" r="1.7" fill={purpleSoft} opacity="0.8" />
+          <circle cx="14" cy="34" r="1.7" fill={purpleSoft} opacity="0.7" />
+          <circle cx="35" cy="33" r="1.7" fill={purpleSoft} opacity="0.85" />
+        </svg>
+      );
     default:
       return (
         <svg {...baseProps}>
@@ -542,7 +696,7 @@ function AnimationSampleGlyph({ type }: { type: EditorAnimationType }) {
   }
 }
 
-function AnimationSampleTile({ type }: { type: EditorAnimationType }) {
+function AnimationSampleTile({ type }: { type: string }) {
   if (type === "NONE") {
     return (
       <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border border-[#d6dce6] bg-white">
@@ -1169,6 +1323,7 @@ function toEditorDesignFromTemplate(
         fill: parseColor(item.fill, "#3b82f6"),
         stroke: parseColor(item.stroke, "#1e293b"),
         strokeWidth: Math.max(0, toNumber(item.strokeWidth, 0)),
+        cornerRadius: Math.max(0, toNumber(item.cornerRadius, 0)),
         scaleX: signedScaleX,
         scaleY: signedScaleY,
         blendMode: toEditorBlendMode(item.blendMode),
@@ -1531,6 +1686,155 @@ function layerDisplayName(layer: EditorElement, page: { width: number; height: n
   return layerTypeLabel(layer);
 }
 
+// Subtle checkerboard so transparent shapes/images read as transparent in their thumbnail box
+// (this editor's shapes and cut-outs are frequently transparent).
+const LAYER_THUMB_CHECKER: CSSProperties = {
+  backgroundColor: "#ffffff",
+  backgroundImage:
+    "linear-gradient(45deg,#e3e7ee 25%,transparent 25%),linear-gradient(-45deg,#e3e7ee 25%,transparent 25%),linear-gradient(45deg,transparent 75%,#e3e7ee 75%),linear-gradient(-45deg,transparent 75%,#e3e7ee 75%)",
+  backgroundSize: "8px 8px",
+  backgroundPosition: "0 0,0 4px,4px -4px,-4px 0",
+};
+
+/** True for near-white / very light colors, so a text preview can flip to a dark backdrop. */
+function isLightColor(input: string) {
+  let hex = String(input || "").trim().replace(/^#/, "").toLowerCase();
+  if (hex.length === 3) hex = hex.split("").map((c) => c + c).join("");
+  if (!/^[0-9a-f]{6}$/.test(hex)) return false;
+  const r = parseInt(hex.slice(0, 2), 16);
+  const g = parseInt(hex.slice(2, 4), 16);
+  const b = parseInt(hex.slice(4, 6), 16);
+  return (0.299 * r + 0.587 * g + 0.114 * b) / 255 > 0.8;
+}
+
+/** A small colored glyph standing in for a primitive shape layer (rect/circle/line/arrow/star). */
+function ShapeGlyph({ type, fill, stroke }: { type: string; fill: string; stroke: string }) {
+  const hasFill = fill && fill !== "none" && fill !== "transparent";
+  const solid = hasFill ? fill : stroke && stroke !== "none" ? stroke : "#64748b";
+  const line = stroke && stroke !== "none" ? stroke : hasFill ? fill : "#64748b";
+  return (
+    <svg width={24} height={24} viewBox="0 0 28 28" aria-hidden="true">
+      {type === "rect" ? <rect x={4} y={7} width={20} height={14} rx={2.5} fill={solid} /> : null}
+      {type === "circle" ? <circle cx={14} cy={14} r={9} fill={solid} /> : null}
+      {type === "star" ? (
+        <path
+          d="M14 3l3.2 6.6 7.3 1.1-5.3 5.1 1.3 7.2L14 19.6 7.5 23l1.3-7.2-5.3-5.1 7.3-1.1z"
+          fill={solid}
+        />
+      ) : null}
+      {type === "line" ? (
+        <line x1={5} y1={22} x2={23} y2={6} stroke={line} strokeWidth={3} strokeLinecap="round" />
+      ) : null}
+      {type === "arrow" ? (
+        <path
+          d="M5 22 L21 8 M21 8 h-7 M21 8 v7"
+          fill="none"
+          stroke={line}
+          strokeWidth={2.6}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+      ) : null}
+    </svg>
+  );
+}
+
+/** Resolves the <img> source for an image layer's thumbnail, honoring an active shape recolor. */
+function layerThumbnailImageSrc(layer: EditorElement) {
+  const vector = String(layer.vectorSrc || "");
+  const colorMap = layer.rasterColorMap;
+  const hasActiveRecolor =
+    Boolean(vector) &&
+    colorMap != null &&
+    typeof colorMap === "object" &&
+    Object.entries(colorMap).some(
+      ([key, value]) => String(key).trim().toLowerCase() !== String(value).trim().toLowerCase()
+    );
+  // A recolored shape: show the recolored (and crisp) vector so the thumbnail matches the canvas.
+  // Otherwise the rasterized `src` is already trimmed to content and frames the box best.
+  if (hasActiveRecolor) return recolorSvgSource(vector, layer.rasterPalette, colorMap);
+  return String(layer.src || vector || "");
+}
+
+/** A compact visual preview of a layer, shown beside its name in the Layers panel. */
+function LayerThumbnail({ layer }: { layer: EditorElement }) {
+  const [failed, setFailed] = useState(false);
+  // `src` for a video is the video file itself (won't render as an <img>), so videos fall through
+  // to the icon below; image/frame layers do have a still we can show.
+  const imageSrc =
+    layer.type === "image"
+      ? layerThumbnailImageSrc(layer)
+      : layer.type === "frame"
+        ? String(layer.frameContent?.posterSrc || layer.frameContent?.src || "")
+        : "";
+
+  const boxClass =
+    "flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-[#c4cad6]";
+
+  if (imageSrc && !failed) {
+    return (
+      <div className={boxClass} style={LAYER_THUMB_CHECKER}>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src={imageSrc}
+          alt=""
+          draggable={false}
+          loading="lazy"
+          className="h-full w-full object-contain"
+          onError={() => setFailed(true)}
+        />
+      </div>
+    );
+  }
+
+  if (layer.type === "text") {
+    const content = String(layer.text || "").replace(/\s+/g, " ").trim() || "Aa";
+    // Flip to a dark backdrop for near-white text so it stays visible in the thumbnail.
+    const darkBackdrop = isLightColor(String(layer.color || ""));
+    return (
+      <div className={`${boxClass} px-0.5 ${darkBackdrop ? "bg-[#3a4457]" : "bg-white"}`}>
+        <span
+          className="overflow-hidden text-center leading-[1.05]"
+          style={{
+            color: String(layer.color || "#1f2a39"),
+            fontFamily: resolveCssFontFamily(layer.fontFamily),
+            fontStyle: layer.fontStyle === "italic" ? "italic" : "normal",
+            fontWeight: String(layer.fontWeight || "600"),
+            fontSize: "9px",
+            display: "-webkit-box",
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: "vertical",
+            wordBreak: "break-word",
+          }}
+        >
+          {content.slice(0, 16)}
+        </span>
+      </div>
+    );
+  }
+
+  if (
+    layer.type === "rect" ||
+    layer.type === "circle" ||
+    layer.type === "line" ||
+    layer.type === "arrow" ||
+    layer.type === "star"
+  ) {
+    return (
+      <div className={`${boxClass} bg-white`}>
+        <ShapeGlyph type={layer.type} fill={String(layer.fill || "")} stroke={String(layer.stroke || "")} />
+      </div>
+    );
+  }
+
+  const FallbackIcon = layer.type === "video" ? VideoIcon : layer.type === "frame" ? Square : ImageIcon;
+  return (
+    <div className={`${boxClass} bg-white`}>
+      <FallbackIcon size={16} className="text-[#8a93a6]" />
+    </div>
+  );
+}
+
 function assetPayload(payload: Record<string, unknown>) {
   return JSON.stringify(payload);
 }
@@ -1669,6 +1973,9 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const searchParams = useSearchParams();
   const activeTab = useEditorStore((state) => state.sidebarTab);
   const pages = useEditorStore((state) => state.pages);
+  const designTimeline = useEditorStore((state) => state.designTimeline);
+  const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
+  const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
   const activePageId = useEditorStore((state) => state.activePageId);
   const importedElementsRefreshKey = useEditorStore((state) => state.importedElementsRefreshKey);
   const activeTemplateId = useEditorStore((state) => state.activeTemplateId);
@@ -1915,6 +2222,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
    */
   const updateAnimationSlot = useCallback(
     (patch: Partial<AnimationSpecInput> & { type?: string }) => {
+      // Whether the whole template already had any animation BEFORE this change — used to detect
+      // when this is the FIRST animation on the template, so the timeline preview can auto-play.
+      const wasAnimated = hasAnimatedTemplateContent(pages, designTimeline);
+      let appliedAnimation = false;
       selectedElements.forEach((element) => {
         const slots = resolveElementAnimations(element);
         const current = slots[animationSlotKey];
@@ -1934,9 +2245,26 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             [animationSlotKey]: makeAnimationSpec({ ...base, ...patch, type: nextType }, animationSlot),
           },
         });
+        appliedAnimation = true;
       });
+      // Adding the first animation reveals the timeline preview (see hasAnimatedElementContent) —
+      // start it playing from the top so the user immediately sees the effect they just picked.
+      // Only on the not-animated → animated transition, so later edits don't hijack playback.
+      if (appliedAnimation && !wasAnimated) {
+        setTimelinePlayheadMs(0);
+        setTimelinePlaying(true);
+      }
     },
-    [selectedElements, animationSlotKey, animationSlot, updateElement]
+    [
+      selectedElements,
+      animationSlotKey,
+      animationSlot,
+      updateElement,
+      pages,
+      designTimeline,
+      setTimelinePlayheadMs,
+      setTimelinePlaying,
+    ]
   );
   const primarySelectedElement = selectedElements.length === 1 ? selectedElements[0] : null;
   const [animationDurationDraft, setAnimationDurationDraft] = useState("");
@@ -1949,8 +2277,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
   const applyBackgroundColorSelection = useCallback(
     (nextColor: string) => {
-      const normalizedColor = String(nextColor || "#ffffff").trim() || "#ffffff";
-      if (activePage?.background?.type === "image" && activeBackgroundImageUri) {
+      const isTransparent = String(nextColor || "").trim().toLowerCase() === "transparent";
+      const normalizedColor = isTransparent
+        ? "transparent"
+        : String(nextColor || "#ffffff").trim() || "#ffffff";
+      // Transparent always clears any image background and drops to a transparent color fill.
+      if (!isTransparent && activePage?.background?.type === "image" && activeBackgroundImageUri) {
         setBackground({
           type: "image",
           color: normalizedColor,
@@ -2248,6 +2580,9 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         ...createBuiltInShapePayload(shape),
         src: resolvedSrc,
         rasterOriginalSrc: resolvedSrc,
+        // Preserve the original vector so it can ship to mobile as a crisp SVG (see mapImageLayer /
+        // assetKind:"vector"); `src` stays the rasterized PNG for sharp on-canvas display here.
+        vectorSrc: shape.src,
         // Match the source pixel dimensions to the baked resolution so crop/alpha
         // math uses the real raster size (the placed width/height are unchanged).
         sourceWidth: shape.width * rasterScale,
@@ -2265,6 +2600,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         if (!element || element.type !== "image") return;
         const trimmed = await computeTrimTransparentPaddingPatch(element as EditorElement & { type: "image" });
         if (!trimmed.supported || !trimmed.patch) return;
+        // vectorSrc stays the raw shape SVG; the canvas derives a crisp, content-cropped,
+        // high-resolution vector from it + the layer crop at render time (see CanvasImageNode).
         updateElement(elementId, trimmed.patch, { recordHistory: false });
       } catch {
         // Built-in shape insertion should still succeed even if trim fails.
@@ -4463,10 +4800,14 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
                       <button
                         type="button"
-                        aria-label="Reset to default color"
-                        title="Reset to default"
-                        onClick={() => applyBackgroundColorSelection("#ffffff")}
-                        className="h-14 w-14 rounded border border-[#d3d8e1] bg-[conic-gradient(#eceef3_25%,#9ea8ba_0_50%,#eceef3_0_75%,#9ea8ba_0)] [background-size:14px_14px] shadow-sm"
+                        aria-label="Transparent background"
+                        title="Transparent"
+                        onClick={() => applyBackgroundColorSelection("transparent")}
+                        className={`h-14 w-14 rounded border bg-[conic-gradient(#eceef3_25%,#9ea8ba_0_50%,#eceef3_0_75%,#9ea8ba_0)] [background-size:14px_14px] shadow-sm ${
+                          activeBackgroundColor.toLowerCase() === "transparent"
+                            ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]"
+                            : "border-[#d3d8e1]"
+                        }`}
                       />
                     </div>
                   </div>
@@ -4679,9 +5020,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             </div>
                             <button
                               type="button"
-                              className="min-w-0 flex-1 text-left"
+                              className="flex min-w-0 flex-1 items-center gap-2 text-left"
                               onClick={(event) => handleLayerSelect(event, layer.id)}
                             >
+                              <LayerThumbnail layer={layer} />
                               <div className="flex min-w-0 flex-col">
                                 <span className="truncate text-[13px] font-semibold" style={{ color: textColor }}>
                                   {displayName}
@@ -4972,7 +5314,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             }`}
                           >
                             <div className="flex justify-center">
-                              <AnimationSampleTile type={type as EditorAnimationType} />
+                              <AnimationSampleTile type={type} />
                             </div>
                             <div className="mt-2 text-[11px] font-semibold leading-tight text-[#243041]">
                               {getAnimationLabel(type, "en", animationSlot)}
@@ -5400,6 +5742,223 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           }
           80% {
             transform: scale(0.95);
+          }
+        }
+
+        /* ── ported effects (spec catalog) ─────────────────────────────── */
+        .editor-animation-panel .animation-sample-zoom {
+          animation-name: sampleZoom;
+        }
+        .editor-animation-panel .animation-sample-slide {
+          animation-name: sampleSlide;
+        }
+        .editor-animation-panel .animation-sample-drop {
+          animation-name: sampleDrop;
+        }
+        .editor-animation-panel .animation-sample-diagonal {
+          animation-name: sampleDiagonal;
+        }
+        .editor-animation-panel .animation-sample-dissolve {
+          animation-name: sampleDissolve;
+        }
+        .editor-animation-panel .animation-sample-radial {
+          animation-name: sampleRadial;
+          animation-duration: 1.9s;
+          animation-direction: normal;
+          animation-timing-function: linear;
+        }
+        .editor-animation-panel .animation-sample-circle {
+          animation-name: sampleCircle;
+        }
+        .editor-animation-panel .animation-sample-type {
+          animation-name: sampleType;
+          animation-duration: 1.7s;
+        }
+        .editor-animation-panel .animation-sample-wave {
+          animation-name: sampleWave;
+          animation-duration: 1.8s;
+          animation-direction: normal;
+          animation-timing-function: ease-in-out;
+        }
+        .editor-animation-panel .animation-sample-shake {
+          animation-name: sampleShake;
+          animation-duration: 0.8s;
+          animation-direction: normal;
+          animation-timing-function: linear;
+        }
+        .editor-animation-panel .animation-sample-bounce {
+          animation-name: sampleBounce;
+          animation-duration: 1.4s;
+          animation-direction: normal;
+          animation-timing-function: ease-in-out;
+        }
+        .editor-animation-panel .animation-sample-wobble {
+          animation-name: sampleWobble;
+          animation-duration: 1.5s;
+        }
+        .editor-animation-panel .animation-sample-random {
+          animation-name: sampleRandom;
+          animation-duration: 0.9s;
+          animation-direction: normal;
+          animation-timing-function: linear;
+        }
+
+        @keyframes sampleZoom {
+          0%,
+          100% {
+            transform: scale(0.5);
+            opacity: 0.45;
+          }
+          50% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleSlide {
+          0%,
+          100% {
+            transform: translateX(-9px);
+            opacity: 0.4;
+          }
+          50% {
+            transform: translateX(0);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleDrop {
+          0%,
+          100% {
+            transform: translateY(-9px);
+            opacity: 0.35;
+          }
+          50% {
+            transform: translateY(2px);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleDiagonal {
+          0%,
+          100% {
+            transform: translate(-6px, 6px);
+            opacity: 0.4;
+          }
+          50% {
+            transform: translate(0, 0);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleDissolve {
+          0%,
+          100% {
+            transform: translateY(4px) scale(0.97);
+            opacity: 0.28;
+          }
+          50% {
+            transform: translateY(0) scale(1);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleRadial {
+          0% {
+            transform: rotate(0deg);
+          }
+          100% {
+            transform: rotate(360deg);
+          }
+        }
+        @keyframes sampleCircle {
+          0%,
+          100% {
+            transform: scale(0.3);
+            opacity: 0.45;
+          }
+          50% {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+        /* Left→right "typing" reveal for the typewriter/one-word tiles. Never fully hides —
+           the base class alternates it, so it reveals in then out and always stays legible. */
+        @keyframes sampleType {
+          0% {
+            clip-path: inset(0 62% 0 0);
+            opacity: 0.85;
+          }
+          100% {
+            clip-path: inset(0 0 0 0);
+            opacity: 1;
+          }
+        }
+        @keyframes sampleWave {
+          0%,
+          100% {
+            transform: translate(0, 0);
+          }
+          25% {
+            transform: translate(-4px, -4px);
+          }
+          50% {
+            transform: translate(0, 3px);
+          }
+          75% {
+            transform: translate(4px, -2px);
+          }
+        }
+        @keyframes sampleShake {
+          0%,
+          100% {
+            transform: translateX(0);
+          }
+          20% {
+            transform: translateX(-4px);
+          }
+          40% {
+            transform: translateX(4px);
+          }
+          60% {
+            transform: translateX(-3px);
+          }
+          80% {
+            transform: translateX(3px);
+          }
+        }
+        @keyframes sampleBounce {
+          0%,
+          100% {
+            transform: translateY(-8px);
+          }
+          45% {
+            transform: translateY(4px) scaleY(0.88) scaleX(1.08);
+          }
+          60% {
+            transform: translateY(0) scaleY(1);
+          }
+        }
+        @keyframes sampleWobble {
+          0%,
+          100% {
+            transform: rotate(-13deg);
+          }
+          50% {
+            transform: rotate(13deg);
+          }
+        }
+        @keyframes sampleRandom {
+          0%,
+          100% {
+            transform: translate(0, 0) rotate(0deg);
+          }
+          20% {
+            transform: translate(-3px, 2px) rotate(-4deg);
+          }
+          40% {
+            transform: translate(3px, -2px) rotate(3deg);
+          }
+          60% {
+            transform: translate(-2px, -3px) rotate(-2deg);
+          }
+          80% {
+            transform: translate(2px, 3px) rotate(4deg);
           }
         }
 

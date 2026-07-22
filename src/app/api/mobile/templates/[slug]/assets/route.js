@@ -14,6 +14,8 @@ import {
   getPublicStorageBucketName,
   parsePublicObjectKey,
 } from "@/lib/storage/objectStorage.server";
+import { trimShapeSvg } from "@/lib/mobile/shapeSvgTrim.server";
+import { recolorSvgSource } from "@/lib/editor/imagePalette";
 
 export const runtime = "nodejs";
 
@@ -324,6 +326,45 @@ export async function GET(request, { params }) {
         { status: 422 }
       );
     }
+  }
+
+  if (scope === "layer" && field === "vector") {
+    const vectorSource = String(layerObject?.vectorSrc || "").trim();
+    if (!vectorSource) {
+      return NextResponse.json({ error: "Asset not found." }, { status: 404 });
+    }
+
+    const vectorObjectKey = parsePublicObjectKey(vectorSource);
+    if (vectorObjectKey) {
+      const proxyUrl = new URL(getPublicObjectProxyUrl(vectorObjectKey), request.url);
+      return NextResponse.redirect(proxyUrl, 307);
+    }
+    if (/^https?:\/\//i.test(vectorSource)) {
+      return NextResponse.redirect(vectorSource, 307);
+    }
+
+    if (!/^data:image\/svg\+xml/i.test(vectorSource)) {
+      return NextResponse.json({ error: "Unsupported asset source." }, { status: 422 });
+    }
+    // Bake an active palette recolor into the SVG's fills (identical maths to the raster recolor)
+    // so a recolored shape ships as a crisp vector instead of a rasterized PNG — a no-op when the
+    // layer has no active remap.
+    const recoloredVector = recolorSvgSource(
+      vectorSource,
+      layerObject?.rasterPalette,
+      layerObject?.rasterColorMap
+    );
+    // Crop the viewBox to the shape's content bounds (authoring SVGs carry transparent padding)
+    // so it fills its box like the trimmed raster, then serve the raw SVG so it stays crisp when
+    // scaled — do NOT fall through to the SVG->PNG rasterization used for other sources below.
+    const trimmedVector = await trimShapeSvg(recoloredVector);
+    return new NextResponse(Buffer.from(trimmedVector.svg, "utf8"), {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": "public, max-age=300",
+      },
+    });
   }
 
   if (scope === "thumbnail") {

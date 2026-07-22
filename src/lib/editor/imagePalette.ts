@@ -1,6 +1,8 @@
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
 
-export const RASTER_PALETTE_VERSION = 2;
+// v3: shapes with a `vectorSrc` derive their palette from the SVG's authored colors instead of
+// pixel-extracting the rasterized PNG (whose anti-aliased edges hallucinate phantom entries).
+export const RASTER_PALETTE_VERSION = 3;
 
 type RgbColor = [number, number, number];
 type HslColor = { h: number; s: number; l: number };
@@ -465,4 +467,152 @@ export async function recolorRasterSourceToDataUrl(
 
   recolorCache.set(cacheKey, task);
   return task;
+}
+
+/** Decodes a raw `<svg …>` string or an SVG data URL (utf8 or base64) to its markup. */
+function decodeSvgSource(input: string): { svg: string; isDataUrl: boolean } | null {
+  const source = asString(input);
+  if (!source) return null;
+  if (source.startsWith("data:image/svg+xml")) {
+    const comma = source.indexOf(",");
+    if (comma < 0) return null;
+    const payload = source.slice(comma + 1);
+    try {
+      const svg = source.slice(0, comma).includes(";base64")
+        ? typeof atob === "function"
+          ? atob(payload)
+          : Buffer.from(payload, "base64").toString("utf8")
+        : decodeURIComponent(payload);
+      return { svg, isDataUrl: true };
+    } catch {
+      return null;
+    }
+  }
+  if (source.startsWith("<")) return { svg: source, isDataUrl: false };
+  return null;
+}
+
+/**
+ * Lists the distinct colours actually authored inside an SVG (its `#rgb`/`#rrggbb` tokens), in
+ * document order. For shapes that keep their original SVG this is the TRUE palette — unlike pixel
+ * extraction from the rasterized PNG, whose anti-aliased edge pixels can hallucinate near-black
+ * phantom entries (e.g. a flat #111827 shape yielding a bogus second "#001122" swatch).
+ * Returns [] when the input isn't an SVG or holds no hex colours (caller should fall back).
+ */
+export function extractSvgPaletteColors(svgInput: string, maxColors = 6): string[] {
+  const decoded = decodeSvgSource(asString(svgInput));
+  if (!decoded) return [];
+  const seen = new Set<string>();
+  const colors: string[] = [];
+  const matches = decoded.svg.match(/#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b/g) || [];
+  for (const token of matches) {
+    const normalized = normalizeHexColor(token);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    colors.push(normalized);
+    if (colors.length >= Math.max(1, maxColors)) break;
+  }
+  return colors;
+}
+
+/**
+ * Re-keys a raster colour map onto a re-derived palette: every original→target entry moves to the
+ * nearest colour of `newPalette` (plain RGB distance), so a user's recolour survives a palette
+ * refresh. When several old keys collapse onto one new colour, the closest original wins — e.g.
+ * a phantom edge-artifact entry loses to the shape's real fill. Identity mappings are dropped.
+ */
+export function migrateRasterColorMap(colorMapInput: unknown, newPalette: string[]) {
+  const colorMap = normalizeRasterColorMap(colorMapInput);
+  const paletteRgb = (Array.isArray(newPalette) ? newPalette : [])
+    .map((value) => {
+      const hex = normalizeHexColor(String(value || ""));
+      const rgb = hex ? hexToRgb(hex) : null;
+      return hex && rgb ? { hex, rgb } : null;
+    })
+    .filter((entry): entry is { hex: string; rgb: RgbColor } => Boolean(entry));
+  if (paletteRgb.length === 0) return {};
+
+  const best = new Map<string, { target: string; distance: number }>();
+  for (const [originalHex, targetHex] of Object.entries(colorMap)) {
+    const originalRgb = hexToRgb(originalHex);
+    if (!originalRgb) continue;
+    let nearest = paletteRgb[0];
+    let nearestDistance = colorDistance(originalRgb, nearest.rgb);
+    for (let i = 1; i < paletteRgb.length; i += 1) {
+      const distance = colorDistance(originalRgb, paletteRgb[i].rgb);
+      if (distance < nearestDistance) {
+        nearest = paletteRgb[i];
+        nearestDistance = distance;
+      }
+    }
+    const current = best.get(nearest.hex);
+    if (!current || nearestDistance < current.distance) {
+      best.set(nearest.hex, { target: targetHex, distance: nearestDistance });
+    }
+  }
+
+  const migrated: Record<string, string> = {};
+  for (const [hex, entry] of best) {
+    if (entry.target !== hex) migrated[hex] = entry.target;
+  }
+  return normalizeRasterColorMap(migrated);
+}
+
+/**
+ * Applies the same palette→target recolour that {@link recolorRasterSourceToDataUrl} performs on
+ * pixels, but to the solid colour tokens inside an SVG string — so a recoloured shape can render as
+ * a crisp vector instead of a rasterised PNG. Each `#rgb`/`#rrggbb` token in the SVG is matched to
+ * the nearest mapped palette colour (identical distance + 0.34 threshold as the raster path) and
+ * transformed with the same HSL {@link recolorPixel} maths + influence blend, so the vector looks
+ * the same as the recoloured raster would, just sharp.
+ *
+ * Pure + synchronous (no canvas/DOM) so it runs on the server (template asset route) and client.
+ * Accepts a raw `<svg …>` string or an SVG data URL and returns the same shape it was given.
+ * Returns the source unchanged when there is no active remap or nothing matches. Never throws.
+ */
+export function recolorSvgSource(
+  svgSource: string,
+  paletteInput: unknown,
+  colorMapInput: unknown
+): string {
+  const source = asString(svgSource);
+  if (!source) return svgSource;
+
+  const recolorEntries = buildRecolorEntries(paletteInput, colorMapInput);
+  if (recolorEntries.length === 0) return svgSource;
+
+  const decoded = decodeSvgSource(source);
+  if (!decoded) return svgSource;
+  const { svg, isDataUrl } = decoded;
+
+  const threshold = 0.34;
+  const recolored = svg.replace(/#[0-9a-fA-F]{6}\b|#[0-9a-fA-F]{3}\b/g, (token) => {
+    const rgb = hexToRgb(token);
+    if (!rgb) return token;
+
+    let nearest: RecolorEntry | null = null;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+    for (let i = 0; i < recolorEntries.length; i += 1) {
+      const distance = smartColorDistance(rgb, recolorEntries[i].originalRgb);
+      if (distance < nearestDistance) {
+        nearest = recolorEntries[i];
+        nearestDistance = distance;
+      }
+    }
+    if (!nearest || nearestDistance > threshold) return token;
+
+    const influence = Math.pow(1 - nearestDistance / threshold, 0.5);
+    const [rr, rg, rb] = recolorPixel(rgb, nearest.originalRgb, nearest.replacementRgb);
+    return rgbToHex(
+      rgb[0] * (1 - influence) + rr * influence,
+      rgb[1] * (1 - influence) + rg * influence,
+      rgb[2] * (1 - influence) + rb * influence
+    );
+  });
+
+  if (recolored === svg) return svgSource;
+
+  return isDataUrl
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(recolored)}`
+    : recolored;
 }

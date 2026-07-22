@@ -23,6 +23,7 @@ import {
 
 import {
   createElementFromAsset,
+  resolveCornerRadiusList,
   useEditorStore,
   type EditorElement,
   type EditorPage,
@@ -40,9 +41,12 @@ import {
 import {
   normalizeRasterColorMap,
   recolorRasterSourceToDataUrl,
+  recolorSvgSource,
   serializeRasterColorMap,
 } from "@/lib/editor/imagePalette";
 import {
+  buildTrimmedShapeSvgDataUrl,
+  isSvgDataUrlSource,
   rasterizeSvgDataUrlToPngDataUrl,
   SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
@@ -53,10 +57,18 @@ import {
   getFrameAlignedPlayheadFrame,
   getPlayheadMsForFrame,
   resolveAnimatedElementPoseAtFrame,
+  resolveAnimatedElementEffectsAtFrame,
   resolvePreviewRenderFps,
   resolveVideoSourceTimeAtFrame,
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
+import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
+import {
+  revealFraction,
+  glyphVisual,
+  splitWordsForMotion,
+  layoutWordsSingleLine,
+} from "@/lib/editor/animationGlyph";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
 import {
   getPageDurationMs,
@@ -87,6 +99,33 @@ interface ImageNodeProps {
   registerPreviewMediaController?: (id: string, controller: PreviewMediaController | null) => void;
   onImageMetadata?: (meta: { width: number; height: number }) => void;
   onVideoMetadata?: (meta: { duration: number }) => void;
+}
+
+/**
+ * Measures each word's advance width with an offscreen 2D context, so the per-word ASCEND /
+ * ONE_WORD renderer can lay words out (layoutWordsSingleLine). Konva applies letterSpacing
+ * between characters, which measureText doesn't, so it's added back approximately. One shared
+ * canvas — measurement is synchronous and cheap.
+ */
+let sharedMeasureCtx: CanvasRenderingContext2D | null = null;
+function measureWordAdvances(
+  words: string[],
+  fontCss: string,
+  letterSpacing: number
+): { widths: number[]; spaceWidth: number } {
+  if (!sharedMeasureCtx && typeof document !== "undefined") {
+    sharedMeasureCtx = document.createElement("canvas").getContext("2d");
+  }
+  const ctx = sharedMeasureCtx;
+  if (!ctx) {
+    // SSR / no canvas: fall back to a rough per-char estimate so layout is still finite.
+    const est = (w: string) => w.length * 0.55 * (Number(fontCss.match(/(\d+)px/)?.[1]) || 16);
+    return { widths: words.map(est), spaceWidth: 0.3 * (Number(fontCss.match(/(\d+)px/)?.[1]) || 16) };
+  }
+  ctx.font = fontCss;
+  const ls = Number.isFinite(letterSpacing) ? letterSpacing : 0;
+  const widths = words.map((w) => ctx.measureText(w).width + ls * Math.max(0, w.length - 1));
+  return { widths, spaceWidth: ctx.measureText(" ").width + ls };
 }
 
 function isGifSource(src: unknown) {
@@ -422,6 +461,44 @@ function CanvasImageNode({
     [normalizedRasterColorMap]
   );
   const shouldRecolorRaster = Boolean(baseRasterSource && rasterColorMapKey !== "{}");
+  // Built-in shapes carry their original SVG in `vectorSrc` (cropped to content). Render that SVG
+  // live so Konva re-rasterizes it crisply at any zoom/scale instead of upscaling the fixed-
+  // resolution baked PNG. A recolor is applied to the SVG's colors (same palette maths as the
+  // raster path) rather than falling back to the raster PNG, so recolored shapes stay crisp too.
+  const vectorShapeSource = useMemo(() => {
+    const source = String(element.vectorSrc || "").trim();
+    if (!source || !isSvgDataUrlSource(source)) return "";
+    // Derive a content-cropped, high-resolution vector from the RAW shape SVG + the layer's crop.
+    // An SVG <img> rasterizes at its intrinsic width/height, so the raw ~120px shape would blur
+    // when enlarged; this rewrites it to a large intrinsic (crisp) and crops the viewBox to the
+    // shape's content (fills the trimmed box with no distortion). Works for any stored shape.
+    const trimmed = buildTrimmedShapeSvgDataUrl(source, {
+      cropX: element.cropX,
+      cropY: element.cropY,
+      cropWidth: element.cropWidth,
+      cropHeight: element.cropHeight,
+      sourceWidth: element.sourceWidth,
+      sourceHeight: element.sourceHeight,
+    });
+    if (!trimmed) return "";
+    // Apply an active palette recolor directly to the SVG's fills (identical distance/HSL maths as
+    // the raster recolor, so it looks the same) — a no-op when nothing is remapped.
+    return recolorSvgSource(trimmed, normalizedRasterPalette, normalizedRasterColorMap);
+  }, [
+    element.vectorSrc,
+    element.cropX,
+    element.cropY,
+    element.cropWidth,
+    element.cropHeight,
+    element.sourceWidth,
+    element.sourceHeight,
+    normalizedRasterPalette,
+    normalizedRasterColorMap,
+  ]);
+  // Any shape carrying a `vectorSrc` renders as a live vector — including recolored ones, whose
+  // recolor is baked into `vectorShapeSource` above. The raster recolor path below is only for
+  // non-shape images (photos) that have no vector source.
+  const canRenderVectorShape = Boolean(vectorShapeSource);
   const recolorRequestKey = useMemo(
     () => `${baseRasterSource}::${rasterColorMapKey}::${normalizedRasterPalette.join(",")}`,
     [
@@ -435,6 +512,7 @@ function CanvasImageNode({
     src: "",
   });
   const resolvedSource = useMemo(() => {
+    if (canRenderVectorShape) return vectorShapeSource;
     if (shouldRecolorRaster) {
       if (recoloredEntry.key === recolorRequestKey && recoloredEntry.src) {
         return recoloredEntry.src;
@@ -444,10 +522,12 @@ function CanvasImageNode({
     return String(element.src || "");
   }, [
     baseRasterSource,
+    canRenderVectorShape,
     element.src,
     recolorRequestKey,
     recoloredEntry,
     shouldRecolorRaster,
+    vectorShapeSource,
   ]);
   const [image] = useImage(resolvedSource, "anonymous");
   const imageRef = useRef<Konva.Image | null>(null);
@@ -455,7 +535,8 @@ function CanvasImageNode({
   const isGif = useMemo(() => isGifSource(resolvedSource), [resolvedSource]);
 
   useEffect(() => {
-    if (!shouldRecolorRaster) return;
+    // Vector shapes recolor their SVG directly (see `vectorShapeSource`); skip the PNG remap.
+    if (!shouldRecolorRaster || canRenderVectorShape) return;
     let cancelled = false;
     const requestKey = recolorRequestKey;
     void recolorRasterSourceToDataUrl(
@@ -483,6 +564,7 @@ function CanvasImageNode({
     };
   }, [
     baseRasterSource,
+    canRenderVectorShape,
     normalizedRasterColorMap,
     normalizedRasterPalette,
     recolorRequestKey,
@@ -494,11 +576,14 @@ function CanvasImageNode({
   }, [onImageMetadata]);
 
   useEffect(() => {
+    // A vector shape renders from its SVG, whose intrinsic size is tiny and unrelated to the baked
+    // raster's sourceWidth/Height (which the recolor crop depends on) — don't let it clobber that.
+    if (canRenderVectorShape) return;
     const naturalWidth = Number(image?.naturalWidth || 0);
     const naturalHeight = Number(image?.naturalHeight || 0);
     if (naturalWidth <= 0 || naturalHeight <= 0) return;
     onImageMetadataRef.current?.({ width: naturalWidth, height: naturalHeight });
-  }, [image]);
+  }, [image, canRenderVectorShape]);
 
   useEffect(() => {
     if (!isGif || !image) return;
@@ -511,7 +596,10 @@ function CanvasImageNode({
     return () => window.cancelAnimationFrame(frame);
   }, [isGif, image]);
 
-  const crop = useMemo(() => resolveKonvaImageCrop(element, image || undefined), [element, image]);
+  const crop = useMemo(
+    () => (canRenderVectorShape ? undefined : resolveKonvaImageCrop(element, image || undefined)),
+    [canRenderVectorShape, element, image]
+  );
   const alphaHitRects = useMemo(
     () => computeAlphaHitRects(element, image || undefined, crop),
     [crop, element, image]
@@ -537,7 +625,10 @@ function CanvasImageNode({
       draggable={canTransform}
       listening={interactive}
       globalCompositeOperation={element.blendMode}
-      cornerRadius={element.cornerRadius || 0}
+      cornerRadius={resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)}
+      stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+      strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+      strokeScaleEnabled={false}
       shadowColor={element.shadowColor}
       shadowBlur={element.shadowBlur}
       shadowOffsetX={element.shadowOffsetX}
@@ -754,23 +845,37 @@ function CanvasVideoNode({
       shadowBlur={element.shadowBlur}
       shadowOffsetX={element.shadowOffsetX}
       shadowOffsetY={element.shadowOffsetY}
+      stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+      strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+      strokeScaleEnabled={false}
       sceneFunc={(context, shape) => {
-        const radius = Math.max(0, Number(element.cornerRadius || 0));
-        context.beginPath();
-        if (radius > 0) {
-          context.moveTo(radius, 0);
-          context.lineTo(element.width - radius, 0);
-          context.quadraticCurveTo(element.width, 0, element.width, radius);
-          context.lineTo(element.width, element.height - radius);
-          context.quadraticCurveTo(element.width, element.height, element.width - radius, element.height);
-          context.lineTo(radius, element.height);
-          context.quadraticCurveTo(0, element.height, 0, element.height - radius);
-          context.lineTo(0, radius);
-          context.quadraticCurveTo(0, 0, radius, 0);
-        } else {
-          context.rect(0, 0, element.width, element.height);
-        }
-        context.closePath();
+        const resolved = resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners);
+        const [rTL, rTR, rBR, rBL] = Array.isArray(resolved)
+          ? resolved
+          : [resolved, resolved, resolved, resolved];
+        const hasRadius = rTL > 0 || rTR > 0 || rBR > 0 || rBL > 0;
+        const buildPath = () => {
+          context.beginPath();
+          if (hasRadius) {
+            context.moveTo(rTL, 0);
+            context.lineTo(element.width - rTR, 0);
+            context.quadraticCurveTo(element.width, 0, element.width, rTR);
+            context.lineTo(element.width, element.height - rBR);
+            context.quadraticCurveTo(element.width, element.height, element.width - rBR, element.height);
+            context.lineTo(rBL, element.height);
+            context.quadraticCurveTo(0, element.height, 0, element.height - rBL);
+            context.lineTo(0, rTL);
+            context.quadraticCurveTo(0, 0, rTL, 0);
+          } else {
+            context.rect(0, 0, element.width, element.height);
+          }
+          context.closePath();
+        };
+        // Border first (on the rounded-rect path), then clip + draw the media on top — matches
+        // Konva.Image's native cornerRadius+stroke ordering so image and video borders look identical.
+        buildPath();
+        context.fillStrokeShape(shape);
+        buildPath();
         context.clip();
         if (video) {
           context.drawImage(video, 0, 0, element.width, element.height);
@@ -778,7 +883,6 @@ function CanvasVideoNode({
           context.fillStyle = "rgba(255,255,255,0.001)";
           context.fillRect(0, 0, element.width, element.height);
         }
-        context.fillStrokeShape(shape);
       }}
     />
   );
@@ -1375,6 +1479,35 @@ interface CanvasPageSceneProps {
   onBeginInlineTextEdit?: (node: Konva.Node, element: EditorElement) => void;
 }
 
+/** A page background is transparent when its color is explicitly "transparent" (or blank). */
+function isTransparentBackground(background: { type?: string; color?: string } | null | undefined) {
+  if (!background || background.type !== "color") return false;
+  const color = String(background.color || "").trim().toLowerCase();
+  return color === "transparent" || color === "" || color === "rgba(0, 0, 0, 0)" || color === "rgba(0,0,0,0)";
+}
+
+// Small light/grey checkerboard, lazily built once — used ONLY as the editor's on-canvas
+// indicator that the background is transparent. Never rendered into exports (see the Rect below),
+// so downloads/thumbnails keep genuinely transparent pixels.
+let checkerboardPatternCanvas: HTMLCanvasElement | null = null;
+function getCheckerboardPattern(): HTMLCanvasElement | null {
+  if (typeof document === "undefined") return null;
+  if (checkerboardPatternCanvas) return checkerboardPatternCanvas;
+  const cell = 12;
+  const canvas = document.createElement("canvas");
+  canvas.width = cell * 2;
+  canvas.height = cell * 2;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(0, 0, cell * 2, cell * 2);
+  ctx.fillStyle = "#d5dbe4";
+  ctx.fillRect(0, 0, cell, cell);
+  ctx.fillRect(cell, cell, cell, cell);
+  checkerboardPatternCanvas = canvas;
+  return checkerboardPatternCanvas;
+}
+
 function CanvasPageScene({
   page,
   elements,
@@ -1474,7 +1607,23 @@ function CanvasPageScene({
           y={0}
           width={page.width}
           height={page.height}
-          fill={page.background.type === "gradient" ? undefined : page.background.color}
+          // Transparent background renders no solid fill. In the editor (includePageOutline) we
+          // paint a checkerboard so the user can SEE it's transparent; in exports/thumbnails
+          // (includePageOutline=false) we paint nothing, leaving genuinely transparent pixels.
+          fill={
+            page.background.type === "gradient" || isTransparentBackground(page.background)
+              ? undefined
+              : page.background.color
+          }
+          fillPatternImage={
+            isTransparentBackground(page.background) && includePageOutline
+              ? // Konva accepts any CanvasImageSource; react-konva's prop type only names HTMLImageElement.
+                ((getCheckerboardPattern() ?? undefined) as HTMLImageElement | undefined)
+              : undefined
+          }
+          fillPatternRepeat={
+            isTransparentBackground(page.background) && includePageOutline ? "repeat" : undefined
+          }
           fillLinearGradientStartPoint={page.background.type === "gradient" ? { x: 0, y: 0 } : undefined}
           fillLinearGradientEndPoint={
             page.background.type === "gradient"
@@ -1685,6 +1834,128 @@ function CanvasPageScene({
               );
             }
 
+            // Phase-2 preview effects (reveal matte / typewriter / BLOCK bar). Rendered only for
+            // NON-selected text — the selected element keeps the plain <Text> so the Konva
+            // Transformer and inline-edit path are never wrapped. Effects are inert at rest, so
+            // this only diverges from the plain node mid-animation during playback.
+            const textFx = isSelected
+              ? null
+              : resolveAnimatedElementEffectsAtFrame(element, playheadFrame, previewFps, pageDurationMs);
+            // Per-WORD motion (ASCEND rises each word in, ONE_WORD shows one at a time). Rendered
+            // as one <Text> per word at a measured x — words shape correctly split (unlike
+            // per-CHAR, which would break Arabic). Single line only; multi-line falls through to
+            // the reveal/clip fallback below. These types also carry a WIPE mask, so this MUST
+            // run before the generic clip branch or the word motion never shows.
+            const perWordType = textFx?.glyphMotion?.type;
+            if (
+              textFx?.glyphMotion &&
+              (perWordType === "ASCEND" || perWordType === "ONE_WORD") &&
+              !element.text.includes("\n")
+            ) {
+              const words = splitWordsForMotion(element.text);
+              if (words.length > 0) {
+                const gm = textFx.glyphMotion;
+                const rtl = direction === "rtl";
+                const fontCss = `${konvaFontStyle} ${element.fontSize}px ${resolveCssFontFamily(
+                  element.fontFamily
+                )}`;
+                const measured = measureWordAdvances(words, fontCss, element.letterSpacing || 0);
+                const boxes = layoutWordsSingleLine(
+                  words.map((w, i) => ({ text: w, width: measured.widths[i] })),
+                  measured.spaceWidth,
+                  element.width,
+                  element.align === "center" ? "center" : element.align === "right" ? "right" : "left",
+                  rtl
+                );
+                const lineHeightPx = element.fontSize * (element.lineHeight || 1);
+                return (
+                  <Group key={element.id} {...commonProps}>
+                    {boxes.map((b) => {
+                      const gv = glyphVisual(gm.type, gm.progress, gm.durationMs, 0, 1, b.wordIndex, words.length);
+                      if (!gv || gv.alpha <= 0.001) return null; // ONE_WORD hides inactive words
+                      return (
+                        <Text
+                          key={b.wordIndex}
+                          x={b.x}
+                          y={gv.translateYEm * lineHeightPx}
+                          text={b.text}
+                          fill={element.color || element.fill}
+                          fontSize={element.fontSize}
+                          fontFamily={resolveCssFontFamily(element.fontFamily)}
+                          fontStyle={konvaFontStyle}
+                          fontVariant="normal"
+                          letterSpacing={element.letterSpacing}
+                          textDecoration={element.textDecoration}
+                          opacity={gv.alpha}
+                          listening={false}
+                        />
+                      );
+                    })}
+                  </Group>
+                );
+              }
+            }
+            if (textFx && (textFx.revealMask || textFx.textReveal || textFx.overlayBar)) {
+              const rtl = direction === "rtl";
+              let clip: ClipMask | null = textFx.revealMask
+                ? (textFx.revealMask as ClipMask)
+                : null;
+              if (!clip && textFx.textReveal) {
+                clip = {
+                  kind: "WIPE",
+                  progress: revealFraction(
+                    textFx.textReveal.progress,
+                    textFx.textReveal.mode,
+                    textFx.textReveal.durationMs,
+                    element.text
+                  ),
+                };
+              }
+              const bar = textFx.overlayBar;
+              const localTextProps = {
+                width: element.width,
+                height: element.height,
+                text: element.text,
+                fill: element.color || element.fill,
+                fontSize: element.fontSize,
+                fontFamily: resolveCssFontFamily(element.fontFamily),
+                fontStyle: konvaFontStyle,
+                fontVariant: "normal" as const,
+                lineHeight: element.lineHeight,
+                align: element.align,
+                direction,
+                letterSpacing: element.letterSpacing,
+                textDecoration: element.textDecoration,
+                listening: false,
+              };
+              return (
+                <Group key={element.id} {...commonProps}>
+                  <Group
+                    listening={false}
+                    clipFunc={
+                      clip
+                        ? (ctx) => drawRevealClip(ctx, clip!, element.width, element.height, rtl)
+                        : undefined
+                    }
+                  >
+                    <Text {...localTextProps} />
+                  </Group>
+                  {bar ? (
+                    // BLOCK's bar rides ON TOP of the swept text (outside the clip), in the text's
+                    // own colour — the thing doing the uncovering.
+                    <Rect
+                      x={bar.leftFraction * element.width}
+                      y={0}
+                      width={bar.widthFraction * element.width}
+                      height={element.height}
+                      fill={element.color || element.fill}
+                      listening={false}
+                    />
+                  ) : null}
+                </Group>
+              );
+            }
+
             return (
               <Text
                 key={element.id}
@@ -1723,8 +1994,8 @@ function CanvasPageScene({
                 {...commonProps}
                 radius={Math.max(4, Math.min(element.width, element.height) / 2)}
                 fill={element.fill}
-                stroke={element.stroke}
-                strokeWidth={element.strokeWidth}
+                stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+                strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
               />
             );
           }
@@ -1768,8 +2039,8 @@ function CanvasPageScene({
                 innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
                 outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}
                 fill={element.fill}
-                stroke={element.stroke}
-                strokeWidth={element.strokeWidth}
+                stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+                strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
               />
             );
           }
@@ -1781,9 +2052,9 @@ function CanvasPageScene({
               width={element.width}
               height={element.height}
               fill={element.fill}
-              stroke={element.stroke}
-              strokeWidth={element.strokeWidth}
-              cornerRadius={element.cornerRadius || 0}
+              stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+              strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+              cornerRadius={resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)}
             />
           );
         })}
@@ -2032,7 +2303,15 @@ export default function CanvasEditor() {
           const newLineHeight = Math.min(lineHeight, MAX_LINE_HEIGHT);
 
           const horizontallyPadded = element.width > newWidth * 1.12;
-          const verticallyPadded = cur.top > fontSize * 0.18 || lineHeight > MAX_LINE_HEIGHT + 0.05;
+          // Padding counts on EITHER vertical side. A box far taller than its glyph but with the
+          // ink sitting near the top has a small `cur.top` yet a large gap BELOW — the asymmetric
+          // "big bottom padding" case. The old check only looked at the top gap, so those boxes
+          // were deemed tight and left untouched. Measure the bottom gap too.
+          const bottomGap = element.height - (cur.top + cur.h);
+          const verticallyPadded =
+            cur.top > fontSize * 0.18 ||
+            bottomGap > fontSize * 0.18 ||
+            lineHeight > MAX_LINE_HEIGHT + 0.05;
           if (!horizontallyPadded && !verticallyPadded) {
             fittedTextIdsRef.current.add(element.id);
             return;
@@ -2103,6 +2382,9 @@ export default function CanvasEditor() {
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
   const expiredFrameDropTargetRef = useRef("");
   const autoFitPageIdRef = useRef("");
+  // While true, the initial-load zoom keeps re-applying 50% as the container is measured. Any
+  // manual zoom/pan flips it off so the user's view is never yanked back.
+  const autoFitActiveRef = useRef(false);
   const previewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
   const exportPreviewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
   const timelinePlayheadMsRef = useRef(timelinePlayheadMs);
@@ -2213,6 +2495,7 @@ export default function CanvasEditor() {
 
   const fitToScreen = useCallback(() => {
     if (!activePage || !containerSize.width || !containerSize.height) return;
+    autoFitActiveRef.current = false;
 
     const padding = 120;
     const scale = clamp(
@@ -2245,6 +2528,7 @@ export default function CanvasEditor() {
 
   const zoomBy = useCallback(
     (factor: number) => {
+      autoFitActiveRef.current = false;
       const next = getCenteredViewportForScale(viewport.scale * factor);
       if (!next) return;
       updateViewport(next);
@@ -2254,6 +2538,7 @@ export default function CanvasEditor() {
 
   const setZoomScale = useCallback(
     (scaleInput: number) => {
+      autoFitActiveRef.current = false;
       const next = getCenteredViewportForScale(scaleInput);
       if (!next) return;
       updateViewport(next);
@@ -2933,17 +3218,21 @@ export default function CanvasEditor() {
     return () => observer.disconnect();
   }, []);
 
+  // On first load / refresh, always start the template at 50% zoom. Applied SYNCHRONOUSLY (no
+  // rAF) so it can't be starved by the re-render churn during template load — an earlier rAF
+  // version was cancelled on every re-render and left the default 100%. It keeps re-applying
+  // (centered) as the ResizeObserver reports the real container size, and the `autoFitActiveRef`
+  // flag (cleared by any manual zoom/pan below) stops it from ever overriding the user.
   useEffect(() => {
     if (!activePage) return;
     if (!containerSize.width || !containerSize.height) return;
-    if (autoFitPageIdRef.current === activePage.id) return;
-    autoFitPageIdRef.current = activePage.id;
-    const frame = requestAnimationFrame(() => {
-      const next = getCenteredViewportForScale(0.5);
-      if (!next) return;
-      updateViewport(next);
-    });
-    return () => cancelAnimationFrame(frame);
+    if (autoFitPageIdRef.current !== activePage.id) {
+      autoFitPageIdRef.current = activePage.id;
+      autoFitActiveRef.current = true;
+    }
+    if (!autoFitActiveRef.current) return;
+    const next = getCenteredViewportForScale(0.5);
+    if (next) updateViewport(next);
   }, [
     activePage,
     containerSize.height,
@@ -3159,6 +3448,7 @@ export default function CanvasEditor() {
   const handleWheel = useCallback(
     (event: Konva.KonvaEventObject<WheelEvent>) => {
       event.evt.preventDefault();
+      autoFitActiveRef.current = false;
 
       const direction = event.evt.deltaY > 0 ? -1 : 1;
       const factor = direction > 0 ? 1.08 : 1 / 1.08;
@@ -3763,6 +4053,9 @@ export default function CanvasEditor() {
               ...next,
               src: resolvedSrc,
               rasterOriginalSrc: next.rasterOriginalSrc || resolvedSrc,
+              // Keep the raw SVG; the canvas derives a crisp, content-cropped, high-resolution
+              // vector from it + the layer crop at render time (see CanvasImageNode).
+              ...(isSvgDataUrlSource(next.src) ? { vectorSrc: next.src } : {}),
             });
           } else if (next.type === "video") {
             if (dropIntoFrame("video", next.src, {
@@ -3933,6 +4226,7 @@ export default function CanvasEditor() {
         draggable={toolMode === "pan"}
         onDragEnd={(event) => {
           if (toolMode !== "pan") return;
+          autoFitActiveRef.current = false;
           updateViewport({ x: event.target.x(), y: event.target.y(), scale: viewport.scale });
         }}
         onWheel={handleWheel}

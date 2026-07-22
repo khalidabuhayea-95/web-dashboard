@@ -49,21 +49,44 @@ function expandFlatBounds(minValue, maxValue, minimumSize) {
   };
 }
 
+// `radius` may be a single number or a per-corner list [topLeft, topRight, bottomRight, bottomLeft]
+// (the editor's per-corner rounding mask resolves to the list form).
 function roundRectPath(ctx, x, y, width, height, radius) {
-  const safeRadius = Math.min(Math.max(0, radius), width / 2, height / 2);
+  const clampRadius = (value) => Math.min(Math.max(0, numberOr(value, 0)), width / 2, height / 2);
+  const radii = Array.isArray(radius)
+    ? [clampRadius(radius[0]), clampRadius(radius[1]), clampRadius(radius[2]), clampRadius(radius[3])]
+    : (() => {
+        const safe = clampRadius(radius);
+        return [safe, safe, safe, safe];
+      })();
   if (typeof ctx.roundRect === "function") {
     ctx.beginPath();
-    ctx.roundRect(x, y, width, height, safeRadius);
+    ctx.roundRect(x, y, width, height, radii);
     return;
   }
 
+  const [topLeft, topRight, bottomRight, bottomLeft] = radii;
   ctx.beginPath();
-  ctx.moveTo(x + safeRadius, y);
-  ctx.arcTo(x + width, y, x + width, y + height, safeRadius);
-  ctx.arcTo(x + width, y + height, x, y + height, safeRadius);
-  ctx.arcTo(x, y + height, x, y, safeRadius);
-  ctx.arcTo(x, y, x + width, y, safeRadius);
+  ctx.moveTo(x + topLeft, y);
+  ctx.arcTo(x + width, y, x + width, y + height, topRight);
+  ctx.arcTo(x + width, y + height, x, y + height, bottomRight);
+  ctx.arcTo(x, y + height, x, y, bottomLeft);
+  ctx.arcTo(x, y, x + width, y, topLeft);
   ctx.closePath();
+}
+
+// The editor stores one `cornerRadius` plus an optional per-corner enable mask; disabled corners
+// stay sharp. Absent mask = all corners rounded.
+function resolveRectCornerRadii(item) {
+  const radius = Math.max(0, numberOr(item?.cornerRadius, 0));
+  const corners = item?.cornerRadiusCorners;
+  if (!corners || typeof corners !== "object") return radius;
+  return [
+    corners.topLeft !== false ? radius : 0,
+    corners.topRight !== false ? radius : 0,
+    corners.bottomRight !== false ? radius : 0,
+    corners.bottomLeft !== false ? radius : 0,
+  ];
 }
 
 export function isRasterizableShapeLayer(item) {
@@ -168,7 +191,7 @@ export function renderShapeLayerToPngBuffer(item) {
       strokeInset,
       width,
       height,
-      Math.max(0, numberOr(item?.cornerRadius, 0))
+      resolveRectCornerRadii(item)
     );
     strokeAndFillShape(ctx, item);
     return canvas.toBuffer("image/png");

@@ -13,6 +13,10 @@ import { verifyCanvaImportToken } from "@/lib/tools/canvaImportAuth";
 import { translateBatchToArabic } from "@/lib/tools/arabicTranslate.server";
 import { sanitizeImportPayloadAssets } from "@/lib/tools/importAssetSanitizer";
 import {
+  parseFailedFabricObjectIndexesFromError,
+  replaceExternalImageSourcesWithSnapshotCrops,
+} from "@/lib/tools/importSnapshotRecovery";
+import {
   buildFabricData,
   createImportedTemplate,
   normalizeCanvasInput,
@@ -1018,7 +1022,10 @@ function pruneRedundantFullPageSnapshotCropLayer(fabricData, canvasWidth, canvas
   };
 }
 
-function parseFailedFabricObjectIndexesFromError(errorMessage) {
+// LEGACY (superseded by @/lib/tools/importSnapshotRecovery — kept temporarily for reference;
+// the imported versions above shadow these at call sites).
+// eslint-disable-next-line no-unused-vars
+function parseFailedFabricObjectIndexesFromError_legacy(errorMessage) {
   const source = String(errorMessage || "");
   const matches = source.matchAll(/fabricData\.objects\[(\d+)\]\.src/g);
   const indexes = new Set();
@@ -1030,7 +1037,8 @@ function parseFailedFabricObjectIndexesFromError(errorMessage) {
   return indexes;
 }
 
-async function fetchExternalImageSourceAsDataUrl(sourceUrl, maxBytes = 10_000_000) {
+// eslint-disable-next-line no-unused-vars
+async function fetchExternalImageSourceAsDataUrl_legacy(sourceUrl, maxBytes = 10_000_000) {
   const normalizedUrl = String(sourceUrl || "").trim();
   if (!/^https?:\/\//i.test(normalizedUrl)) return "";
   try {
@@ -1052,7 +1060,8 @@ async function fetchExternalImageSourceAsDataUrl(sourceUrl, maxBytes = 10_000_00
   }
 }
 
-async function replaceExternalImageSourcesWithSnapshotCrops({
+// eslint-disable-next-line no-unused-vars
+async function replaceExternalImageSourcesWithSnapshotCrops_legacy({
   fabricData,
   snapshotDataUrl,
   canvasWidth,
@@ -1559,12 +1568,17 @@ export async function POST(request) {
         if (pendingIndexes.size === 0) break;
         pendingIndexes.forEach((index) => attemptedObjectIndexes.add(index));
 
+        // The sanitizer FAILS FAST (one bad object per error), so error-driven targeting fixes ONE
+        // layer per attempt — a design with more protected images than maxLayerCropAttempts (e.g.
+        // 13 vs 12) ran out of retries and collapsed to a flat snapshot. First attempt therefore
+        // sweeps ALL objects with unfetchable srcs in one pass; error-driven targeting remains as
+        // the backstop for anything the sweep could not have seen.
         const layerCropFallback = await replaceExternalImageSourcesWithSnapshotCrops({
           fabricData: workingFabricData,
           snapshotDataUrl: rawThumbnailDataUrl,
           canvasWidth: dimensions.canvasWidth,
           canvasHeight: dimensions.canvasHeight,
-          targetIndexes: pendingIndexes,
+          targetIndexes: attempt === 0 ? null : pendingIndexes,
         });
         if (Array.isArray(layerCropFallback.warnings) && layerCropFallback.warnings.length > 0) {
           layerCropFallbackWarnings.push(...layerCropFallback.warnings);

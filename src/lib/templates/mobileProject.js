@@ -15,6 +15,7 @@ import {
   normalizeSpecDirection,
   normalizeSpecEasing,
 } from "@/lib/editor/animationSpec";
+import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import {
   getShapeRasterFrame,
   isRasterizableShapeLayer,
@@ -315,6 +316,28 @@ function resolveMediaUri(rawUri, options) {
   return resolved || value;
 }
 
+function appendQueryParam(url, key, value) {
+  const target = String(url || "");
+  if (!target || !value) return target;
+  const separator = target.includes("?") ? "&" : "?";
+  return `${target}${separator}${encodeURIComponent(key)}=${encodeURIComponent(value)}`;
+}
+
+// Stable short fingerprint of a raster color map, so a vector shape's ?field=vector URL (which is
+// otherwise identical across recolors) changes when the recolor changes and the mobile image cache
+// refetches the freshly-recolored SVG. Order-independent (entries are sorted).
+function colorMapFingerprint(colorMap) {
+  const serialized = Object.entries(colorMap || {})
+    .map(([key, value]) => `${String(key).toLowerCase()}:${String(value).toLowerCase()}`)
+    .sort()
+    .join(",");
+  let hash = 5381;
+  for (let i = 0; i < serialized.length; i += 1) {
+    hash = ((hash << 5) + hash + serialized.charCodeAt(i)) >>> 0;
+  }
+  return hash.toString(36);
+}
+
 function normalizeHex(value, fallback = "#000000") {
   const raw = String(value || "").trim();
   const rgba = raw.match(
@@ -602,7 +625,11 @@ function readCornerRadiusRatio(item) {
     return numberOr(item.mediaCornerRadius, 0.1);
   }
   const radius = Math.max(0, numberOr(item?.cornerRadius, 0));
-  const minEdge = Math.max(1, Math.min(numberOr(item?.width, 1), numberOr(item?.height, 1)));
+  // Rendered edge = base size × |scale| (editor elements carry ±1 scales; raw fabric
+  // objects carry natural bitmap sizes with real scales — radius is display px in both).
+  const renderedWidth = numberOr(item?.width, 1) * Math.abs(numberOr(item?.scaleX, 1));
+  const renderedHeight = numberOr(item?.height, 1) * Math.abs(numberOr(item?.scaleY, 1));
+  const minEdge = Math.max(1, Math.min(renderedWidth, renderedHeight));
   return radius / minEdge;
 }
 
@@ -914,6 +941,20 @@ function mediaFilters(item, options = {}) {
     blendMode: mapBlendMode(readBlendMode(item)),
     shape: includeShapeMask ? mapMediaShape(item.mediaShape) : "RECTANGLE",
     cornerRadius: includeShapeMask ? clamp(readCornerRadiusRatio(item), 0, 0.5) : 0,
+    // Per-corner enable mask for `cornerRadius`. Omitted = round ALL corners (the default).
+    // Disabled corners stay sharp; the single radius applies to the enabled ones.
+    ...(includeShapeMask &&
+    item.cornerRadiusCorners &&
+    typeof item.cornerRadiusCorners === "object"
+      ? {
+          cornerRadiusCorners: {
+            topLeft: item.cornerRadiusCorners.topLeft !== false,
+            topRight: item.cornerRadiusCorners.topRight !== false,
+            bottomRight: item.cornerRadiusCorners.bottomRight !== false,
+            bottomLeft: item.cornerRadiusCorners.bottomLeft !== false,
+          },
+        }
+      : {}),
     strokeColorHex: includeStroke ? stroke.hex : "#FFFFFF",
     strokeOpacity: includeStroke ? stroke.opacity : 0,
     strokeWidth: includeStroke ? clamp(numberOr(item.strokeWidth, 0), 0, 24) : 0,
@@ -1007,6 +1048,21 @@ function mapImageLayer(item, index, canvasSize, options) {
             .filter(([key, value]) => key && value)
         )
       : {};
+  const vectorSourceRaw = String(item.vectorSrc || "").trim();
+  // A built-in shape keeps its original SVG in vectorSrc. Always ship it as a vector so it stays
+  // crisp at any scale on mobile — INCLUDING recolored shapes: the recolor is applied to the SVG's
+  // fills (inline below when there's no asset resolver, otherwise by the ?field=vector asset route
+  // which bakes it server-side) so a recolored shape looks the same as the raster but stays sharp.
+  const hasActiveRasterRecolor = Object.entries(rasterColorMap).some(
+    ([key, value]) => key.toLowerCase() !== value.toLowerCase()
+  );
+  const isVectorLayer = vectorSourceRaw.startsWith("data:image/svg");
+  const normalizedCrop = mapCropRect(item, sourceWidth, sourceHeight);
+  // The served vector (?field=vector) is already cropped to the shape's content, so it must NOT
+  // also carry the raster's crop — that double-crops it (clipping the shape, e.g. the pointed top).
+  // Serve it full-frame at the content's own dimensions instead.
+  const contentWidth = Math.max(1, Math.round((normalizedCrop.right - normalizedCrop.left) * sourceWidth));
+  const contentHeight = Math.max(1, Math.round((normalizedCrop.bottom - normalizedCrop.top) * sourceHeight));
   const rasterUri = resolveMediaUri(rasterSourceRaw || item.src || item.imageUri || "", {
     assetResolver: options?.assetResolver,
     mediaUrlResolver: options?.mediaUrlResolver,
@@ -1015,6 +1071,21 @@ function mapImageLayer(item, index, canvasSize, options) {
     index,
     field: item.rasterOriginalSrc ? "rasterOriginalSrc" : "src",
   });
+  let imageUri = resolveMediaUri(isVectorLayer ? vectorSourceRaw : item.src || item.imageUri || "", {
+    assetResolver: options?.assetResolver,
+    mediaUrlResolver: options?.mediaUrlResolver,
+    scope: "layer",
+    elementId: item.id || item.layerId || "",
+    index,
+    field: isVectorLayer ? "vector" : "src",
+  });
+  if (isVectorLayer && imageUri && hasActiveRasterRecolor) {
+    imageUri = isDataUri(imageUri)
+      ? // Inline SVG (no asset resolver): recolor its fills here so the shipped vector is correct.
+        recolorSvgSource(imageUri, rasterPalette, rasterColorMap)
+      : // ?field=vector URL: the asset route bakes the recolor; bust the cache when it changes.
+        appendQueryParam(imageUri, "rcm", colorMapFingerprint(rasterColorMap));
+  }
   return {
     ...base,
     transform: buildTransform({
@@ -1029,23 +1100,16 @@ function mapImageLayer(item, index, canvasSize, options) {
       scaleBounds: { min: MIN_MEDIA_VISUAL_SCALE, max: MAX_MEDIA_VISUAL_SCALE },
     }),
     type: "IMAGE",
-    imageUri: resolveMediaUri(item.src || item.imageUri || "", {
-      assetResolver: options?.assetResolver,
-      mediaUrlResolver: options?.mediaUrlResolver,
-      scope: "layer",
-      elementId: item.id || item.layerId || "",
-      index,
-      field: "src",
-    }),
+    imageUri,
     frameWidth: layerBaseWidth,
     frameHeight: layerBaseHeight,
-    sourceWidth,
-    sourceHeight,
+    sourceWidth: isVectorLayer ? contentWidth : sourceWidth,
+    sourceHeight: isVectorLayer ? contentHeight : sourceHeight,
     sourceHasAlpha: Boolean(item.sourceHasAlpha),
-    cropRect: mapCropRect(item, sourceWidth, sourceHeight),
+    cropRect: isVectorLayer ? { left: 0, top: 0, right: 1, bottom: 1 } : normalizedCrop,
     filters: mediaFilters(item),
-    assetKind: "raster",
-    colorEditMode: rasterPalette.length > 0 ? "raster" : "none",
+    assetKind: isVectorLayer ? "vector" : "raster",
+    colorEditMode: isVectorLayer ? "none" : rasterPalette.length > 0 ? "raster" : "none",
     rasterOriginalUri: rasterUri || null,
     rasterPalette,
     rasterColorMap,
@@ -1356,6 +1420,18 @@ function mapStickerLayer(item, index, canvasSize) {
   };
 }
 
+// Whether an element carries real image pixels (a fetched/embedded asset) vs. being a solid
+// vector shape. A shape (rect/circle/…) with a paintable `fill` and no image src is NOT an image.
+function hasUsableImageSource(item) {
+  const src = String(item?.src || item?.imageUri || item?.rasterOriginalSrc || "").trim();
+  return (
+    /^https?:\/\//i.test(src) ||
+    /^data:image\//i.test(src) ||
+    /^file:\/\//i.test(src) ||
+    /^blob:/i.test(src)
+  );
+}
+
 function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
   const layerType = String(item.layerType || item.type || "").toLowerCase();
   if (layerType === "frame" || item?.frameShape || item?.frameContent) {
@@ -1370,6 +1446,15 @@ function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
   if (layerType === "video") {
     return mapVideoLayer(item, index, canvasSize, options);
   }
+  // A concrete vector shape (rect/circle/line/arrow/star) carrying NO real image source is a SOLID
+  // shape and must be rasterized as one. Checked BEFORE the image branch because a shape captured
+  // from Canva — which renders shapes as protected rasters — keeps importKind="image", and
+  // extractFabricData's `layerType || importKind || type` fallback then labels the rect "image".
+  // That routed it to mapImageLayer, which emitted an EMPTY imageUri and rendered as a grey block on
+  // mobile (observed: an imported banner-bar rect). The element's real `type` (rect) is authoritative.
+  if (isRasterizableShapeLayer(item) && !hasUsableImageSource(item)) {
+    return mapShapeLayerAsImage(item, index, canvasSize, options);
+  }
   if (layerType === "image" || String(item.type || "").toLowerCase().includes("image")) {
     return mapImageLayer(item, index, canvasSize, options);
   }
@@ -1377,6 +1462,12 @@ function mapFabricObjectToMobileLayer(item, index, canvasSize, options) {
     return mapShapeLayerAsImage(item, index, canvasSize, options);
   }
   return mapShapeLayer(item, index, canvasSize);
+}
+
+// A transparent page background — the editor's "transparent" swatch (color === "transparent").
+function isTransparentBackgroundColor(color) {
+  const c = String(color || "").trim().toLowerCase();
+  return c === "transparent" || c === "rgba(0, 0, 0, 0)" || c === "rgba(0,0,0,0)";
 }
 
 function mapBackground(value, options) {
@@ -1391,10 +1482,20 @@ function mapBackground(value, options) {
       return { type: "image", imageUri };
     }
   }
-  if (value && typeof value === "string" && value.trim()) {
+  if (value && typeof value === "string") {
+    // A blank/transparent string means no fill; a real color is solid.
+    if (!value.trim() || isTransparentBackgroundColor(value)) {
+      return { type: "transparent" };
+    }
     return { type: "solid", colorHex: normalizeHex(value, "#FFFFFF") };
   }
   if (value && typeof value === "object") {
+    // Transparent page background — emitted as its own wire type so the app can render real
+    // transparency. Builds without a Background.Transparent variant fall back to solid white
+    // (their mapper's default branch), so this is forward-compatible.
+    if (value.type === "color" && isTransparentBackgroundColor(value.color)) {
+      return { type: "transparent" };
+    }
     if (value.type === "image" && value.imageUri) {
       return {
         type: "image",

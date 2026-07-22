@@ -227,6 +227,45 @@ export function resolveAnimatedElementPoseAtFrame(
   };
 }
 
+/**
+ * The animation's non-transform channels at [currentFrame] — the reveal matte, typewriter
+ * reveal, per-glyph motion and BLOCK's bar. Phase 2: the Konva renderer honours these; a null
+ * return means nothing to draw beyond the pose. Kept separate from the pose so the transform
+ * path stays untouched.
+ */
+export interface ElementRenderEffects {
+  revealMask: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["revealMask"];
+  textReveal: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["textReveal"];
+  glyphMotion: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["glyphMotion"];
+  overlayBar: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["overlayBar"];
+}
+
+export function resolveAnimatedElementEffectsAtFrame(
+  element: EditorElement,
+  currentFrame: number,
+  fps: number,
+  pageDurationMs: number
+): ElementRenderEffects | null {
+  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs);
+  if (!state) return null;
+  const visual = resolveAnimationVisualState(
+    state.spec,
+    state.cycleProgress,
+    Math.max(1, element.width),
+    Math.max(1, element.height),
+    state.isExiting
+  );
+  if (!visual.revealMask && !visual.textReveal && !visual.glyphMotion && !visual.overlayBar) {
+    return null;
+  }
+  return {
+    revealMask: visual.revealMask,
+    textReveal: visual.textReveal,
+    glyphMotion: visual.glyphMotion,
+    overlayBar: visual.overlayBar,
+  };
+}
+
 export function resolveVideoSourceTimeAtFrame({
   frame,
   fps,

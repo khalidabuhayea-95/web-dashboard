@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Dashboard Canva Importer",
-  "version": "1.10.2",
-  "version_name": "1.10.2-bgvideo-poster-flips",
+  "version": "1.13.3",
+  "version_name": "1.13.3-rect-frame-no-snapshot",
   "description": "Import Canva designs from the active tab into the dashboard templates.",
   "permissions": [
     "activeTab",
@@ -26,6 +26,16 @@
   "background": {
     "service_worker": "background.js"
   },
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "canva-fiber-main.js"
+      ],
+      "matches": [
+        "https://*.canva.com/*"
+      ]
+    }
+  ],
   "content_security_policy": {
     "extension_pages": "script-src 'self'; object-src 'self'; connect-src 'self' http://* https://*"
   }

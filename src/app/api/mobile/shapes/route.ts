@@ -42,7 +42,7 @@ export async function GET(request: NextRequest) {
       totalCatalogSize: BUILTIN_SHAPE_ASSETS.length,
     });
 
-    const result = listMobileBuiltInShapes({
+    const result = await listMobileBuiltInShapes({
       request,
       locale,
       query,
