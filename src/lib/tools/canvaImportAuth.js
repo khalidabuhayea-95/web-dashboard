@@ -18,11 +18,14 @@ function fromBase64Url(input) {
 }
 
 function getTokenSecret() {
-  const secret =
-    process.env.CANVA_IMPORT_TOKEN_SECRET ||
-    process.env.DATABASE_URL;
+  // Never fall back to DATABASE_URL — reusing the DB connection string (which
+  // embeds credentials) as MAC key material couples import-token security to the
+  // DB secret and risks credential exposure through key reuse.
+  const secret = process.env.CANVA_IMPORT_TOKEN_SECRET;
   if (!secret) {
-    throw new Error("Missing token secret.");
+    throw new Error(
+      "Missing CANVA_IMPORT_TOKEN_SECRET. Set a dedicated signing secret for Canva import tokens."
+    );
   }
   return secret;
 }

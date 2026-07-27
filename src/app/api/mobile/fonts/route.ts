@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
+
 import {
   buildMobileFontCatalog,
   normalizeMobileFontCategory,
@@ -32,6 +34,13 @@ function normalizeLanguage(value: unknown): string {
 }
 
 export async function GET(request: NextRequest) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:fonts",
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const requestId = resolveRequestId(request);
   const requestLogger = logger;
 

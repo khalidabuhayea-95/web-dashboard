@@ -1,3 +1,5 @@
+import { randomBytes } from "node:crypto";
+
 import prisma from "@/lib/prisma";
 import { resizeThumbnailDataUrlHalf } from "@/lib/media/thumbnailResize.server";
 import { extractFabricData } from "@/lib/templates/editorData";
@@ -64,33 +66,37 @@ export function buildFabricData(snapshotDataUrl, canvasWidth, canvasHeight, sour
   };
 }
 
+// Cap the collision walk to avoid unbounded sequential DB round-trips on import;
+// the unique constraint on `slug` is the final backstop after the random suffix.
+const MAX_UNIQUENESS_ATTEMPTS = 25;
+
 async function ensureUniqueSlug(baseSlug) {
   const base = normalizeSlug(baseSlug) || `canva-import-${Date.now()}`;
   let candidate = base;
-  let counter = 1;
 
-  while (true) {
+  for (let counter = 1; counter <= MAX_UNIQUENESS_ATTEMPTS; counter += 1) {
     const existing = await prisma.template.findUnique({ where: { slug: candidate } });
     if (!existing) return candidate;
-    counter += 1;
-    candidate = `${base}-${counter}`;
+    candidate = `${base}-${counter + 1}`;
   }
+
+  return `${base}-${randomBytes(4).toString("hex")}`;
 }
 
 async function ensureUniqueName(ownerId, baseName) {
   const normalized = String(baseName || "").trim() || `Imported Canva Template ${new Date().toISOString().slice(0, 10)}`;
   let candidate = normalized;
-  let counter = 1;
 
-  while (true) {
+  for (let counter = 1; counter <= MAX_UNIQUENESS_ATTEMPTS; counter += 1) {
     const existing = await prisma.template.findFirst({
       where: { ownerId, name: candidate },
       select: { id: true },
     });
     if (!existing) return candidate;
-    counter += 1;
-    candidate = `${normalized} (${counter})`;
+    candidate = `${normalized} (${counter + 1})`;
   }
+
+  return `${normalized} (${randomBytes(3).toString("hex")})`;
 }
 
 export function normalizeCanvasInput({ width, height, sourceWidth, sourceHeight, maxDimension = 1920 }) {

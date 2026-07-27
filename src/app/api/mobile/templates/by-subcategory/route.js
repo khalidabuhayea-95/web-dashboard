@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
 
 import prisma from "@/lib/prisma";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
@@ -26,6 +27,13 @@ function parsePositiveInt(value, fallback) {
 }
 
 export async function GET(request) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:by-subcategory",
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const { searchParams } = new URL(request.url);
   const locale = resolveMobileLocale(request, searchParams);
   const taxonomySettings = await getTemplateTaxonomySettings();

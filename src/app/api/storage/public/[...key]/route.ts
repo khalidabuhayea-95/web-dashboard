@@ -11,9 +11,31 @@ import {
 export const runtime = "nodejs";
 
 function getObjectKey(params: { key?: string[] } | null | undefined) {
-  return Array.isArray(params?.key)
-    ? params.key.map((segment) => String(segment || "").trim()).filter(Boolean).join("/")
-    : "";
+  if (!Array.isArray(params?.key)) return "";
+  const segments = params.key.map((segment) => String(segment || "").trim());
+  // Defensively reject path-traversal / absolute segments. S3/R2 treat ".." as a
+  // literal key so this is not exploitable today, but it keeps the route safe if
+  // the storage driver is ever backed by a filesystem.
+  if (segments.some((segment) => segment === ".." || segment === "." || segment.startsWith("/"))) {
+    return "";
+  }
+  return segments.filter(Boolean).join("/");
+}
+
+// Content types that a browser will execute/render inline on our origin. We never
+// serve these inline from the public media proxy — force a download instead.
+const ACTIVE_CONTENT_TYPES = [
+  "svg",
+  "xml",
+  "html",
+  "xhtml",
+  "javascript",
+  "ecmascript",
+];
+
+function isActiveContentType(value: unknown) {
+  const type = String(value || "").toLowerCase();
+  return ACTIVE_CONTENT_TYPES.some((needle) => type.includes(needle));
 }
 
 function toWebStream(body: unknown) {
@@ -54,7 +76,15 @@ function buildHeaders(object: {
         ? "no-store, no-cache, must-revalidate, max-age=0"
       : normalizeCacheControl(object.CacheControl)
   );
-  if (object.ContentType) headers.set("Content-Type", String(object.ContentType));
+  if (isActiveContentType(object.ContentType)) {
+    // Neutralize active content (SVG/HTML/XML/JS): serve as an opaque download so
+    // it cannot execute script on our origin (defense-in-depth for SEC-3).
+    headers.set("Content-Type", "application/octet-stream");
+    headers.set("Content-Disposition", "attachment");
+    headers.set("X-Content-Type-Options", "nosniff");
+  } else if (object.ContentType) {
+    headers.set("Content-Type", String(object.ContentType));
+  }
   if (object.ContentLength != null) headers.set("Content-Length", String(object.ContentLength));
   if (object.ETag) headers.set("ETag", object.ETag);
   return headers;

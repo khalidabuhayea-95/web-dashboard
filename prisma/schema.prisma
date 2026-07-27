@@ -42,6 +42,11 @@ model Template {
   @@unique([ownerId, name])
   @@index([ownerId])
   @@index([status])
+  // Hot-path composites: catalog browse (status+category+subCategory ordered by
+  // recency), status-wide recency lists, and the editor "my templates" list.
+  @@index([status, category, subCategory, updatedAt(sort: Desc)])
+  @@index([status, updatedAt(sort: Desc)])
+  @@index([ownerId, updatedAt(sort: Desc)])
 }
 
 model TemplateRevision {

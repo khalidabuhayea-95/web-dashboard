@@ -136,6 +136,15 @@ function ensureValidUpload({
     if (!mimeType.startsWith("image/")) {
       throw new Error("Only image files are allowed for image uploads.");
     }
+    // Reject SVG: it is an active document (can carry <script>) and is stored
+    // and served raw, which would allow stored XSS on the app origin. The
+    // editor works with raster media; vectors have their own import pipeline.
+    if (
+      mimeType.includes("svg") ||
+      String(extension || "").trim().toLowerCase() === "svg"
+    ) {
+      throw new Error("SVG image uploads are not allowed.");
+    }
     if (size > MAX_IMAGE_BYTES) {
       throw new Error("Image file is too large.");
     }

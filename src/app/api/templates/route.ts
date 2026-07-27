@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
@@ -42,6 +42,9 @@ const MAX_THUMBNAIL_BYTES = 12 * 1024 * 1024;
 const MAX_CANVA_REFERENCE_ERRORS = 10;
 const DEFAULT_LIST_PAGE_SIZE = 20;
 const MAX_LIST_PAGE_SIZE = 100;
+// Upper bound for the non-paginated list branch — prevents unbounded row/payload
+// growth while staying well above any realistic single-owner template count.
+const MAX_UNPAGINATED_LIST_SIZE = 1000;
 const MAX_OWNER_LOOKUPS = 50;
 const PREVIEW_STATUS_VALUES = new Set(["not_requested", "queued", "processing", "ready", "failed"]);
 const OVERWRITABLE_TEMPLATE_MEDIA_CACHE_CONTROL = "public, max-age=60, must-revalidate";
@@ -73,27 +76,32 @@ function jsonForEditorClient(body: unknown, init?: ResponseInit): NextResponse {
   return NextResponse.json(rewritePublicObjectUrlsForClient(body), init);
 }
 
+// Cap the collision walk so a base name shared by many templates cannot turn a
+// single save into an unbounded chain of sequential DB round-trips (pool
+// exhaustion / DoS). After the cap, fall back to a random suffix; the unique
+// constraint on `slug` is the final backstop.
+const MAX_UNIQUENESS_ATTEMPTS = 25;
+
 async function ensureUniqueSlug(baseSlug: string, excludeId?: string): Promise<string> {
   const base = normalizeSlug(baseSlug) || `template-${Date.now()}`;
   let candidate = base;
-  let counter = 1;
 
-  while (true) {
+  for (let counter = 1; counter <= MAX_UNIQUENESS_ATTEMPTS; counter += 1) {
     const existing = await prisma.template.findUnique({ where: { slug: candidate } });
     if (!existing || existing.id === excludeId) {
       return candidate;
     }
-    counter += 1;
-    candidate = `${base}-${counter}`;
+    candidate = `${base}-${counter + 1}`;
   }
+
+  return `${base}-${randomBytes(4).toString("hex")}`;
 }
 
 async function ensureUniqueName(ownerId: string, baseName: string, excludeId?: string): Promise<string> {
   const normalized = String(baseName || "").trim() || `Untitled ${new Date().toISOString().slice(0, 10)}`;
   let candidate = normalized;
-  let counter = 1;
 
-  while (true) {
+  for (let counter = 1; counter <= MAX_UNIQUENESS_ATTEMPTS; counter += 1) {
     const existing = await prisma.template.findFirst({
       where: {
         ownerId,
@@ -106,9 +114,10 @@ async function ensureUniqueName(ownerId: string, baseName: string, excludeId?: s
       return candidate;
     }
 
-    counter += 1;
-    candidate = `${normalized} (${counter})`;
+    candidate = `${normalized} (${counter + 1})`;
   }
+
+  return `${normalized} (${randomBytes(3).toString("hex")})`;
 }
 
 function withTemplatePreview(template: any) {
@@ -602,9 +611,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       templates = items;
       total = count;
     } else {
+      // Bound the non-paginated response so the list cannot grow without limit
+      // as the catalog does (PERF-B4). This is a generous DoS backstop, not the
+      // primary paging mechanism — clients that need more should pass ?page.
       templates = await prisma.template.findMany({
         where: scopedWhere,
         orderBy: { updatedAt: "desc" },
+        take: MAX_UNPAGINATED_LIST_SIZE,
         select: TEMPLATE_LIST_SELECT,
       });
     }

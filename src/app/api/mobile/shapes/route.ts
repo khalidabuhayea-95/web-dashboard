@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
+
 import { handleApiError } from "@/lib/api/errors";
 import { BUILTIN_SHAPE_ASSETS } from "@/lib/editor/builtinShapes";
 import { logger } from "@/lib/logging/logger";
@@ -16,6 +18,13 @@ function parsePositiveInt(value: unknown, fallback: number, max = 100): number {
 }
 
 export async function GET(request: NextRequest) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:shapes",
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   try {
     const { searchParams } = new URL(request.url);
     const locale = resolveMobileLocale(request, searchParams);

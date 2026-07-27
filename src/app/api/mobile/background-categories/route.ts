@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
+
 import { handleApiError } from "@/lib/api/errors";
 import { getBackgroundCategoryOptions } from "@/lib/backgrounds/categorySettings";
 import { getBackgroundCategorySettings } from "@/lib/backgrounds/categorySettings.server";
@@ -12,6 +14,13 @@ import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets"
 export const runtime = "nodejs";
 
 export async function GET(request: NextRequest) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:background-categories",
+    limit: 120,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   try {
     const { searchParams } = new URL(request.url);
     const locale = resolveMobileLocale(request, searchParams);

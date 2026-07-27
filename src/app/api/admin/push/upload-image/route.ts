@@ -47,6 +47,7 @@ export async function POST(request: NextRequest) {
     const mimeType = String(fileEntry.type || "").toLowerCase();
     const size = Number(fileEntry.size || 0);
     if (!mimeType.startsWith("image/")) return handleBadRequest("Only image files are allowed.");
+    if (mimeType.includes("svg")) return handleBadRequest("SVG image uploads are not allowed.");
     if (size <= 0) return handleBadRequest("The selected file is empty.");
     if (size > MAX_IMAGE_BYTES) return handleBadRequest("Image is too large (max 5 MB).");
 

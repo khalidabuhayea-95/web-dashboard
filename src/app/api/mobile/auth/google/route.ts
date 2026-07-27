@@ -13,8 +13,17 @@ import {
   handleMissingBody,
   parseJsonBody,
 } from "../_shared";
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
 
 export async function POST(request: Request) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:auth:google",
+    limit: 20,
+    windowMs: 60_000,
+    message: "Too many login attempts. Please retry shortly.",
+  });
+  if (limited) return limited;
+
   const body = await parseJsonBody(request);
   if (!body) return handleMissingBody();
 

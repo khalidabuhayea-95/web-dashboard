@@ -424,12 +424,20 @@ export async function verifyGoogleMobileLogin({ idToken }) {
     ...(Array.isArray(settings.google.iosClientIds) ? settings.google.iosClientIds : []),
   ]);
 
-  if (allowedAudiences.size > 0 && !allowedAudiences.has(String(payload?.aud || ""))) {
+  // Fail closed: without at least one configured client ID we cannot prove the
+  // token was minted for THIS app, so a Google id_token issued for any other
+  // OAuth client would be accepted (token-substitution / account takeover).
+  if (allowedAudiences.size === 0) {
+    throw new Error(
+      "Google login is misconfigured: no Android/iOS client IDs are set, so token audience cannot be verified."
+    );
+  }
+  if (!allowedAudiences.has(String(payload?.aud || ""))) {
     throw new Error("Google token audience is not allowed.");
   }
 
   const issuer = String(payload?.iss || "");
-  if (issuer && issuer !== "https://accounts.google.com" && issuer !== "accounts.google.com") {
+  if (issuer !== "https://accounts.google.com" && issuer !== "accounts.google.com") {
     throw new Error("Google token issuer is invalid.");
   }
 

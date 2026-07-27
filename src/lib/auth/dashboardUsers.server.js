@@ -8,10 +8,15 @@ import {
 } from "@/lib/auth/utils";
 import { createLogger } from "@/lib/logging/logger.js";
 
+// The initial system-admin account is provisioned from environment variables so
+// that no credential is ever committed to source. If either var is missing,
+// seeding is skipped (see ensureSystemAdmin) — never fall back to a default
+// password. Rotate by changing SYSTEM_ADMIN_PASSWORD (only applied on first
+// create) or through the dashboard once the account exists.
 const SYSTEM_ADMIN = {
-  name: "khalid AbuHayea",
-  email: "khalidabuhayea@gmail.com",
-  password: "Rtyu$56789",
+  name: process.env.SYSTEM_ADMIN_NAME || "System Admin",
+  email: process.env.SYSTEM_ADMIN_EMAIL || "",
+  password: process.env.SYSTEM_ADMIN_PASSWORD || "",
   role: "admin",
 };
 
@@ -53,6 +58,14 @@ export async function ensureSystemAdmin() {
 
   ensureSystemAdminPromise = (async () => {
     await ensureLegacyDashboardUsersMigrated();
+
+    if (!SYSTEM_ADMIN.email || !SYSTEM_ADMIN.password) {
+      logger.warn(
+        "System-admin seeding skipped: SYSTEM_ADMIN_EMAIL and SYSTEM_ADMIN_PASSWORD must both be set to provision the initial admin account."
+      );
+      return null;
+    }
+
     const normalizedEmail = normalizeEmail(SYSTEM_ADMIN.email);
     const existing = await prisma.dashboardUser.findUnique({
       where: { normalizedEmail },
@@ -280,9 +293,8 @@ export async function updateDashboardUser({
     if (email && normalizeEmail(email) !== user.normalizedEmail) {
       throw new Error("The system admin email cannot be changed.");
     }
-    if (password) {
-      throw new Error("The system admin password cannot be changed.");
-    }
+    // Password IS rotatable for the system admin (this is how the committed
+    // credential gets rotated after deploy); only email/ban stay locked.
     if (ban === true) {
       throw new Error("The system admin cannot be banned.");
     }

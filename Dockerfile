@@ -1,7 +1,7 @@
 # Single image shared by the web (next start) and the import worker
-# (npm run worker). Deliberately not deploy-optimized — no standalone output,
-# no non-root user, dev deps kept (next build needs typescript/eslint; the
-# worker needs tsx at runtime). Goal: builds + runs locally under compose.
+# (npm run worker). Not fully deploy-optimized — no standalone output, dev deps
+# kept (next build needs typescript/eslint; the worker needs tsx at runtime) —
+# but it runs as a non-root user. Goal: builds + runs locally under compose.
 FROM node:22-bookworm
 
 # System libraries:
@@ -16,6 +16,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Install Playwright's Chromium into a shared, world-readable location so the
+# non-root runtime user (below) can find it. Must be set for both the build-time
+# install and the runtime process.
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 # Install deps first for layer caching. Dev deps are intentionally included.
 COPY package.json package-lock.json ./
@@ -37,6 +42,12 @@ ARG AUTH_SECRET=build-time-placeholder
 ARG DATABASE_URL=postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
 RUN AUTH_SECRET="$AUTH_SECRET" DATABASE_URL="$DATABASE_URL" npm run build
+
+# Drop root: run as the unprivileged `node` user shipped with the base image.
+# Own the app tree and the browser cache so the runtime/worker can read+write
+# what they need (.next/cache, generated Prisma client, Chromium).
+RUN chown -R node:node /app /ms-playwright
+USER node
 
 ENV NODE_ENV=production
 ENV PORT=3000

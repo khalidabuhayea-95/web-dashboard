@@ -1,6 +1,9 @@
 import { normalizeHexColor } from "@/lib/editor/colorUtils"
+import { fetchPublicResource } from "@/lib/security/ssrfGuard.server"
 
 export const RASTER_PALETTE_VERSION = 2
+
+const MAX_RASTER_SOURCE_BYTES = 25 * 1024 * 1024 // 25 MB
 
 type RgbColor = [number, number, number]
 type HslColor = { h: number; s: number; l: number }
@@ -209,22 +212,22 @@ async function loadSourceImage(sourceInput: string) {
 
   try {
     if (/^https?:\/\//i.test(source)) {
-      const response = await fetch(source, {
-        method: "GET",
-        redirect: "follow",
-        headers: {
-          Accept: "image/*,*/*;q=0.8",
-        },
+      // SSRF-guarded: blocks internal targets, re-validates redirects, caps size.
+      const { bytes } = await fetchPublicResource(source, {
+        maxBytes: MAX_RASTER_SOURCE_BYTES,
+        headers: { Accept: "image/*,*/*;q=0.8" },
       })
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`)
-      }
-      const bytes = Buffer.from(await response.arrayBuffer())
       if (!bytes.length) return null
       return await canvasLib.loadImage(bytes)
     }
 
-    return await canvasLib.loadImage(source)
+    // Only allow inline data URIs through to the loader. Never pass through
+    // file:// paths or other schemes — that would read local resources.
+    if (/^data:/i.test(source)) {
+      return await canvasLib.loadImage(source)
+    }
+
+    return null
   } catch {
     return null
   }

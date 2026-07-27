@@ -45,3 +45,10 @@ next-env.d.ts
 # local python tooling
 /.venv-rembg/
 __pycache__/
+
+# scratch / debug artifacts
+/a.json
+/n.txt
+/.codex_*
+/.tmp-*
+/.tmp/

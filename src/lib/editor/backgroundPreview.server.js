@@ -4,10 +4,12 @@ import {
   getPublicStorageBucketName,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
+import { fetchPublicResource } from "@/lib/security/ssrfGuard.server";
 
 export const DEFAULT_BACKGROUND_PREVIEW_MAX_DIMENSION = 512;
 
 const DEFAULT_DOWNLOAD_TIMEOUT_MS = 20_000;
+const MAX_REMOTE_ASSET_BYTES = 25 * 1024 * 1024; // 25 MB
 
 let sharpPromise = null;
 
@@ -97,32 +99,17 @@ export async function downloadRemoteAsset(url, { timeoutMs = DEFAULT_DOWNLOAD_TI
     throw new Error("Asset URL is required.");
   }
 
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  // SSRF-guarded fetch: blocks private/loopback/link-local/metadata targets,
+  // re-validates redirects, and caps the response size.
+  const { bytes, mimeType } = await fetchPublicResource(safeUrl, {
+    timeoutMs,
+    maxBytes: MAX_REMOTE_ASSET_BYTES,
+  });
 
-  try {
-    const response = await fetch(safeUrl, {
-      method: "GET",
-      signal: controller.signal,
-      cache: "no-store",
-      headers: {
-        "User-Agent": "Mozilla/5.0",
-        Accept: "image/*,application/octet-stream,*/*",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Download failed (${response.status}).`);
-    }
-
-    const bytes = Buffer.from(await response.arrayBuffer());
-    return {
-      bytes,
-      mimeType: inferContentType(safeUrl, response.headers.get("content-type")),
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
+  return {
+    bytes,
+    mimeType: inferContentType(safeUrl, mimeType),
+  };
 }
 
 export async function createBackgroundPreview({

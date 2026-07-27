@@ -9,8 +9,16 @@ import {
   handleMissingBody,
   parseJsonBody,
 } from "../_shared";
+import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
 
 export async function POST(request: Request) {
+  const limited = enforceIpRateLimit(request, {
+    scope: "api:mobile:auth:refresh",
+    limit: 30,
+    windowMs: 60_000,
+  });
+  if (limited) return limited;
+
   const body = await parseJsonBody(request);
   if (!body) return handleMissingBody();
 

@@ -20,15 +20,21 @@ function normalizeIdentifier(value, fallback = "anonymous") {
 }
 
 export function resolveRequestIp(request) {
+  // Prefer headers set by trusted infrastructure (Cloudflare / the reverse proxy)
+  // over the client-controlled X-Forwarded-For. A client can forge X-Forwarded-For
+  // to mint a fresh rate-limit bucket per request; cf-connecting-ip / x-real-ip are
+  // overwritten by the edge and cannot be spoofed by the origin caller.
+  const cfIp = String(request?.headers?.get("cf-connecting-ip") || "").trim();
+  if (cfIp) return cfIp;
+  const realIp = String(request?.headers?.get("x-real-ip") || "").trim();
+  if (realIp) return realIp;
   const forwardedFor = String(request?.headers?.get("x-forwarded-for") || "")
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
-  if (forwardedFor.length > 0) return forwardedFor[0];
-  const realIp = String(request?.headers?.get("x-real-ip") || "").trim();
-  if (realIp) return realIp;
-  const cfIp = String(request?.headers?.get("cf-connecting-ip") || "").trim();
-  if (cfIp) return cfIp;
+  // Fall back to the last hop (added by the nearest proxy) rather than the first
+  // (client-supplied) entry when only X-Forwarded-For is available.
+  if (forwardedFor.length > 0) return forwardedFor[forwardedFor.length - 1];
   return "";
 }
 
@@ -103,4 +109,35 @@ export function createRateLimitResponse(
       headers: createRateLimitHeaders(rateLimitState),
     }
   );
+}
+
+/**
+ * Convenience guard for public/unauthenticated routes: rate-limits by client IP
+ * and returns a ready-to-return 429 Response when the limit is exceeded, or null
+ * when the request is allowed.
+ *
+ *   const limited = enforceIpRateLimit(request, { scope: "api:mobile:templates" });
+ *   if (limited) return limited;
+ *
+ * @param {Request} request
+ * @param {{ scope?: string, limit?: number, windowMs?: number, message?: string }} [options]
+ * @returns {import("next/server").NextResponse | null}
+ */
+export function enforceIpRateLimit(
+  request,
+  { scope, limit = 120, windowMs = 60_000, message } = {}
+) {
+  const rateLimit = checkRateLimit({
+    scope: scope || "api:public",
+    identifier: resolveRequestIp(request) || "anonymous",
+    limit,
+    windowMs,
+  });
+  if (!rateLimit.allowed) {
+    return createRateLimitResponse(
+      message || "Too many requests. Please retry shortly.",
+      rateLimit
+    );
+  }
+  return null;
 }
