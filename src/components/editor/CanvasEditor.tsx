@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Konva from "konva";
 import useImage from "use-image";
@@ -36,6 +36,7 @@ import {
   resolveFrameContentLayout,
   resolveFramePreset,
   type FrameContent,
+  type FrameContentTransform,
   type FramePreset,
 } from "@/lib/editor/frames";
 import {
@@ -63,6 +64,7 @@ import {
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
 import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
+import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import {
   revealFraction,
   glyphVisual,
@@ -98,6 +100,13 @@ interface ImageNodeProps {
   registerRef: (id: string, node: Konva.Node | null) => void;
   registerPreviewMediaController?: (id: string, controller: PreviewMediaController | null) => void;
   onImageMetadata?: (meta: { width: number; height: number }) => void;
+  /**
+   * Fired once the node's bitmap is decoded and drawable. A blurred layer is rendered through a
+   * Konva cache, and an image finishing loading does NOT re-render the parent scene (metadata
+   * updates early-return when the dimensions already match), so without this the cache would be
+   * taken while the node was still empty and stay blank.
+   */
+  onContentReady?: () => void;
   onVideoMetadata?: (meta: { duration: number }) => void;
 }
 
@@ -398,7 +407,7 @@ function resolveBackgroundCoverLayout(
   };
 }
 
-function CanvasBackgroundImage({
+function CanvasBackgroundImageImpl({
   src,
   pageWidth,
   pageHeight,
@@ -428,7 +437,7 @@ function CanvasBackgroundImage({
   );
 }
 
-function CanvasImageNode({
+function CanvasImageNodeImpl({
   element,
   pose,
   interactive,
@@ -440,6 +449,7 @@ function CanvasImageNode({
   onTransformEnd,
   registerRef,
   onImageMetadata,
+  onContentReady,
 }: ImageNodeProps) {
   const baseRasterSource = useMemo(() => {
     const source = String(element.rasterOriginalSrc || element.src || "").trim();
@@ -585,6 +595,17 @@ function CanvasImageNode({
     onImageMetadataRef.current?.({ width: naturalWidth, height: naturalHeight });
   }, [image, canRenderVectorShape]);
 
+  const onContentReadyRef = useRef(onContentReady);
+  useEffect(() => {
+    onContentReadyRef.current = onContentReady;
+  }, [onContentReady]);
+  useEffect(() => {
+    // Tell the scene the bitmap is drawable so a blurred layer re-takes its Konva cache; without
+    // this the cache can be captured while the image is still loading and stay blank.
+    if (!image) return;
+    onContentReadyRef.current?.();
+  }, [image]);
+
   useEffect(() => {
     if (!isGif || !image) return;
     let frame = 0;
@@ -664,7 +685,7 @@ function CanvasImageNode({
   );
 }
 
-function CanvasVideoNode({
+function CanvasVideoNodeImpl({
   element,
   pose,
   interactive,
@@ -1004,7 +1025,7 @@ function getFrameBoundsClientRect(
   };
 }
 
-function CanvasFrameNode({
+function CanvasFrameNodeImpl({
   element,
   pose,
   interactive,
@@ -1479,6 +1500,20 @@ interface CanvasPageSceneProps {
   onBeginInlineTextEdit?: (node: Konva.Node, element: EditorElement) => void;
 }
 
+/** Stable per-element handler bundle handed to the memoized canvas node components. */
+interface ElementSceneHandlers {
+  onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
+  onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
+  onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
+  onDragEnd: (event: Konva.KonvaEventObject<DragEvent>) => void;
+  onTransformEnd: (event: Konva.KonvaEventObject<Event>) => void;
+  onEnterContentEdit: () => void;
+  onContentTransform: (patch: { scale?: number; offsetX?: number; offsetY?: number }) => void;
+  onContentMetadata: (patch: Partial<FrameContent>) => void;
+  onImageMetadata: (meta: { width: number; height: number }) => void;
+  onVideoMetadata: (meta: { duration: number }) => void;
+}
+
 /** A page background is transparent when its color is explicitly "transparent" (or blank). */
 function isTransparentBackground(background: { type?: string; color?: string } | null | undefined) {
   if (!background || background.type !== "color") return false;
@@ -1508,7 +1543,7 @@ function getCheckerboardPattern(): HTMLCanvasElement | null {
   return checkerboardPatternCanvas;
 }
 
-function CanvasPageScene({
+function CanvasPageSceneImpl({
   page,
   elements,
   selectedIds = [],
@@ -1554,13 +1589,115 @@ function CanvasPageScene({
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
 
-  // Canva-parity gaussian blur (pose.blurRadius, e.g. the BLUR/تمويه entrance): Konva filters need
-  // node.cache(), so blur is applied imperatively AFTER each commit to whatever nodes the render
-  // pass flagged. Nodes are re-cached while their radius changes (playhead moves / content edits)
-  // and un-cached the moment the blur ends so normal editing/rendering is untouched.
+  // Per-element event handlers, cached by element id and stable for the lifetime
+  // of that element. The node components are memoized, and passing freshly
+  // created arrows here would defeat that memo for every layer on every render
+  // (including each animation frame during playback).
+  //
+  // Staleness is impossible by construction: the handlers never close over
+  // `elements` or the callback props directly — they read them through refs that
+  // are re-pointed at the latest values on every render, so a cached handler
+  // always invokes the current callback with the current element.
+  const latestElementsRef = useRef(elements);
+  latestElementsRef.current = elements;
+  const latestSceneCallbacksRef = useRef({
+    onSelectNode,
+    onOpenContextMenu,
+    onNodeDragMove,
+    onNodeDragEnd,
+    onNodeTransformEnd,
+    onEnterFrameContentEdit,
+    onUpdateFrameContentTransform,
+    onUpdateFrameContentMetadata,
+    onUpdateImageMetadata,
+    onUpdateVideoMetadata,
+  });
+  latestSceneCallbacksRef.current = {
+    onSelectNode,
+    onOpenContextMenu,
+    onNodeDragMove,
+    onNodeDragEnd,
+    onNodeTransformEnd,
+    onEnterFrameContentEdit,
+    onUpdateFrameContentTransform,
+    onUpdateFrameContentMetadata,
+    onUpdateImageMetadata,
+    onUpdateVideoMetadata,
+  };
+
+  const elementHandlerCacheRef = useRef<Map<string, ElementSceneHandlers>>(new Map());
+  const getElementHandlers = useCallback((elementId: string): ElementSceneHandlers => {
+    const cache = elementHandlerCacheRef.current;
+    const cached = cache.get(elementId);
+    if (cached) return cached;
+
+    const currentElement = () =>
+      latestElementsRef.current.find((candidate) => candidate.id === elementId) || null;
+
+    const handlers: ElementSceneHandlers = {
+      onSelect: (event) => latestSceneCallbacksRef.current.onSelectNode?.(event, elementId),
+      onContextMenu: (event) =>
+        latestSceneCallbacksRef.current.onOpenContextMenu?.(event, elementId),
+      onDragMove: (event) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onNodeDragMove?.(event, element);
+      },
+      onDragEnd: (event) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onNodeDragEnd?.(event, element);
+      },
+      onTransformEnd: (event) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onNodeTransformEnd?.(event, element);
+      },
+      onEnterContentEdit: () => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onEnterFrameContentEdit?.(element);
+      },
+      onContentTransform: (patch) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onUpdateFrameContentTransform?.(element, patch);
+      },
+      onContentMetadata: (patch) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onUpdateFrameContentMetadata?.(element, patch);
+      },
+      onImageMetadata: (meta) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onUpdateImageMetadata?.(element, meta);
+      },
+      onVideoMetadata: (meta) => {
+        const element = currentElement();
+        if (element) latestSceneCallbacksRef.current.onUpdateVideoMetadata?.(element, meta);
+      },
+    };
+
+    cache.set(elementId, handlers);
+    return handlers;
+  }, []);
+
+  // Drop handlers for elements that no longer exist so the cache cannot grow
+  // without bound across a long editing session.
+  useEffect(() => {
+    const liveIds = new Set(elements.map((element) => element.id));
+    const cache = elementHandlerCacheRef.current;
+    for (const cachedId of Array.from(cache.keys())) {
+      if (!liveIds.has(cachedId)) cache.delete(cachedId);
+    }
+  }, [elements]);
+
+  // Gaussian blur — both the layer's own static blur (the Blur control) and the animated
+  // pose.blurRadius (e.g. the BLUR/تمويه entrance): Konva filters need node.cache(), so blur is
+  // applied imperatively AFTER each commit to whatever nodes the render pass flagged. Nodes are
+  // re-cached while their radius changes (playhead moves / content edits) and un-cached the moment
+  // the blur ends so normal editing/rendering is untouched.
   const blurRadiiThisRenderRef = useRef<Map<string, number>>(new Map());
   const blurCachedIdsRef = useRef<Set<string>>(new Set());
   blurRadiiThisRenderRef.current = new Map();
+  // An image finishing loading doesn't otherwise re-render this scene, so a statically-blurred
+  // layer would keep the blank cache taken before its bitmap arrived. Bumping this re-runs the
+  // caching effect below once the node actually has pixels.
+  const [, refreshBlurCaches] = useReducer((tick: number) => tick + 1, 0);
   useEffect(() => {
     const radii = blurRadiiThisRenderRef.current;
     const cached = blurCachedIdsRef.current;
@@ -1671,9 +1808,15 @@ function CanvasPageScene({
             previewFps,
             pageDurationMs
           );
-          if (pose.blurRadius >= 0.5) {
-            blurRadiiThisRenderRef.current.set(element.id, pose.blurRadius);
+          // The layer's own static blur (Blur control) and any animation blur share one filter
+          // pass — take the stronger of the two so a blurred layer animating a blur doesn't
+          // double-cache or momentarily sharpen below its authored blur.
+          const staticBlurRadius = Math.max(0, Math.min(40, Number(element.mediaBlur) || 0));
+          const effectiveBlurRadius = Math.max(pose.blurRadius, staticBlurRadius);
+          if (effectiveBlurRadius >= 0.5) {
+            blurRadiiThisRenderRef.current.set(element.id, effectiveBlurRadius);
           }
+          const elementHandlers = getElementHandlers(element.id);
           const isEditingFrameContent = interactive && frameContentEditId === element.id;
           const isSelected = interactive && selectedIdSet.has(element.id);
           const canTransform =
@@ -1733,14 +1876,14 @@ function CanvasPageScene({
                 forceTimelineSync={forceTimelineSync}
                 registerRef={safeRegisterRef}
                 registerPreviewMediaController={safeRegisterPreviewMediaController}
-                onSelect={(event) => onSelectNode?.(event, element.id)}
-                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
-                onDragMove={(event) => onNodeDragMove?.(event, element)}
-                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
-                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
-                onEnterContentEdit={() => onEnterFrameContentEdit?.(element)}
-                onContentTransform={(patch) => onUpdateFrameContentTransform?.(element, patch)}
-                onContentMetadata={(patch) => onUpdateFrameContentMetadata?.(element, patch)}
+                onSelect={elementHandlers.onSelect}
+                onContextMenu={elementHandlers.onContextMenu}
+                onDragMove={elementHandlers.onDragMove}
+                onDragEnd={elementHandlers.onDragEnd}
+                onTransformEnd={elementHandlers.onTransformEnd}
+                onEnterContentEdit={elementHandlers.onEnterContentEdit}
+                onContentTransform={elementHandlers.onContentTransform}
+                onContentMetadata={elementHandlers.onContentMetadata}
               />
             );
           }
@@ -1758,12 +1901,14 @@ function CanvasPageScene({
                 pageDurationMs={pageDurationMs}
                 forceTimelineSync={forceTimelineSync}
                 registerRef={safeRegisterRef}
-                onSelect={(event) => onSelectNode?.(event, element.id)}
-                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
-                onDragMove={(event) => onNodeDragMove?.(event, element)}
-                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
-                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
-                onImageMetadata={(meta) => onUpdateImageMetadata?.(element, meta)}
+                onSelect={elementHandlers.onSelect}
+                onContextMenu={elementHandlers.onContextMenu}
+                onDragMove={elementHandlers.onDragMove}
+                onDragEnd={elementHandlers.onDragEnd}
+                onTransformEnd={elementHandlers.onTransformEnd}
+                onImageMetadata={elementHandlers.onImageMetadata}
+                // Only blurred layers need the re-cache nudge; skip the extra render otherwise.
+                onContentReady={staticBlurRadius > 0 ? refreshBlurCaches : undefined}
               />
             );
           }
@@ -1782,12 +1927,12 @@ function CanvasPageScene({
                 forceTimelineSync={forceTimelineSync}
                 registerRef={safeRegisterRef}
                 registerPreviewMediaController={safeRegisterPreviewMediaController}
-                onSelect={(event) => onSelectNode?.(event, element.id)}
-                onContextMenu={(event) => onOpenContextMenu?.(event, element.id)}
-                onDragMove={(event) => onNodeDragMove?.(event, element)}
-                onDragEnd={(event) => onNodeDragEnd?.(event, element)}
-                onTransformEnd={(event) => onNodeTransformEnd?.(event, element)}
-                onVideoMetadata={(meta) => onUpdateVideoMetadata?.(element, meta)}
+                onSelect={elementHandlers.onSelect}
+                onContextMenu={elementHandlers.onContextMenu}
+                onDragMove={elementHandlers.onDragMove}
+                onDragEnd={elementHandlers.onDragEnd}
+                onTransformEnd={elementHandlers.onTransformEnd}
+                onVideoMetadata={elementHandlers.onVideoMetadata}
               />
             );
           }
@@ -1795,6 +1940,17 @@ function CanvasPageScene({
           if (element.type === "text") {
             const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
             const direction = resolveTextDirection(element.text);
+            // Text outline. `fillAfterStrokeEnabled` paints the fill over the stroke so the stroke
+            // reads as an outline hugging the glyph instead of eating half of it.
+            const textStrokeWidthPx = resolveTextStrokeWidthPx(element.strokeWidth, element.fontSize);
+            const textStrokeProps =
+              textStrokeWidthPx > 0 && String(element.stroke || "").trim()
+                ? {
+                    stroke: element.stroke,
+                    strokeWidth: textStrokeWidthPx,
+                    fillAfterStrokeEnabled: true,
+                  }
+                : {};
             const hasTextCurve =
               Boolean(element.textCurveEnabled) &&
               Math.abs(Number(element.textCurveAmount || 0)) > 0.5;
@@ -1817,6 +1973,7 @@ function CanvasPageScene({
                 >
                   <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
                   <TextPath
+                    {...textStrokeProps}
                     data={resolveTextCurvePath(element)}
                     text={element.text}
                     fill={element.color || element.fill}
@@ -1876,6 +2033,7 @@ function CanvasPageScene({
                       return (
                         <Text
                           key={b.wordIndex}
+                          {...textStrokeProps}
                           x={b.x}
                           y={gv.translateYEm * lineHeightPx}
                           text={b.text}
@@ -1913,6 +2071,7 @@ function CanvasPageScene({
               }
               const bar = textFx.overlayBar;
               const localTextProps = {
+                ...textStrokeProps,
                 width: element.width,
                 height: element.height,
                 text: element.text,
@@ -1960,6 +2119,7 @@ function CanvasPageScene({
               <Text
                 key={element.id}
                 {...commonProps}
+                {...textStrokeProps}
                 width={element.width}
                 height={element.height}
                 text={element.text}
@@ -2062,6 +2222,47 @@ function CanvasPageScene({
     </>
   );
 }
+
+// Memoized canvas components.
+//
+// The scene tree is re-rendered on every parent render — which includes every
+// animation frame during timeline playback, every wheel-zoom tick, and every
+// element edit. Without memo, each of those re-created every Konva node and
+// forced react-konva to diff and repaint the whole scene. Props are primitives,
+// stable store references, or useCallback-stabilized handlers, so the default
+// shallow comparison is both correct and effective here.
+// `pose` is recomputed into a fresh object on every scene render, so the default
+// shallow comparison would never match. Compare it by value; every other prop is
+// a primitive or a stable reference (see getElementHandlers).
+function canvasNodePropsEqual(
+  prev: Record<string, unknown>,
+  next: Record<string, unknown>
+) {
+  const keys = Object.keys(prev);
+  if (keys.length !== Object.keys(next).length) return false;
+  for (const key of keys) {
+    if (key === "pose") {
+      const a = prev.pose as Record<string, number> | undefined;
+      const b = next.pose as Record<string, number> | undefined;
+      if (a === b) continue;
+      if (!a || !b) return false;
+      const poseKeys = Object.keys(a);
+      if (poseKeys.length !== Object.keys(b).length) return false;
+      for (const poseKey of poseKeys) {
+        if (!Object.is(a[poseKey], b[poseKey])) return false;
+      }
+      continue;
+    }
+    if (!Object.is(prev[key], next[key])) return false;
+  }
+  return true;
+}
+
+const CanvasBackgroundImage = memo(CanvasBackgroundImageImpl);
+const CanvasImageNode = memo(CanvasImageNodeImpl, canvasNodePropsEqual);
+const CanvasVideoNode = memo(CanvasVideoNodeImpl, canvasNodePropsEqual);
+const CanvasFrameNode = memo(CanvasFrameNodeImpl, canvasNodePropsEqual);
+const CanvasPageScene = memo(CanvasPageSceneImpl);
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -2377,6 +2578,12 @@ export default function CanvasEditor() {
   const [captureFrameOverride, setCaptureFrameOverride] = useState<number | null>(null);
   const [exportFrameOverride, setExportFrameOverride] = useState(0);
   const [exportMaxDimension, setExportMaxDimension] = useState(720);
+  // The hidden export stage duplicates the entire scene (a second Konva node per
+  // element, plus a second decoded bitmap/video per media layer). Keeping it
+  // mounted at all times doubled canvas memory for every editing session, so it
+  // is now mounted only while an export/capture actually needs it. Consumers go
+  // through ensureExportStage() below, which mounts it and waits for the commit.
+  const [exportStageRequested, setExportStageRequested] = useState(false);
 
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
@@ -2433,6 +2640,10 @@ export default function CanvasEditor() {
     ? activePagePlayheadFrame
     : exportFrameOverride;
   const isRenderingPreview = previewGenerationActive || captureFrameOverride !== null;
+  // Mount the hidden export stage only when something needs it: an in-flight
+  // preview recording, a main-stage capture, or an on-demand request from
+  // ensureExportStage(). Otherwise it stays unmounted and costs nothing.
+  const exportStageMounted = isRenderingPreview || exportStageRequested;
   // Blocking overlay ONLY during real preview generation (save/extract video) — editing mid-recording
   // would corrupt the recording. The timeline filmstrip renders from the hidden export stage and must
   // never block the editor (it re-runs on load and on every element change).
@@ -2626,6 +2837,31 @@ export default function CanvasEditor() {
     [activePage, viewport.scale, viewport.x, viewport.y]
   );
 
+  // Mounts the hidden export stage on demand and resolves once Konva has actually
+  // committed it, so callers can use exportStageRef synchronously afterwards.
+  // Returns null if the stage could not be mounted (no active page / unmounted).
+  const ensureExportStage = useCallback(async () => {
+    if (exportStageRef.current) return exportStageRef.current;
+
+    flushSync(() => {
+      setExportStageRequested(true);
+    });
+    if (exportStageRef.current) return exportStageRef.current;
+
+    // Fallback: give React/Konva a couple of frames to attach the ref.
+    for (let attempt = 0; attempt < 5; attempt += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      if (exportStageRef.current) return exportStageRef.current;
+    }
+    return null;
+  }, []);
+
+  // Release the on-demand mount. The stage stays mounted while a real preview
+  // recording is in flight (previewGenerationActive drives it independently).
+  const releaseExportStage = useCallback(() => {
+    setExportStageRequested(false);
+  }, []);
+
   const renderExportPageToCanvas = useCallback(
     () => {
       const stage = exportStageRef.current;
@@ -2653,8 +2889,9 @@ export default function CanvasEditor() {
 
   const recordTimelinePreviewVideo = useCallback(
     async (options?: { fps?: number; maxDimension?: number; durationMs?: number; signal?: AbortSignal }) => {
-      const stage = exportStageRef.current;
-      if (!stage || !activePage) return null;
+      if (!activePage) return null;
+      const stage = await ensureExportStage();
+      if (!stage) return null;
       const ensureNotAborted = () => {
         if (options?.signal?.aborted) {
           throw createAbortError("Preview generation was canceled.");
@@ -2959,6 +3196,7 @@ export default function CanvasEditor() {
           setExportFrameOverride(0);
         });
         stage.getLayers().forEach((layer) => layer.draw());
+        releaseExportStage();
       }
     },
     [
@@ -2972,6 +3210,8 @@ export default function CanvasEditor() {
       syncExportPreviewMediaControllers,
       setTimelinePlayheadMs,
       setTimelinePlaying,
+      ensureExportStage,
+      releaseExportStage,
     ]
   );
 
@@ -2981,15 +3221,13 @@ export default function CanvasEditor() {
       // stage: hijacking the main stage (captureFrameOverride) blanked the editor behind a blocking
       // "Generating preview" overlay on every load/edit — and on long timeline imports that capture
       // takes long enough to read as a hang. The export stage mirrors the same elements offscreen.
-      const stage = exportStageRef.current;
-      if (!stage || !activePage || !Array.isArray(playheadsMs) || playheadsMs.length === 0) {
+      if (!activePage || !Array.isArray(playheadsMs) || playheadsMs.length === 0) {
         return [];
       }
       if (previewGenerationActive) {
         // The export stage is busy recording the real preview video — skip this strip pass.
         return [];
       }
-
       const pageContainsVideo = activePage.elements.some((element) => {
         const type = String(element.type || "").trim().toLowerCase();
         if (type === "video") return true;
@@ -2999,6 +3237,9 @@ export default function CanvasEditor() {
       if (pageContainsVideo) {
         return [];
       }
+
+      const stage = await ensureExportStage();
+      if (!stage) return [];
 
       const waitForCanvasFrame = async () => {
         await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -3048,6 +3289,7 @@ export default function CanvasEditor() {
         flushSync(() => {
           setExportFrameOverride(0);
         });
+        releaseExportStage();
       }
 
       return captures;
@@ -3059,6 +3301,8 @@ export default function CanvasEditor() {
       exportCanvasSpec.width,
       previewGenerationActive,
       previewRenderFps,
+      ensureExportStage,
+      releaseExportStage,
     ]
   );
 
@@ -3798,6 +4042,98 @@ export default function CanvasEditor() {
     [updateElement, viewport.scale]
   );
 
+  // The scene handlers below are hoisted out of the JSX and memoized on purpose:
+  // CanvasPageScene is wrapped in React.memo, and a fresh inline arrow on every
+  // render would defeat it (re-rendering every element node each frame).
+  const handleEnterFrameContentEdit = useCallback(
+    (element: EditorElement) => {
+      if (!element.frameContent) return;
+      setSelectedIds([element.id]);
+      setFrameContentEditId(element.id);
+    },
+    [setSelectedIds]
+  );
+
+  const handleUpdateFrameContentTransform = useCallback(
+    (element: EditorElement, patch: Partial<FrameContentTransform>) => {
+      updateFrameContentTransform(element.id, patch, { recordHistory: true });
+    },
+    [updateFrameContentTransform]
+  );
+
+  const handleUpdateFrameContentMetadata = useCallback(
+    (element: EditorElement, patch: Partial<NonNullable<EditorElement["frameContent"]>>) => {
+      if (!element.frameContent) return;
+      const nextContent = {
+        ...element.frameContent,
+        ...patch,
+      };
+      const sameSourceSize =
+        Math.round(Number(element.frameContent.sourceWidth || 0)) ===
+          Math.round(Number(nextContent.sourceWidth || 0)) &&
+        Math.round(Number(element.frameContent.sourceHeight || 0)) ===
+          Math.round(Number(nextContent.sourceHeight || 0));
+      const sameVideoDuration =
+        Math.round(Number(element.frameContent.videoDuration || 0) * 1000) ===
+          Math.round(Number(nextContent.videoDuration || 0) * 1000);
+      if (sameSourceSize && sameVideoDuration) return;
+      setFrameContent(element.id, nextContent, { recordHistory: false });
+    },
+    [setFrameContent]
+  );
+
+  const handleUpdateImageMetadata = useCallback(
+    (element: EditorElement, { width, height }: { width: number; height: number }) => {
+      if (!Number.isFinite(width) || !Number.isFinite(height)) return;
+      const nextWidth = Math.max(1, Math.round(width));
+      const nextHeight = Math.max(1, Math.round(height));
+      const currentWidth = Math.max(0, Math.round(Number(element.sourceWidth || 0)));
+      const currentHeight = Math.max(0, Math.round(Number(element.sourceHeight || 0)));
+      if (currentWidth === nextWidth && currentHeight === nextHeight) return;
+      updateElement(
+        element.id,
+        {
+          sourceWidth: nextWidth,
+          sourceHeight: nextHeight,
+          cropX: Number.isFinite(Number(element.cropX)) ? element.cropX : 0,
+          cropY: Number.isFinite(Number(element.cropY)) ? element.cropY : 0,
+          cropWidth:
+            Number.isFinite(Number(element.cropWidth)) && Number(element.cropWidth) > 0
+              ? element.cropWidth
+              : nextWidth,
+          cropHeight:
+            Number.isFinite(Number(element.cropHeight)) && Number(element.cropHeight) > 0
+              ? element.cropHeight
+              : nextHeight,
+        },
+        { recordHistory: false }
+      );
+    },
+    [updateElement]
+  );
+
+  const handleUpdateVideoMetadata = useCallback(
+    (element: EditorElement, { duration }: { duration: number }) => {
+      if (!Number.isFinite(duration) || duration <= 0) return;
+      const nextDuration = Math.round(duration * 1000) / 1000;
+      const currentDuration = Math.round((element.videoDuration || 0) * 1000) / 1000;
+      if (currentDuration === nextDuration) return;
+      const rawVideoEnd = Number(element.videoEnd);
+      updateElement(
+        element.id,
+        {
+          videoDuration: nextDuration,
+          videoEnd:
+            Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+              ? Math.min(rawVideoEnd, nextDuration)
+              : nextDuration,
+        },
+        { recordHistory: false }
+      );
+    },
+    [updateElement]
+  );
+
   // Fallback so double-clicking a selected text always opens the inline editor —
   // even if the click lands on a Transformer anchor/border rather than the text
   // node itself. The guard in beginInlineTextEdit prevents a duplicate textarea
@@ -4164,9 +4500,11 @@ export default function CanvasEditor() {
     selectedFrameTargetId,
   ]);
 
-  const setNodeRef = (id: string, node: Konva.Node | null) => {
+  // Must be stable: it is passed to the memoized CanvasPageScene, and a fresh
+  // identity each render would defeat the memo for the entire scene tree.
+  const setNodeRef = useCallback((id: string, node: Konva.Node | null) => {
     nodeRefs.current[id] = node;
-  };
+  }, []);
 
   return (
     <div
@@ -4262,76 +4600,12 @@ export default function CanvasEditor() {
             onNodeDragEnd={finishNodeDrag}
             onNodeTransform={syncTransformerVisuals}
             onNodeTransformEnd={updateNodeTransform}
-            onEnterFrameContentEdit={(element) => {
-              if (!element.frameContent) return;
-              setSelectedIds([element.id]);
-              setFrameContentEditId(element.id);
-            }}
-            onUpdateFrameContentTransform={(element, patch) =>
-              updateFrameContentTransform(element.id, patch, { recordHistory: true })
-            }
-            onUpdateFrameContentMetadata={(element, patch) => {
-              if (!element.frameContent) return;
-              const nextContent = {
-                ...element.frameContent,
-                ...patch,
-              };
-              const sameSourceSize =
-                Math.round(Number(element.frameContent.sourceWidth || 0)) ===
-                  Math.round(Number(nextContent.sourceWidth || 0)) &&
-                Math.round(Number(element.frameContent.sourceHeight || 0)) ===
-                  Math.round(Number(nextContent.sourceHeight || 0));
-              const sameVideoDuration =
-                Math.round(Number(element.frameContent.videoDuration || 0) * 1000) ===
-                  Math.round(Number(nextContent.videoDuration || 0) * 1000);
-              if (sameSourceSize && sameVideoDuration) return;
-              setFrameContent(element.id, nextContent, { recordHistory: false });
-            }}
-            onUpdateImageMetadata={(element, { width, height }) => {
-              if (!Number.isFinite(width) || !Number.isFinite(height)) return;
-              const nextWidth = Math.max(1, Math.round(width));
-              const nextHeight = Math.max(1, Math.round(height));
-              const currentWidth = Math.max(0, Math.round(Number(element.sourceWidth || 0)));
-              const currentHeight = Math.max(0, Math.round(Number(element.sourceHeight || 0)));
-              if (currentWidth === nextWidth && currentHeight === nextHeight) return;
-              updateElement(
-                element.id,
-                {
-                  sourceWidth: nextWidth,
-                  sourceHeight: nextHeight,
-                  cropX: Number.isFinite(Number(element.cropX)) ? element.cropX : 0,
-                  cropY: Number.isFinite(Number(element.cropY)) ? element.cropY : 0,
-                  cropWidth:
-                    Number.isFinite(Number(element.cropWidth)) && Number(element.cropWidth) > 0
-                      ? element.cropWidth
-                      : nextWidth,
-                  cropHeight:
-                    Number.isFinite(Number(element.cropHeight)) && Number(element.cropHeight) > 0
-                      ? element.cropHeight
-                      : nextHeight,
-                },
-                { recordHistory: false }
-              );
-            }}
-            onUpdateVideoMetadata={(element, { duration }) => {
-              if (!Number.isFinite(duration) || duration <= 0) return;
-              const nextDuration = Math.round(duration * 1000) / 1000;
-              const currentDuration = Math.round((element.videoDuration || 0) * 1000) / 1000;
-              if (currentDuration === nextDuration) return;
-              const rawVideoEnd = Number(element.videoEnd);
-              updateElement(
-                element.id,
-                {
-                  videoDuration: nextDuration,
-                  videoEnd:
-                    Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
-                      ? Math.min(rawVideoEnd, nextDuration)
-                      : nextDuration,
-                },
-                { recordHistory: false }
-              );
-            }}
-            onBeginInlineTextEdit={(node, element) => beginInlineTextEdit(node, element)}
+            onEnterFrameContentEdit={handleEnterFrameContentEdit}
+            onUpdateFrameContentTransform={handleUpdateFrameContentTransform}
+            onUpdateFrameContentMetadata={handleUpdateFrameContentMetadata}
+            onUpdateImageMetadata={handleUpdateImageMetadata}
+            onUpdateVideoMetadata={handleUpdateVideoMetadata}
+            onBeginInlineTextEdit={beginInlineTextEdit}
           />
           <Group
             clipX={0}
@@ -4437,45 +4711,47 @@ export default function CanvasEditor() {
           />
         </Layer>
       </Stage>
-      <div
-        ref={exportStageHostRef}
-        aria-hidden="true"
-        className="pointer-events-none fixed opacity-0"
-        style={{
-          left: -100000,
-          top: 0,
-          width: exportCanvasSpec.width,
-          height: exportCanvasSpec.height,
-          overflow: "hidden",
-        }}
-      >
-        <Stage
-          ref={(node) => {
-            exportStageRef.current = node;
+      {exportStageMounted ? (
+        <div
+          ref={exportStageHostRef}
+          aria-hidden="true"
+          className="pointer-events-none fixed opacity-0"
+          style={{
+            left: -100000,
+            top: 0,
+            width: exportCanvasSpec.width,
+            height: exportCanvasSpec.height,
+            overflow: "hidden",
           }}
-          width={exportCanvasSpec.width}
-          height={exportCanvasSpec.height}
         >
-          <Layer listening={false}>
-            <Group scaleX={exportCanvasSpec.scale} scaleY={exportCanvasSpec.scale}>
-              <CanvasPageScene
-                page={activePage}
-                elements={elements}
-                pageDurationMs={activePageDurationMs}
-                playheadMs={effectiveExportPlayheadMs}
-                playheadFrame={effectiveExportPlayheadFrame}
-                previewFps={previewRenderFps}
-                forceTimelineSync
-                interactive={false}
-                toolMode={toolMode}
-                includePageOutline={false}
-                registerRef={registerExportNodeRef}
-                registerPreviewMediaController={registerExportPreviewMediaController}
-              />
-            </Group>
-          </Layer>
-        </Stage>
-      </div>
+          <Stage
+            ref={(node) => {
+              exportStageRef.current = node;
+            }}
+            width={exportCanvasSpec.width}
+            height={exportCanvasSpec.height}
+          >
+            <Layer listening={false}>
+              <Group scaleX={exportCanvasSpec.scale} scaleY={exportCanvasSpec.scale}>
+                <CanvasPageScene
+                  page={activePage}
+                  elements={elements}
+                  pageDurationMs={activePageDurationMs}
+                  playheadMs={effectiveExportPlayheadMs}
+                  playheadFrame={effectiveExportPlayheadFrame}
+                  previewFps={previewRenderFps}
+                  forceTimelineSync
+                  interactive={false}
+                  toolMode={toolMode}
+                  includePageOutline={false}
+                  registerRef={registerExportNodeRef}
+                  registerPreviewMediaController={registerExportPreviewMediaController}
+                />
+              </Group>
+            </Layer>
+          </Stage>
+        </div>
+      ) : null}
 
       {showBlockingPreviewOverlay ? (
         <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7d7d9]">

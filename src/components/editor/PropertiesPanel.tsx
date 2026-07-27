@@ -17,6 +17,10 @@ import { computeRemoveEdgeWhiteBackgroundPatch } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import {
+  resolveTextStrokeWidthPx,
+  TEXT_STROKE_MAX_PERCENT,
+} from "@/lib/editor/textStroke";
+import {
   useEditorStore,
   type CornerRadiusCorners,
   type EditorElement,
@@ -28,6 +32,40 @@ const ALL_CORNERS: CornerRadiusCorners = {
   bottomRight: true,
   bottomLeft: true,
 };
+
+/** Matches the mobile app's MAX_BLUR_RADIUS, and the 0–40 clamp the mobile serializer applies. */
+const MAX_MEDIA_BLUR = 40;
+
+/**
+ * Shadow and stroke opacity ride inside their colour as an `rgba()` string rather than as separate
+ * fields: Konva renders that directly, and the mobile serializer already splits colour from alpha
+ * (rgbaToHexWithOpacity → `…ColorHex` + `…Opacity`), so nothing new has to be persisted.
+ */
+function splitColorAlpha(input: unknown) {
+  const value = String(input || "").trim();
+  if (!value) return { hex: "#000000", opacity: 1 };
+  const rgba = value.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)(?:\s*,\s*([\d.]+))?\s*\)$/i);
+  if (rgba) {
+    const channel = (raw: string) => Math.max(0, Math.min(255, Math.round(Number(raw) || 0)));
+    const hex = `#${[rgba[1], rgba[2], rgba[3]]
+      .map((part) => channel(part).toString(16).padStart(2, "0"))
+      .join("")}`;
+    const alpha = rgba[4] === undefined ? 1 : Number(rgba[4]);
+    return { hex, opacity: Math.max(0, Math.min(1, Number.isFinite(alpha) ? alpha : 1)) };
+  }
+  return { hex: normalizeHexColor(value) || "#000000", opacity: 1 };
+}
+
+function buildColorAlpha(hex: string, opacity: number) {
+  const safeHex = normalizeHexColor(hex) || "#000000";
+  const alpha = Math.max(0, Math.min(1, Number.isFinite(opacity) ? opacity : 1));
+  if (alpha >= 1) return safeHex;
+  const value = safeHex.slice(1);
+  const r = parseInt(value.slice(0, 2), 16);
+  const g = parseInt(value.slice(2, 4), 16);
+  const b = parseInt(value.slice(4, 6), 16);
+  return `rgba(${r}, ${g}, ${b}, ${Math.round(alpha * 100) / 100})`;
+}
 
 type ImageEditorElement = EditorElement & { type: "image" };
 type VideoEditorElement = EditorElement & { type: "video" };
@@ -65,6 +103,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
 
   const updateElement = useEditorStore((state) => state.updateElement);
+  const recordHistory = useEditorStore((state) => state.recordHistory);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const convertMediaElementToFrame = useEditorStore((state) => state.convertMediaElementToFrame);
 
@@ -111,6 +150,48 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
     }
     applyCornerMask({ ...activeCornerMask, [key]: !activeCornerMask[key] });
   };
+  // Shadow renders on text, media and shapes alike, and ships to mobile for all of them (text via
+  // the layer's `shadow` object, media via `filters.shadow*`).
+  const activeShadowElement =
+    activeElement &&
+    (activeElement.type === "text" || !!activeMediaElement || isShapeEditorElement(activeElement))
+      ? activeElement
+      : null;
+  const activeShadow = splitColorAlpha(activeShadowElement?.shadowColor);
+  const activeShadowBlur = Math.max(0, Math.round(Number(activeShadowElement?.shadowBlur) || 0));
+  const activeShadowOffsetX = Math.round(Number(activeShadowElement?.shadowOffsetX) || 0);
+  const activeShadowOffsetY = Math.round(Number(activeShadowElement?.shadowOffsetY) || 0);
+  // Mirrors the serializer's visibility test: a 0-radius, 0-offset shadow draws nothing.
+  const activeShadowVisible =
+    activeShadow.opacity > 0 &&
+    (activeShadowBlur > 0 || activeShadowOffsetX !== 0 || activeShadowOffsetY !== 0);
+  const patchShadow = (patch: Partial<EditorElement>, options?: { recordHistory?: boolean }) => {
+    if (!activeShadowElement) return;
+    updateElement(activeShadowElement.id, patch, options);
+  };
+  /** Writes colour + opacity back as one rgba() string (what the mobile serializer parses). */
+  const setShadowColor = (hex: string, opacity: number, options?: { recordHistory?: boolean }) =>
+    patchShadow({ shadowColor: buildColorAlpha(hex, opacity) }, options);
+
+  // Text outline. Separate from the media/shape "Corners & Border" section because a TEXT layer's
+  // `strokeWidth` is a 0–100 PERCENTAGE of the font size, not a pixel width (see textStroke.ts).
+  const activeTextStrokeElement = activeElement?.type === "text" ? activeElement : null;
+  const activeTextStroke = splitColorAlpha(activeTextStrokeElement?.stroke);
+  const activeTextStrokeWidth = Math.max(
+    0,
+    Math.min(TEXT_STROKE_MAX_PERCENT, Math.round(Number(activeTextStrokeElement?.strokeWidth) || 0))
+  );
+  const patchTextStroke = (patch: Partial<EditorElement>, options?: { recordHistory?: boolean }) => {
+    if (!activeTextStrokeElement) return;
+    updateElement(activeTextStrokeElement.id, patch, options);
+  };
+
+  // Blur is a media filter on mobile (MediaAction.BLUR). Videos are excluded: a blurred Konva node
+  // renders from a cached bitmap, which would freeze playback on the web canvas.
+  const activeBlurElement =
+    activeElement && activeElement.type === "image" ? activeElement : null;
+  const activeBlurRadius = Math.max(0, Math.min(MAX_MEDIA_BLUR, Number(activeBlurElement?.mediaBlur) || 0));
+
   const activeImageElement = isImageEditorElement(activeElement) ? activeElement : null;
   const activeImageId = String(activeImageElement?.id || "");
   const activeImageRasterOriginalSrc = String(activeImageElement?.rasterOriginalSrc || "").trim();
@@ -302,9 +383,12 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 max={100}
                 value={Math.round((activeElement.opacity ?? 1) * 100)}
                 onChange={(event) => {
+                  // Don't push an undo entry on every drag tick — commit one on release.
                   const value = Math.max(0, Math.min(100, numberOr(event.target.value, 100))) / 100;
-                  updateElement(activeElement.id, { opacity: value });
+                  updateElement(activeElement.id, { opacity: value }, { recordHistory: false });
                 }}
+                onPointerUp={() => recordHistory()}
+                onKeyUp={() => recordHistory()}
                 aria-label="Layer opacity"
                 className="h-2 flex-1 cursor-pointer accent-slate-700 dark:accent-slate-300"
               />
@@ -526,10 +610,14 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                     step={1}
                     value={Math.round(Number(activeBorderElement.cornerRadius) || 0)}
                     onChange={(event) =>
-                      updateElement(activeBorderElement.id, {
-                        cornerRadius: Math.max(0, numberOr(event.target.value, 0)),
-                      })
+                      updateElement(
+                        activeBorderElement.id,
+                        { cornerRadius: Math.max(0, numberOr(event.target.value, 0)) },
+                        { recordHistory: false }
+                      )
                     }
+                    onPointerUp={() => recordHistory()}
+                    onKeyUp={() => recordHistory()}
                     className="w-full accent-sky-500"
                   />
                 </div>
@@ -568,6 +656,284 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   />
                 </div>
               </div>
+            </div>
+          ) : null}
+
+          {activeTextStrokeElement ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="m-0">Stroke</Label>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-600 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300"
+                  disabled={activeTextStrokeWidth <= 0}
+                  onClick={() => patchTextStroke({ strokeWidth: 0 })}
+                >
+                  Reset
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Color
+                  </Label>
+                  <Input
+                    type="color"
+                    className="h-9 cursor-pointer p-1"
+                    value={activeTextStroke.hex}
+                    onChange={(event) => {
+                      patchTextStroke({
+                        stroke: buildColorAlpha(event.target.value, activeTextStroke.opacity),
+                      });
+                      // Picking a colour with no width reads as a no-op — give it a visible outline.
+                      if (activeTextStrokeWidth <= 0) patchTextStroke({ strokeWidth: 10 });
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                      Opacity
+                    </Label>
+                    <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                      {Math.round(activeTextStroke.opacity * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(activeTextStroke.opacity * 100)}
+                    onChange={(event) =>
+                      patchTextStroke(
+                        {
+                          stroke: buildColorAlpha(
+                            activeTextStroke.hex,
+                            numberOr(event.target.value, 100) / 100
+                          ),
+                        },
+                        { recordHistory: false }
+                      )
+                    }
+                    onPointerUp={() => recordHistory()}
+                    onKeyUp={() => recordHistory()}
+                    className="h-9 w-full accent-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Width
+                  </Label>
+                  {/* Percentage of the font size, exactly like the mobile Stroke sheet. */}
+                  <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                    {activeTextStrokeWidth}%
+                    {activeTextStrokeWidth > 0
+                      ? ` · ${
+                          Math.round(
+                            resolveTextStrokeWidthPx(
+                              activeTextStrokeWidth,
+                              activeTextStrokeElement.fontSize
+                            ) * 10
+                          ) / 10
+                        }px`
+                      : ""}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={TEXT_STROKE_MAX_PERCENT}
+                  step={1}
+                  value={activeTextStrokeWidth}
+                  onChange={(event) => {
+                    const nextWidth = Math.max(
+                      0,
+                      Math.min(TEXT_STROKE_MAX_PERCENT, numberOr(event.target.value, 0))
+                    );
+                    const patch: Partial<EditorElement> = { strokeWidth: nextWidth };
+                    // Give a newly-enabled outline a visible colour when the layer has none.
+                    if (nextWidth > 0 && !String(activeTextStrokeElement.stroke || "").trim()) {
+                      patch.stroke = "#000000";
+                    }
+                    patchTextStroke(patch, { recordHistory: false });
+                  }}
+                  onPointerUp={() => recordHistory()}
+                  onKeyUp={() => recordHistory()}
+                  className="w-full accent-sky-500"
+                />
+              </div>
+            </div>
+          ) : null}
+
+          {activeShadowElement ? (
+            <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="m-0">Shadow</Label>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-600 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300"
+                  disabled={!activeShadowVisible}
+                  onClick={() =>
+                    patchShadow({
+                      shadowColor: "#000000",
+                      shadowBlur: 0,
+                      shadowOffsetX: 0,
+                      shadowOffsetY: 0,
+                    })
+                  }
+                >
+                  Reset
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Color
+                  </Label>
+                  <Input
+                    type="color"
+                    className="h-9 cursor-pointer p-1"
+                    value={activeShadow.hex}
+                    onChange={(event) => {
+                      // Giving a shadow a colour should show something: seed a soft radius when
+                      // the layer has no offset or blur yet, otherwise the pick looks like a no-op.
+                      setShadowColor(event.target.value, activeShadow.opacity);
+                      if (!activeShadowVisible) patchShadow({ shadowBlur: 12 });
+                    }}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                      Opacity
+                    </Label>
+                    <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                      {Math.round(activeShadow.opacity * 100)}%
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0}
+                    max={100}
+                    step={1}
+                    value={Math.round(activeShadow.opacity * 100)}
+                    onChange={(event) =>
+                      setShadowColor(activeShadow.hex, numberOr(event.target.value, 100) / 100, {
+                        recordHistory: false,
+                      })
+                    }
+                    onPointerUp={() => recordHistory()}
+                    onKeyUp={() => recordHistory()}
+                    className="h-9 w-full accent-sky-500"
+                  />
+                </div>
+              </div>
+
+              <div className="space-y-1">
+                <div className="flex items-center justify-between">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Shadow radius
+                  </Label>
+                  <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                    {activeShadowBlur}px
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={1}
+                  value={Math.min(100, activeShadowBlur)}
+                  onChange={(event) =>
+                    patchShadow(
+                      { shadowBlur: Math.max(0, numberOr(event.target.value, 0)) },
+                      { recordHistory: false }
+                    )
+                  }
+                  onPointerUp={() => recordHistory()}
+                  onKeyUp={() => recordHistory()}
+                  className="w-full accent-sky-500"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Move horizontally
+                  </Label>
+                  <Input
+                    type="number"
+                    value={activeShadowOffsetX}
+                    onChange={(event) =>
+                      patchShadow({ shadowOffsetX: numberOr(event.target.value, 0) })
+                    }
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Move vertically
+                  </Label>
+                  <Input
+                    type="number"
+                    value={activeShadowOffsetY}
+                    onChange={(event) =>
+                      patchShadow({ shadowOffsetY: numberOr(event.target.value, 0) })
+                    }
+                  />
+                </div>
+              </div>
+            </div>
+          ) : null}
+
+          {activeBlurElement ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="m-0">Blur</Label>
+                <button
+                  type="button"
+                  className="text-xs font-medium text-slate-600 underline underline-offset-2 disabled:cursor-not-allowed disabled:opacity-50 dark:text-slate-300"
+                  disabled={activeBlurRadius <= 0}
+                  onClick={() => updateElement(activeBlurElement.id, { mediaBlur: 0 })}
+                >
+                  Reset
+                </button>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Blurs the layer itself
+                </span>
+                {/* Shown as a percentage of the 40px max, matching the mobile Blur sheet. */}
+                <span className="text-xs tabular-nums text-slate-500 dark:text-slate-400">
+                  {Math.round((activeBlurRadius / MAX_MEDIA_BLUR) * 100)}%
+                </span>
+              </div>
+              <input
+                type="range"
+                min={0}
+                max={100}
+                step={1}
+                value={Math.round((activeBlurRadius / MAX_MEDIA_BLUR) * 100)}
+                onChange={(event) =>
+                  updateElement(
+                    activeBlurElement.id,
+                    {
+                      mediaBlur:
+                        (Math.max(0, Math.min(100, numberOr(event.target.value, 0))) / 100) *
+                        MAX_MEDIA_BLUR,
+                    },
+                    { recordHistory: false }
+                  )
+                }
+                onPointerUp={() => recordHistory()}
+                onKeyUp={() => recordHistory()}
+                className="w-full accent-sky-500"
+              />
             </div>
           ) : null}
 
