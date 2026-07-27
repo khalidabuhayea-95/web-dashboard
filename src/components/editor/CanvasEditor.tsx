@@ -2264,6 +2264,10 @@ const CanvasVideoNode = memo(CanvasVideoNodeImpl, canvasNodePropsEqual);
 const CanvasFrameNode = memo(CanvasFrameNodeImpl, canvasNodePropsEqual);
 const CanvasPageScene = memo(CanvasPageSceneImpl);
 
+// Sentinel returned by the playhead selector while the timeline is playing, so the
+// subscription yields a constant and never re-renders on playhead changes.
+const PLAYBACK_FROZEN_PLAYHEAD_MS = -1;
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -2340,7 +2344,29 @@ export default function CanvasEditor() {
   const drawColor = useEditorStore((state) => state.drawColor);
   const drawOpacity = useEditorStore((state) => state.drawOpacity);
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
-  const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
+  const timelineIsPlaying = useEditorStore((state) => state.timelineIsPlaying);
+  // While the timeline is playing the playhead advances ~60x/second. Subscribing
+  // to it reactively would re-render this entire component (and, through it, the
+  // whole Konva scene) on every frame. Instead the subscription is frozen during
+  // playback and the live value is delivered through a ref that the playback
+  // driver below updates; see applyImperativePlaybackFrame.
+  const subscribedPlayheadMs = useEditorStore((state) =>
+    state.timelineIsPlaying ? PLAYBACK_FROZEN_PLAYHEAD_MS : state.timelinePlayheadMs
+  );
+  const livePlaybackPlayheadMsRef = useRef(0);
+  const [, forcePlaybackRender] = useReducer((tick: number) => tick + 1, 0);
+  // Keep the ref tracking the store whenever playback is idle, so the first frame
+  // after pressing play starts from the real playhead instead of a stale value.
+  if (!timelineIsPlaying) {
+    livePlaybackPlayheadMsRef.current = subscribedPlayheadMs;
+  }
+  // Reading the ref during render is intentional: it always holds the frame the
+  // imperative driver last applied, so any render that does happen mid-playback
+  // (forced by the driver, or incidental) paints the current frame rather than a
+  // stale one — without the ref itself ever scheduling a render.
+  const timelinePlayheadMs = timelineIsPlaying
+    ? livePlaybackPlayheadMsRef.current
+    : subscribedPlayheadMs;
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const previewGenerationActive = useEditorStore((state) => state.previewGenerationActive);
   const zoomPercent = useEditorStore((state) => state.zoomPercent);
@@ -2630,6 +2656,200 @@ export default function CanvasEditor() {
     captureFrameOverride === null
       ? activePagePlayheadMs
       : Math.min(activePageDurationMs, frameToSampleTimeMs(captureFrameOverride, previewRenderFps));
+
+  // ---------------------------------------------------------------------------
+  // Imperative playback
+  //
+  // During playback the pose channel (position / rotation / scale / opacity) is
+  // written straight onto the Konva nodes instead of being routed through React,
+  // so a frame costs a handful of attribute writes and one batchDraw rather than
+  // a full re-render of this component and every element in the scene.
+  //
+  // The fast path is only taken when it is provably equivalent to rendering. Any
+  // frame that needs React to do structural work falls back to a normal render,
+  // so playback output is identical either way. It bails when:
+  //   - the animation has a non-pose channel this frame (reveal mask, text
+  //     reveal, per-glyph motion, overlay bar) — those change what is drawn,
+  //     not just where;
+  //   - the pose carries a blur radius, which needs a Konva filter re-cache;
+  //   - the set of visible elements differs from the last commit (an element
+  //     entered or left, so nodes must mount/unmount);
+  //   - the page contains video, whose frame sync is driven by a render effect;
+  //   - a node has not been mounted yet.
+  const lastCommittedVisibleSignatureRef = useRef("");
+  // The frame React last painted, and whether the nodes have since been moved
+  // out from under it imperatively. react-konva diffs new props against the props
+  // it last applied — not against the live node — so a node we mutated directly
+  // would keep its imperative value if the next render's prop happened to equal
+  // the previously rendered one. Before handing control back to React we restore
+  // the poses of that last render, so its diff starts from the state it expects.
+  const lastRenderedFrameRef = useRef(0);
+  const imperativePoseDirtyRef = useRef(false);
+  const visibleElementSignature = useMemo(
+    () =>
+      elements
+        .filter((element) =>
+          isElementVisibleAtPlayhead(element, effectiveActivePagePlayheadMs, activePageDurationMs)
+        )
+        .map((element) => element.id)
+        .join("|"),
+    [activePageDurationMs, effectiveActivePagePlayheadMs, elements]
+  );
+  lastCommittedVisibleSignatureRef.current = visibleElementSignature;
+  lastRenderedFrameRef.current = effectiveActivePageFrame;
+  imperativePoseDirtyRef.current = false;
+
+  const pageContainsVideoLayer = useMemo(
+    () =>
+      elements.some((element) => {
+        const type = String(element.type || "").trim().toLowerCase();
+        if (type === "video") return true;
+        if (type !== "frame") return false;
+        return String(element.frameContent?.kind || "").trim().toLowerCase() === "video";
+      }),
+    [elements]
+  );
+
+  const applyPoseToNode = useCallback((node: Konva.Node, pose: ElementRenderPose) => {
+    node.x(pose.x);
+    node.y(pose.y);
+    node.rotation(pose.rotation);
+    node.scaleX(pose.scaleX);
+    node.scaleY(pose.scaleY);
+    node.opacity(pose.opacity);
+  }, []);
+
+  // Hand control back to React: rewind the nodes to the poses of the last render
+  // so react-konva's next diff is computed against the state it believes in.
+  const releaseImperativePoses = useCallback(() => {
+    if (!imperativePoseDirtyRef.current) return false;
+    const restoreFrame = lastRenderedFrameRef.current;
+    let layer: Konva.Layer | null = null;
+    for (const element of elements) {
+      const node = nodeRefs.current[element.id];
+      if (!node) continue;
+      applyPoseToNode(
+        node,
+        resolveAnimatedElementPoseAtFrame(
+          element,
+          restoreFrame,
+          previewRenderFps,
+          activePageDurationMs
+        )
+      );
+      layer = layer || node.getLayer();
+    }
+    layer?.batchDraw();
+    imperativePoseDirtyRef.current = false;
+    return false;
+  }, [activePageDurationMs, applyPoseToNode, elements, previewRenderFps]);
+
+  const applyImperativePlaybackFrame = useCallback(
+    (timelineMs: number) => {
+      if (pageContainsVideoLayer) return releaseImperativePoses();
+
+      const pageMs = Math.max(
+        0,
+        Math.min(activePageDurationMs, timelineMs - activePageTimelineStartMs)
+      );
+      const frame = getFrameAlignedPlayheadFrame(pageMs, previewRenderFps, activePageDurationMs);
+
+      const pending: Array<{ node: Konva.Node; pose: ElementRenderPose }> = [];
+      const visibleIds: string[] = [];
+
+      for (const element of elements) {
+        if (!isElementVisibleAtPlayhead(element, pageMs, activePageDurationMs)) continue;
+        visibleIds.push(element.id);
+
+        if (
+          resolveAnimatedElementEffectsAtFrame(
+            element,
+            frame,
+            previewRenderFps,
+            activePageDurationMs
+          )
+        ) {
+          return releaseImperativePoses();
+        }
+
+        const pose = resolveAnimatedElementPoseAtFrame(
+          element,
+          frame,
+          previewRenderFps,
+          activePageDurationMs
+        );
+        if (pose.blurRadius > 0) return releaseImperativePoses();
+
+        const node = nodeRefs.current[element.id];
+        if (!node) return releaseImperativePoses();
+        pending.push({ node, pose });
+      }
+
+      if (visibleIds.join("|") !== lastCommittedVisibleSignatureRef.current) {
+        return releaseImperativePoses();
+      }
+
+      let layer: Konva.Layer | null = null;
+      for (const { node, pose } of pending) {
+        applyPoseToNode(node, pose);
+        layer = layer || node.getLayer();
+      }
+      imperativePoseDirtyRef.current = true;
+
+      // Keep the selection handles glued to a moving layer.
+      transformerRef.current?.forceUpdate?.();
+      (layer || stageRef.current?.getLayers()?.[0])?.batchDraw();
+      return true;
+    },
+    [
+      activePageDurationMs,
+      activePageTimelineStartMs,
+      applyPoseToNode,
+      elements,
+      pageContainsVideoLayer,
+      previewRenderFps,
+      releaseImperativePoses,
+    ]
+  );
+
+  useEffect(() => {
+    if (!timelineIsPlaying) return;
+    // The preview recorder steps frames itself (flushSync + draw); leave it alone.
+    if (previewGenerationActive || captureFrameOverride !== null) return;
+
+    const applyPlayheadMs = (playheadMs: number) => {
+      livePlaybackPlayheadMsRef.current = playheadMs;
+      // Keep the recorder's snapshot ref exact even across frames we never render.
+      timelinePlayheadMsRef.current = playheadMs;
+      if (!applyImperativePlaybackFrame(playheadMs)) {
+        // Fall back to a real render for this frame.
+        forcePlaybackRender();
+      }
+    };
+
+    // Driven off the store rather than a second requestAnimationFrame loop: the
+    // timeline's playback loop already runs on rAF, and subscribing means each
+    // frame is applied the moment it is produced, with no extra loop and no
+    // one-frame lag between the two.
+    applyPlayheadMs(useEditorStore.getState().timelinePlayheadMs);
+    const unsubscribe = useEditorStore.subscribe((state, prevState) => {
+      if (state.timelinePlayheadMs === prevState.timelinePlayheadMs) return;
+      applyPlayheadMs(state.timelinePlayheadMs);
+    });
+
+    return () => {
+      unsubscribe();
+      // Playback stopped. The nodes already sit at the final frame, which is also
+      // what the store now reports, so the upcoming render agrees with them — just
+      // clear the flag so a later bail cannot rewind to a frame from this session.
+      imperativePoseDirtyRef.current = false;
+    };
+  }, [
+    applyImperativePlaybackFrame,
+    captureFrameOverride,
+    previewGenerationActive,
+    timelineIsPlaying,
+  ]);
   const effectiveExportPlayheadMs = Math.min(
     activePageDurationMs,
     previewGenerationActive
