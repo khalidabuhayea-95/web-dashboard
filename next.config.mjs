@@ -20,8 +20,12 @@ const nextConfig = {
     // injection. Tighten script-src with per-request nonces when feasible.
     const contentSecurityPolicy = [
       "default-src 'self'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "style-src 'self' 'unsafe-inline'",
+      // googletagmanager.com serves gtag.js for the GA4 tag on the marketing
+      // pages (public/analytics.js); without it the tag is silently blocked.
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://www.googletagmanager.com",
+      // fonts.googleapis.com serves the Cairo/El Messiri stylesheet the marketing
+      // pages depend on; without it every page falls back to a generic sans.
+      "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
       "img-src 'self' data: blob: https:",
       "media-src 'self' blob: https:",
       "font-src 'self' data: https:",

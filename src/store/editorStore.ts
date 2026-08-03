@@ -127,6 +127,12 @@ export interface EditorElement {
    * with one size — the renderer zeroes the disabled corners.
    */
   cornerRadiusCorners?: CornerRadiusCorners;
+  /**
+   * Gaussian blur over the layer's own pixels, in design px (0–40, matching the mobile app's
+   * MAX_BLUR_RADIUS). Media only (image/video); ships to mobile as `filters.blurRadius`. The
+   * mobile sheet presents it as a percentage of 40, and so does the web Blur control.
+   */
+  mediaBlur?: number;
   points: number[];
   src: string;
   /**
@@ -265,6 +271,11 @@ interface StageApi {
   fitToScreen: () => void;
   exportPng: () => void;
   captureThumbnailDataUrl: () => string;
+  /**
+   * Thumbnail for ANY page, including one never opened this session — renders it through the
+   * hidden export stage without disturbing the visible canvas. Returns "" when unavailable.
+   */
+  captureThumbnailDataUrlForPage: (pageId: string) => Promise<string>;
   captureTimelineStripDataUrls: (playheadsMs: number[]) => Promise<string[]>;
   recordTimelinePreviewVideo: (options?: {
     fps?: number;
@@ -316,6 +327,8 @@ interface TemplateMetaPatch {
 interface EditorStore {
   pages: EditorPage[];
   activePageId: string;
+  /** Live per-page thumbnail cache (pageId -> data URL); captured from the stage, never persisted. */
+  pageThumbnails: Record<string, string>;
   designTimeline: EditorTimeline;
   timelinePlayheadMs: number;
   timelineIsPlaying: boolean;
@@ -403,7 +416,8 @@ interface EditorStore {
   setBackground: (background: Partial<PageBackground>) => void;
   resizeActivePage: (width: number, height: number, options?: { useMagic?: boolean }) => void;
 
-  addPage: () => void;
+  addPage: (afterPageId?: string) => void;
+  setPageThumbnail: (pageId: string, dataUrl: string) => void;
   duplicatePage: (pageId: string) => void;
   deletePage: (pageId: string) => void;
   reorderPages: (sourceId: string, targetId: string, position: "before" | "after") => void;
@@ -835,8 +849,21 @@ function normalizeElementTypeName(type: ElementType) {
   return "Star";
 }
 
-function createBlankPage(name = "Page 1"): EditorPage {
-  const pageId = uid("page");
+/** A fresh page with no seeded content, matching the given design dimensions (Canva-style "Add page"). */
+function createEmptyPage(name: string, width: number, height: number): EditorPage {
+  return {
+    id: uid("page"),
+    name,
+    width: Math.max(16, Math.round(width) || 1080),
+    height: Math.max(16, Math.round(height) || 1350),
+    durationMs: DEFAULT_PAGE_DURATION_MS,
+    background: createDefaultBackground(),
+    elements: [],
+  };
+}
+
+function createBlankPage(name = "Page 1", pageIdOverride?: string): EditorPage {
+  const pageId = pageIdOverride || uid("page");
   return {
     id: pageId,
     name,
@@ -951,13 +978,16 @@ function scaleElementForResize(element: EditorElement, scaleX: number, scaleY: n
   };
 }
 
-const initialPage = createBlankPage();
+// Deterministic id: this page is created at module scope, so it renders during SSR and again
+// on the client — a random id would hydration-mismatch the page bar's data-page-tile attribute.
+const initialPage = createBlankPage("Page 1", "page-initial");
 const initialTimeline = createDefaultDesignTimeline([initialPage]);
 const initialSnapshot = serializeHistorySnapshot([initialPage], initialPage.id, initialTimeline);
 
 export const useEditorStore = create<EditorStore>((set, get) => ({
   pages: [initialPage],
   activePageId: initialPage.id,
+  pageThumbnails: {},
   designTimeline: initialTimeline,
   timelinePlayheadMs: 0,
   timelineIsPlaying: false,
@@ -2097,30 +2127,45 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     const nextWidth = Math.max(16, Math.round(width || page.width));
     const nextHeight = Math.max(16, Math.round(height || page.height));
-    if (nextWidth === page.width && nextHeight === page.height) return;
-
     const useMagic = options.useMagic ?? state.resizeUseMagic;
-    const scaleX = nextWidth / Math.max(1, page.width);
-    const scaleY = nextHeight / Math.max(1, page.height);
 
-    set({
-      pages: mutateActivePage(state, (activePage) => ({
-        ...activePage,
+    // A design shares one canvas size across all its pages (Canva behavior), so
+    // resize applies to every page — each scaled by its own current dimensions.
+    let changed = false;
+    const nextPages = state.pages.map((item) => {
+      if (nextWidth === item.width && nextHeight === item.height) return item;
+      changed = true;
+      const scaleX = nextWidth / Math.max(1, item.width);
+      const scaleY = nextHeight / Math.max(1, item.height);
+      return {
+        ...item,
         width: nextWidth,
         height: nextHeight,
         elements: useMagic
-          ? activePage.elements.map((element) => scaleElementForResize(element, scaleX, scaleY))
-          : activePage.elements,
-      })),
+          ? item.elements.map((element) => scaleElementForResize(element, scaleX, scaleY))
+          : item.elements,
+      };
     });
+    if (!changed) return;
+
+    set({ pages: nextPages, pageThumbnails: {} });
 
     get().recordHistory();
   },
 
-  addPage: () => {
+  addPage: (afterPageId) => {
     const state = get();
-    const nextPage = createBlankPage(`Page ${state.pages.length + 1}`);
-    const nextPages = [...state.pages, nextPage];
+    const referenceId = afterPageId || state.activePageId;
+    const referenceIndex = state.pages.findIndex((page) => page.id === referenceId);
+    const referencePage = state.pages[referenceIndex] || state.pages[state.pages.length - 1] || null;
+    const nextPage = createEmptyPage(
+      `Page ${state.pages.length + 1}`,
+      referencePage?.width || 1080,
+      referencePage?.height || 1350
+    );
+    const insertIndex = referenceIndex >= 0 ? referenceIndex + 1 : state.pages.length;
+    const nextPages = [...state.pages];
+    nextPages.splice(insertIndex, 0, nextPage);
 
     set({
       pages: nextPages,
@@ -2132,6 +2177,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     });
 
     get().recordHistory();
+  },
+
+  setPageThumbnail: (pageId, dataUrl) => {
+    if (!pageId || !dataUrl) return;
+    const current = get().pageThumbnails;
+    if (current[pageId] === dataUrl) return;
+    set({ pageThumbnails: { ...current, [pageId]: dataUrl } });
   },
 
   duplicatePage: (pageId) => {
@@ -2153,9 +2205,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const pages = [...state.pages];
     pages.splice(sourceIndex + 1, 0, cloned);
 
+    const sourceThumbnail = state.pageThumbnails[pageId];
     set({
       pages,
       activePageId: cloned.id,
+      ...(sourceThumbnail
+        ? { pageThumbnails: { ...state.pageThumbnails, [nextPageId]: sourceThumbnail } }
+        : {}),
       designTimeline: createDefaultDesignTimeline(pages, state.designTimeline),
       timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, pages),
       selectedIds: [],
@@ -2169,14 +2225,19 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     const state = get();
     if (state.pages.length <= 1) return;
 
+    const deletedIndex = state.pages.findIndex((page) => page.id === pageId);
     const nextPages = state.pages.filter((page) => page.id !== pageId);
     if (nextPages.length === state.pages.length) return;
 
-    const nextActive = state.activePageId === pageId ? nextPages[0].id : state.activePageId;
+    const neighbor = nextPages[Math.max(0, deletedIndex - 1)] || nextPages[0];
+    const nextActive = state.activePageId === pageId ? neighbor.id : state.activePageId;
+    const nextThumbnails = { ...state.pageThumbnails };
+    delete nextThumbnails[pageId];
 
     set({
       pages: nextPages,
       activePageId: nextActive,
+      pageThumbnails: nextThumbnails,
       designTimeline: createDefaultDesignTimeline(nextPages, state.designTimeline),
       timelinePlayheadMs: clampTimelinePlayheadMs(state.timelinePlayheadMs, nextPages),
       timelineIsPlaying: state.timelineIsPlaying && nextPages.length > 0,
@@ -2318,6 +2379,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
     set((state) => ({
       pages: normalizedPages,
       activePageId,
+      pageThumbnails: {},
       designTimeline,
       timelinePlayheadMs: 0,
       timelineIsPlaying: false,

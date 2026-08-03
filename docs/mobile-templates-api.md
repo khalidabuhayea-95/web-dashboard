@@ -74,8 +74,25 @@ Response:
     - `timelineStartMs`
     - `timelineEndMs`
     - `animation`
-  - `project` is slimmed to `canvasWidth`, `canvasHeight`, `background`, and `layers`
+  - `project` is slimmed to `canvasWidth`, `canvasHeight`, `background`, `layers`, and `pageCount` (plus `pages` when multi-page)
   - `project.meta`, top-level preview aliases, and redundant template/project identity fields are omitted on this endpoint
+
+Multi-page templates:
+- `template.pageCount` / `project.pageCount` give the number of design pages (1 for single-page).
+- When `pageCount > 1`, `project.pages` is present and authoritative: an ordered array of
+  `{id, name, width, height, durationMs, thumbnailUrl?, background, layers}` with the same
+  background/layer contracts as the top-level fields.
+- `pages[i].thumbnailUrl` is an optional ready-made preview image of that page, for page-strip
+  UI. Page 1 falls back to the template's cover thumbnail (always present); later pages carry
+  one only when captured at import/save time — otherwise the field is omitted and the client
+  renders that page itself. Treat it as valid only while the page still matches the shipped
+  content, and switch to a local render once the user edits that page.
+- The top-level `project.background` / `project.layers` / `canvasWidth` / `canvasHeight`
+  always mirror `pages[0]` (the design cover) so app builds without multi-page support keep
+  rendering the first page.
+- Layer asset URLs belonging to pages after the first carry a `page` query parameter; treat
+  asset URLs as opaque.
+- Template summaries (`/templates`, `/templates/by-subcategory`, favorites) also expose `pageCount`.
 
 Example layer payload:
 

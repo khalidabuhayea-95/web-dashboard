@@ -21,6 +21,10 @@ model Template {
   status            String             @default("draft")
   version           Int                @default(1)
   canvasSize        Json
+  pageCount         Int                @default(1)
+  /// Per-page preview images for multi-page designs: { [pageId]: publicUrl }. Page 1 falls back
+  /// to thumbnailDataUrl, so this is only populated for pages 2..N.
+  pageThumbnails    Json?
   category          String             @default("general")
   subCategory       String             @default("general")
   tags              Json
@@ -171,6 +175,8 @@ model MobileUser {
   email           String?
   normalizedEmail String?
   emailVerified   Boolean              @default(false)
+  role            String               @default("user")
+  bannedUntil     DateTime?
   lastLoginAt     DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
@@ -178,9 +184,12 @@ model MobileUser {
   refreshTokens   MobileRefreshToken[]
   deviceTokens    MobileDeviceToken[]
   favorites       MobileFavoriteTemplate[]
+  contactMessages ContactMessage[]
 
   @@index([normalizedEmail])
   @@index([createdAt])
+  @@index([bannedUntil])
+  @@index([role])
 }
 
 model MobileIdentity {
@@ -245,6 +254,62 @@ model MobileFavoriteTemplate {
   @@unique([mobileUserId, templateId])
   @@index([mobileUserId, createdAt(sort: Desc)])
   @@index([templateId])
+}
+
+model ContactMessage {
+  id              String      @id @default(uuid()) @db.Uuid
+  source          String      @default("web")
+  name            String
+  email           String
+  topic           String      @default("general")
+  device          String?
+  message         String
+  status          String      @default("new")
+  mobileUserId    String?     @db.Uuid
+  appVersion      String?
+  userAgent       String?
+  ipAddress       String?
+  handledByUserId String?     @db.Uuid
+  handledAt       DateTime?
+  lastRepliedAt   DateTime?
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  mobileUser      MobileUser? @relation(fields: [mobileUserId], references: [id], onDelete: SetNull)
+  replies         ContactMessageReply[]
+
+  @@index([createdAt(sort: Desc)])
+  @@index([status, createdAt(sort: Desc)])
+  @@index([source])
+  @@index([topic])
+  @@index([mobileUserId])
+}
+
+// One outbound email per row: the support thread hanging off a ContactMessage.
+// Rows are kept even when delivery fails so the drawer can show what was
+// attempted and why it bounced, rather than silently losing the draft.
+//
+// "messageId"/"inReplyTo" are the RFC 5322 headers we stamp on the outgoing
+// mail. Threading them is what makes the customer's mail client stack our
+// replies into one conversation instead of N unrelated emails.
+model ContactMessageReply {
+  id               String   @id @default(uuid()) @db.Uuid
+  contactMessageId String   @db.Uuid
+  body             String
+  subject          String
+  fromEmail        String
+  toEmail          String
+  authorUserId     String?  @db.Uuid
+  authorName       String
+  messageId        String?
+  inReplyTo        String?
+  status           String   @default("sent")
+  error            String?
+  createdAt        DateTime @default(now())
+
+  contactMessage ContactMessage @relation(fields: [contactMessageId], references: [id], onDelete: Cascade)
+
+  @@index([contactMessageId, createdAt])
+  @@index([status])
 }
 
 model PushCampaign {

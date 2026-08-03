@@ -20,6 +20,7 @@ const FAVORITE_TEMPLATE_SELECT = {
   category: true,
   subCategory: true,
   canvasSize: true,
+  pageCount: true,
   updatedAt: true,
 };
 
@@ -60,6 +61,7 @@ function serializeFavoriteTemplate(template, origin) {
     subCategory: String(template.subCategory || "general"),
     canvasWidth: Math.max(numberOr(canvasSize.width, 1080), 1),
     canvasHeight: Math.max(numberOr(canvasSize.height, 1080), 1),
+    pageCount: Math.max(1, Math.round(numberOr(template.pageCount, 1))),
     thumbnailUrl: buildThumbnailUrl(template.id, origin),
     updatedAt: new Date(template.updatedAt || Date.now()).getTime(),
   };

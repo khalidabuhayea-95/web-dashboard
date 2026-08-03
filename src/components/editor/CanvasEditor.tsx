@@ -2322,6 +2322,9 @@ function normalizeRect(rect: { x: number; y: number; width: number; height: numb
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 4;
+// Page thumbnails ship to mobile as page-strip tiles — small on purpose so a many-page save
+// stays a light payload. Matches the width PageBar downscales its own captures to.
+const PAGE_THUMBNAIL_MAX_WIDTH_PX = 168;
 
 export default function CanvasEditor() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -2610,6 +2613,10 @@ export default function CanvasEditor() {
   // is now mounted only while an export/capture actually needs it. Consumers go
   // through ensureExportStage() below, which mounts it and waits for the commit.
   const [exportStageRequested, setExportStageRequested] = useState(false);
+  // Renders the hidden export stage against a page OTHER than the active one, so a save can
+  // thumbnail pages the user never opened without disturbing the visible canvas. Empty = the
+  // export stage mirrors the active page (every pre-existing export/preview path).
+  const [exportPageIdOverride, setExportPageIdOverride] = useState("");
 
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null);
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
@@ -2634,9 +2641,17 @@ export default function CanvasEditor() {
   const elements = useMemo(() => activePage?.elements ?? [], [activePage]);
   const activePageDurationMs = useMemo(() => getPageDurationMs(activePage), [activePage]);
   const previewRenderFps = useMemo(() => resolvePreviewRenderFps(), []);
+  // The page the hidden export stage draws — the active page unless a page-thumbnail pass has
+  // pointed it elsewhere.
+  const exportPage = useMemo(() => {
+    if (!exportPageIdOverride) return activePage;
+    return pages.find((page) => page.id === exportPageIdOverride) || activePage;
+  }, [activePage, exportPageIdOverride, pages]);
+  const exportElements = useMemo(() => exportPage?.elements ?? [], [exportPage]);
+  const exportPageDurationMs = useMemo(() => getPageDurationMs(exportPage), [exportPage]);
   const exportCanvasSpec = useMemo(
-    () => getPreviewRenderSpec(activePage, exportMaxDimension),
-    [activePage, exportMaxDimension]
+    () => getPreviewRenderSpec(exportPage, exportMaxDimension),
+    [exportPage, exportMaxDimension]
   );
   const activePageTimelineStartMs = useMemo(() => {
     const entry = getTimelinePageEntries(pages).find((item) => item.page.id === activePage?.id);
@@ -3068,9 +3083,20 @@ export default function CanvasEditor() {
     });
     if (exportStageRef.current) return exportStageRef.current;
 
-    // Fallback: give React/Konva a couple of frames to attach the ref.
+    // Fallback: give React/Konva a couple of frames to attach the ref. Each wait races a timer
+    // because a backgrounded tab throttles rAF to a standstill — without it, any caller that
+    // awaits this (save, preview, filmstrip) would hang instead of failing fast.
     for (let attempt = 0; attempt < 5; attempt += 1) {
-      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      await new Promise<void>((resolve) => {
+        let settled = false;
+        const done = () => {
+          if (settled) return;
+          settled = true;
+          resolve();
+        };
+        requestAnimationFrame(done);
+        window.setTimeout(done, 150);
+      });
       if (exportStageRef.current) return exportStageRef.current;
     }
     return null;
@@ -3105,6 +3131,172 @@ export default function CanvasEditor() {
       }
     },
     [activePage, exportCanvasSpec.height, exportCanvasSpec.width]
+  );
+
+  /**
+   * Warms the browser's image cache for a page before it is drawn off-screen. `use-image`
+   * resolves asynchronously, so a page whose media has never been decoded would otherwise
+   * rasterize blank — capturing an empty thumbnail is worse than capturing none.
+   */
+  const preloadPageImageSources = useCallback(async (page: EditorPage) => {
+    const sources = new Set<string>();
+    const add = (value: unknown) => {
+      const source = String(value || "").trim();
+      if (source) sources.add(source);
+    };
+
+    if (page.background?.type === "image") {
+      add(page.background.imageThumbnailUri || page.background.imageUri);
+    }
+    page.elements.forEach((element) => {
+      if (!element.visible) return;
+      if (element.type === "image") add(element.src);
+      if (element.type === "frame" && element.frameContent?.kind === "image") {
+        add(element.frameContent.src);
+      }
+    });
+
+    const MAX_PRELOADS = 40;
+    const PRELOAD_TIMEOUT_MS = 4000;
+    await Promise.all(
+      Array.from(sources)
+        .slice(0, MAX_PRELOADS)
+        .map(
+          (source) =>
+            new Promise<void>((resolve) => {
+              let settled = false;
+              const done = () => {
+                if (settled) return;
+                settled = true;
+                resolve();
+              };
+              const timeoutId = window.setTimeout(done, PRELOAD_TIMEOUT_MS);
+              const image = new window.Image();
+              image.crossOrigin = "anonymous";
+              // Videos and unreachable media land on error — a missing layer must not stall
+              // (or fail) the whole save.
+              image.onload = () => {
+                window.clearTimeout(timeoutId);
+                done();
+              };
+              image.onerror = () => {
+                window.clearTimeout(timeoutId);
+                done();
+              };
+              image.src = source;
+            })
+        )
+    );
+  }, []);
+
+  /**
+   * Thumbnails ANY page, including one the user has never opened, by pointing the hidden
+   * export stage at it. The visible canvas, selection and playhead are untouched.
+   */
+  const captureThumbnailDataUrlForPage = useCallback(
+    async (pageId: string) => {
+      const targetPage = pages.find((page) => page.id === pageId);
+      if (!targetPage) return "";
+      // A hidden tab pauses compositing, so anything drawn now rasterizes EMPTY. Capturing
+      // would silently store a blank tile — worse than storing none, since the app trusts a
+      // shipped preview. Bail and let the client render that page itself.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") return "";
+      // The active page is already composited on the live stage — no off-screen work needed.
+      if (targetPage.id === activePage?.id) return captureThumbnailDataUrl();
+      // The export stage is single-tenant; a preview recording owns it while it runs.
+      if (previewGenerationActive) return "";
+
+      await preloadPageImageSources(targetPage);
+
+      flushSync(() => {
+        setExportPageIdOverride(pageId);
+      });
+
+      const stage = await ensureExportStage();
+      if (!stage) {
+        flushSync(() => {
+          setExportPageIdOverride("");
+        });
+        return "";
+      }
+
+      // A BACKGROUND tab throttles requestAnimationFrame to a standstill, so a bare rAF await
+      // would hang the save forever (the Save button stays "Saving..." and the template is
+      // never written). Every wait here races a timer so the capture always completes.
+      const waitForCanvasFrame = async () => {
+        const frameOrTimeout = () =>
+          new Promise<void>((resolve) => {
+            let settled = false;
+            const done = () => {
+              if (settled) return;
+              settled = true;
+              resolve();
+            };
+            requestAnimationFrame(done);
+            window.setTimeout(done, 150);
+          });
+        await frameOrTimeout();
+        await frameOrTimeout();
+      };
+
+      try {
+        const spec = getPreviewRenderSpec(targetPage, exportMaxDimension);
+        await waitForCanvasFrame();
+        // use-image resolves on its own load event even from cache, so give the scene a beat
+        // to swap the decoded bitmaps in before rasterizing.
+        await new Promise<void>((resolve) => window.setTimeout(resolve, 220));
+        stage.batchDraw();
+        await waitForCanvasFrame();
+
+        const pixelRatio = Math.min(
+          1,
+          Math.max(0.05, PAGE_THUMBNAIL_MAX_WIDTH_PX / Math.max(spec.width, 1))
+        );
+
+        // Rasterize to a canvas first so the result can be PROVEN non-empty. A page that never
+        // actually painted comes back fully transparent, which JPEG then encodes as solid
+        // black — indistinguishable from real content once it is a data URL. Any opaque pixel
+        // means the scene (at minimum its background) rendered.
+        const canvas = stage.toCanvas({
+          x: 0,
+          y: 0,
+          width: spec.width,
+          height: spec.height,
+          pixelRatio,
+        }) as HTMLCanvasElement;
+        const context = canvas.getContext("2d");
+        if (!context) return "";
+        const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
+        let painted = false;
+        // Sample every ~29th pixel: enough to detect a rendered page, cheap on a 168px tile.
+        for (let offset = 3; offset < data.length; offset += 4 * 29) {
+          if (data[offset] !== 0) {
+            painted = true;
+            break;
+          }
+        }
+        if (!painted) return "";
+
+        return String(canvas.toDataURL("image/jpeg", 0.72) || "").trim();
+      } catch {
+        return "";
+      } finally {
+        flushSync(() => {
+          setExportPageIdOverride("");
+        });
+        releaseExportStage();
+      }
+    },
+    [
+      activePage?.id,
+      captureThumbnailDataUrl,
+      ensureExportStage,
+      exportMaxDimension,
+      pages,
+      preloadPageImageSources,
+      previewGenerationActive,
+      releaseExportStage,
+    ]
   );
 
   const recordTimelinePreviewVideo = useCallback(
@@ -3797,6 +3989,7 @@ export default function CanvasEditor() {
       fitToScreen,
       exportPng,
       captureThumbnailDataUrl,
+      captureThumbnailDataUrlForPage,
       captureTimelineStripDataUrls,
       recordTimelinePreviewVideo,
       mergeSelectedLayers,
@@ -3805,6 +3998,7 @@ export default function CanvasEditor() {
     return () => setStageApi(null);
   }, [
     captureThumbnailDataUrl,
+    captureThumbnailDataUrlForPage,
     captureTimelineStripDataUrls,
     recordTimelinePreviewVideo,
     exportPng,
@@ -4954,11 +5148,13 @@ export default function CanvasEditor() {
             <Layer listening={false}>
               <Group scaleX={exportCanvasSpec.scale} scaleY={exportCanvasSpec.scale}>
                 <CanvasPageScene
-                  page={activePage}
-                  elements={elements}
-                  pageDurationMs={activePageDurationMs}
-                  playheadMs={effectiveExportPlayheadMs}
-                  playheadFrame={effectiveExportPlayheadFrame}
+                  page={exportPage}
+                  elements={exportElements}
+                  pageDurationMs={exportPageDurationMs}
+                  // An off-screen page is thumbnailed at its own start, not at the active
+                  // page's playhead (which is meaningless for a different page).
+                  playheadMs={exportPageIdOverride ? 0 : effectiveExportPlayheadMs}
+                  playheadFrame={exportPageIdOverride ? 0 : effectiveExportPlayheadFrame}
                   previewFps={previewRenderFps}
                   forceTimelineSync
                   interactive={false}

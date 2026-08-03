@@ -1,14 +1,15 @@
 {
   "manifest_version": 3,
   "name": "Dashboard Canva Importer",
-  "version": "1.13.3",
-  "version_name": "1.13.3-rect-frame-no-snapshot",
+  "version": "1.15.0",
+  "version_name": "1.15.0-page-thumbs",
   "description": "Import Canva designs from the active tab into the dashboard templates.",
   "permissions": [
     "activeTab",
     "storage",
     "tabs",
-    "scripting"
+    "scripting",
+    "debugger"
   ],
   "host_permissions": [
     "https://www.canva.com/*",

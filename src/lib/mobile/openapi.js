@@ -17,6 +17,21 @@ const DEVICE_PUSH_FIELDS = {
   },
 };
 
+// Returned whenever the account has been disabled from the dashboard. Every
+// bearer-authenticated endpoint can answer with this, not just the auth routes
+// listed below — the app should treat a 403 carrying code "account_disabled" as
+// terminal and stop retrying the login flow.
+const ACCOUNT_DISABLED_RESPONSE = {
+  description: "Account disabled by an administrator",
+  content: {
+    "application/json": {
+      schema: {
+        $ref: "#/components/schemas/AccountDisabledResponse",
+      },
+    },
+  },
+};
+
 function normalizeServerUrl(url) {
   const raw = String(url || "").trim();
   if (!raw) return "";
@@ -266,6 +281,17 @@ const reusableParameters = {
       minimum: 0,
     },
   },
+  assetPage: {
+    name: "page",
+    in: "query",
+    required: false,
+    description:
+      "Zero-based page index for multi-page templates. Omitted (or 0) resolves against the first page; layer asset URLs emitted for pages after the first carry this automatically.",
+    schema: {
+      type: "integer",
+      minimum: 0,
+    },
+  },
   fontCategory: {
     name: "category",
     in: "query",
@@ -509,6 +535,77 @@ const schemas = {
       error: { type: "string" },
     },
   },
+  // Shared by POST /api/contact (website form) and POST /api/mobile/support/contact
+  // (app), so both stay in sync — the two endpoints accept an identical body.
+  ContactMessageSubmission: {
+    type: "object",
+    required: ["name", "email", "message"],
+    properties: {
+      name: {
+        type: "string",
+        maxLength: 120,
+        description: "Sender's full name.",
+        example: "خالد",
+      },
+      email: {
+        type: "string",
+        format: "email",
+        maxLength: 200,
+        description: "Reply-to address. Lowercased before storage.",
+        example: "user@example.com",
+      },
+      topic: {
+        type: "string",
+        enum: ["general", "support", "feature", "account", "business", "press", "privacy"],
+        default: "general",
+        description: "Message category. Unknown values fall back to `general`.",
+      },
+      device: {
+        type: "string",
+        maxLength: 200,
+        nullable: true,
+        description:
+          'Optional free-text device and OS, e.g. "iPhone 14 — iOS 18". Greatly speeds up technical support.',
+      },
+      appVersion: {
+        type: "string",
+        maxLength: 40,
+        nullable: true,
+        description: "Optional app build the message was sent from.",
+        example: "1.4.2",
+      },
+      message: {
+        type: "string",
+        maxLength: 5000,
+        description: "The message body.",
+      },
+    },
+  },
+  ContactMessageCreatedResponse: {
+    type: "object",
+    required: ["ok"],
+    properties: {
+      ok: { type: "boolean", example: true },
+      id: {
+        type: "string",
+        format: "uuid",
+        description:
+          "Id of the stored message. Omitted when the submission was silently discarded as spam.",
+      },
+    },
+  },
+  AccountDisabledResponse: {
+    type: "object",
+    required: ["error", "code"],
+    properties: {
+      error: { type: "string" },
+      code: {
+        type: "string",
+        enum: ["account_disabled"],
+        description: "Stable machine-readable reason. Signing in again will not help.",
+      },
+    },
+  },
   MobileAppSettingsResponse: {
     type: "object",
     required: ["deviceType", "appVersion", "forceUpdate", "enableCache", "redirectLink"],
@@ -536,12 +633,18 @@ const schemas = {
   },
   MobileAuthUser: {
     type: "object",
-    required: ["id", "emailVerified"],
+    required: ["id", "emailVerified", "role"],
     properties: {
       id: { type: "string", format: "uuid" },
       name: { type: "string", nullable: true },
       email: { type: "string", nullable: true },
       emailVerified: { type: "boolean" },
+      role: {
+        type: "string",
+        enum: ["user", "tester"],
+        description:
+          "Account role. \"tester\" accounts additionally receive templates whose status is \"draft\" from the template endpoints, so the app can surface a preview-mode hint.",
+      },
     },
   },
   MobileAuthSessionResponse: {
@@ -617,7 +720,7 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
+          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
         items: {
           type: "object",
           additionalProperties: true,
@@ -641,6 +744,18 @@ const schemas = {
           },
         },
       },
+      pageCount: {
+        type: "integer",
+        format: "int32",
+        description:
+          "Number of design pages. 1 for single-page templates. When greater than 1 the `pages` array is present and is authoritative; top-level `background`/`layers` mirror `pages[0]` (the cover) for builds that predate multi-page.",
+      },
+      pages: {
+        type: "array",
+        description:
+          "All design pages in order, present only when `pageCount` > 1. `pages[0]` duplicates the top-level `background`/`layers`. Clients with multi-page support should render from this array and ignore the top-level fields.",
+        items: { $ref: "#/components/schemas/MobileProjectPage" },
+      },
       meta: {
         type: "object",
         additionalProperties: true,
@@ -653,6 +768,39 @@ const schemas = {
             items: { type: "string" },
           },
         },
+      },
+    },
+  },
+  MobileProjectPage: {
+    type: "object",
+    required: ["id", "name", "width", "height", "durationMs", "background", "layers"],
+    properties: {
+      id: { type: "string" },
+      name: { type: "string" },
+      width: { type: "number", description: "Page canvas width in project px." },
+      height: { type: "number", description: "Page canvas height in project px." },
+      durationMs: {
+        type: "integer",
+        format: "int32",
+        description: "Page duration for animated playback, in milliseconds.",
+      },
+      thumbnailUrl: {
+        type: "string",
+        format: "uri",
+        description:
+          "Ready-made preview image of this page, when one exists. The first page falls back to the template's cover thumbnail, so it is effectively always present; later pages carry one only when the page was captured at import/save time. Clients should treat it as valid only while the page still matches the shipped content and render locally once the user edits that page.",
+      },
+      background: {
+        type: "object",
+        additionalProperties: true,
+        description:
+          "Same background contract as the project-level `background` (`solid`/`gradient`/`image`/`transparent`).",
+      },
+      layers: {
+        type: "array",
+        description:
+          "Layers of this page, same per-layer contract as the project-level `layers` array. Asset URLs for pages after the first carry a `page` query parameter.",
+        items: { type: "object", additionalProperties: true },
       },
     },
   },
@@ -886,7 +1034,13 @@ const schemas = {
       brightness: { type: "number", description: "1 = neutral, range 0–2." },
       contrast: { type: "number", description: "1 = neutral, range 0–2." },
       saturation: { type: "number", description: "1 = neutral, range 0–2." },
-      blurRadius: { type: "number", description: "0–40 px." },
+      blurRadius: {
+        type: "number",
+        minimum: 0,
+        maximum: 40,
+        description:
+          "Gaussian blur over the layer's OWN pixels, in project px (0–40; 0 = sharp). Authored with the web editor's Blur control, which presents it as a percentage of 40 — mirror that if you show a percentage. Distinct from `shadowBlurRadius`, which softens the drop shadow only.",
+      },
       tintColorHex: { type: "string" },
       tintStrength: { type: "number", description: "0–1." },
       blendMode: { type: "string" },
@@ -924,12 +1078,36 @@ const schemas = {
         description:
           "Border thickness in project px, stroked along the SAME (per-corner) rounded outline the media is clipped to — the border curves around every rounded corner. 0 = no border.",
       },
-      shadowColorHex: { type: "string" },
-      shadowOpacity: { type: "number" },
-      shadowBlurRadius: { type: "number" },
-      shadowOffsetX: { type: "number" },
-      shadowOffsetY: { type: "number" },
+      shadowColorHex: { type: "string", description: "Drop-shadow color (#RRGGBB); alpha lives in `shadowOpacity`." },
+      shadowOpacity: {
+        type: "number",
+        minimum: 0,
+        maximum: 1,
+        description: "Drop-shadow alpha; 0 hides the shadow.",
+      },
+      shadowBlurRadius: {
+        type: "number",
+        minimum: 0,
+        maximum: 40,
+        description:
+          "Drop-shadow softness in project px (0–40). Softens the SHADOW only — the layer itself stays sharp (see `blurRadius`).",
+      },
+      shadowOffsetX: {
+        type: "number",
+        minimum: -80,
+        maximum: 80,
+        description: "Drop-shadow horizontal offset in project px (positive = right).",
+      },
+      shadowOffsetY: {
+        type: "number",
+        minimum: -80,
+        maximum: 80,
+        description: "Drop-shadow vertical offset in project px (positive = down).",
+      },
     },
+    // A media drop shadow is VISIBLE only when it is offset or blurred and not transparent:
+    // a 0-radius, 0-offset shadow sits exactly behind its layer and draws nothing. There is no
+    // `enabled` flag here (unlike a TEXT layer's `shadow` object) — derive it from these values.
   },
   MobileTemplateSummary: {
     type: "object",
@@ -950,12 +1128,23 @@ const schemas = {
       "thumbnailDataUrl",
     ],
     properties: {
+      status: {
+        type: "string",
+        enum: ["published", "draft"],
+        description:
+          "Template lifecycle status. Only ever \"published\" for normal accounts; a tester account (MobileAuthUser.role = \"tester\") also receives \"draft\" templates so a designer can review them before publishing.",
+      },
       id: { type: "string", format: "uuid" },
       title: { type: "string" },
       version: { type: "integer" },
       updatedAt: { type: "integer", format: "int64" },
       canvasWidth: { type: "number" },
       canvasHeight: { type: "number" },
+      pageCount: {
+        type: "integer",
+        format: "int32",
+        description: "Number of design pages in the template (1 for single-page).",
+      },
       category: { type: "string", description: "Localized category label." },
       subCategory: { type: "string", description: "Localized sub category label." },
       categoryId: { type: "string", format: "uuid" },
@@ -1005,6 +1194,11 @@ const schemas = {
       title: { type: "string" },
       canvasWidth: { type: "number" },
       canvasHeight: { type: "number" },
+      pageCount: {
+        type: "integer",
+        format: "int32",
+        description: "Number of design pages in the template (1 for single-page).",
+      },
       thumbnailUrl: { type: "string" },
       previewVideoUrl: {
         type: "string",
@@ -1051,6 +1245,12 @@ const schemas = {
       "project",
     ],
     properties: {
+      status: {
+        type: "string",
+        enum: ["published", "draft"],
+        description:
+          "Template lifecycle status. Only ever \"published\" for normal accounts; a tester account (MobileAuthUser.role = \"tester\") also receives \"draft\" templates so a designer can review them before publishing.",
+      },
       id: { type: "string", format: "uuid" },
       title: { type: "string" },
       category: { type: "string", description: "Localized category label." },
@@ -1062,12 +1262,36 @@ const schemas = {
         allOf: [{ $ref: "#/components/schemas/MobileTemplatePreviewSlim" }],
         nullable: true,
       },
+      pageCount: {
+        type: "integer",
+        format: "int32",
+        description:
+          "Number of design pages. Mirrors `project.pageCount`; 1 for single-page templates.",
+      },
       project: {
         type: "object",
-        required: ["canvasWidth", "canvasHeight", "background", "layers"],
+        required: ["canvasWidth", "canvasHeight", "background", "layers", "pageCount"],
         properties: {
-          canvasWidth: { type: "number" },
-          canvasHeight: { type: "number" },
+          canvasWidth: {
+            type: "number",
+            description: "Width of the FIRST page (the cover) in project px.",
+          },
+          canvasHeight: {
+            type: "number",
+            description: "Height of the FIRST page (the cover) in project px.",
+          },
+          pageCount: {
+            type: "integer",
+            format: "int32",
+            description:
+              "Number of design pages. When greater than 1 the `pages` array is present and authoritative; the top-level `background`/`layers` mirror `pages[0]` for app builds that predate multi-page.",
+          },
+          pages: {
+            type: "array",
+            description:
+              "All design pages in order, present only when `pageCount` > 1. Each entry is `{id, name, width, height, durationMs, thumbnailUrl?, background, layers}` with the same background/layer contracts as the top-level fields. `pages[0]` duplicates the top-level `background`/`layers`. `thumbnailUrl` is an optional ready-made preview of that page (page 1 falls back to the template thumbnail). Layer asset URLs for pages after the first carry a `page` query parameter pointing back at the assets endpoint.",
+            items: { $ref: "#/components/schemas/MobileProjectPage" },
+          },
           background: {
             type: "object",
             additionalProperties: true,
@@ -1077,7 +1301,7 @@ const schemas = {
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor. The same `filters` object also carries the layer's own `blurRadius` (0–40 project px) and its drop shadow (`shadowColorHex`/`shadowOpacity`/`shadowBlurRadius`/`shadowOffsetX`/`shadowOffsetY`) — both authored in the web editor's Blur and Shadow controls.",
             items: {
               type: "object",
               additionalProperties: true,
@@ -1744,7 +1968,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       title: "Web Dashboard Mobile Templates API",
       version: "1.0.0",
       description:
-        "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; write-heavy media routes may require signed mobile headers.",
+        "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; write-heavy media routes may require signed mobile headers.\n\nThe **Website** tag covers public endpoints that back nayroz.com rather than the app — they are documented here so one page describes every public surface.",
     },
     servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
@@ -1756,6 +1980,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile Elements" },
       { name: "Mobile Shapes" },
       { name: "Mobile Media" },
+      { name: "Mobile Support" },
+      { name: "Website" },
     ],
     paths: {
       "/api/mobile/auth/google": {
@@ -1801,6 +2027,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+            403: ACCOUNT_DISABLED_RESPONSE,
           },
         },
       },
@@ -1847,6 +2074,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+            403: ACCOUNT_DISABLED_RESPONSE,
           },
         },
       },
@@ -1897,6 +2125,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+            403: ACCOUNT_DISABLED_RESPONSE,
           },
         },
       },
@@ -1942,6 +2171,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+            403: ACCOUNT_DISABLED_RESPONSE,
           },
         },
       },
@@ -2016,6 +2246,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+            403: ACCOUNT_DISABLED_RESPONSE,
           },
         },
       },
@@ -2243,6 +2474,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             reusableParameters.assetField,
             reusableParameters.assetElementId,
             reusableParameters.assetIndex,
+            reusableParameters.assetPage,
           ],
           responses: {
             200: {
@@ -3688,6 +3920,90 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             401: {
               description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/support/contact": {
+        post: {
+          tags: ["Mobile Support"],
+          summary: "Send a contact-us message to the support team",
+          description:
+            "Submits a support/contact message from the app. Accepts the same fields as the website contact form, so both sources land in one dashboard inbox.\n\nAuthentication is optional: send `Authorization: Bearer <accessToken>` and the message is linked to that account, which lets the support team see who wrote it. Anonymous submissions are accepted too — an absent, expired or invalid token simply stores the message without an account link.\n\nRate limited to 5 submissions per 5 minutes per IP.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ContactMessageSubmission" },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: "Message stored",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ContactMessageCreatedResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Missing or invalid name, email or message",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/contact": {
+        post: {
+          tags: ["Website"],
+          summary: "Send a contact-us message from the marketing site",
+          description:
+            "Backs the contact form on nayroz.com (public/contact.html). Documented here so the whole contact-us surface lives in one place.\n\n**Mobile clients should not call this** — use `POST /api/mobile/support/contact` instead, which additionally links the message to the signed-in account when a bearer token is sent. This endpoint is always anonymous and ignores `Authorization`.\n\nBoth endpoints accept an identical body and write to the same dashboard inbox. Rate limited to 5 submissions per 5 minutes per IP. Submissions that fill the form's hidden anti-spam field are discarded and still answered `201`, without an `id`.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ContactMessageSubmission" },
+              },
+            },
+          },
+          responses: {
+            201: {
+              description: "Message stored, or silently discarded as spam",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ContactMessageCreatedResponse" },
+                },
+              },
+            },
+            400: {
+              description: "Missing or invalid name, email or message",
               content: {
                 "application/json": {
                   schema: { $ref: "#/components/schemas/ErrorResponse" },

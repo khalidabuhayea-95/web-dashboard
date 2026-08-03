@@ -166,10 +166,27 @@ function normalizePage(value, fallbackWidth = 1080, fallbackHeight = 1080) {
   };
 }
 
+/**
+ * Multi-page imports: the ordered page list matching each fabric object's `importPageIndex`.
+ * Null (field omitted) for single-page imports, keeping their stored metadata byte-identical.
+ */
+function normalizePages(value, fallbackWidth = 1080, fallbackHeight = 1080) {
+  if (!Array.isArray(value) || value.length < 2) return null;
+  return value.map((page, index) => {
+    const normalized = normalizePage(page, fallbackWidth, fallbackHeight);
+    return {
+      ...normalized,
+      id: asString(page?.id) || `page-${index + 1}`,
+      name: asString(page?.name) || `Page ${index + 1}`,
+    };
+  });
+}
+
 export function buildImportMetadata({
   source = "unknown",
   importVersion = IMPORT_PARITY_VERSION,
   page,
+  pages = null,
   layerTree,
   layerStats,
   usedFonts,
@@ -181,6 +198,11 @@ export function buildImportMetadata({
   const safeLayerTree = normalizeLayerTree(layerTree || fallback.layerTree);
   const safePage = normalizePage(
     page || fallback.page,
+    numberOr(fallback?.page?.width, 1080),
+    numberOr(fallback?.page?.height, 1080)
+  );
+  const safePages = normalizePages(
+    pages || fallback.pages,
     numberOr(fallback?.page?.width, 1080),
     numberOr(fallback?.page?.height, 1080)
   );
@@ -206,6 +228,7 @@ export function buildImportMetadata({
     importVersion: safeVersion,
     source: safeSource,
     page: safePage,
+    ...(safePages ? { pages: safePages } : {}),
     layerTree: safeLayerTree,
     layerStats: safeLayerStats,
     usedFonts: safeUsedFonts,
@@ -229,6 +252,7 @@ export function readImportMetadataFromEditorData(editorData) {
       source: source.source,
       importVersion: source.importVersion,
       page: source.page,
+      pages: source.pages,
       layerTree: source.layerTree,
       layerStats: source.layerStats,
       usedFonts: source.usedFonts,

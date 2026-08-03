@@ -3,6 +3,7 @@ import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
 
 import prisma from "@/lib/prisma";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
 import {
   createMobilePublicMediaUrlResolver,
   createTemplateAssetResolver,
@@ -35,6 +36,7 @@ export async function GET(request) {
   if (limited) return limited;
 
   const { searchParams } = new URL(request.url);
+  const audience = await resolveTemplateAudience(request);
   const locale = resolveMobileLocale(request, searchParams);
   const taxonomySettings = await getTemplateTaxonomySettings();
   const taxonomy = prepareMobileTaxonomy(taxonomySettings);
@@ -103,7 +105,7 @@ export async function GET(request) {
     subCategoryDescriptors.map(({ category, subCategory }) =>
       prisma.template.findMany({
         where: {
-          status: "published",
+          ...audience.statusWhere,
           category: category.value,
           subCategory: subCategory.value,
           ...(tag ? { tags: { array_contains: [tag] } } : {}),
@@ -114,9 +116,11 @@ export async function GET(request) {
         select: {
           id: true,
           name: true,
+          status: true,
           version: true,
           updatedAt: true,
           canvasSize: true,
+          pageCount: true,
           thumbnailDataUrl: true,
           previewVideoUrl: true,
           previewPosterUrl: true,
@@ -162,7 +166,9 @@ export async function GET(request) {
         title: mobileTemplate.title,
         canvasWidth: mobileTemplate.canvasWidth,
         canvasHeight: mobileTemplate.canvasHeight,
+        pageCount: mobileTemplate.pageCount,
         thumbnailUrl: mobileTemplate.thumbnailUrl,
+        status: String(template.status || ""),
         ...(preview ? { preview } : {}),
         ...(preview?.url ? { previewVideoUrl: preview.url } : {}),
         ...(preview?.posterUrl ? { previewPosterUrl: preview.posterUrl } : {}),
@@ -180,10 +186,6 @@ export async function GET(request) {
     {
       subCategories,
     },
-    {
-      headers: {
-        "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
-      },
-    }
+    { headers: audience.headers(MOBILE_PUBLIC_JSON_CACHE_SHORT) }
   );
 }

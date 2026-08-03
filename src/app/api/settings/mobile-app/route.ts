@@ -14,6 +14,12 @@ export async function GET() {
     const session = await getEditorSession();
     if (session.error) return session.error;
 
+    // Admin-only end to end: this is app configuration, not content, and the
+    // only page that reads it (/mobile-settings) is itself admin-gated.
+    if (session.role !== "admin") {
+      return handleForbidden("Only admins can view mobile app settings");
+    }
+
     logger.info("Mobile app settings requested", {
       userId: session.userId,
     });
@@ -21,7 +27,7 @@ export async function GET() {
     const settings = await getMobileAppSettings();
     return NextResponse.json({
       settings,
-      canEdit: session.role === "admin",
+      canEdit: true,
     });
   } catch (error) {
     return handleApiError(error, "Failed to retrieve mobile app settings");

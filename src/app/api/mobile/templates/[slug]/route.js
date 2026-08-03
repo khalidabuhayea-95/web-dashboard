@@ -11,6 +11,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
 import {
   createMobilePublicMediaUrlResolver,
   createTemplateAssetResolver,
@@ -21,7 +22,7 @@ import {
   localizeTemplateTaxonomy,
   prepareMobileTaxonomy,
 } from "@/lib/mobile/taxonomy";
-import { extractFabricData } from "@/lib/templates/editorData";
+import { extractEditorPagesData, extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
 import { toMobileTemplateDetailSlim } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
@@ -69,6 +70,7 @@ export async function GET(request, { params }) {
   const requestStartedAt = performance.now();
   const { searchParams } = new URL(request.url);
   const locale = resolveMobileLocale(request, searchParams);
+  let audience = null;
   const timings = {
     dbMs: 0,
     taxonomyMs: 0,
@@ -92,20 +94,25 @@ export async function GET(request, { params }) {
     }
     const where = UUID_PATTERN.test(templateRef) ? { id: templateRef } : { slug: templateRef };
 
+    audience = await resolveTemplateAudience(request);
+
     const dbStartedAt = performance.now();
     const template = await prisma.template.findFirst({
       where: {
-        status: "published",
+        ...audience.statusWhere,
         ...where,
       },
       select: {
         id: true,
         name: true,
+        status: true,
         version: true,
         updatedAt: true,
         category: true,
         subCategory: true,
         canvasSize: true,
+        pageCount: true,
+        pageThumbnails: true,
         thumbnailDataUrl: true,
         previewVideoUrl: true,
         previewPosterUrl: true,
@@ -166,11 +173,19 @@ export async function GET(request, { params }) {
     timings.taxonomyMs = roundTiming(performance.now() - taxonomyStartedAt);
 
     const fabricParseStartedAt = performance.now();
-    const fabricData = measureSync(fabricParseDetails, "extractFabricDataMs", () =>
-      extractFabricData(template.data || {}) || template.data || {}
+    const pagesData = measureSync(fabricParseDetails, "extractEditorPagesDataMs", () =>
+      extractEditorPagesData(template.data || {})
     );
-    const objects = Array.isArray(fabricData?.objects) ? fabricData.objects : [];
+    // Fonts must cover every page — a font used only on page 3 still needs a
+    // catalog entry in the payload.
+    const objects = Array.isArray(pagesData)
+      ? pagesData.flatMap((page) => page.objects || [])
+      : (() => {
+          const fabricData = extractFabricData(template.data || {}) || template.data || {};
+          return Array.isArray(fabricData?.objects) ? fabricData.objects : [];
+        })();
     fabricParseDetails.objectCount = objects.length;
+    fabricParseDetails.pageCount = Array.isArray(pagesData) ? pagesData.length : 1;
     const usedFontNames = measureSync(fabricParseDetails, "collectTextLayerFontNamesMs", () =>
       collectTextLayerFontNames(objects)
     );
@@ -195,7 +210,7 @@ export async function GET(request, { params }) {
         categoryValue: localized.categoryValue,
         subCategoryLabel: localized.subCategoryLabel,
         subCategoryValue: localized.subCategoryValue,
-        fabricData,
+        ...(Array.isArray(pagesData) && pagesData.length > 0 ? { pagesData } : {}),
         fontLookup,
         telemetry: layerMappingDetails,
       })
@@ -219,13 +234,9 @@ export async function GET(request, { params }) {
 
     const response = NextResponse.json(
       {
-        template: mobileTemplate,
+        template: { ...mobileTemplate, status: String(template.status || "") },
       },
-      {
-        headers: {
-          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
-        },
-      }
+      { headers: audience.headers(MOBILE_PUBLIC_JSON_CACHE_SHORT) }
     );
     return attachRequestIdHeader(response, requestId);
   } catch (error) {

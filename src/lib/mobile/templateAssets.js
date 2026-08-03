@@ -12,7 +12,7 @@ export function createTemplateAssetResolver(request, template) {
     request.url
   );
 
-  return ({ scope = "layer", elementId = "", index = null, field = "" } = {}) => {
+  return ({ scope = "layer", elementId = "", index = null, field = "", page = null } = {}) => {
     const url = new URL(baseUrl.toString());
     if (scope) url.searchParams.set("scope", String(scope));
     if (elementId) url.searchParams.set("elementId", String(elementId));
@@ -20,6 +20,10 @@ export function createTemplateAssetResolver(request, template) {
       url.searchParams.set("index", String(Number(index)));
     }
     if (field) url.searchParams.set("field", String(field));
+    // Page 0 stays unparameterized so existing single-page asset URLs are byte-identical.
+    if (Number.isInteger(Number(page)) && Number(page) > 0) {
+      url.searchParams.set("page", String(Number(page)));
+    }
     return url.toString();
   };
 }

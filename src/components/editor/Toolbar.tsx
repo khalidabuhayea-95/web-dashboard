@@ -7,8 +7,10 @@ import {
   AlignLeft,
   AlignRight,
   Bold,
+  Check,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   FlipHorizontal,
   FlipVertical,
@@ -16,6 +18,7 @@ import {
   Layers,
   Menu,
   Scissors,
+  Share2,
   SlidersHorizontal,
   Strikethrough,
   Underline,
@@ -46,6 +49,7 @@ import {
 } from "@/lib/editor/imagePalette";
 import { formatTimelineTime, hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { PREVIEW_RENDER_FPS } from "@/lib/editor/previewRuntime";
+import { buildTemplateShareUrl } from "@/lib/shareLink";
 import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/editorStore";
 
 interface ToolbarProps {
@@ -65,6 +69,8 @@ type TrimRange = {
 };
 
 const TEMPLATE_PREVIEW_VIDEO_MAX_DIMENSION = 240;
+/** Per-page ceiling for off-screen preview capture during a save. */
+const PAGE_THUMBNAIL_CAPTURE_TIMEOUT_MS = 6000;
 
 function clampNumber(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
@@ -130,6 +136,8 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const [isUnpublishingTemplate, setIsUnpublishingTemplate] = useState(false);
   const [isPublishingElements, setIsPublishingElements] = useState(false);
   const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
+  const [isShareLinkOpen, setIsShareLinkOpen] = useState(false);
+  const [shareCopyState, setShareCopyState] = useState<"idle" | "copied" | "error">("idle");
   const [isVideoTrimOpen, setIsVideoTrimOpen] = useState(false);
   const [isTrimmingImagePadding, setIsTrimmingImagePadding] = useState(false);
   const [previewToast, setPreviewToast] = useState<{
@@ -140,6 +148,9 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const [videoTrimDragEdge, setVideoTrimDragEdge] = useState<"start" | "end" | null>(null);
   const [videoTrimPlayhead, setVideoTrimPlayhead] = useState(0);
   const [videoTrimFrameStrip, setVideoTrimFrameStrip] = useState<string[]>([]);
+  const shareWrapperRef = useRef<HTMLDivElement | null>(null);
+  const shareInputRef = useRef<HTMLInputElement | null>(null);
+  const shareCopyTimeoutRef = useRef<number | null>(null);
   const trimTrackRef = useRef<HTMLDivElement | null>(null);
   const videoTrimViewportRef = useRef<HTMLDivElement | null>(null);
   const videoTrimDraftRef = useRef<TrimRange>({ start: 0, end: 1 });
@@ -168,6 +179,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const historyIndex = useEditorStore((state) => state.historyIndex);
   const historyLength = useEditorStore((state) => state.history.length);
   const stageApi = useEditorStore((state) => state.stageApi);
+  const pageThumbnails = useEditorStore((state) => state.pageThumbnails);
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const timelineIsPlaying = useEditorStore((state) => state.timelineIsPlaying);
 
@@ -1138,6 +1150,51 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     ]
   );
 
+  /**
+   * One preview per page for the mobile page strip. The page bar already caches a capture for
+   * every page the user opened; anything still missing is rendered through the hidden export
+   * stage so a multi-page save never ships a partial strip. Best-effort — a page that fails to
+   * render is simply omitted rather than blocking the save.
+   */
+  const collectPageThumbnailsForSave = useCallback(
+    async (design: EditorDesign) => {
+      const designPages = Array.isArray(design?.pages) ? design.pages : [];
+      if (designPages.length <= 1) return null;
+
+      const collected: Record<string, string> = {};
+      for (const page of designPages) {
+        const pageId = String(page?.id || "").trim();
+        if (!pageId) continue;
+
+        const cached = String(pageThumbnails[pageId] || "").trim();
+        if (cached) {
+          collected[pageId] = cached;
+          continue;
+        }
+        if (!stageApi?.captureThumbnailDataUrlForPage) continue;
+        try {
+          // Hard ceiling per page. Rendering a page off-screen depends on image decoding and
+          // frame scheduling, neither of which is guaranteed to make progress (a backgrounded
+          // tab throttles both) — the save must never be held hostage by a preview.
+          const captured = String(
+            (await Promise.race([
+              stageApi.captureThumbnailDataUrlForPage(pageId),
+              new Promise<string>((resolve) =>
+                window.setTimeout(() => resolve(""), PAGE_THUMBNAIL_CAPTURE_TIMEOUT_MS)
+              ),
+            ])) || ""
+          ).trim();
+          if (captured) collected[pageId] = captured;
+        } catch {
+          // Keep saving: a missing page preview only means mobile renders that tile itself.
+        }
+      }
+
+      return Object.keys(collected).length > 0 ? collected : null;
+    },
+    [pageThumbnails, stageApi]
+  );
+
   const saveTemplate = useCallback(async () => {
     if (isSavingTemplate) return null;
 
@@ -1160,6 +1217,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     try {
       const parsedDesign = JSON.parse(exportDesign()) as EditorDesign;
       const thumbnailDataUrl = stageApi?.captureThumbnailDataUrl?.() || "";
+      const savedPageThumbnails = await collectPageThumbnailsForSave(parsedDesign);
       const response = await fetch("/api/templates", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1175,6 +1233,9 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           subCategory: activeTemplateSubCategory || "general",
           tags: activeTemplateTags,
           thumbnailDataUrl,
+          // Per-page previews for the mobile page strip — one per page, including pages the
+          // user never opened (rendered off-screen just above).
+          ...(savedPageThumbnails ? { pageThumbnails: savedPageThumbnails } : {}),
         }),
         signal: saveController.signal,
       });
@@ -1256,6 +1317,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     activeTemplateName,
     activeTemplateSubCategory,
     activeTemplateTags,
+    collectPageThumbnailsForSave,
     exportDesign,
     generateTemplatePreview,
     isSavingTemplate,
@@ -1464,6 +1526,103 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     clearTemplateMeta,
     isDeletingTemplate,
   ]);
+
+  const templateShareUrl = useMemo(
+    () => buildTemplateShareUrl(activeTemplateId),
+    [activeTemplateId]
+  );
+  const isTemplateShareable = activeTemplateStatus === "published";
+
+  const closeShareLink = useCallback(() => {
+    setIsShareLinkOpen(false);
+    setShareCopyState("idle");
+    if (shareCopyTimeoutRef.current !== null) {
+      window.clearTimeout(shareCopyTimeoutRef.current);
+      shareCopyTimeoutRef.current = null;
+    }
+  }, []);
+
+  const toggleShareLink = useCallback(() => {
+    if (!activeTemplateId) {
+      window.alert("Save the template first before sharing.");
+      return;
+    }
+    setShareCopyState("idle");
+    setIsShareLinkOpen((current) => !current);
+  }, [activeTemplateId]);
+
+  const copyShareLink = useCallback(async () => {
+    if (!templateShareUrl) return;
+    if (shareCopyTimeoutRef.current !== null) {
+      window.clearTimeout(shareCopyTimeoutRef.current);
+      shareCopyTimeoutRef.current = null;
+    }
+    try {
+      // `navigator.clipboard` is undefined outside a secure context (plain http on a LAN
+      // IP), and `writeText` rejects when the document is not focused. Both land here.
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard unavailable.");
+      }
+      await navigator.clipboard.writeText(templateShareUrl);
+      setShareCopyState("copied");
+      shareCopyTimeoutRef.current = window.setTimeout(() => {
+        setShareCopyState((current) => (current === "copied" ? "idle" : current));
+        shareCopyTimeoutRef.current = null;
+      }, 1800);
+    } catch (_error) {
+      setShareCopyState("error");
+      // Fall back to selecting the link so the user can copy it by hand.
+      const input = shareInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+  }, [templateShareUrl]);
+
+  useEffect(() => {
+    closeShareLink();
+  }, [activeTemplateId, closeShareLink]);
+
+  useEffect(() => {
+    if (!isShareLinkOpen) return;
+    const input = shareInputRef.current;
+    if (input) {
+      input.focus();
+      input.select();
+    }
+  }, [isShareLinkOpen]);
+
+  useEffect(() => {
+    if (!isShareLinkOpen) return;
+    const handlePointerDown = (event: MouseEvent | TouchEvent) => {
+      const wrapper = shareWrapperRef.current;
+      if (!wrapper) return;
+      const target = event.target;
+      if (target instanceof Node && wrapper.contains(target)) return;
+      closeShareLink();
+    };
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closeShareLink();
+    };
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("touchstart", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("touchstart", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [closeShareLink, isShareLinkOpen]);
+
+  useEffect(() => {
+    return () => {
+      if (shareCopyTimeoutRef.current !== null) {
+        window.clearTimeout(shareCopyTimeoutRef.current);
+        shareCopyTimeoutRef.current = null;
+      }
+    };
+  }, []);
 
   const topActionClass =
     "inline-flex items-center gap-1 rounded px-2 py-1 text-[13px] text-[#202a38] hover:bg-[#eef2f8] disabled:cursor-not-allowed disabled:opacity-40";
@@ -1928,6 +2087,98 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
           >
             {isDeletingTemplate ? "Deleting..." : "Delete"}
           </Button>
+
+          <div className="relative" ref={shareWrapperRef}>
+            <Button
+              type="button"
+              variant="ghost"
+              className={
+                isShareLinkOpen
+                  ? "!h-8 !rounded !px-3 !text-sm !font-medium !text-[#2458a3] !bg-[#e8f1ff]"
+                  : "!h-8 !rounded !px-3 !text-sm !font-medium !text-[#1b2738]"
+              }
+              onClick={toggleShareLink}
+              disabled={isDeletingTemplate || !activeTemplateId}
+              title={
+                activeTemplateId
+                  ? "Copy the public share link for this template"
+                  : "Save the template first before sharing."
+              }
+              aria-haspopup="dialog"
+              aria-expanded={isShareLinkOpen}
+            >
+              <Share2 size={15} /> Share
+            </Button>
+
+            {isShareLinkOpen && templateShareUrl ? (
+              <div
+                role="dialog"
+                aria-label="Template share link"
+                className="absolute right-0 top-full z-50 mt-2 w-[340px] rounded-xl border border-[#d0d7e2] bg-white p-3 shadow-xl"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#667085]">
+                    Share link
+                  </p>
+                  <button
+                    type="button"
+                    className="rounded px-2 py-0.5 text-xs text-[#4b5563] hover:bg-[#eef2f8]"
+                    onClick={closeShareLink}
+                  >
+                    Close
+                  </button>
+                </div>
+
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    ref={shareInputRef}
+                    type="text"
+                    readOnly
+                    value={templateShareUrl}
+                    aria-label="Public share link"
+                    onFocus={(event) => event.currentTarget.select()}
+                    onClick={(event) => event.currentTarget.select()}
+                    className="min-w-0 flex-1 rounded border border-[#d7dbe1] bg-[#f6f7f9] px-2 py-1 text-[12px] text-[#1f2937] outline-none focus:border-[#2f6fca]"
+                  />
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="!h-8 !shrink-0 !rounded !px-3 !text-sm !font-medium !text-[#1b2738]"
+                    onClick={() => void copyShareLink()}
+                  >
+                    {shareCopyState === "copied" ? (
+                      <>
+                        <Check size={14} /> Copied
+                      </>
+                    ) : (
+                      <>
+                        <Copy size={14} /> Copy
+                      </>
+                    )}
+                  </Button>
+                </div>
+
+                {shareCopyState === "error" ? (
+                  <p className="mt-2 rounded border border-[#fca5a5] bg-[#fef2f2] px-2 py-1 text-[12px] text-[#b42318]">
+                    Could not reach the clipboard (this needs https or localhost). The link is
+                    selected above — copy it manually.
+                  </p>
+                ) : null}
+
+                {isTemplateShareable ? (
+                  <p className="mt-2 text-[12px] leading-snug text-[#667085]">
+                    Opens the template in the Nayroz app when installed, otherwise a public web
+                    page.
+                  </p>
+                ) : (
+                  <p className="mt-2 rounded border border-[#fcd34d] bg-[#fffbeb] px-2 py-1 text-[12px] leading-snug text-[#92400e]">
+                    This template is a draft, so the link will 404 for anyone you send it to.
+                    Publish it first to make the link work.
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </div>
 
           <Button type="button" variant="ghost" className="!h-8 !rounded !px-3 !text-sm !font-medium !text-[#1b2738]" onClick={() => stageApi?.exportPng()}>
             <Download size={15} /> Download

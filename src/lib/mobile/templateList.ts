@@ -9,6 +9,7 @@ import {
 } from "@/lib/logging/request";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
 import {
   buildPublishedTemplateScopeWhere,
   localizeCategoryOptions,
@@ -121,6 +122,7 @@ export async function buildMobileTemplatesListResponse(
 
   try {
     const { searchParams } = new URL(request.url);
+    const audience = await resolveTemplateAudience(request);
     const locale = resolveMobileLocale(request, searchParams);
     const taxonomySettings = await getTemplateTaxonomySettings();
     const taxonomy = prepareMobileTaxonomy(taxonomySettings);
@@ -160,9 +162,7 @@ export async function buildMobileTemplatesListResponse(
       const response = NextResponse.json(
         buildEmptyPayload({ locale, categories, page, pageSize }),
         {
-          headers: {
-            "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
-          },
+          headers: audience.headers(MOBILE_PUBLIC_JSON_CACHE_SHORT),
         }
       );
       return attachRequestIdHeader(response, requestId);
@@ -173,16 +173,14 @@ export async function buildMobileTemplatesListResponse(
       const response = NextResponse.json(
         buildEmptyPayload({ locale, categories, page, pageSize }),
         {
-          headers: {
-            "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
-          },
+          headers: audience.headers(MOBILE_PUBLIC_JSON_CACHE_SHORT),
         }
       );
       return attachRequestIdHeader(response, requestId);
     }
 
     const baseWhere = {
-      status: "published",
+      ...audience.statusWhere,
       ...publishedScopeWhere,
       ...(categoryValue ? { category: categoryValue } : {}),
       ...(subCategoryValue ? { subCategory: subCategoryValue } : {}),
@@ -195,11 +193,13 @@ export async function buildMobileTemplatesListResponse(
     const templateSelect = {
       id: true,
       name: true,
+      status: true,
       version: true,
       category: true,
       subCategory: true,
       tags: true,
       canvasSize: true,
+      pageCount: true,
       thumbnailDataUrl: true,
       previewVideoUrl: true,
       previewPosterUrl: true,
@@ -245,6 +245,7 @@ export async function buildMobileTemplatesListResponse(
       const assetResolver = createTemplateAssetResolver(request, template);
       return {
         ...toMobileTemplate(template, { assetResolver, mediaUrlResolver, includeProject: false }),
+        status: String(template.status || ""),
         category: localized.categoryLabel,
         subCategory: localized.subCategoryLabel,
         categoryId: localized.categoryId,
@@ -340,11 +341,7 @@ export async function buildMobileTemplatesListResponse(
         hasNextPage,
         hasPrevPage,
       },
-      {
-        headers: {
-          "Cache-Control": MOBILE_PUBLIC_JSON_CACHE_SHORT,
-        },
-      }
+      { headers: audience.headers(MOBILE_PUBLIC_JSON_CACHE_SHORT) }
     );
     return attachRequestIdHeader(response, requestId);
   } catch (error) {

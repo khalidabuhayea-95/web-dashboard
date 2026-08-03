@@ -18,6 +18,12 @@ export async function GET() {
     const session = await getEditorSession();
     if (session.error) return session.error;
 
+    // Admin-only end to end: these are auth/credential settings, and the only
+    // pages that read them (/settings, /mobile-settings) are admin-gated.
+    if (session.role !== "admin") {
+      return handleForbidden("Only admins can view mobile auth settings");
+    }
+
     logger.info("Mobile auth settings requested", {
       userId: session.userId,
     });
@@ -25,7 +31,7 @@ export async function GET() {
     const settings = await getMobileAuthSettings();
     return NextResponse.json({
       settings: toPublicMobileAuthSettings(settings),
-      canEdit: session.role === "admin",
+      canEdit: true,
     });
   } catch (error) {
     return handleApiError(error, "Failed to retrieve mobile auth settings");

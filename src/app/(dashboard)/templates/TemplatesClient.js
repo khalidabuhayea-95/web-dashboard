@@ -7,6 +7,7 @@ import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/form";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
+import { buildTemplateShareUrl } from "@/lib/shareLink";
 import {
   TEMPLATE_CATEGORY_SETTINGS,
   getTemplateCategoryOptions,
@@ -213,7 +214,11 @@ export default function TemplatesClient() {
   const [selectedTemplateIds, setSelectedTemplateIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
   const [previewPopup, setPreviewPopup] = useState(null);
+  const [sharePopup, setSharePopup] = useState(null);
+  const [shareCopyState, setShareCopyState] = useState("idle");
   const selectAllRef = useRef(null);
+  const shareInputRef = useRef(null);
+  const shareCopyTimeoutRef = useRef(null);
 
   const categoryOptions = useMemo(
     () => getTemplateCategoryOptions(taxonomySettings, locale),
@@ -459,6 +464,80 @@ export default function TemplatesClient() {
     }
   }, [deleteTemplateById, loadTemplates, selectedTemplateIdsSet, visibleTemplateIds]);
 
+  const closeSharePopup = useCallback(() => {
+    setSharePopup(null);
+    setShareCopyState("idle");
+    if (shareCopyTimeoutRef.current !== null) {
+      window.clearTimeout(shareCopyTimeoutRef.current);
+      shareCopyTimeoutRef.current = null;
+    }
+  }, []);
+
+  const openSharePopup = useCallback((template) => {
+    const templateId = String(template?.id || "").trim();
+    if (!templateId) return;
+    const shareUrl = buildTemplateShareUrl(templateId);
+    if (!shareUrl) return;
+    setShareCopyState("idle");
+    setSharePopup({
+      name: String(template?.name || "").trim(),
+      status: String(template?.status || "").trim(),
+      url: shareUrl,
+    });
+  }, []);
+
+  const handleCopyShareLink = useCallback(async () => {
+    const shareUrl = String(sharePopup?.url || "").trim();
+    if (!shareUrl) return;
+    if (shareCopyTimeoutRef.current !== null) {
+      window.clearTimeout(shareCopyTimeoutRef.current);
+      shareCopyTimeoutRef.current = null;
+    }
+    try {
+      // `navigator.clipboard` is undefined outside a secure context (plain http on a LAN IP),
+      // and `writeText` rejects when the document is not focused. Both land here.
+      if (typeof navigator === "undefined" || !navigator.clipboard?.writeText) {
+        throw new Error("Clipboard unavailable.");
+      }
+      await navigator.clipboard.writeText(shareUrl);
+      setShareCopyState("copied");
+      shareCopyTimeoutRef.current = window.setTimeout(() => {
+        setShareCopyState((current) => (current === "copied" ? "idle" : current));
+        shareCopyTimeoutRef.current = null;
+      }, 1800);
+    } catch (_error) {
+      setShareCopyState("error");
+      const input = shareInputRef.current;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+    }
+  }, [sharePopup]);
+
+  useEffect(() => {
+    if (!sharePopup) return undefined;
+    const input = shareInputRef.current;
+    if (input) {
+      input.focus();
+      input.select();
+    }
+    const handleKeyDown = (event) => {
+      if (event.key === "Escape") closeSharePopup();
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [closeSharePopup, sharePopup]);
+
+  useEffect(() => {
+    return () => {
+      if (shareCopyTimeoutRef.current !== null) {
+        window.clearTimeout(shareCopyTimeoutRef.current);
+        shareCopyTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const formatUpdatedAt = (value) => {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) return "-";
@@ -556,7 +635,7 @@ export default function TemplatesClient() {
                   <TableHeaderCell className="w-24 whitespace-nowrap">Status</TableHeaderCell>
                   <TableHeaderCell className="w-36 whitespace-nowrap">Updated</TableHeaderCell>
                   <TableHeaderCell className="w-48 whitespace-nowrap">Created by</TableHeaderCell>
-                  <TableHeaderCell className="w-24 whitespace-nowrap text-right">Actions</TableHeaderCell>
+                  <TableHeaderCell className="w-64 whitespace-nowrap text-right">Actions</TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -619,7 +698,14 @@ export default function TemplatesClient() {
                       )}
                     </TableCell>
                     <TableCell className="font-semibold">
-                      <div className="truncate">{template.name}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="truncate">{template.name}</div>
+                        {Number(template.pageCount) > 1 ? (
+                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
+                            {Number(template.pageCount)} pages
+                          </span>
+                        ) : null}
+                      </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{template.category || "general"}</TableCell>
                     <TableCell className="whitespace-nowrap">{template.subCategory || "general"}</TableCell>
@@ -647,6 +733,14 @@ export default function TemplatesClient() {
                           variant="secondary"
                         >
                           Edit
+                        </Button>
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => openSharePopup(template)}
+                          title={`Copy the public share link for ${template.name}`}
+                        >
+                          Share
                         </Button>
                         <Button
                           type="button"
@@ -740,6 +834,73 @@ export default function TemplatesClient() {
                 />
               )}
             </div>
+          </div>
+        </div>
+      ) : null}
+      {sharePopup ? (
+        <div
+          className="fixed inset-0 z-50 bg-black/35"
+          onClick={closeSharePopup}
+          role="presentation"
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Template share link"
+            className="absolute left-1/2 top-1/2 w-[min(420px,92vw)] -translate-x-1/2 -translate-y-1/2 rounded-xl border border-[#d0d7e2] bg-white p-4 shadow-xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="mb-3 flex items-start justify-between gap-2">
+              <div className="min-w-0">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#667085]">
+                  Share link
+                </p>
+                <div className="mt-0.5 truncate text-sm font-semibold text-[#1f2937]">
+                  {sharePopup.name || "Untitled template"}
+                </div>
+              </div>
+              <button
+                type="button"
+                className="shrink-0 rounded px-2 py-1 text-sm text-[#4b5563] hover:bg-[#eef2f8]"
+                onClick={closeSharePopup}
+              >
+                Close
+              </button>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <input
+                ref={shareInputRef}
+                type="text"
+                readOnly
+                value={sharePopup.url}
+                aria-label="Public share link"
+                onFocus={(event) => event.currentTarget.select()}
+                onClick={(event) => event.currentTarget.select()}
+                className="min-w-0 flex-1 rounded border border-[#d7dbe1] bg-[#f6f7f9] px-2 py-2 text-[12px] text-[#1f2937] outline-none focus:border-[#2f6fca]"
+              />
+              <Button type="button" variant="secondary" onClick={handleCopyShareLink}>
+                {shareCopyState === "copied" ? "Copied" : "Copy"}
+              </Button>
+            </div>
+
+            {shareCopyState === "error" ? (
+              <p className="mt-2 rounded border border-[#fca5a5] bg-[#fef2f2] px-2 py-1 text-[12px] text-[#b42318]">
+                Could not reach the clipboard (this needs https or localhost). The link is selected
+                above — copy it manually.
+              </p>
+            ) : null}
+
+            {sharePopup.status === "published" ? (
+              <p className="mt-2 text-[12px] leading-snug text-[#667085]">
+                Opens the template in the Nayroz app when installed, otherwise a public web page.
+              </p>
+            ) : (
+              <p className="mt-2 rounded border border-[#fcd34d] bg-[#fffbeb] px-2 py-1 text-[12px] leading-snug text-[#92400e]">
+                This template is a draft, so the link will 404 for anyone you send it to. Publish it
+                first to make the link work.
+              </p>
+            )}
           </div>
         </div>
       ) : null}

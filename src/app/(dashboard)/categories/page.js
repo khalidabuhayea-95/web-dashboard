@@ -7,6 +7,8 @@ export const metadata = {
 };
 
 export default async function CategoriesPage() {
-  const { role } = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
-  return <SettingsClient canEdit={role === Roles.ADMIN} />;
+  // Taxonomy is content, not configuration: both roles that reach this page can
+  // edit it. The matching API routes apply the same rule.
+  await requireRole([Roles.ADMIN, Roles.DESIGNER]);
+  return <SettingsClient canEdit />;
 }

@@ -3219,7 +3219,29 @@
       };
 
       let bestPage = null;
-      const pageNodes = Array.from(document.querySelectorAll("[data-page-id]"));
+      // Multi-page import: the orchestrator scrapes one page at a time, pinning each pass to a
+      // specific [data-page-id] instead of the viewport-center score heuristic. In virtualized
+      // single-page view the attribute is just the viewport slot (always "0"), so the node is
+      // ALSO accepted when it CONTAINS the target page's expected LB element ids.
+      const targetPageId = String((runtimeOptions && runtimeOptions.targetPageId) || "").trim();
+      const expectedLbIds = Array.isArray(runtimeOptions && runtimeOptions.expectedLbIds)
+        ? runtimeOptions.expectedLbIds.map((id) => String(id || "")).filter(Boolean)
+        : [];
+      const nodeContainsExpectedId = (page) =>
+        expectedLbIds.some((id) => {
+          try {
+            return Boolean(page.querySelector("#" + CSS.escape(id)));
+          } catch (_e) {
+            return false;
+          }
+        });
+      const allPageNodes = Array.from(document.querySelectorAll("[data-page-id]"));
+      const pageNodes = targetPageId
+        ? allPageNodes.filter((page) => {
+            if (String(page.getAttribute("data-page-id") || "") === targetPageId) return true;
+            return expectedLbIds.length > 0 && nodeContainsExpectedId(page);
+          })
+        : allPageNodes;
       pageNodes.forEach((page) => {
         const rect = page.getBoundingClientRect();
         if (!isVisible(page, rect)) return;
@@ -3278,6 +3300,15 @@
           };
         }
       });
+
+      // Pinned-page pass with no matching node on screen: refuse rather than silently capturing
+      // whichever canvas scores best (that imports the WRONG page).
+      if (targetPageId && !bestPage) {
+        return {
+          ok: false,
+          error: `Target page (${targetPageId}) is not on screen.`,
+        };
+      }
 
       const selectedCanvas = bestPage ? null : bestCanvas;
 
@@ -5083,4 +5114,141 @@
   }
 
   globalThis.__canvaImporterGetCaptureMetaFromTab = canvaImporterGetCaptureMeta;
+
+  // Ordered page inventory for the multi-page orchestrator. Document order matches Canva's page
+  // order (page 1 first); each entry carries the page's design-space dimensions when resolvable.
+  globalThis.__canvaImporterListPages = function () {
+    try {
+      const parsePxLocal = (value) => {
+        const parsed = Number.parseFloat(String(value || "").replace("px", ""));
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+      };
+      const parseStyleDimensionLocal = (styleText, dimension) => {
+        const match = String(styleText || "").match(
+          new RegExp(`${dimension}:\\s*([0-9.]+)px`, "i")
+        );
+        return match ? Number.parseFloat(match[1]) : 0;
+      };
+      return Array.from(document.querySelectorAll("[data-page-id]")).map((page, index) => {
+        const rect = page.getBoundingClientRect();
+        let designWidth = 0;
+        let designHeight = 0;
+        const scaleRoot = page.querySelector('div[style*="transform: scale"]');
+        if (scaleRoot) {
+          const styleText = scaleRoot.getAttribute("style") || "";
+          designWidth = parseStyleDimensionLocal(styleText, "width");
+          designHeight = parseStyleDimensionLocal(styleText, "height");
+        }
+        if (!designWidth || !designHeight) {
+          const pageStyleText = page.getAttribute("style") || "";
+          designWidth =
+            parseStyleDimensionLocal(pageStyleText, "width") || parsePxLocal(page.style.width) || rect.width;
+          designHeight =
+            parseStyleDimensionLocal(pageStyleText, "height") || parsePxLocal(page.style.height) || rect.height;
+        }
+        return {
+          index,
+          pageId: String(page.getAttribute("data-page-id") || ""),
+          top: rect.top,
+          width: Math.max(1, Math.round(designWidth || 0)),
+          height: Math.max(1, Math.round(designHeight || 0)),
+          layerNodeCount: page.querySelectorAll('[id^="LB"]').length,
+        };
+      });
+    } catch (_error) {
+      return [];
+    }
+  };
+
+  // Locates the bottom-strip page thumbnail for 1-based page number N. Canva's single-page view
+  // switches pages ONLY through these thumbnails, and their handlers ignore untrusted events —
+  // the background clicks the returned viewport coordinates through chrome.debugger (trusted
+  // input). Locale-agnostic: matches any aria-label ENDING with the page number ("Page 2",
+  // "صفحة 2", ...), skipping tiny live-region nodes.
+  globalThis.__canvaImporterLocatePageThumb = function (pageNumber) {
+    try {
+      const target = Number(pageNumber);
+      if (!Number.isInteger(target) || target < 1) return null;
+      const matches = Array.from(document.querySelectorAll("[aria-label]"))
+        .map((node) => ({ node, label: String(node.getAttribute("aria-label") || "").trim() }))
+        .filter(({ label }) => new RegExp(`(^|\\s)${target}$`).test(label) && label.length < 48);
+      for (const { node } of matches) {
+        let rect = node.getBoundingClientRect();
+        if (rect.width < 16 || rect.height < 16) continue;
+        if (rect.bottom < 0 || rect.top > window.innerHeight || rect.right < 0 || rect.left > window.innerWidth) {
+          node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+          rect = node.getBoundingClientRect();
+        }
+        return {
+          x: rect.left + rect.width / 2,
+          y: rect.top + rect.height / 2,
+          label: String(node.getAttribute("aria-label") || ""),
+        };
+      }
+      return null;
+    } catch (_error) {
+      return null;
+    }
+  };
+
+  // True when the currently mounted page contains any of the expected LB element ids — the
+  // locale/DOM-agnostic way to know WHICH design page is on screen (the [data-page-id]
+  // attribute is just the viewport slot index in single-page view, always "0").
+  globalThis.__canvaImporterDisplayedPageMatches = function (expectedIds) {
+    try {
+      const scope = document.querySelector("[data-page-id]") || document;
+      return (Array.isArray(expectedIds) ? expectedIds : []).some((id) => {
+        try {
+          return Boolean(scope.querySelector("#" + CSS.escape(String(id))));
+        } catch (_e) {
+          return false;
+        }
+      });
+    } catch (_error) {
+      return false;
+    }
+  };
+
+  // Scrolls a page into view ahead of its scrape/capture pass. Current Canva editors
+  // VIRTUALIZE pages — only the on-screen page's [data-page-id] node exists (attribute value =
+  // page INDEX), so when the target is missing this nudges the design scroller forward to make
+  // the next page mount; the caller re-invokes until "found". Returns "found" | "scrolled".
+  globalThis.__canvaImporterScrollToPage = function (pageId) {
+    try {
+      const target = String(pageId || "").replace(/"/g, '\\"');
+      const node = document.querySelector(`[data-page-id="${target}"]`);
+      if (node) {
+        node.scrollIntoView({ block: "center", inline: "center", behavior: "instant" });
+        return "found";
+      }
+
+      const scrollerOf = (start) => {
+        let current = start && start.parentElement;
+        while (current) {
+          const style = window.getComputedStyle(current);
+          if (
+            /(auto|scroll)/.test(style.overflowY) &&
+            current.scrollHeight > current.clientHeight + 10
+          ) {
+            return current;
+          }
+          current = current.parentElement;
+        }
+        return document.scrollingElement || document.documentElement;
+      };
+
+      const pageNodes = Array.from(document.querySelectorAll("[data-page-id]"));
+      const anchor = pageNodes[pageNodes.length - 1] || document.querySelector('[id^="LB"]');
+      const scroller = scrollerOf(anchor);
+      if (anchor) {
+        anchor.scrollIntoView({ block: "end", behavior: "instant" });
+      }
+      if (scroller) {
+        scroller.scrollTop += Math.max(200, Math.round(scroller.clientHeight * 0.85));
+      }
+      return "scrolled";
+    } catch (_error) {
+      return "scrolled";
+    }
+  };
 })();

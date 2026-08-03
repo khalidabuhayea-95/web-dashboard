@@ -1530,6 +1530,7 @@ export async function POST(request) {
 
   let sanitizedImportPayload;
   let forcedSnapshotFallbackWarning = "";
+  let forcedFullSnapshotFallback = false;
   const layerCropFallbackWarnings = [];
   let initialSanitizeError = "";
   try {
@@ -1607,6 +1608,8 @@ export async function POST(request) {
     }
 
     if (sanitizedImportPayload) {
+      // Per-layer crop replacement keeps the object list (and therefore the editor metadata —
+      // layer tree, fonts, warnings, pages) fully valid; only warn.
       forcedSnapshotFallbackWarning =
         `Layer asset rewrite failed (${initialSanitizeError || "protected source"}); protected layers were replaced from fallback crops.`;
     }
@@ -1649,6 +1652,9 @@ export async function POST(request) {
       });
       forcedSnapshotFallbackWarning =
         `Layer asset rewrite failed (${initialSanitizeError || "protected source"}); imported as full snapshot fallback.`;
+      // The whole design collapsed to one snapshot image — the editor metadata no longer
+      // describes the stored objects, so it must be discarded below.
+      forcedFullSnapshotFallback = true;
     } catch (fallbackError) {
       return withCorsRequest(
         NextResponse.json(
@@ -1730,10 +1736,23 @@ export async function POST(request) {
     Array.isArray(fabricData.objects) &&
     fabricData.objects.length > 0;
   const fabricObjects = hasFabricData ? fabricData.objects : [];
-  const metadataFromEditor =
-    forcedSnapshotFallbackWarning.length > 0
-      ? null
-      : readImportMetadataFromEditorData(editorData);
+  const metadataFromEditor = forcedFullSnapshotFallback
+    ? null
+    : readImportMetadataFromEditorData(editorData);
+  // Per-page previews the extension captured while walking the design ({ pageId: dataUrl }).
+  // Dropped alongside the rest of the editor metadata when the import collapsed to one snapshot.
+  const incomingPageThumbnails = forcedFullSnapshotFallback
+    ? null
+    : (() => {
+        const pages = Array.isArray(editorData?.pages) ? editorData.pages : [];
+        const map = {};
+        pages.forEach((page, index) => {
+          const dataUrl = String(page?.thumbnailDataUrl || "").trim();
+          if (!dataUrl.startsWith("data:image/")) return;
+          map[String(page?.id || `canva-page-${index + 1}`)] = dataUrl;
+        });
+        return Object.keys(map).length > 0 ? map : null;
+      })();
   const filteredEditorLayerTree =
     Array.isArray(metadataFromEditor?.layerTree) && metadataFromEditor.layerTree.length > 0
       ? metadataFromEditor.layerTree.filter((node) => {
@@ -1790,6 +1809,9 @@ export async function POST(request) {
         sourceWidth: dimensions.sourceWidth,
         sourceHeight: dimensions.sourceHeight,
       },
+      // Multi-page imports: ordered page descriptors matching the fabric objects'
+      // importPageIndex tags. Absent for single-page imports.
+      pages: metadataFromEditor?.pages,
       layerTree: defaultLayerTree.length > 0 ? defaultLayerTree : singleSnapshotLayerTree,
       layerStats: metadataFromEditor?.layerStats || computedStats,
       usedFonts:
@@ -1887,6 +1909,7 @@ export async function POST(request) {
       tags: hasFabricData ? ["canva", "imported", "extension", "layers", "parity-v2"] : ["canva", "imported", "extension", "parity-v2"],
       action: "import-canva-extension",
       importMetadata,
+      pageThumbnails: incomingPageThumbnails,
     });
 
     const importedElementSummary = { imported: [], skipped: [] };

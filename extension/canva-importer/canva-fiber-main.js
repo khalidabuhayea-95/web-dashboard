@@ -66,27 +66,6 @@
       };
       findElements(doc, 0);
       if (!elementsArray) return result;
-      const allElements = [];
-      const collected = new Set();
-      const collect = (items, depth) => {
-        if (!Array.isArray(items) || depth > 10) return;
-        for (const el of items) {
-          if (!el || typeof el !== "object" || collected.has(el)) continue;
-          collected.add(el);
-          allElements.push(el);
-          for (const key in el) {
-            try {
-              const val = el[key];
-              if (Array.isArray(val) && val.some((it) => it && typeof it === "object" && "type" in it)) {
-                collect(val, depth + 1);
-              }
-            } catch (_e) {
-              /* ignore */
-            }
-          }
-        }
-      };
-      collect(elementsArray, 0);
 
       // Canva custom "create an animation" motion paths are DELTA-encoded keyframe streams: a time
       // array (per-sample ms deltas, all ≥0, summing ≈ durationUs/1000) + x/y px delta arrays.
@@ -404,29 +383,60 @@
       // zOrder: Canva's element array order IS the paint order (index 0 = bottom). Stamped
       // EXPLICITLY because the model crosses executeScript arg serialization, which SORTS object
       // keys alphabetically — Object.keys() insertion order does NOT survive the boundary.
-      let zOrder = 0;
-      for (const el of allElements) {
-        const id = String((el && el.id) || "");
-        if (!id || !/^LB/.test(id)) continue;
-        result[id] = {
-          zOrder: zOrder++,
-          type: typeof el.type === "string" ? el.type : "",
-          left: num(el.left),
-          top: num(el.top),
-          width: num(el.width),
-          height: num(el.height),
-          rotation: num(el.rotation),
-          transparency: num(el.transparency),
-          startUs: num(el.startUs),
-          durationUs: num(el.durationUs),
-          animation: extractAnimation(el),
-          text: el.type === "text" ? extractText(el) : null,
-          image: el.type === "rect" ? extractImage(el) : null,
-          shape: el.type === "shape" ? extractShape(el) : null,
-          line: el.type === "line" ? extractLine(el) : null,
-          border: el.type === "shape" ? extractBorder(el) : null,
+      const mapElement = (el, zOrder) => ({
+        zOrder,
+        type: typeof el.type === "string" ? el.type : "",
+        left: num(el.left),
+        top: num(el.top),
+        width: num(el.width),
+        height: num(el.height),
+        rotation: num(el.rotation),
+        transparency: num(el.transparency),
+        startUs: num(el.startUs),
+        durationUs: num(el.durationUs),
+        animation: extractAnimation(el),
+        text: el.type === "text" ? extractText(el) : null,
+        image: el.type === "rect" ? extractImage(el) : null,
+        shape: el.type === "shape" ? extractShape(el) : null,
+        line: el.type === "line" ? extractLine(el) : null,
+        border: el.type === "shape" ? extractBorder(el) : null,
+      });
+      const buildElementMap = (rootArray) => {
+        const out = {};
+        if (!Array.isArray(rootArray)) return out;
+        const localElements = [];
+        const localCollected = new Set();
+        const collectLocal = (items, depth) => {
+          if (!Array.isArray(items) || depth > 10) return;
+          for (const el of items) {
+            if (!el || typeof el !== "object" || localCollected.has(el)) continue;
+            localCollected.add(el);
+            localElements.push(el);
+            for (const key in el) {
+              try {
+                const val = el[key];
+                if (
+                  Array.isArray(val) &&
+                  val.some((it) => it && typeof it === "object" && "type" in it)
+                ) {
+                  collectLocal(val, depth + 1);
+                }
+              } catch (_e) {
+                /* ignore */
+              }
+            }
+          }
         };
-      }
+        collectLocal(rootArray, 0);
+        let zOrder = 0;
+        for (const el of localElements) {
+          const id = String((el && el.id) || "");
+          if (!id || !/^LB/.test(id)) continue;
+          out[id] = mapElement(el, zOrder++);
+        }
+        return out;
+      };
+      Object.assign(result, buildElementMap(elementsArray));
 
       // ── Page BACKGROUND clip track (video designs) ──────────────────────────────────────────────
       // The full-canvas backdrop of a Canva video is NOT an LB element — it's a per-scene clip array
@@ -462,10 +472,11 @@
             }
           }
         })(doc, 0);
-        if (pageObj) {
+        const findClipsOnPageObj = (targetPageObj) => {
+          if (!targetPageObj) return null;
           let clips = null;
-          for (const k of Object.keys(pageObj)) {
-            const v = pageObj[k];
+          for (const k of Object.keys(targetPageObj)) {
+            const v = targetPageObj[k];
             if (!Array.isArray(v) || !v.length) continue;
             const looksLikeClips = v.every(
               (it) =>
@@ -479,66 +490,187 @@
               break;
             }
           }
-          if (clips) {
-            const findVideoRef = (clip) => {
-              for (const k of Object.keys(clip)) {
-                const v = clip[k];
-                if (!v || typeof v !== "object" || Array.isArray(v)) continue;
-                // a video clip object carries a VA… reference + trim/autoplay/volume-ish fields
-                const refKey = Object.keys(v).find(
-                  (kk) => typeof v[kk] === "string" && /^VA/.test(v[kk])
-                );
-                if (refKey && ("trim" in v || "autoplay" in v || "volume" in v)) {
-                  let rb = null;
-                  for (const kk of Object.keys(v)) {
-                    const cand = v[kk];
-                    if (
-                      cand &&
-                      typeof cand === "object" &&
-                      Number.isFinite(Number(cand.width)) &&
-                      Number.isFinite(Number(cand.left)) &&
-                      Number(cand.width) > 0
-                    ) {
-                      rb = {
-                        left: Number(cand.left) || 0,
-                        top: Number(cand.top) || 0,
-                        width: Number(cand.width) || 0,
-                        height: Number(cand.height) || 0,
-                      };
-                      break;
-                    }
+          if (!clips) return null;
+          const findVideoRef = (clip) => {
+            for (const k of Object.keys(clip)) {
+              const v = clip[k];
+              if (!v || typeof v !== "object" || Array.isArray(v)) continue;
+              // a video clip object carries a VA… reference + trim/autoplay/volume-ish fields
+              const refKey = Object.keys(v).find(
+                (kk) => typeof v[kk] === "string" && /^VA/.test(v[kk])
+              );
+              if (refKey && ("trim" in v || "autoplay" in v || "volume" in v)) {
+                let rb = null;
+                for (const kk of Object.keys(v)) {
+                  const cand = v[kk];
+                  if (
+                    cand &&
+                    typeof cand === "object" &&
+                    Number.isFinite(Number(cand.width)) &&
+                    Number.isFinite(Number(cand.left)) &&
+                    Number(cand.width) > 0
+                  ) {
+                    rb = {
+                      left: Number(cand.left) || 0,
+                      top: Number(cand.top) || 0,
+                      width: Number(cand.width) || 0,
+                      height: Number(cand.height) || 0,
+                    };
+                    break;
                   }
-                  return { videoId: v[refKey], transparency: Number(v.transparency) || 0, rb };
                 }
+                return { videoId: v[refKey], transparency: Number(v.transparency) || 0, rb };
               }
-              return null;
-            };
-            const outClips = [];
-            for (const clip of clips) {
-              outClips.push({
-                durationMs: Math.round(Number(clip.durationUs) / 1000),
-                color: typeof clip.color === "string" ? clip.color : null,
-                video: findVideoRef(clip),
-              });
             }
-            const posters = {};
+            return null;
+          };
+          const outClips = [];
+          for (const clip of clips) {
+            outClips.push({
+              durationMs: Math.round(Number(clip.durationUs) / 1000),
+              color: typeof clip.color === "string" ? clip.color : null,
+              video: findVideoRef(clip),
+            });
+          }
+          return outClips;
+        };
+        const posters = {};
+        try {
+          for (const entry of performance.getEntriesByType("resource")) {
+            const m = String(entry.name || "").match(
+              /https:\/\/video-public\.canva\.com\/([^/]+)\/([pl])\/[^?#]+\.jpe?g/i
+            );
+            if (!m) continue;
+            const [url, vid, tier] = [entry.name, m[1], m[2].toLowerCase()];
+            // prefer the larger /l/ poster over /p/
+            if (!posters[vid] || (tier === "l" && !/\/l\//.test(posters[vid]))) posters[vid] = url;
+          }
+        } catch (_e) {
+          /* resource timing unavailable */
+        }
+        if (pageObj) {
+          const outClips = findClipsOnPageObj(pageObj);
+          if (outClips && outClips.some((c) => c.video)) {
+            result.__background = { clips: outClips, posters };
+          }
+        }
+
+        // ── Multi-page designs: per-page element maps ─────────────────────────────────────────────
+        // doc.pages (when it is a real array with 2+ entries) holds one subtree per design page in
+        // page order. Each subtree gets the same structural walk as the whole-doc pass: first
+        // LB-element array = that page's paint-ordered elements; the object holding it = the page
+        // object carrying the background clip track. Page 1's map ALSO stays merged at the result
+        // top level so every single-page consumer keeps working unchanged.
+        try {
+          // doc.pages is an ARRAY on older Canva models but an iterable keyed COLLECTION
+          // ({type, domain, ctx, cells, ...}) on current ones — spreading yields the page
+          // objects ({id, elements, ...}) in page order. Map-like [key, page] pairs are
+          // unwrapped for safety.
+          let pagesArray = Array.isArray(doc.pages) ? doc.pages : null;
+          if (
+            !pagesArray &&
+            doc.pages &&
+            typeof doc.pages === "object" &&
+            typeof doc.pages[Symbol.iterator] === "function"
+          ) {
             try {
-              for (const entry of performance.getEntriesByType("resource")) {
-                const m = String(entry.name || "").match(
-                  /https:\/\/video-public\.canva\.com\/([^/]+)\/([pl])\/[^?#]+\.jpe?g/i
-                );
-                if (!m) continue;
-                const [url, vid, tier] = [entry.name, m[1], m[2].toLowerCase()];
-                // prefer the larger /l/ poster over /p/
-                if (!posters[vid] || (tier === "l" && !/\/l\//.test(posters[vid]))) posters[vid] = url;
-              }
-            } catch (_e) {
-              /* resource timing unavailable */
-            }
-            if (outClips.some((c) => c.video)) {
-              result.__background = { clips: outClips, posters };
+              pagesArray = [...doc.pages];
+            } catch (_spreadError) {
+              pagesArray = null;
             }
           }
+          if (
+            pagesArray &&
+            pagesArray.length &&
+            Array.isArray(pagesArray[0]) &&
+            pagesArray[0].length === 2 &&
+            pagesArray[0][1] &&
+            typeof pagesArray[0][1] === "object"
+          ) {
+            pagesArray = pagesArray.map((entry) => entry[1]);
+          }
+          if (pagesArray && pagesArray.length > 1) {
+            const findElementsArrayIn = (root) => {
+              let found = null;
+              const localSeen = new Set();
+              (function walk(obj, depth) {
+                if (found || !obj || typeof obj !== "object" || depth > 14 || localSeen.has(obj)) {
+                  return;
+                }
+                localSeen.add(obj);
+                if (Array.isArray(obj)) {
+                  if (
+                    obj.length &&
+                    obj.some(
+                      (it) => it && typeof it.id === "string" && /^LB/.test(it.id) && "animation" in it
+                    )
+                  ) {
+                    found = obj;
+                    return;
+                  }
+                  for (const it of obj) walk(it, depth + 1);
+                } else {
+                  for (const key in obj) {
+                    try {
+                      walk(obj[key], depth + 1);
+                    } catch (_e) {
+                      /* observable getters can throw */
+                    }
+                  }
+                }
+              })(root, 0);
+              return found;
+            };
+            const findPageObjIn = (root) => {
+              let found = null;
+              const localSeen = new Set();
+              (function walk(n, depth) {
+                if (found || depth > 12 || !n || typeof n !== "object" || localSeen.has(n)) return;
+                localSeen.add(n);
+                if (!Array.isArray(n)) {
+                  for (const k of Object.keys(n)) {
+                    const v = n[k];
+                    if (
+                      Array.isArray(v) &&
+                      v.length &&
+                      v.some((it) => it && typeof it.id === "string" && /^LB/.test(it.id))
+                    ) {
+                      found = n;
+                      return;
+                    }
+                  }
+                }
+                const keys = Array.isArray(n) ? [...n.keys()] : Object.keys(n);
+                for (const k of keys) {
+                  try {
+                    walk(n[k], depth + 1);
+                  } catch (_e) {
+                    /* ignore */
+                  }
+                }
+              })(root, 0);
+              return found;
+            };
+            const pages = [];
+            for (let pageIndex = 0; pageIndex < pagesArray.length; pageIndex += 1) {
+              const pageRoot = pagesArray[pageIndex];
+              const pageElements = buildElementMap(findElementsArrayIn(pageRoot));
+              const pageClips = findClipsOnPageObj(findPageObjIn(pageRoot));
+              pages.push({
+                index: pageIndex,
+                elements: pageElements,
+                background:
+                  pageClips && pageClips.some((c) => c.video)
+                    ? { clips: pageClips, posters }
+                    : null,
+              });
+            }
+            if (pages.some((p) => Object.keys(p.elements).length > 0)) {
+              result.__pages = pages;
+            }
+          }
+        } catch (_pagesError) {
+          /* best-effort */
         }
       } catch (_bgError) {
         /* best-effort */

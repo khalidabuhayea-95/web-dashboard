@@ -250,14 +250,108 @@ async function getLargestCanvasCapture(page) {
   };
 }
 
+// Canva fronts automated browsers with a Cloudflare interstitial ("We'll have you designing
+// again soon" / Turnstile "Verifying..."). That page contains canvases of its own, so a plain
+// largest-canvas wait happily captures the CHALLENGE SCREEN and imports garbage. Detect it and
+// keep waiting instead — the non-interactive check usually clears on its own, and an
+// interactive one can be clicked in the headed window.
+async function isChallengePage(page) {
+  try {
+    return await page.evaluate(() => {
+      const title = String(document.title || "").toLowerCase();
+      const bodyText = String(document.body?.innerText || "").slice(0, 4000).toLowerCase();
+      return (
+        title.includes("just a moment") ||
+        bodyText.includes("verifying...") ||
+        bodyText.includes("have you designing again soon") ||
+        bodyText.includes("verify you are human") ||
+        Boolean(document.querySelector('iframe[src*="challenges.cloudflare.com"]'))
+      );
+    });
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function isCanvaEditorReady(page) {
+  try {
+    return await page.evaluate(
+      () => document.querySelectorAll("[data-page-id]").length > 0
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
 async function waitForCanvaCanvas(page, timeoutMs) {
   const start = Date.now();
+  let challengeLogged = false;
   while (Date.now() - start < timeoutMs) {
-    const capture = await getLargestCanvasCapture(page);
-    if (capture) return capture;
+    if (await isChallengePage(page)) {
+      if (!challengeLogged) {
+        challengeLogged = true;
+        console.log(
+          "Cloudflare verification detected — waiting it out. If a checkbox appears in the browser window, click it."
+        );
+      }
+      await page.waitForTimeout(1500);
+      continue;
+    }
+    // Only capture once the real editor DOM is present; any earlier canvas belongs to a
+    // loading/challenge/preview page.
+    if (await isCanvaEditorReady(page)) {
+      const capture = await getLargestCanvasCapture(page);
+      if (capture) return capture;
+    }
     await page.waitForTimeout(1200);
   }
   return null;
+}
+
+const MAX_IMPORT_PAGES = 10;
+
+// Multi-page designs: capture every [data-page-id] node (document order = Canva page order)
+// as its own snapshot. Returns null for single-page designs so the legacy largest-canvas
+// capture keeps handling them.
+async function captureCanvaPageNodes(page, maxPages = MAX_IMPORT_PAGES) {
+  let pageIds = [];
+  try {
+    pageIds = await page.evaluate(() =>
+      Array.from(document.querySelectorAll("[data-page-id]"))
+        .map((node) => String(node.getAttribute("data-page-id") || ""))
+        .filter(Boolean)
+    );
+  } catch (_error) {
+    return null;
+  }
+  const orderedIds = [...new Set(pageIds)];
+  if (orderedIds.length <= 1) return null;
+
+  const captures = [];
+  const truncated = Math.max(0, orderedIds.length - maxPages);
+  for (const pageId of orderedIds.slice(0, maxPages)) {
+    const locator = page
+      .locator(`[data-page-id="${pageId.replace(/"/g, '\\"')}"]`)
+      .first();
+    try {
+      await locator.scrollIntoViewIfNeeded({ timeout: 10_000 });
+      // Let Canva lazy-render the freshly scrolled page before shooting it.
+      await page.waitForTimeout(800);
+      const box = await locator.boundingBox();
+      if (!box || box.width < 60 || box.height < 60) continue;
+      const screenshotBuffer = await locator.screenshot({ type: "png", timeout: 20_000 });
+      captures.push({
+        pageId,
+        screenshotBuffer,
+        cssWidth: Math.round(box.width),
+        cssHeight: Math.round(box.height),
+      });
+    } catch (error) {
+      console.warn(`Page capture failed for Canva page ${pageId}: ${error.message}`);
+    }
+  }
+  if (captures.length <= 1) return null;
+  return { captures, truncated };
 }
 
 async function captureCanva(url, options) {
@@ -292,6 +386,11 @@ async function captureCanva(url, options) {
       }
     }
     if (!capture) {
+      if (await isChallengePage(page)) {
+        throw new Error(
+          "Blocked by Canva's Cloudflare verification. Re-run and complete the verification in the opened browser window, or use the Chrome extension import instead."
+        );
+      }
       throw new Error(
         "Could not detect Canva design canvas. Make sure the design is open and accessible in this browser profile."
       );
@@ -307,10 +406,14 @@ async function captureCanva(url, options) {
       capture = refreshedCapture;
     }
 
+    // Multi-page designs: one snapshot per page. Null → single-page legacy capture.
+    const multiPage = await captureCanvaPageNodes(page);
+
     const title = await page.title();
     const finalUrl = page.url();
     return {
       ...capture,
+      multiPage,
       title,
       finalUrl,
     };
@@ -321,37 +424,97 @@ async function captureCanva(url, options) {
   }
 }
 
-function buildFabricData(snapshotDataUrl, canvasWidth, canvasHeight, sourceWidth, sourceHeight) {
+function buildSnapshotImageObject(snapshotDataUrl, canvasWidth, canvasHeight, sourceWidth, sourceHeight, extra = {}) {
   const resolvedSourceWidth = Math.max(1, Math.round(sourceWidth || canvasWidth));
   const resolvedSourceHeight = Math.max(1, Math.round(sourceHeight || canvasHeight));
   const scaleX = canvasWidth / resolvedSourceWidth;
   const scaleY = canvasHeight / resolvedSourceHeight;
 
   return {
+    type: "Image",
+    version: "7.0.0",
+    originX: "left",
+    originY: "top",
+    left: 0,
+    top: 0,
+    width: resolvedSourceWidth,
+    height: resolvedSourceHeight,
+    scaleX,
+    scaleY,
+    angle: 0,
+    opacity: 1,
+    src: snapshotDataUrl,
+    layerType: "image",
+    layerName: "Imported Canva Snapshot",
+    layerLocked: false,
+    layerHidden: false,
+    sourceWidth: resolvedSourceWidth,
+    sourceHeight: resolvedSourceHeight,
+    ...extra,
+  };
+}
+
+function buildFabricData(snapshotDataUrl, canvasWidth, canvasHeight, sourceWidth, sourceHeight) {
+  return {
     version: "7.0.0",
     objects: [
-      {
-        type: "Image",
-        version: "7.0.0",
-        originX: "left",
-        originY: "top",
-        left: 0,
-        top: 0,
-        width: resolvedSourceWidth,
-        height: resolvedSourceHeight,
-        scaleX,
-        scaleY,
-        angle: 0,
-        opacity: 1,
-        src: snapshotDataUrl,
-        layerType: "image",
-        layerName: "Imported Canva Snapshot",
-        layerLocked: false,
-        layerHidden: false,
-        sourceWidth: resolvedSourceWidth,
-        sourceHeight: resolvedSourceHeight,
-      },
+      buildSnapshotImageObject(snapshotDataUrl, canvasWidth, canvasHeight, sourceWidth, sourceHeight),
     ],
+  };
+}
+
+// Multi-page: one full-page snapshot object per page, tagged with importPageIndex, plus the
+// meta.import.pages descriptor list the dashboard/editor/mobile pipeline partitions on.
+function buildMultiPageFabricData(pageSnapshots, canvasWidth, canvasHeight) {
+  const objects = pageSnapshots.map((snapshot, index) =>
+    buildSnapshotImageObject(
+      snapshot.dataUrl,
+      canvasWidth,
+      canvasHeight,
+      snapshot.sourceWidth,
+      snapshot.sourceHeight,
+      {
+        layerName: `Page ${index + 1} Snapshot`,
+        importNodeId: `canva-page-snapshot-${index + 1}`,
+        importPageIndex: index,
+      }
+    )
+  );
+  const pages = pageSnapshots.map((snapshot, index) => ({
+    id: `canva-page-${index + 1}`,
+    name: `Page ${index + 1}`,
+    width: canvasWidth,
+    height: canvasHeight,
+    sourceWidth: Math.max(1, Math.round(snapshot.sourceWidth || canvasWidth)),
+    sourceHeight: Math.max(1, Math.round(snapshot.sourceHeight || canvasHeight)),
+  }));
+
+  return {
+    version: "7.0.0",
+    objects,
+    meta: {
+      import: {
+        importVersion: 2,
+        source: "canva-playwright",
+        page: pages[0],
+        pages,
+        layerTree: objects.map((object, index) => ({
+          id: String(object.importNodeId),
+          parentId: null,
+          zIndex: index,
+          name: String(object.layerName),
+          kind: "image",
+        })),
+        layerStats: {
+          detected: objects.length,
+          editable: 0,
+          rasterized: objects.length,
+          skipped: 0,
+        },
+        usedFonts: [],
+        warnings: [],
+      },
+    },
   };
 }
 
@@ -369,9 +532,28 @@ async function main() {
   }
 
   const capture = await captureCanva(sourceUrl, options);
-  const dataUrl = `data:image/png;base64,${capture.screenshotBuffer.toString("base64")}`;
-  const sourceWidth = Math.max(1, Math.round(capture.pixelWidth || capture.cssWidth || 1080));
-  const sourceHeight = Math.max(1, Math.round(capture.pixelHeight || capture.cssHeight || 1080));
+  // Multi-page captures anchor everything (canvas size, thumbnail) on page 1's snapshot;
+  // single-page keeps the legacy largest-canvas capture.
+  const primaryPageCapture = capture.multiPage ? capture.multiPage.captures[0] : null;
+  const dataUrl = primaryPageCapture
+    ? `data:image/png;base64,${primaryPageCapture.screenshotBuffer.toString("base64")}`
+    : `data:image/png;base64,${capture.screenshotBuffer.toString("base64")}`;
+  const sourceWidth = Math.max(
+    1,
+    Math.round(
+      primaryPageCapture
+        ? primaryPageCapture.cssWidth
+        : capture.pixelWidth || capture.cssWidth || 1080
+    )
+  );
+  const sourceHeight = Math.max(
+    1,
+    Math.round(
+      primaryPageCapture
+        ? primaryPageCapture.cssHeight
+        : capture.pixelHeight || capture.cssHeight || 1080
+    )
+  );
   const maxDimension = Math.max(320, Number(options.maxDimension) || 1920);
   const downscale = Math.min(1, maxDimension / Math.max(sourceWidth, sourceHeight));
   const width = Math.max(1, Math.round(sourceWidth * downscale));
@@ -388,7 +570,25 @@ async function main() {
     const requestedName = options.name || titleToTemplateName(capture.title);
     const templateName = await ensureUniqueName(prisma, ownerId, requestedName);
     const templateSlug = await ensureUniqueSlug(prisma, options.slug || templateName);
-    const templateData = buildFabricData(dataUrl, width, height, sourceWidth, sourceHeight);
+
+    let templateData;
+    let pageCount = 1;
+    if (capture.multiPage) {
+      const pageSnapshots = capture.multiPage.captures.map((pageCapture) => ({
+        dataUrl: `data:image/png;base64,${pageCapture.screenshotBuffer.toString("base64")}`,
+        sourceWidth: pageCapture.cssWidth,
+        sourceHeight: pageCapture.cssHeight,
+      }));
+      templateData = buildMultiPageFabricData(pageSnapshots, width, height);
+      pageCount = pageSnapshots.length;
+      if (capture.multiPage.truncated > 0) {
+        templateData.meta.import.warnings.push(
+          `Design has ${pageCount + capture.multiPage.truncated} pages; imported the first ${pageCount} (page cap).`
+        );
+      }
+    } else {
+      templateData = buildFabricData(dataUrl, width, height, sourceWidth, sourceHeight);
+    }
 
     const created = await prisma.$transaction(async (tx) => {
       const item = await tx.template.create({
@@ -399,6 +599,7 @@ async function main() {
           status: "draft",
           version: 1,
           canvasSize: { width, height },
+          pageCount,
           category: "general",
           subCategory: "general",
           tags: ["canva", "imported"],
@@ -435,6 +636,7 @@ async function main() {
     console.log(`Name: ${created.name}`);
     console.log(`Slug: ${created.slug}`);
     console.log(`Canvas: ${width}x${height}`);
+    console.log(`Pages: ${pageCount}`);
     console.log(`Captured source: ${sourceWidth}x${sourceHeight}`);
     console.log(`Source URL: ${capture.finalUrl}`);
     console.log(`Editor: http://localhost:3000/editor?templateId=${encodeURIComponent(created.id)}`);

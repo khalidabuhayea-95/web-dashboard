@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
+import { ACCOUNT_DISABLED_CODE } from "@/lib/mobile/mobileUserBan";
 
 export function getClientIp(request) {
   const forwardedFor = String(request.headers.get("x-forwarded-for") || "")
@@ -50,5 +51,15 @@ export function authSuccessResponse(payload) {
 }
 
 export function authErrorResponse(error, fallback, status = 400) {
+  // A disabled account has to reach the app with an unmasked reason and a
+  // stable code — handleApiError swaps the message for the generic fallback in
+  // production, which would leave the app looping through the login screen.
+  if (error?.code === ACCOUNT_DISABLED_CODE) {
+    return NextResponse.json(
+      { error: error.message, code: ACCOUNT_DISABLED_CODE },
+      { status: 403, headers: { "Cache-Control": "no-store" } }
+    );
+  }
+
   return handleApiError(error, fallback, status);
 }

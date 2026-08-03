@@ -107,6 +107,11 @@ export async function getEditorSession() {
   return { userId: session.userId, role: session.role };
 }
 
-export function canAccessTemplate(session, template) {
-  return session.role === "admin" || template.ownerId === session.userId;
+// Templates are a shared library: any dashboard user may open and edit any
+// template regardless of who imported it. getEditorSession already turned away
+// everyone who is not an admin or a designer, so reaching here is authorization
+// enough. Template.ownerId is kept for attribution and asset pathing, not for
+// access control — narrow this again if per-owner silos are ever wanted back.
+export function canAccessTemplate(_session, _template) {
+  return true;
 }

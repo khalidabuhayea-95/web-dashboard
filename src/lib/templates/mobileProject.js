@@ -1,7 +1,7 @@
 import { performance } from "node:perf_hooks";
 
 import { appendVersionParam } from "@/lib/storage/objectStorage.server";
-import { extractFabricData } from "@/lib/templates/editorData";
+import { extractEditorPagesData, extractFabricData } from "@/lib/templates/editorData";
 import { resolveEditorTextFontName } from "@/lib/templates/mobileCompatibility";
 import {
   DEFAULT_ANIMATION_DURATION_MS,
@@ -607,6 +607,19 @@ function readShadow(item) {
   };
 }
 
+/**
+ * A shadow is visible only when it is blurred or offset away from the layer, and not fully
+ * transparent — a 0-radius, 0-offset shadow sits exactly behind its layer and draws nothing.
+ */
+function isShadowVisible(shadow, opacity) {
+  if (numberOr(opacity, 1) <= 0) return false;
+  return (
+    numberOr(shadow?.blur, 0) > 0 ||
+    numberOr(shadow?.offsetX, 0) !== 0 ||
+    numberOr(shadow?.offsetY, 0) !== 0
+  );
+}
+
 function readTextAlignment(item) {
   return item?.textAlign || item?.align;
 }
@@ -884,7 +897,10 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     textCase: textFormat.textCase,
     colorHex: normalizeHex(item.color || item.fill, "#FFFFFF"),
     shadow: {
-      enabled: Boolean(shadow.color || shadow.blur || shadow.offsetX || shadow.offsetY),
+      // Enabled means ACTUALLY VISIBLE, not merely "has a colour": every element defaults to
+      // shadowColor "#000000", so keying off the colour marked every text layer as shadowed.
+      // A shadow shows only when it is offset or blurred, and not fully transparent.
+      enabled: isShadowVisible(shadow, shadowColor.opacity),
       colorHex: shadowColor.hex,
       opacity: shadowColor.opacity,
       blurRadius: numberOr(shadow.blur, 0),
@@ -1536,6 +1552,78 @@ function resolveCanvasSize(template) {
   };
 }
 
+/**
+ * Page list for a template: `options.pagesData` (precomputed by the route) or derived
+ * from the stored payload. Always ordered first-page-first; single-page templates
+ * yield one entry.
+ */
+function resolvePagesData(template, options = {}) {
+  if (Array.isArray(options?.pagesData) && options.pagesData.length > 0) {
+    return options.pagesData;
+  }
+  return extractEditorPagesData(template?.data || {}) || null;
+}
+
+/**
+ * Wraps the asset resolver so every asset URL generated while mapping page
+ * `pageIndex` carries the page dimension. Page 0 returns options untouched, which
+ * keeps single-page asset URLs byte-identical to the pre-pages format.
+ */
+function wrapOptionsForPage(options, pageIndex) {
+  if (!options || pageIndex <= 0 || typeof options.assetResolver !== "function") {
+    return options || {};
+  }
+  const baseResolver = options.assetResolver;
+  return {
+    ...options,
+    assetResolver: (args = {}) => baseResolver({ ...args, page: pageIndex }),
+  };
+}
+
+function resolvePageSize(page, canvasSize) {
+  return {
+    width: Math.max(numberOr(page?.width, canvasSize.width), 1),
+    height: Math.max(numberOr(page?.height, canvasSize.height), 1),
+  };
+}
+
+function normalizePageDurationMs(value) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.round(parsed) : DEFAULT_PAGE_DURATION_MS;
+}
+
+/**
+ * Per-page preview URL for the app's page strip.
+ *
+ * Page 0 falls back to the template's cover thumbnail — every template has one, and it IS the
+ * first page — so a multi-page template always ships at least one ready-made page image. Later
+ * pages resolve from `Template.pageThumbnails` and are simply absent when never captured (the
+ * app then renders that tile locally).
+ */
+function resolvePageThumbnailUrl(template, page, pageIndex, pageTotal, options) {
+  const stored = template?.pageThumbnails;
+  const map = stored && typeof stored === "object" && !Array.isArray(stored) ? stored : null;
+  let raw = String(map?.[String(page?.id || "")] || "").trim();
+
+  // Positional fallback for the id-rename transition: opening an IMPORTED template in the
+  // editor re-keys its pages (canva-page-N → template-page-<id>-N), which would orphan the
+  // previews captured at import time. Only applied when the stored set still lines up 1:1
+  // with the pages, so a genuine add/delete falls through to no preview instead of a wrong one.
+  if (!raw && map) {
+    const orderedValues = Object.values(map);
+    if (orderedValues.length === pageTotal && pageIndex < orderedValues.length) {
+      raw = String(orderedValues[pageIndex] || "").trim();
+    }
+  }
+
+  if (raw) {
+    const updatedAt = toTimestampMs(template?.updatedAt);
+    const versionToken = Number.isFinite(updatedAt) ? String(updatedAt) : "";
+    return resolveClientMediaUri(appendVersionParam(raw, versionToken), options);
+  }
+  return pageIndex === 0 ? resolveTemplateThumbnailUrl(template, options) : "";
+}
+
 const FRAME_PRESET_NAMES = new Map([
   ["frame-circle", "Circle"],
   ["frame-rounded-square", "Rounded square"],
@@ -1628,6 +1716,10 @@ function buildFrameInfoFromObjects(objects) {
 function getMobileTemplateFrameInfo(template) {
   if (!Object.prototype.hasOwnProperty.call(template || {}, "data")) return null;
   const rawData = template?.data || {};
+  const pages = extractEditorPagesData(rawData);
+  if (Array.isArray(pages) && pages.length > 0) {
+    return buildFrameInfoFromObjects(pages.flatMap((page) => page.objects || []));
+  }
   const data = extractFabricData(rawData) || rawData || {};
   return buildFrameInfoFromObjects(Array.isArray(data?.objects) ? data.objects : []);
 }
@@ -1911,23 +2003,59 @@ export function toMobileProject(template, options = {}) {
   const canvasSize = resolveCanvasSize(template);
 
   const rawData = template?.data || {};
-  const data = options?.fabricData || extractFabricData(rawData) || rawData || {};
+  const pagesData = options?.fabricData ? null : resolvePagesData(template, options);
+  const primaryPage = Array.isArray(pagesData) && pagesData.length > 0 ? pagesData[0] : null;
+  const data =
+    options?.fabricData ||
+    (primaryPage
+      ? { background: primaryPage.background, objects: primaryPage.objects }
+      : extractFabricData(rawData) || rawData || {});
+  const primarySize = primaryPage ? resolvePageSize(primaryPage, canvasSize) : canvasSize;
   const objects = Array.isArray(data?.objects) ? data.objects : [];
   const layers = objects.map((item, index) =>
-    mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options)
+    mapFabricObjectToMobileLayer(item || {}, index, primarySize, options)
   );
-  const frameInfo = buildFrameInfoFromObjects(objects);
+  const frameInfo = getMobileTemplateFrameInfo(template) || buildFrameInfoFromObjects(objects);
   const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
+  const pageCount = Array.isArray(pagesData) && pagesData.length > 0 ? pagesData.length : 1;
 
   return {
     id: String(template?.id || ""),
     name: String(template?.name || "Untitled"),
     createdAt: new Date(template?.createdAt || Date.now()).getTime(),
     updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
-    canvasWidth: canvasSize.width,
-    canvasHeight: canvasSize.height,
+    canvasWidth: primarySize.width,
+    canvasHeight: primarySize.height,
     background: mapBackground(data.background, options),
     layers,
+    pageCount,
+    ...(pageCount > 1
+      ? {
+          pages: pagesData.map((page, pageIndex) => {
+            const pageOptions = wrapOptionsForPage(options, pageIndex);
+            const pageSize = resolvePageSize(page, canvasSize);
+            const pageThumbnailUrl = resolvePageThumbnailUrl(template, page, pageIndex, pagesData.length, options);
+            return {
+              id: String(page.id || `page-${pageIndex + 1}`),
+              name: String(page.name || `Page ${pageIndex + 1}`),
+              width: pageSize.width,
+              height: pageSize.height,
+              durationMs: normalizePageDurationMs(page.durationMs),
+              ...(pageThumbnailUrl ? { thumbnailUrl: pageThumbnailUrl } : {}),
+              background:
+                pageIndex === 0
+                  ? mapBackground(data.background, options)
+                  : mapBackground(page.background, pageOptions),
+              layers:
+                pageIndex === 0
+                  ? layers
+                  : (page.objects || []).map((item, index) =>
+                      mapFabricObjectToMobileLayer(item || {}, index, pageSize, pageOptions)
+                    ),
+            };
+          }),
+        }
+      : {}),
     meta: {
       source: "web-dashboard-fabric",
       templateId: String(template?.id || ""),
@@ -1947,6 +2075,8 @@ export function toMobileTemplate(template, options = {}) {
   const resolvedThumbnail = resolveTemplateThumbnailUrl(template, options);
   const frameInfo = getMobileTemplateFrameInfo(template);
   const compatibilityWarnings = buildMobileCompatibilityWarnings(frameInfo);
+  // List selects omit `data`, so summaries rely on the persisted pageCount column.
+  const summaryPageCount = Math.max(1, Math.round(numberOr(template?.pageCount, 1)));
   return {
     id: String(template?.id || ""),
     title: String(template?.name || "Untitled"),
@@ -1954,6 +2084,7 @@ export function toMobileTemplate(template, options = {}) {
     updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
     canvasWidth: canvasSize.width,
     canvasHeight: canvasSize.height,
+    pageCount: summaryPageCount,
     category: mapTemplateCategory(template?.category),
     subCategory: String(template?.subCategory || "general"),
     thumbnailUrl: resolvedThumbnail,
@@ -1973,7 +2104,16 @@ export function toMobileProjectSlim(template, options = {}) {
       : null;
   const canvasSize = resolveCanvasSize(template);
   const rawData = template?.data || {};
-  const data = options?.fabricData || extractFabricData(rawData) || rawData || {};
+  const pagesData = options?.fabricData ? null : resolvePagesData(template, options);
+  const primaryPage = Array.isArray(pagesData) && pagesData.length > 0 ? pagesData[0] : null;
+  // Top-level background/layers always mirror the FIRST page (the design cover) so
+  // app builds that predate `pages` keep rendering something sensible.
+  const data =
+    options?.fabricData ||
+    (primaryPage
+      ? { background: primaryPage.background, objects: primaryPage.objects }
+      : extractFabricData(rawData) || rawData || {});
+  const primarySize = primaryPage ? resolvePageSize(primaryPage, canvasSize) : canvasSize;
   const objects = Array.isArray(data?.objects) ? data.objects : [];
   if (telemetry) {
     telemetry.objectCount = objects.length;
@@ -1983,25 +2123,59 @@ export function toMobileProjectSlim(template, options = {}) {
   const background = mapBackground(data.background, options);
   addTiming(telemetry, "mapBackgroundMs", performance.now() - backgroundStartedAt);
 
-  const layers = objects.map((item, index) => {
-    const layerStartedAt = performance.now();
-    const mappedLayer = slimMobileLayer(mapFabricObjectToMobileLayer(item || {}, index, canvasSize, options));
-    const layerDurationMs = performance.now() - layerStartedAt;
-    const layerPrefix = resolveLayerTelemetryPrefix(mappedLayer);
-    incrementCount(telemetry, `${layerPrefix}LayerCount`);
-    addTiming(telemetry, `${layerPrefix}LayerMapMs`, layerDurationMs);
-    return mappedLayer;
-  });
+  const mapSlimLayers = (pageObjects, pageSize, pageOptions) =>
+    (Array.isArray(pageObjects) ? pageObjects : []).map((item, index) => {
+      const layerStartedAt = performance.now();
+      const mappedLayer = slimMobileLayer(
+        mapFabricObjectToMobileLayer(item || {}, index, pageSize, pageOptions)
+      );
+      const layerDurationMs = performance.now() - layerStartedAt;
+      const layerPrefix = resolveLayerTelemetryPrefix(mappedLayer);
+      incrementCount(telemetry, `${layerPrefix}LayerCount`);
+      addTiming(telemetry, `${layerPrefix}LayerMapMs`, layerDurationMs);
+      return mappedLayer;
+    });
+
+  const layers = mapSlimLayers(objects, primarySize, options);
 
   if (telemetry) {
     telemetry.layerCount = layers.length;
   }
 
+  const pageCount = Array.isArray(pagesData) && pagesData.length > 0 ? pagesData.length : 1;
+  if (telemetry) {
+    telemetry.pageCount = pageCount;
+  }
+
+  let pagesPayload = null;
+  if (pageCount > 1) {
+    const pagesStartedAt = performance.now();
+    pagesPayload = pagesData.map((page, pageIndex) => {
+      const pageOptions = wrapOptionsForPage(options, pageIndex);
+      const pageSize = resolvePageSize(page, canvasSize);
+      const pageThumbnailUrl = resolvePageThumbnailUrl(template, page, pageIndex, pagesData.length, options);
+      return {
+        id: String(page.id || `page-${pageIndex + 1}`),
+        name: String(page.name || `Page ${pageIndex + 1}`),
+        width: pageSize.width,
+        height: pageSize.height,
+        durationMs: normalizePageDurationMs(page.durationMs),
+        ...(pageThumbnailUrl ? { thumbnailUrl: pageThumbnailUrl } : {}),
+        background:
+          pageIndex === 0 ? background : mapBackground(page.background, pageOptions),
+        layers: pageIndex === 0 ? layers : mapSlimLayers(page.objects, pageSize, pageOptions),
+      };
+    });
+    addTiming(telemetry, "mapPagesMs", performance.now() - pagesStartedAt);
+  }
+
   return {
-    canvasWidth: canvasSize.width,
-    canvasHeight: canvasSize.height,
+    canvasWidth: primarySize.width,
+    canvasHeight: primarySize.height,
     background,
     layers,
+    pageCount,
+    ...(pagesPayload ? { pages: pagesPayload } : {}),
   };
 }
 
@@ -2029,6 +2203,7 @@ export function toMobileTemplateDetailSlim(template, options = {}) {
     subCategoryValue: String(options?.subCategoryValue || template?.subCategory || ""),
     thumbnailUrl,
     ...(preview ? { preview } : {}),
+    pageCount: Math.max(1, Math.round(numberOr(project?.pageCount, 1))),
     project,
   };
 }

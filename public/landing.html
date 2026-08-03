@@ -9,7 +9,7 @@
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1" />
 <meta name="author" content="نيروز" />
 <meta name="keywords" content="تصميم, تطبيق تصميم عربي, إزالة الخلفية, تصميم ستوري, قوالب عربية, محرر صور, نيروز" />
-<link rel="icon" href="/nayroz-tab-icon.svg" type="image/svg+xml" />
+<link rel="icon" href="/nayroz-logo-color.svg" type="image/svg+xml" />
 <link rel="apple-touch-icon" href="/nayroz-icon.png" />
 <link rel="canonical" href="https://nayroz.com/" />
 
@@ -153,14 +153,9 @@ nav.scrolled { box-shadow: var(--shadow); }
   display: block;
   object-fit: contain;
   flex-shrink: 0;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid rgba(34,130,140,0.14);
-  box-shadow: 0 4px 14px rgba(16,77,111,0.12);
 }
 .footer-logo .logo-img {
   width: 42px; height: 42px;
-  box-shadow: 0 8px 20px rgba(0,0,0,0.22);
 }
 .logo-name {
   font-size: 1.45rem; font-weight: 900; color: var(--dark);
@@ -391,6 +386,8 @@ nav.scrolled { box-shadow: var(--shadow); }
 .stat-num {
   font-size: clamp(2rem, 4vw, 2.8rem);
   font-weight: 900; line-height: 1;
+  direction: ltr; unicode-bidi: isolate;
+  font-variant-numeric: tabular-nums;
   background: linear-gradient(135deg, var(--teal), var(--teal-mid));
   -webkit-background-clip: text; -webkit-text-fill-color: transparent;
   background-clip: text;
@@ -412,34 +409,85 @@ nav.scrolled { box-shadow: var(--shadow); }
   background: radial-gradient(circle, rgba(34,130,140,0.06) 0%, transparent 65%);
 }
 
-.ai-rows {
-  display: flex; flex-direction: column;
-  gap: 5.5rem;
-  max-width: 1080px; margin: 4rem auto 0;
-}
-.ai-row {
-  display: grid; grid-template-columns: 1fr 1fr;
-  gap: 3.5rem; align-items: center;
-}
-.ai-row:nth-child(even) .ai-row-media { order: -1; }
 .ai-icon {
   width: 52px; height: 52px; border-radius: 14px;
   display: flex; align-items: center; justify-content: center;
   margin-bottom: 1.25rem;
 }
 .ai-icon svg { width: 28px; height: 28px; }
-.ai-row-title {
-  font-size: clamp(1.5rem, 2.6vw, 2rem);
-  font-weight: 800; color: var(--dark);
-  line-height: 1.3; margin-bottom: 0.85rem;
-}
 .ai-row-desc { font-size: 1.02rem; color: var(--text-mid); line-height: 1.85; }
 .ai-badge-row { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 1.25rem; }
 .ai-badge {
   font-size: 0.78rem; font-weight: 600; padding: 4px 12px;
   border-radius: var(--r-pill); border: 1.5px solid;
 }
-.ai-row-media .ba-slider { margin-top: 0; height: 380px; }
+/* AI feature media treatments */
+.ai-prompt-chip {
+  position: absolute; top: 14px; left: 50%;
+  transform: translateX(-50%);
+  z-index: 3; pointer-events: none;
+  display: flex; align-items: center; gap: 8px;
+  direction: rtl; white-space: nowrap;
+  background: rgba(255,255,255,0.94); color: var(--dark);
+  border: 1px solid var(--border);
+  padding: 8px 14px; border-radius: var(--r-pill);
+  font-size: 0.8rem; font-weight: 600;
+  box-shadow: 0 6px 18px rgba(11,30,40,0.16);
+}
+.ai-prompt-chip svg { width: 15px; height: 15px; color: var(--teal); flex-shrink: 0; }
+/* AI features — two compact cards per line */
+.ai-duo {
+  display: grid; grid-template-columns: 1fr 1fr;
+  gap: 1.5rem; align-items: stretch;
+  max-width: 1080px; margin: 4rem auto 0;
+  position: relative; z-index: 1;
+}
+.ai-duo-card {
+  background: white; border-radius: var(--r-sm);
+  border: 1px solid var(--border);
+  padding: 1.75rem;
+  display: flex; flex-direction: column;
+}
+.ai-duo-card .ai-icon { width: 46px; height: 46px; margin-bottom: 1rem; }
+.ai-duo-card .ai-icon svg { width: 24px; height: 24px; }
+.ai-duo-title { font-size: 1.35rem; font-weight: 800; color: var(--dark); margin-bottom: 0.6rem; }
+.ai-duo-card .ai-row-desc { font-size: 0.95rem; }
+.ai-duo-card .ai-badge-row { margin-top: 1rem; margin-bottom: 1.4rem; }
+.ai-duo-card .ba-slider { height: 240px; margin-top: auto; }
+@media (max-width: 860px) {
+  .ai-duo { grid-template-columns: 1fr; }
+}
+
+.ai-resize-mock {
+  position: relative; height: 240px; margin-top: auto;
+  border-radius: var(--r-sm); overflow: hidden;
+  background: var(--off-white);
+  border: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: center;
+  gap: 10px; padding: 16px;
+}
+.rz-col { display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+.rz-canvas {
+  position: relative; border-radius: 10px; overflow: hidden;
+  background: linear-gradient(160deg, var(--navy), var(--teal));
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 8px;
+  box-shadow: 0 8px 20px rgba(11,30,40,0.14);
+}
+.rz-story { width: 100px; height: 178px; }
+.rz-square { width: 100px; height: 100px; }
+.rz-wide { width: 100px; height: 64px; gap: 5px; }
+.rz-dot { width: 26px; height: 26px; border-radius: 50%; background: rgba(255,255,255,0.92); }
+.rz-wide .rz-dot { width: 20px; height: 20px; }
+.rz-bar { width: 44px; height: 6px; border-radius: 4px; background: rgba(255,255,255,0.65); }
+.rz-bar.short { width: 30px; height: 5px; background: rgba(255,255,255,0.4); }
+.rz-ratio {
+  position: absolute; top: 8px; inset-inline-end: 8px;
+  background: rgba(11,30,40,0.5); color: #fff;
+  font-size: 0.6rem; font-weight: 700;
+  padding: 2px 8px; border-radius: var(--r-pill);
+  letter-spacing: 0.02em;
+}
 
 /* before/after slider */
 .ba-slider {
@@ -803,43 +851,6 @@ nav.scrolled { box-shadow: var(--shadow); }
 .step-desc { font-size: 0.88rem; color: rgba(255,255,255,0.5); line-height: 1.7; }
 
 /* ──────────────────────────────────────────
-   FAQ
-──────────────────────────────────────────── */
-.faq {
-  padding: 100px 5vw;
-  background: var(--off-white);
-}
-.faq-list { max-width: 800px; margin: 3rem auto 0; display: flex; flex-direction: column; gap: 1rem; }
-.faq-item {
-  background: white; border-radius: var(--r-sm);
-  border: 1px solid var(--border);
-  overflow: hidden; transition: box-shadow 0.2s;
-}
-.faq-item:hover { box-shadow: var(--shadow); }
-.faq-q {
-  width: 100%; text-align: right;
-  padding: 1.25rem 1.5rem;
-  background: none; border: none; cursor: pointer;
-  font-family: var(--font); font-size: 0.97rem; font-weight: 700;
-  color: var(--dark); display: flex; align-items: center;
-  justify-content: space-between; gap: 1rem;
-}
-.faq-arrow {
-  width: 28px; height: 28px; border-radius: 50%;
-  background: var(--teal-light); color: var(--teal);
-  display: flex; align-items: center; justify-content: center;
-  flex-shrink: 0; font-size: 1.1rem;
-  transition: transform 0.3s;
-}
-.faq-item.open .faq-arrow { transform: rotate(180deg); }
-.faq-a {
-  padding: 0 1.5rem;
-  font-size: 0.9rem; color: var(--text-mid); line-height: 1.8;
-  max-height: 0; overflow: hidden; transition: max-height 0.35s ease, padding 0.25s;
-}
-.faq-item.open .faq-a { max-height: 200px; padding: 0 1.5rem 1.25rem; }
-
-/* ──────────────────────────────────────────
    FINAL CTA
 ──────────────────────────────────────────── */
 .cta-section {
@@ -900,9 +911,6 @@ footer {
 .footer-col ul li a:hover { color: var(--teal); }
 .footer-bottom { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 1rem; }
 .footer-copy { font-size: 0.82rem; color: rgba(255,255,255,0.25); }
-.footer-legal { display: flex; gap: 1.5rem; }
-.footer-legal a { font-size: 0.82rem; color: rgba(255,255,255,0.3); text-decoration: none; transition: color 0.2s; }
-.footer-legal a:hover { color: var(--teal); }
 
 /* ──────────────────────────────────────────
    ANIMATIONS
@@ -941,9 +949,6 @@ footer {
   .phone-frame { width: 240px; }
   .phone-inner { height: 456px; }
   .stats-inner { grid-template-columns: repeat(2, 1fr); }
-  .ai-row { grid-template-columns: 1fr; gap: 1.75rem; }
-  .ai-row:nth-child(even) .ai-row-media { order: 0; }
-  .ai-row-media .ba-slider { height: 300px; }
   .arabic-features { grid-template-columns: 1fr; gap: 2rem; }
   .steps-grid { grid-template-columns: 1fr; }
   .footer-top { grid-template-columns: 1fr 1fr; }
@@ -1006,7 +1011,9 @@ footer {
       "url": "https://nayroz.com/",
       "name": "نيروز",
       "inLanguage": "ar",
-      "publisher": { "@id": "https://nayroz.com/#organization" }
+      "publisher": {
+        "@id": "https://nayroz.com/#organization"
+      }
     },
     {
       "@type": "MobileApplication",
@@ -1018,47 +1025,19 @@ footer {
       "inLanguage": "ar",
       "description": "نيروز: تطبيق التصميم العربي الأول. صوّر، صمّم، حرّك، وانشر — كل شيء من هاتفك.",
       "image": "https://nayroz.com/og-image.png",
-      "publisher": { "@id": "https://nayroz.com/#organization" },
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" }
-    },
-    {
-      "@type": "FAQPage",
-      "mainEntity": [
-        {
-          "@type": "Question",
-          "name": "هل التطبيق مجاني؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "نيروز مجاني للتنزيل والاستخدام. بعض الميزات المتقدمة وعدد من القوالب الحصرية ستكون ضمن الاشتراك المميز، لكن المحرر الأساسي وعدداً كبيراً من القوالب ستبقى مجانية تماماً." }
-        },
-        {
-          "@type": "Question",
-          "name": "هل يعمل التطبيق بدون اتصال بالإنترنت؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "المحرر الأساسي — الطبقات، النصوص، الأشكال، الرسم — يعمل بدون إنترنت. لكن أدوات الذكاء الاصطناعي مثل إزالة الخلفية وتوسيع الصورة تحتاج اتصالاً بالإنترنت، كذلك تصفّح القوالب الجديدة وتحميل الخطوط." }
-        },
-        {
-          "@type": "Question",
-          "name": "ماذا يحدث بصوري عند استخدام أدوات الذكاء الاصطناعي؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "خصوصيتك تهمنا. صورك تُرسل للمعالجة بشكل مشفّر، ولا تُحفظ على خوادمنا بعد اكتمال المعالجة. لا نبيع بياناتك ولا نستخدمها لأغراض تجارية." }
-        },
-        {
-          "@type": "Question",
-          "name": "ما صيغ التصدير المتاحة؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "يدعم نيروز التصدير بصيغ: JPEG، PNG (مع شفافية)، WebP، PDF، MP4، وGIF. يمكنك اختيار الجودة ودقة الدقة قبل التصدير مع معاينة حجم الملف." }
-        },
-        {
-          "@type": "Question",
-          "name": "هل التطبيق متاح على Android و iOS؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "نعم، نيروز متاح الآن على App Store لأجهزة iPhone وiPad، وعلى Google Play لأجهزة Android. حمّله مجاناً وابدأ التصميم خلال دقائق." }
-        },
-        {
-          "@type": "Question",
-          "name": "هل يوجد دعم للغة العربية الكامل؟",
-          "acceptedAnswer": { "@type": "Answer", "text": "نيروز مبني أساساً للغة العربية. الواجهة كاملة RTL، ومحرك النصوص يدعم التشكيل العربي الكامل، الخط المقوّس، ومئات الخطوط العربية عالية الجودة." }
-        }
-      ]
+      "publisher": {
+        "@id": "https://nayroz.com/#organization"
+      },
+      "offers": {
+        "@type": "Offer",
+        "price": "0",
+        "priceCurrency": "USD"
+      }
     }
   ]
 }
 </script>
+<script src="analytics.js" defer></script>
 </head>
 <body>
 
@@ -1069,14 +1048,13 @@ footer {
   <a href="#arabic" onclick="closeMobileMenu()">دعم العربية</a>
   <a href="#features" onclick="closeMobileMenu()">المميزات</a>
   <a href="#how" onclick="closeMobileMenu()">كيف يعمل</a>
-  <a href="#faq" onclick="closeMobileMenu()">الأسئلة الشائعة</a>
   <a href="#download" onclick="closeMobileMenu()" class="btn btn-teal btn-lg">حمّل التطبيق</a>
 </div>
 
 <!-- NAV -->
 <nav id="nav">
   <a href="#" class="nav-logo">
-    <img class="logo-img" src="/nayroz-icon.png" alt="أيقونة نيروز" />
+    <img class="logo-img" src="/nayroz-logo-color.svg" width="38" height="38" alt="شعار نيروز" />
     <span class="logo-name">نيروز</span>
   </a>
   <ul class="nav-links">
@@ -1084,7 +1062,6 @@ footer {
     <li><a href="#arabic">دعم العربية</a></li>
     <li><a href="#features">المميزات</a></li>
     <li><a href="#how">كيف يعمل</a></li>
-    <li><a href="#faq">الأسئلة الشائعة</a></li>
   </ul>
   <div class="nav-actions">
     <a href="#download" class="btn btn-teal">حمّل مجاناً</a>
@@ -1183,7 +1160,7 @@ footer {
             <div class="reel-content">
               <div class="reel-badge">REEL</div>
               <div class="reel-title">قصتك<br/>في حركة</div>
-              <div class="reel-sub">+٢٠ حركة احترافية</div>
+              <div class="reel-sub">حركات دخول وتكرار وخروج — حتى لكل حرف</div>
               <div class="reel-anim-bars">
                 <div class="reel-bar" style="height:24px;animation-delay:0s;"></div>
                 <div class="reel-bar" style="height:40px;animation-delay:0.15s;"></div>
@@ -1244,19 +1221,19 @@ footer {
 <section class="stats">
   <div class="stats-inner">
     <div class="stat reveal">
-      <div class="stat-num">+٧٠٠٠</div>
+      <div class="stat-num" data-count="7000" data-plus="1">+7,000</div>
       <div class="stat-label">قالب جاهز للتعديل</div>
     </div>
     <div class="stat reveal">
-      <div class="stat-num">+٢٠</div>
-      <div class="stat-label">حركة احترافية للأنيميشن</div>
+      <div class="stat-num" data-count="1900" data-plus="1">+1,900</div>
+      <div class="stat-label">خط عربي وعالمي</div>
     </div>
     <div class="stat reveal">
-      <div class="stat-num">٨</div>
+      <div class="stat-num" data-count="8">8</div>
       <div class="stat-label">منصات مدعومة بمقاسات جاهزة</div>
     </div>
     <div class="stat reveal">
-      <div class="stat-num">٦</div>
+      <div class="stat-num" data-count="6">6</div>
       <div class="stat-label">صيغ تصدير مختلفة</div>
     </div>
   </div>
@@ -1272,88 +1249,143 @@ footer {
       <p class="section-sub">أدوات ذكاء اصطناعي متقدمة مُدمجة بالكامل — بدون اشتراك إضافي.</p>
     </div>
 
-    <div class="ai-rows">
+    <div class="ai-duo">
       <!-- Remove Background -->
-      <div class="ai-row reveal">
-        <div class="ai-row-text">
-          <div class="ai-icon" style="background:var(--coral-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/></svg></div>
-          <h3 class="ai-row-title">إزالة الخلفية</h3>
-          <p class="ai-row-desc">بضغطة واحدة، يحذف الذكاء الاصطناعي الخلفية بدقة ممتازة — سواء كان الموضوع شخصاً أو منتجاً أو حيواناً أليفاً.</p>
-          <div class="ai-badge-row">
-            <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">أشخاص</span>
-            <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">منتجات</span>
-            <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">حيوانات</span>
-          </div>
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--coral-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="6" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M20 4 8.12 15.88M14.47 14.48 20 20M8.12 8.12 12 12"/></svg></div>
+        <h3 class="ai-duo-title">إزالة الخلفية</h3>
+        <p class="ai-row-desc">بضغطة واحدة، يحذف الذكاء الاصطناعي الخلفية بدقة ممتازة — سواء كان الموضوع شخصاً أو منتجاً أو حيواناً أليفاً.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">أشخاص</span>
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">منتجات</span>
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">حيوانات</span>
         </div>
-        <div class="ai-row-media">
-          <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
-               aria-label="مقارنة قبل وبعد إزالة الخلفية"
-               aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
-            <div class="ba-layer ba-after">
-              <div class="ba-fill ba-checker"></div>
-              <img class="ba-img" src="/bg-remove-after.png" alt="" loading="lazy" decoding="async" />
-              <span class="ba-tag">بعد</span>
-            </div>
-            <div class="ba-layer ba-before">
-              <img class="ba-img" src="/bg-remove-before.png" alt="" loading="lazy" decoding="async" />
-              <span class="ba-tag">قبل</span>
-            </div>
-            <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
+             aria-label="مقارنة قبل وبعد إزالة الخلفية"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <div class="ba-layer ba-after">
+            <div class="ba-fill ba-checker"></div>
+            <img class="ba-img" src="/bg-remove-after.png" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">بعد</span>
           </div>
+          <div class="ba-layer ba-before">
+            <img class="ba-img" src="/bg-remove-before.png" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">قبل</span>
+          </div>
+          <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
         </div>
       </div>
 
       <!-- Object Removal -->
-      <div class="ai-row reveal">
-        <div class="ai-row-text">
-          <div class="ai-icon" style="background:var(--navy-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M15 9h.01M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/></svg></div>
-          <h3 class="ai-row-title">إزالة الأشياء</h3>
-          <p class="ai-row-desc">امسح أي عنصر لا تريده من الصورة — خطوط كهربائية، زوار عشوائيون، لافتات — مع ملء ذكي يطابق الخلفية.</p>
-          <div class="ai-badge-row">
-            <span class="ai-badge" style="color:var(--navy);border-color:var(--navy-light);">ملء ذكي بالذكاء الاصطناعي</span>
-          </div>
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--navy-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 4V2M15 16v-2M8 9h2M20 9h2M17.8 11.8 19 13M15 9h.01M17.8 6.2 19 5M3 21l9-9M12.2 6.2 11 5"/></svg></div>
+        <h3 class="ai-duo-title">إزالة الأشياء</h3>
+        <p class="ai-row-desc">امسح أي عنصر لا تريده من الصورة — خطوط كهربائية، زوار عشوائيون، لافتات — مع ملء ذكي يطابق الخلفية.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--navy);border-color:var(--navy-light);">ملء ذكي بالذكاء الاصطناعي</span>
         </div>
-        <div class="ai-row-media">
-          <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
-               aria-label="مقارنة قبل وبعد إزالة الأشياء"
-               aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
-            <div class="ba-layer ba-after">
-              <img class="ba-img" src="/object-after.png" alt="" loading="lazy" decoding="async" />
-              <span class="ba-tag">بعد</span>
-            </div>
-            <div class="ba-layer ba-before">
-              <img class="ba-img" src="/object-before.png" alt="" loading="lazy" decoding="async" />
-              <span class="ba-tag">قبل</span>
-            </div>
-            <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
+             aria-label="مقارنة قبل وبعد إزالة الأشياء"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <div class="ba-layer ba-after">
+            <img class="ba-img" src="/object-after.png" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">بعد</span>
           </div>
+          <div class="ba-layer ba-before">
+            <img class="ba-img" src="/object-before.png" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">قبل</span>
+          </div>
+          <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
         </div>
       </div>
 
       <!-- AI Expand -->
-      <div class="ai-row reveal">
-        <div class="ai-row-text">
-          <div class="ai-icon" style="background:var(--coral-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 8 4 4-4 4M2 12h20M6 8l-4 4 4 4"/></svg></div>
-          <h3 class="ai-row-title">توسيع الصورة بالذكاء</h3>
-          <p class="ai-row-desc">مدّد حدود صورتك. يولّد الذكاء الاصطناعي بكسلات جديدة تتناسب مع مشهد الصورة الأصلية — مثالي لتغيير نسب العرض.</p>
-          <div class="ai-badge-row">
-            <span class="ai-badge" style="color:var(--gold-dark);border-color:var(--coral-light);">توليد بكسلات</span>
-          </div>
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--coral-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m18 8 4 4-4 4M2 12h20M6 8l-4 4 4 4"/></svg></div>
+        <h3 class="ai-duo-title">توسيع الصورة بالذكاء</h3>
+        <p class="ai-row-desc">مدّد حدود صورتك. يولّد الذكاء الاصطناعي بكسلات جديدة تتناسب مع مشهد الصورة الأصلية — مثالي لتغيير نسب العرض.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--gold-dark);border-color:var(--coral-light);">توليد بكسلات</span>
         </div>
-        <div class="ai-row-media">
-          <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
-               aria-label="مقارنة قبل وبعد توسيع الصورة"
-               aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
-            <div class="ba-layer ba-after">
-              <img class="ba-img" src="/expand-after.png" alt="" loading="lazy" decoding="async" />
-              <span class="ba-tag">بعد</span>
-            </div>
-            <div class="ba-layer ba-before">
-              <div class="ba-fill ba-canvas"></div>
-              <div class="ba-frame"><img src="/expand-before.png" alt="" loading="lazy" decoding="async" /></div>
-              <span class="ba-tag">قبل</span>
-            </div>
-            <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
+             aria-label="مقارنة قبل وبعد توسيع الصورة"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <div class="ba-layer ba-after">
+            <img class="ba-img" src="/expand-after.png" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">بعد</span>
+          </div>
+          <div class="ba-layer ba-before">
+            <div class="ba-fill ba-canvas"></div>
+            <div class="ba-frame"><img src="/expand-before.png" alt="" loading="lazy" decoding="async" /></div>
+            <span class="ba-tag">قبل</span>
+          </div>
+          <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        </div>
+      </div>
+
+      <!-- Prompt Edit -->
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--teal-light);color:var(--teal);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/><path d="M8 8h8M8 12h5"/></svg></div>
+        <h3 class="ai-duo-title">التعديل بالوصف</h3>
+        <p class="ai-row-desc">اكتب التغيير الذي تريده بجملة واحدة — والذكاء الاصطناعي ينفّذه على صورتك مباشرة.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--teal);border-color:var(--teal-light);">إضاءة وأجواء</span>
+          <span class="ai-badge" style="color:var(--teal);border-color:var(--teal-light);">ألوان</span>
+        </div>
+        <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
+             aria-label="مقارنة قبل وبعد التعديل بالوصف"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <div class="ba-layer ba-after">
+            <img class="ba-img" src="/prompt-edit-after.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">بعد</span>
+          </div>
+          <div class="ba-layer ba-before">
+            <img class="ba-img" src="/prompt-edit-before.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">قبل</span>
+          </div>
+          <div class="ai-prompt-chip"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9z"/></svg>دفّئ الألوان وأضف إضاءة غروب</div>
+          <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        </div>
+      </div>
+
+      <!-- AI Upscale -->
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--coral-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/><path d="M11 8v6M8 11h6"/></svg></div>
+        <h3 class="ai-duo-title">تحسين الدقة ×٢</h3>
+        <p class="ai-row-desc">ضاعِف دقة صورك بضغطة: تفاصيل أوضح وحواف أنقى بدون تحبّب.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--navy);border-color:var(--navy-light);">تفاصيل أوضح</span>
+          <span class="ai-badge" style="color:var(--navy);border-color:var(--navy-light);">بدون تحبّب</span>
+        </div>
+        <div class="ba-slider" data-ba-slider tabindex="0" role="slider"
+             aria-label="مقارنة قبل وبعد تحسين الدقة"
+             aria-valuemin="0" aria-valuemax="100" aria-valuenow="50">
+          <div class="ba-layer ba-after">
+            <img class="ba-img" src="/upscale-after.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">بعد</span>
+          </div>
+          <div class="ba-layer ba-before">
+            <img class="ba-img" src="/upscale-before.jpg" alt="" loading="lazy" decoding="async" />
+            <span class="ba-tag">قبل</span>
+          </div>
+          <div class="ba-handle"><span class="ba-knob"><svg width="22" height="14" viewBox="0 0 22 14" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M7 2 2 7l5 5"/><path d="M15 2l5 5-5 5"/></svg></span></div>
+        </div>
+      </div>
+
+      <!-- Smart Resize -->
+      <div class="ai-duo-card reveal">
+        <div class="ai-icon" style="background:var(--navy-light);color:var(--navy);"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M16 3h5v5"/><path d="M14 10 21 3"/></svg></div>
+        <h3 class="ai-duo-title">تغيير المقاس الذكي</h3>
+        <p class="ai-row-desc">صمّمت بوستاً وتحتاجه ستوري؟ يتحوّل تصميمك لأي مقاس بضغطة — يتعرّف الذكاء على العنصر المهم ويُبقيه داخل الإطار، وتصدّر عدة مقاسات دفعة واحدة.</p>
+        <div class="ai-badge-row">
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">يتعرّف على العنصر المهم</span>
+          <span class="ai-badge" style="color:var(--coral);border-color:var(--coral-light);">عدة مقاسات دفعة واحدة</span>
+        </div>
+        <div class="ai-resize-mock" aria-hidden="true">
+          <div class="rz-canvas rz-story"><span class="rz-ratio">9:16</span><span class="rz-dot"></span><span class="rz-bar"></span><span class="rz-bar short"></span></div>
+          <div class="rz-col">
+            <div class="rz-canvas rz-square"><span class="rz-ratio">1:1</span><span class="rz-dot"></span><span class="rz-bar"></span><span class="rz-bar short"></span></div>
+            <div class="rz-canvas rz-wide"><span class="rz-ratio">16:9</span><span class="rz-dot"></span><span class="rz-bar"></span></div>
           </div>
         </div>
       </div>
@@ -1381,7 +1413,7 @@ footer {
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 7V4h16v3M9 20h6M12 4v16"/></svg>
         </div>
         <div class="ar-feat-title">محرّك نصوص عربي متكامل</div>
-        <div class="ar-feat-desc">تشكيل أصيل، خط مقوّس على مسار، ظل، إطار، وتحكّم كامل بالأحرف والأسطر.</div>
+        <div class="ar-feat-desc">تشكيل أصيل، خط مقوّس حتى دائرة كاملة، ظل، إطار، وتحكّم كامل بالأحرف والأسطر.</div>
       </div>
       <div class="ar-feat">
         <div class="ar-feat-icon">
@@ -1428,7 +1460,7 @@ footer {
     <div class="section-header center reveal">
       <div class="tag tag-teal">لكل المنصات</div>
       <h2 class="section-title">مقاسات جاهزة لكل ما تنشر</h2>
-      <p class="section-sub">لا حاجة للبحث عن المقاسات — كل منصة جاهزة بضغطة.</p>
+      <p class="section-sub">لا حاجة للبحث عن المقاسات — كل منصة جاهزة بضغطة، والتغيير الذكي للمقاس ينقل تصميمك بين المنصات دون إفساد العناصر.</p>
     </div>
 
     <div class="platform-grid">
@@ -1544,6 +1576,26 @@ footer {
         <div class="feat-name">خطوط المحاذاة</div>
         <div class="feat-desc">خطوط snap ذكية تساعدك على محاذاة عناصرك بدقة.</div>
       </div>
+      <div class="feat-item reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 3a2 2 0 0 0-2 2"/><path d="M19 3a2 2 0 0 1 2 2"/><path d="M21 19a2 2 0 0 1-2 2"/><path d="M5 21a2 2 0 0 1-2-2"/><path d="M9 3h1"/><path d="M14 3h1"/><path d="M9 21h1"/><path d="M14 21h1"/><path d="M3 9v1"/><path d="M21 9v1"/><path d="M3 14v1"/><path d="M21 14v1"/></svg></div>
+        <div class="feat-name">تحديد متعدد</div>
+        <div class="feat-desc">حدّد عدة طبقات معاً واسحبها أو عدّلها دفعة واحدة.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8.3 10a.7.7 0 0 1-.626-1.079L11.4 3a.7.7 0 0 1 1.198-.043L16.3 8.9a.7.7 0 0 1-.572 1.1Z"/><rect x="3" y="14" width="7" height="7" rx="1"/><circle cx="17.5" cy="17.5" r="3.5"/></svg></div>
+        <div class="feat-name">أشكال فيكتور</div>
+        <div class="feat-desc">أشكال SVG تبقى حادة بأي حجم — مع تلوين وقصّ فوري.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div>
+        <div class="feat-name">تقسيم الصورة</div>
+        <div class="feat-desc">قسّم صورتك لشبكة صفوف وأعمدة — مثالي لشبكة إنستغرام.</div>
+      </div>
+      <div class="feat-item reveal">
+        <div class="feat-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z"/></svg></div>
+        <div class="feat-name">مفضلة وتصاميمي</div>
+        <div class="feat-desc">ابحث في القوالب، احفظ مفضلاتك، وارجع لتصاميمك في أي وقت.</div>
+      </div>
     </div>
   </div>
 </section>
@@ -1618,63 +1670,6 @@ footer {
 </section>
 
 <!-- ══════════════════════════════════════
-     FAQ
-══════════════════════════════════════ -->
-<section class="faq" id="faq">
-  <div class="container">
-    <div class="section-header center reveal">
-      <div class="tag tag-navy">أسئلة شائعة</div>
-      <h2 class="section-title">كل ما تريد معرفته</h2>
-    </div>
-
-    <div class="faq-list">
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>هل التطبيق مجاني؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">نيروز مجاني للتنزيل والاستخدام. بعض الميزات المتقدمة وعدد من القوالب الحصرية ستكون ضمن الاشتراك المميز، لكن المحرر الأساسي وعدداً كبيراً من القوالب ستبقى مجانية تماماً.</div>
-      </div>
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>هل يعمل التطبيق بدون اتصال بالإنترنت؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">المحرر الأساسي — الطبقات، النصوص، الأشكال، الرسم — يعمل بدون إنترنت. لكن أدوات الذكاء الاصطناعي مثل إزالة الخلفية وتوسيع الصورة تحتاج اتصالاً بالإنترنت، كذلك تصفّح القوالب الجديدة وتحميل الخطوط.</div>
-      </div>
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>ماذا يحدث بصوري عند استخدام أدوات الذكاء الاصطناعي؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">خصوصيتك تهمنا. صورك تُرسل للمعالجة بشكل مشفّر، ولا تُحفظ على خوادمنا بعد اكتمال المعالجة. لا نبيع بياناتك ولا نستخدمها لأغراض تجارية.</div>
-      </div>
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>ما صيغ التصدير المتاحة؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">يدعم نيروز التصدير بصيغ: JPEG، PNG (مع شفافية)، WebP، PDF، MP4، وGIF. يمكنك اختيار الجودة ودقة الدقة قبل التصدير مع معاينة حجم الملف.</div>
-      </div>
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>هل التطبيق متاح على Android و iOS؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">نعم، نيروز متاح الآن على App Store لأجهزة iPhone وiPad، وعلى Google Play لأجهزة Android. حمّله مجاناً وابدأ التصميم خلال دقائق.</div>
-      </div>
-      <div class="faq-item">
-        <button class="faq-q" onclick="toggleFaq(this)">
-          <span>هل يوجد دعم للغة العربية الكامل؟</span>
-          <span class="faq-arrow">▾</span>
-        </button>
-        <div class="faq-a">نيروز مبني أساساً للغة العربية. الواجهة كاملة RTL، ومحرك النصوص يدعم التشكيل العربي الكامل، الخط المقوّس، ومئات الخطوط العربية عالية الجودة.</div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ══════════════════════════════════════
      FINAL CTA
 ══════════════════════════════════════ -->
 <section class="cta-section" id="download">
@@ -1714,7 +1709,7 @@ footer {
   <div class="footer-top">
     <div>
       <div class="footer-logo nav-logo">
-        <img class="logo-img" src="/nayroz-icon.png" alt="أيقونة نيروز" />
+        <img class="logo-img" src="/nayroz-logo-color.svg" width="42" height="42" alt="شعار نيروز" />
         <span class="logo-name">نيروز</span>
       </div>
       <p class="footer-about">استوديو التصميم العربي الأول على الهاتف. صور، فيديو، وحركة — في تطبيق واحد.</p>
@@ -1737,40 +1732,32 @@ footer {
     <div class="footer-col">
       <h3>التطبيق</h3>
       <ul>
-        <li><a href="#">القوالب</a></li>
-        <li><a href="#">تصاميمي</a></li>
-        <li><a href="#">تحميل التطبيق</a></li>
-        <li><a href="#">الجديد</a></li>
+        <li><a href="templates.html">القوالب</a></li>
+        <li><a href="download.html">تحميل التطبيق</a></li>
+        <li><a href="whats-new.html">الجديد</a></li>
       </ul>
     </div>
 
     <div class="footer-col">
       <h3>الدعم</h3>
       <ul>
-        <li><a href="#">مركز المساعدة</a></li>
-        <li><a href="#">تواصل معنا</a></li>
-        <li><a href="#">الأسئلة الشائعة</a></li>
-        <li><a href="#">وظائف</a></li>
+        <li><a href="contact.html">تواصل معنا</a></li>
+        <li><a href="faq.html">الأسئلة الشائعة</a></li>
       </ul>
     </div>
 
     <div class="footer-col">
       <h3>القانونية</h3>
       <ul>
-        <li><a href="#">شروط الاستخدام</a></li>
-        <li><a href="#">سياسة الخصوصية</a></li>
-        <li><a href="#">سياسة ملفات الكوكيز</a></li>
+        <li><a href="terms.html">شروط الاستخدام</a></li>
+        <li><a href="privacy.html">سياسة الخصوصية</a></li>
+        <li><a href="cookies.html">سياسة ملفات الكوكيز</a></li>
       </ul>
     </div>
   </div>
 
   <div class="footer-bottom">
     <p class="footer-copy">© ٢٠٢٦ نيروز. جميع الحقوق محفوظة.</p>
-    <div class="footer-legal">
-      <a href="#">الشروط</a>
-      <a href="#">الخصوصية</a>
-      <a href="#">تواصل</a>
-    </div>
   </div>
 </footer>
 
@@ -1793,6 +1780,33 @@ const observer = new IntersectionObserver((entries) => {
 }, { threshold: 0.08 });
 document.querySelectorAll('.reveal').forEach(el => observer.observe(el));
 
+// Stat count-up
+const statFmt = (n) => n.toLocaleString('en-US');
+const statObserver = new IntersectionObserver((entries) => {
+  entries.forEach((e) => {
+    if (!e.isIntersecting) return;
+    statObserver.unobserve(e.target);
+    const el = e.target;
+    const target = parseInt(el.dataset.count, 10) || 0;
+    const plus = el.dataset.plus ? '+' : '';
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      el.textContent = plus + statFmt(target);
+      return;
+    }
+    const dur = 1400;
+    let start = null;
+    const tick = (ts) => {
+      if (start === null) start = ts;
+      const p = Math.min(1, (ts - start) / dur);
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = plus + statFmt(Math.round(target * eased));
+      if (p < 1) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  });
+}, { threshold: 0.5 });
+document.querySelectorAll('.stat-num[data-count]').forEach(el => statObserver.observe(el));
+
 // Phone slides
 let currentSlide = 0;
 const slides = document.querySelectorAll('.phone-slide');
@@ -1806,14 +1820,6 @@ function goSlide(n) {
 }
 if (!window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
   setInterval(() => goSlide((currentSlide + 1) % slides.length), 3000);
-}
-
-// FAQ
-function toggleFaq(btn) {
-  const item = btn.parentElement;
-  const isOpen = item.classList.contains('open');
-  document.querySelectorAll('.faq-item').forEach(i => i.classList.remove('open'));
-  if (!isOpen) item.classList.add('open');
 }
 
 // Platform cards

@@ -1616,13 +1616,92 @@ function toEditorDesignFromTemplate(
     Math.max(DEFAULT_PAGE_DURATION_MS, Math.round(maxElementEndMs))
   );
   const isTimelineImport = derivedPageDurationMs > DEFAULT_PAGE_DURATION_MS;
+
+  // Multi-page imports: meta.import.pages lists the design's pages and every fabric object
+  // carries an importPageIndex — partition the built elements back into editor pages.
+  const importPagesMeta = (() => {
+    const meta = (template.data as Record<string, unknown> | null | undefined) ?? null;
+    const importMeta =
+      meta && typeof meta === "object"
+        ? ((meta as { meta?: { import?: { pages?: unknown } } }).meta?.import ?? null)
+        : null;
+    const pages = importMeta && typeof importMeta === "object" ? importMeta.pages : null;
+    return Array.isArray(pages) && pages.length > 1 ? (pages as Array<Record<string, unknown>>) : null;
+  })();
+
+  const buildPage = (
+    id: string,
+    name: string,
+    pageWidth: number,
+    pageHeight: number,
+    pageElements: EditorElement[]
+  ): EditorDesign["pages"][number] => {
+    const pageMaxEndMs = pageElements.reduce(
+      (max, element) => Math.max(max, Number(element.timelineEndMs) || 0),
+      0
+    );
+    return {
+      id,
+      name,
+      width: pageWidth,
+      height: pageHeight,
+      durationMs: Math.min(600000, Math.max(DEFAULT_PAGE_DURATION_MS, Math.round(pageMaxEndMs))),
+      background: {
+        type: "color",
+        color: backgroundColor,
+        gradientFrom: backgroundColor,
+        gradientTo: backgroundColor,
+      },
+      elements: pageElements.map((element) => ({ ...element, pageId: id })),
+    };
+  };
+
+  let editorPages: EditorDesign["pages"];
+  if (importPagesMeta) {
+    const pageIndexByNodeId = new Map<string, number>();
+    if (fabric) {
+      fabric.objects.forEach((object) => {
+        if (!object || typeof object !== "object") return;
+        const item = object as Record<string, unknown>;
+        const nodeId = String(item.importNodeId || item.id || "").trim();
+        const rawIndex = Number(item.importPageIndex);
+        if (nodeId && Number.isInteger(rawIndex) && rawIndex >= 0) {
+          pageIndexByNodeId.set(nodeId, rawIndex);
+        }
+      });
+    }
+    const buckets: EditorElement[][] = importPagesMeta.map(() => []);
+    sortedElements.forEach((element) => {
+      const nodeId = String(element.importNodeId || "").trim();
+      const bucketIndex = pageIndexByNodeId.get(nodeId) ?? 0;
+      const bounded = bucketIndex >= 0 && bucketIndex < buckets.length ? bucketIndex : 0;
+      buckets[bounded].push(element);
+    });
+    editorPages = importPagesMeta.map((pageMeta, index) =>
+      buildPage(
+        `template-page-${template.id}-${index + 1}`,
+        String(pageMeta?.name || `Page ${index + 1}`),
+        Math.max(16, Math.round(toNumber(pageMeta?.width, width))),
+        Math.max(16, Math.round(toNumber(pageMeta?.height, height))),
+        buckets[index]
+      )
+    );
+  } else {
+    editorPages = [buildPage(pageId, template.name || "Template", width, height, sortedElements)];
+  }
+
+  const totalDurationMs = editorPages.reduce(
+    (total, page) => total + (Number(page.durationMs) || DEFAULT_PAGE_DURATION_MS),
+    0
+  );
+
   return {
     version: 2,
-    activePageId: pageId,
+    activePageId: editorPages[0].id,
     timeline: {
       enabled: true,
       fps: 30,
-      totalDurationMs: derivedPageDurationMs,
+      totalDurationMs,
       preview: {
         status: "not_requested",
         url: null,
@@ -1635,22 +1714,7 @@ function toEditorDesignFromTemplate(
         animatedImport: isTimelineImport,
       },
     },
-    pages: [
-      {
-        id: pageId,
-        name: template.name || "Template",
-        width,
-        height,
-        durationMs: derivedPageDurationMs,
-        background: {
-          type: "color",
-          color: backgroundColor,
-          gradientFrom: backgroundColor,
-          gradientTo: backgroundColor,
-        },
-        elements: sortedElements,
-      },
-    ],
+    pages: editorPages,
   };
 }
 

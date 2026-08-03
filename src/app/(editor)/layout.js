@@ -8,11 +8,11 @@ export default async function EditorLayout({ children }) {
   const session = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
   const role = session.role;
 
+  // Keep in sync with the dashboard-group nav: designers see content
+  // management only, admins additionally get configuration and people.
   const navItems = [
     { href: "/", label: "Overview", icon: "overview" },
     { href: "/templates", label: "Templates", icon: "templates" },
-    { href: "/settings", label: "Settings", icon: "settings" },
-    { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
     { href: "/categories", label: "Categories", icon: "categories" },
     { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
     { href: "/psd-import", label: "PSD Import", icon: "psdImport" },
@@ -21,6 +21,8 @@ export default async function EditorLayout({ children }) {
 
   if (role === Roles.ADMIN) {
     navItems.push(
+      { href: "/settings", label: "Settings", icon: "settings" },
+      { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
       { href: "/fonts", label: "Fonts", icon: "fonts" },
       { href: "/users", label: "Users", icon: "users" },
       { href: "/analytics", label: "Analytics", icon: "analytics" },

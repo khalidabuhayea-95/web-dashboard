@@ -1,8 +1,9 @@
-import { randomBytes } from "node:crypto";
+import { randomBytes, randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
 import { resizeThumbnailDataUrlHalf } from "@/lib/media/thumbnailResize.server";
 import { extractFabricData } from "@/lib/templates/editorData";
+import { uploadTemplatePageThumbnails } from "@/lib/templates/pageThumbnails.server";
 import { buildSnapshot, normalizeSlug } from "@/lib/templates/serverCore";
 import {
   attachImportMetadataToFabricData,
@@ -130,6 +131,7 @@ export async function createImportedTemplate({
   tags = ["canva", "imported"],
   action = "import-canva",
   importMetadata,
+  pageThumbnails = null,
 }) {
   const sanitizedImageSource = sanitizeDataUrl(imageDataUrl);
   const rawThumbnailSource = sanitizeDataUrl(thumbnailDataUrl || imageDataUrl);
@@ -177,14 +179,32 @@ export async function createImportedTemplate({
     throw new Error("Template payload is too large.");
   }
 
+  const importPages =
+    data?.meta?.import?.pages && Array.isArray(data.meta.import.pages)
+      ? data.meta.import.pages
+      : null;
+  const pageCount = importPages && importPages.length > 1 ? importPages.length : 1;
+
+  // Upload per-page previews BEFORE the row exists so the id is stable: mint it here rather
+  // than letting the DB default it, and reuse it for both the object keys and the insert.
+  const templateId = randomUUID();
+  const storedPageThumbnails = await uploadTemplatePageThumbnails({
+    pageThumbnails,
+    ownerId,
+    templateId,
+  });
+
   return prisma.$transaction(async (tx) => {
     const created = await tx.template.create({
       data: {
+        id: templateId,
         ownerId,
         name: uniqueName,
         slug: uniqueSlug,
         status: "draft",
         canvasSize: { width: canvasWidth, height: canvasHeight },
+        pageCount,
+        ...(storedPageThumbnails ? { pageThumbnails: storedPageThumbnails } : {}),
         category: "general",
         subCategory: "general",
         tags,

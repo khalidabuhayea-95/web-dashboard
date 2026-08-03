@@ -372,10 +372,8 @@ export async function POST(request: NextRequest) {
       if (!template) {
         return handleBadRequest("Template not found for preview upload");
       }
-      if (session.role !== "admin" && template.ownerId !== session.userId) {
-        return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-      }
-
+      // Shared library: any dashboard user may replace another user's preview.
+      // See canAccessTemplate in lib/templates/server.js.
       templatePreviewContext = {
         ownerId: String(template.ownerId || "").trim() || session.userId,
         previousUrl:

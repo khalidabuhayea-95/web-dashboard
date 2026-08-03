@@ -7,6 +7,7 @@ import Toolbar from "@/components/editor/Toolbar";
 import SidePanel from "@/components/editor/SidePanel";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
 import PagesTimeline from "@/components/editor/PagesTimeline";
+import PageBar from "@/components/editor/PageBar";
 import { ErrorBoundary } from "@/components/ui/ErrorBoundary";
 import { useEditorStore } from "@/store/editorStore";
 import { buildGoogleFontsStylesheetUrl } from "@/lib/editor/fonts";
@@ -62,6 +63,8 @@ export default function EditorLayout() {
   const showLeftSidebar = useEditorStore((state) => state.showLeftSidebar);
   const showRightSidebar = useEditorStore((state) => state.showRightSidebar);
   const pages = useEditorStore((state) => state.pages);
+  const activePageId = useEditorStore((state) => state.activePageId);
+  const setActivePageId = useEditorStore((state) => state.setActivePageId);
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const setShowLeftSidebar = useEditorStore((state) => state.setShowLeftSidebar);
@@ -146,6 +149,18 @@ export default function EditorLayout() {
 
       if (typingTarget) return;
 
+      if ((event.key === "PageUp" || event.key === "PageDown") && !ctrlOrMeta && !event.altKey) {
+        event.preventDefault();
+        const currentIndex = pages.findIndex((page) => page.id === activePageId);
+        if (currentIndex < 0) return;
+        const nextIndex = event.key === "PageUp" ? currentIndex - 1 : currentIndex + 1;
+        const nextPage = pages[nextIndex];
+        if (nextPage) {
+          setActivePageId(nextPage.id);
+        }
+        return;
+      }
+
       if (
         (event.key === "Delete" || event.key === "Backspace") &&
         !ctrlOrMeta &&
@@ -161,9 +176,12 @@ export default function EditorLayout() {
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [
+    activePageId,
     deleteSelected,
+    pages,
     redo,
     selectedIds.length,
+    setActivePageId,
     stageApi,
     undo,
   ]);
@@ -304,6 +322,7 @@ export default function EditorLayout() {
               <CanvasEditor />
             </ErrorBoundary>
           </div>
+          <PageBar />
           <PagesTimeline showTimeline={showAnimationTimeline} />
         </div>
 

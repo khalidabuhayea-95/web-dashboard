@@ -5,7 +5,7 @@ import {
   getTemplateTaxonomySettings,
   saveTemplateTaxonomySettings,
 } from "@/lib/templates/templateSettings.server";
-import { handleApiError, handleForbidden, handleBadRequest } from "@/lib/api/errors";
+import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 
 export async function GET() {
@@ -20,7 +20,9 @@ export async function GET() {
     const settings = await getTemplateTaxonomySettings();
     return NextResponse.json({
       settings,
-      canEdit: session.role === "admin",
+      // Taxonomy is content: every role that reaches this endpoint (admin and
+      // designer, per getEditorSession) may edit it.
+      canEdit: true,
     });
   } catch (error) {
     return handleApiError(error, "Failed to retrieve taxonomy settings");
@@ -31,10 +33,6 @@ export async function PUT(request: NextRequest) {
   try {
     const session = await getEditorSession();
     if (session.error) return session.error;
-
-    if (session.role !== "admin") {
-      return handleForbidden("Only admins can update taxonomy settings");
-    }
 
     let body: any = {};
     try {

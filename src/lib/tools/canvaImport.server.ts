@@ -425,6 +425,9 @@ async function rewriteImportedTemplateAssets(template: any): Promise<any> {
           Math.round(Number(existingImportMetadata?.page?.sourceHeight || canvasHeight))
         ),
       },
+      // Multi-page imports: keep the page descriptors — rebuilding metadata without them
+      // would flatten a multi-page import back to one page.
+      pages: existingImportMetadata?.pages,
       layerTree:
         Array.isArray(existingImportMetadata?.layerTree) &&
         existingImportMetadata.layerTree.length > 0

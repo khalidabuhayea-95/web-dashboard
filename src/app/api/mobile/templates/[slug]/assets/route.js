@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 
 import { isTemplateAllowedByTaxonomy, prepareMobileTaxonomy } from "@/lib/mobile/taxonomy";
 import prisma from "@/lib/prisma";
-import { extractFabricData } from "@/lib/templates/editorData";
+import { extractEditorPagesData, extractFabricData } from "@/lib/templates/editorData";
 import {
   isRasterizableShapeLayer,
   renderShapeLayerToPngBuffer,
@@ -16,6 +16,7 @@ import {
 } from "@/lib/storage/objectStorage.server";
 import { trimShapeSvg } from "@/lib/mobile/shapeSvgTrim.server";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
+import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
 
 export const runtime = "nodejs";
 
@@ -184,17 +185,44 @@ async function renderFrameContentPreviewPng(object) {
     .toBuffer();
 }
 
-function findLayerObject(templateData, elementId, index) {
+function resolvePageObjects(templateData, pageIndex) {
+  const pages = extractEditorPagesData(templateData);
+  if (Array.isArray(pages) && pages.length > 0) {
+    const boundedIndex =
+      Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < pages.length ? pageIndex : 0;
+    return {
+      objects: Array.isArray(pages[boundedIndex]?.objects) ? pages[boundedIndex].objects : [],
+      allPages: pages,
+    };
+  }
   const data = extractFabricData(templateData) || templateData || {};
-  const objects = Array.isArray(data?.objects) ? data.objects : [];
+  return {
+    objects: Array.isArray(data?.objects) ? data.objects : [],
+    allPages: null,
+  };
+}
+
+function findLayerObject(templateData, elementId, index, pageIndex = 0) {
+  const { objects, allPages } = resolvePageObjects(templateData, pageIndex);
 
   const normalizedElementId = String(elementId || "").trim();
-  let object = null;
-  if (normalizedElementId) {
-    object = objects.find((item) => {
+  const matchById = (list) =>
+    list.find((item) => {
       const id = String(item?.id || item?.layerId || "").trim();
       return id === normalizedElementId;
-    });
+    }) || null;
+
+  let object = null;
+  if (normalizedElementId) {
+    object = matchById(objects);
+    // The id is authoritative — search the other pages before trusting a
+    // positional index, so stale/proxied URLs still resolve to the right layer.
+    if (!object && Array.isArray(allPages)) {
+      for (const page of allPages) {
+        object = matchById(Array.isArray(page?.objects) ? page.objects : []);
+        if (object) break;
+      }
+    }
   }
   if (!object && Number.isFinite(index) && index >= 0 && index < objects.length) {
     object = objects[index];
@@ -228,9 +256,17 @@ function resolveLayerSource(object, field) {
   return "";
 }
 
-function resolveBackgroundSource(templateData, field) {
-  const data = extractFabricData(templateData) || templateData || {};
-  const background = data?.background;
+function resolveBackgroundSource(templateData, field, pageIndex = 0) {
+  const pages = extractEditorPagesData(templateData);
+  let background = null;
+  if (Array.isArray(pages) && pages.length > 0) {
+    const boundedIndex =
+      Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < pages.length ? pageIndex : 0;
+    background = pages[boundedIndex]?.background;
+  } else {
+    const data = extractFabricData(templateData) || templateData || {};
+    background = data?.background;
+  }
   if (typeof background === "string" && background.trim()) {
     return background.trim();
   }
@@ -259,10 +295,14 @@ export async function GET(request, { params }) {
   const elementId = String(searchParams.get("elementId") || "").trim();
   const indexParam = searchParams.get("index");
   const index = Number.isFinite(Number(indexParam)) ? Number(indexParam) : null;
+  const pageParam = searchParams.get("page");
+  const pageIndex =
+    Number.isInteger(Number(pageParam)) && Number(pageParam) > 0 ? Number(pageParam) : 0;
 
+  const audience = await resolveTemplateAudience(request);
   const template = await prisma.template.findFirst({
     where: {
-      status: "published",
+      ...audience.statusWhere,
       ...where,
     },
     select: {
@@ -284,7 +324,8 @@ export async function GET(request, { params }) {
   }
 
   let source = "";
-  const layerObject = scope === "layer" ? findLayerObject(template.data, elementId, index) : null;
+  const layerObject =
+    scope === "layer" ? findLayerObject(template.data, elementId, index, pageIndex) : null;
   if (scope === "layer" && (field === "frameContent.preview" || field === "frameContentPreview")) {
     try {
       const bytes = await renderFrameContentPreviewPng(layerObject);
@@ -295,7 +336,8 @@ export async function GET(request, { params }) {
         status: 200,
         headers: {
           "Content-Type": "image/png",
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": audience.cacheControl("public, max-age=300"),
+          Vary: "Authorization",
         },
       });
     } catch (error) {
@@ -317,7 +359,8 @@ export async function GET(request, { params }) {
         status: 200,
         headers: {
           "Content-Type": "image/png",
-          "Cache-Control": "public, max-age=300",
+          "Cache-Control": audience.cacheControl("public, max-age=300"),
+          Vary: "Authorization",
         },
       });
     } catch (error) {
@@ -362,7 +405,8 @@ export async function GET(request, { params }) {
       status: 200,
       headers: {
         "Content-Type": "image/svg+xml; charset=utf-8",
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": audience.cacheControl("public, max-age=300"),
+        Vary: "Authorization",
       },
     });
   }
@@ -370,7 +414,7 @@ export async function GET(request, { params }) {
   if (scope === "thumbnail") {
     source = String(template.thumbnailDataUrl || "").trim();
   } else if (scope === "background") {
-    source = resolveBackgroundSource(template.data, field);
+    source = resolveBackgroundSource(template.data, field, pageIndex);
   } else {
     source = resolveLayerSource(layerObject, field);
   }
@@ -400,7 +444,8 @@ export async function GET(request, { params }) {
       status: 200,
       headers: {
         "Content-Type": "image/png",
-        "Cache-Control": "public, max-age=300",
+        "Cache-Control": audience.cacheControl("public, max-age=300"),
+        Vary: "Authorization",
       },
     });
   }
@@ -409,7 +454,8 @@ export async function GET(request, { params }) {
     status: 200,
     headers: {
       "Content-Type": parsed.mimeType,
-      "Cache-Control": "public, max-age=300",
+      "Cache-Control": audience.cacheControl("public, max-age=300"),
+      Vary: "Authorization",
     },
   });
 }

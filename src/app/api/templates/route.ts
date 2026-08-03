@@ -57,6 +57,7 @@ const TEMPLATE_LIST_SELECT: any = {
   status: true,
   version: true,
   canvasSize: true,
+  pageCount: true,
   category: true,
   subCategory: true,
   tags: true,
@@ -483,6 +484,18 @@ function makeTemplateThumbnailPath(ownerId: string, templateId: string, mimeType
   return `users/${ownerId}/templates/thumbnails/${safeTemplateId}/thumbnail.${ext}`;
 }
 
+function makeTemplatePageThumbnailPath(
+  ownerId: string,
+  templateId: string,
+  pageKey: string,
+  mimeType: string
+): string {
+  const safeTemplateId = sanitizePathSegment(templateId) || "template";
+  const safePageKey = sanitizePathSegment(pageKey) || "page";
+  const ext = extensionFromMimeType(mimeType);
+  return `users/${ownerId}/templates/thumbnails/${safeTemplateId}/pages/${safePageKey}.${ext}`;
+}
+
 interface ResolveThumbnailInput {
   thumbnailValue: string;
   ownerId: string;
@@ -549,6 +562,77 @@ async function resolveTemplateThumbnailUrl(input: ResolveThumbnailInput): Promis
   return publicUrl;
 }
 
+/**
+ * Uploads the per-page preview images a multi-page save/import supplies.
+ *
+ * Input is `{ [pageId]: dataUrlOrUrl }`; already-hosted URLs pass through untouched, data URLs
+ * are downscaled and uploaded next to the template's cover thumbnail. A page whose image fails
+ * is simply omitted — a missing page preview degrades to the client's local render and must
+ * never fail the save.
+ */
+async function resolveTemplatePageThumbnails(input: {
+  pageThumbnails: unknown;
+  ownerId: string;
+  templateId: string;
+  existing?: Record<string, string> | null;
+}): Promise<Record<string, string> | null> {
+  const { pageThumbnails, ownerId, templateId, existing = null } = input;
+  const source = asPlainObject(pageThumbnails);
+  if (!source) return existing;
+
+  const resolved: Record<string, string> = {};
+  for (const [rawPageId, rawValue] of Object.entries(source)) {
+    const pageId = String(rawPageId || "").trim();
+    const value = typeof rawValue === "string" ? restorePublicObjectUrlFromClient(rawValue).trim() : "";
+    if (!pageId || !value) continue;
+
+    const parsed = parseImageDataUrl(value);
+    if (!parsed) {
+      // Already a hosted URL (unchanged page re-sent by the client).
+      resolved[pageId] = value;
+      continue;
+    }
+    if (!parsed.mimeType.startsWith("image/") || !parsed.buffer?.length) continue;
+    if (parsed.buffer.length > MAX_THUMBNAIL_BYTES) continue;
+
+    try {
+      let buffer = parsed.buffer;
+      let mimeType = parsed.mimeType;
+      const resized = await resizeThumbnailBufferHalf({ bytes: buffer, mimeType });
+      if (resized.resized) {
+        buffer = resized.bytes;
+        mimeType = resized.mimeType;
+      }
+      const objectPath = makeTemplatePageThumbnailPath(ownerId, templateId, pageId, mimeType);
+      const uploaded = await uploadObject({
+        bucket: THUMBNAIL_BUCKET,
+        key: objectPath,
+        body: buffer,
+        contentType: mimeType,
+        cacheControl: OVERWRITABLE_TEMPLATE_MEDIA_CACHE_CONTROL,
+        upsert: true,
+      });
+      const publicUrl = String(uploaded.url || "").trim();
+      if (publicUrl) resolved[pageId] = publicUrl;
+    } catch (error) {
+      logger.warn("Failed to upload template page thumbnail", {
+        templateId,
+        pageId,
+        error: error instanceof Error ? error.message : String(error || ""),
+      });
+    }
+  }
+
+  if (Object.keys(resolved).length === 0) return existing;
+
+  // Drop stored previews for pages that no longer exist, so deleted pages don't leak URLs.
+  const merged = { ...(existing || {}) };
+  Object.keys(merged).forEach((pageId) => {
+    if (!(pageId in source)) delete merged[pageId];
+  });
+  return { ...merged, ...resolved };
+}
+
 export async function GET(request: NextRequest): Promise<NextResponse> {
   try {
     const session = await getEditorSession();
@@ -580,13 +664,9 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       tag,
       search,
     });
-    const scopedWhere =
-      session.role === "admin"
-        ? where
-        : {
-            ...where,
-            ownerId: session.userId,
-          };
+    // Shared library: the list is not narrowed by owner for any role. See
+    // canAccessTemplate in lib/templates/server.js.
+    const scopedWhere = where;
 
     logger.info("Listing templates", {
       userId: session.userId,
@@ -670,6 +750,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
 
     const requestedSlug = normalizeSlug(body?.slug || name);
     const canvasSize = normalizeCanvasSize(body?.canvasSize);
+    const pageCount = Math.max(1, extractEditorPages(data).length);
     const taxonomySettings = await getTemplateTaxonomySettings();
     const category = normalizeCategory(body?.category, taxonomySettings);
     const subCategory = normalizeSubCategory(body?.subCategory, category, taxonomySettings);
@@ -721,6 +802,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         thumbnailDataUrl,
         existingTemplate: existing,
       });
+      const pageThumbnails = await resolveTemplatePageThumbnails({
+        pageThumbnails: body?.pageThumbnails,
+        ownerId: existing.ownerId,
+        templateId: existing.id,
+        existing: asPlainObject(existing.pageThumbnails) as Record<string, string> | null,
+      });
 
       logger.info("Updating template", { userId: session.userId, templateId: id });
 
@@ -732,10 +819,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             slug,
             data,
             canvasSize,
+            pageCount,
             category,
             subCategory,
             tags,
             thumbnailDataUrl,
+            ...(pageThumbnails ? { pageThumbnails } : {}),
             ...previewUpdate,
             version: { increment: 1 },
           },
@@ -790,6 +879,11 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       data,
       thumbnailDataUrl,
     });
+    const pageThumbnails = await resolveTemplatePageThumbnails({
+      pageThumbnails: body?.pageThumbnails,
+      ownerId: session.userId,
+      templateId: newTemplateId,
+    });
 
     logger.info("Creating new template", { userId: session.userId, name });
 
@@ -802,10 +896,12 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           slug,
           data,
           canvasSize,
+          pageCount,
           category,
           subCategory,
           tags,
           thumbnailDataUrl,
+          ...(pageThumbnails ? { pageThumbnails } : {}),
           ...previewUpdate,
           status: "draft",
         },

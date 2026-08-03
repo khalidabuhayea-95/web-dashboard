@@ -3,6 +3,12 @@ import { SignJWT, createRemoteJWKSet, jwtVerify } from "jose";
 import prisma from "@/lib/prisma";
 import { createOpaqueToken, hashOpaqueToken } from "@/lib/auth/tokens";
 import { normalizeEmail, sanitizeDisplayName } from "@/lib/auth/utils";
+import {
+  ACCOUNT_DISABLED_CODE,
+  accountDisabledError,
+  isMobileUserBanned,
+} from "@/lib/mobile/mobileUserBan";
+import { normalizeMobileUserRole } from "@/lib/mobile/mobileUserRoles";
 import { getMobileAuthSettings } from "@/lib/settings/mobileAuthSettings.server";
 import { upsertDeviceToken } from "@/lib/push/deviceTokens.server";
 
@@ -20,6 +26,9 @@ function serializeMobileUser(user) {
     name: user.name || null,
     email: user.email || null,
     emailVerified: Boolean(user.emailVerified),
+    // Lets the app show a "preview mode" hint when the account is allowed to
+    // see unpublished templates.
+    role: normalizeMobileUserRole(user.role),
   };
 }
 
@@ -53,6 +62,12 @@ export async function issueMobileSession({
   devicePlatform,
   appVersion,
 }) {
+  // Single choke point for every provider's login route and for refresh: a
+  // disabled account never receives a new token pair.
+  if (isMobileUserBanned(mobileUser)) {
+    throw accountDisabledError();
+  }
+
   const settings = await getMobileAuthConfig();
   const accessTokenSecret = String(settings.bearer.accessTokenSecret || "").trim();
   const refreshTokenSecret = String(settings.bearer.refreshTokenSecret || "").trim();
@@ -139,6 +154,12 @@ export async function verifyMobileAccessToken(token) {
     throw new Error("Mobile user not found.");
   }
 
+  // Checked on every authenticated request rather than only at login, so a ban
+  // takes effect immediately instead of when the current access token expires.
+  if (isMobileUserBanned(mobileUser)) {
+    throw accountDisabledError();
+  }
+
   return {
     payload: verification.payload,
     mobileUser,
@@ -181,7 +202,7 @@ export async function requireMobileBearerUser(request) {
  * server-side logging only and is never sent to clients.
  *
  * @typedef {{ ok: true, mobileUser: { id: string, name: string | null, email: string | null, emailVerified: boolean }, payload: import("jose").JWTPayload }} ResolvedMobileBearerUser
- * @typedef {{ ok: false, status: number, error: string, reason: string }} RejectedMobileBearerUser
+ * @typedef {{ ok: false, status: number, error: string, reason: string, code?: string }} RejectedMobileBearerUser
  *
  * @param {Request} request
  * @returns {Promise<ResolvedMobileBearerUser | RejectedMobileBearerUser>}
@@ -201,6 +222,18 @@ export async function resolveMobileBearerUser(request) {
     const { mobileUser, payload } = await verifyMobileAccessToken(token);
     return { ok: true, mobileUser, payload };
   } catch (error) {
+    // A disabled account is a 403, not a 401: signing in again will not help,
+    // and the app should say so instead of looping through the login screen.
+    if (error?.code === ACCOUNT_DISABLED_CODE) {
+      return {
+        ok: false,
+        status: 403,
+        code: ACCOUNT_DISABLED_CODE,
+        error: error.message,
+        reason: "account_disabled",
+      };
+    }
+
     return {
       ok: false,
       status: 401,
@@ -230,7 +263,18 @@ export async function refreshMobileSession({
     include: { mobileUser: true },
   });
 
-  if (!storedToken || storedToken.revokedAt || storedToken.expiresAt.getTime() <= Date.now()) {
+  if (!storedToken) {
+    throw new Error("Refresh token is invalid or expired.");
+  }
+
+  // Deliberately checked before the revoked/expired test: banning revokes every
+  // refresh token, so the generic error would fire first and the app would loop
+  // through the login screen just to learn the account is disabled.
+  if (isMobileUserBanned(storedToken.mobileUser)) {
+    throw accountDisabledError();
+  }
+
+  if (storedToken.revokedAt || storedToken.expiresAt.getTime() <= Date.now()) {
     throw new Error("Refresh token is invalid or expired.");
   }
 

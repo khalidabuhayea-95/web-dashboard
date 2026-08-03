@@ -72,6 +72,7 @@ const MAX_INLINE_IMAGE_DATA_URL_LENGTH = Number(
   SHARED_CONSTANTS.MAX_INLINE_IMAGE_DATA_URL_LENGTH || 1_800_000
 );
 const MAX_TRANSPORT_JSON_LENGTH = Number(SHARED_CONSTANTS.MAX_TRANSPORT_JSON_LENGTH || 7_500_000);
+const MAX_IMPORT_PAGES = Number(SHARED_CONSTANTS.MAX_IMPORT_PAGES || 10);
 const MAX_INLINE_FONT_DATA_URL_LENGTH = Number(
   SHARED_CONSTANTS.MAX_INLINE_FONT_DATA_URL_LENGTH || 7_000_000
 );
@@ -2686,8 +2687,233 @@ async function fetchProtectedImagesInMainWorld(urls) {
   return out;
 }
 
+// Extract Canva's design model in the MAIN world (the ONLY world that can see React's
+// __reactFiber$). This is what makes timeline/video designs import their full layer set +
+// animations — the isolated content script can't reach the fiber itself. Best-effort: {} on
+// failure (the scraper still imports the current frame's DOM).
+async function extractFiberModelFromTab(tabId) {
+  let fiberModel = {};
+  try {
+    let extracted = null;
+    // PREFER file injection over the serialized `func` below. A `func` is serialized from THIS
+    // service worker, which Chrome caches hard — so fiber-derived features (animations, text,
+    // editable shapes, flips) silently ran stale until a full Remove+Load-unpacked. canva-fiber-
+    // main.js is re-read from disk on every import (like canva-scraper.js), so it updates on a
+    // plain reload. It stashes its result on globalThis; a trivial (never-changing → cache-immune)
+    // read-back func retrieves it. Falls back to the in-worker func if file injection is blocked.
+    try {
+      await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        files: ["canva-fiber-main.js"],
+      });
+      const readBack = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: () =>
+          globalThis.__canvaFiberModelResult && typeof globalThis.__canvaFiberModelResult === "object"
+            ? globalThis.__canvaFiberModelResult
+            : null,
+      });
+      const fromFile = Array.isArray(readBack)
+        ? readBack.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+        : null;
+      if (fromFile && typeof fromFile === "object" && Object.keys(fromFile).length) extracted = fromFile;
+    } catch (_fileInjectError) {
+      /* file injection unavailable (older Chrome / blocked) — fall through to the func path */
+    }
+    if (!extracted) {
+      // NOTE: this in-worker fallback predates multi-page extraction (no __pages) — a stale
+      // worker degrades to importing the current page only, which matches its historic behavior.
+      const fiberResults = await chrome.scripting.executeScript({
+        target: { tabId },
+        world: "MAIN",
+        func: extractCanvaFiberModel,
+      });
+      extracted = Array.isArray(fiberResults)
+        ? fiberResults.find((entry) => entry && entry.result && typeof(entry.result) === "object")?.result
+        : null;
+    }
+    if (extracted && typeof extracted === "object") fiberModel = extracted;
+  } catch (_fiberError) {
+    /* MAIN-world injection blocked or fiber shape changed — static designs still import. */
+  }
+  return fiberModel;
+}
+
+// Per-page view of the fiber model: the flat legacy map for page 0 (or when the model has no
+// per-page data), else that page's element map + background re-shaped to the legacy contract the
+// scraper consumes.
+function sliceFiberModelForPage(fiberModel, pageIndex) {
+  if (!fiberModel || typeof fiberModel !== "object") return {};
+  const pages = Array.isArray(fiberModel.__pages) ? fiberModel.__pages : null;
+  if (!pages || !Number.isInteger(pageIndex) || pageIndex < 0 || pageIndex >= pages.length) {
+    return fiberModel;
+  }
+  const page = pages[pageIndex] || {};
+  const sliced = { ...(page.elements && typeof page.elements === "object" ? page.elements : {}) };
+  if (page.background && typeof page.background === "object") {
+    sliced.__background = page.background;
+  }
+  return sliced;
+}
+
+// Ordered [data-page-id] inventory of the open design (scraper file must not yet be injected —
+// this injects it). Empty array when detection fails.
+async function listCanvaPagesInTab(tabId) {
+  try {
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ["canva-scraper.js"],
+    });
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const listPages = globalThis.__canvaImporterListPages;
+        return typeof listPages === "function" ? listPages() : [];
+      },
+    });
+    const pages = Array.isArray(results)
+      ? results.find((entry) => entry && Array.isArray(entry.result))?.result
+      : null;
+    return Array.isArray(pages) ? pages.filter((page) => page && page.pageId) : [];
+  } catch (_error) {
+    return [];
+  }
+}
+
+// Trusted input via the debugger protocol: Canva's page-switcher thumbnails ignore synthetic
+// DOM events (isTrusted checks), so a real Input.dispatchMouseEvent click — indistinguishable
+// from a physical one — is the only reliable way to change pages in single-page view. Chrome
+// shows its standard "is debugging this browser" banner while attached; attach/detach is scoped
+// to each click so the banner clears between pages.
+async function trustedClickAt(tabId, x, y) {
+  const target = { tabId };
+  await chrome.debugger.attach(target, "1.3");
+  try {
+    const base = {
+      x: Math.round(x),
+      y: Math.round(y),
+      button: "left",
+      clickCount: 1,
+      pointerType: "mouse",
+    };
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mousePressed",
+      ...base,
+    });
+    await sleep(40);
+    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
+      type: "mouseReleased",
+      ...base,
+    });
+  } finally {
+    try {
+      await chrome.debugger.detach(target);
+    } catch (_detachError) {
+      /* already detached */
+    }
+  }
+}
+
+async function displayedPageMatches(tabId, expectedLbIds) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [expectedLbIds],
+      func: (ids) => {
+        const matches = globalThis.__canvaImporterDisplayedPageMatches;
+        return typeof matches === "function" ? matches(ids) : false;
+      },
+    });
+    return Boolean(
+      Array.isArray(results) ? results.find((entry) => entry && entry.result === true) : false
+    );
+  } catch (_error) {
+    return false;
+  }
+}
+
+async function locatePageThumb(tabId, pageNumber) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      args: [pageNumber],
+      func: (number) => {
+        const locate = globalThis.__canvaImporterLocatePageThumb;
+        return typeof locate === "function" ? locate(number) : null;
+      },
+    });
+    const thumb = Array.isArray(results)
+      ? results.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+      : null;
+    return thumb && Number.isFinite(Number(thumb.x)) && Number.isFinite(Number(thumb.y))
+      ? thumb
+      : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Virtualized single-page editors: switch to design page `pageIndex` by trusted-clicking its
+// bottom-strip thumbnail, verifying by page CONTENT (the model's per-page LB element ids) —
+// the [data-page-id] attribute is just the viewport slot and never changes.
+async function ensureVirtualizedPageDisplayed(tabId, pageIndex, expectedLbIds, maxAttempts = 6) {
+  const hasExpectedIds = Array.isArray(expectedLbIds) && expectedLbIds.length > 0;
+  if (!hasExpectedIds) {
+    // Without ids we cannot verify which page is on screen; only page 0 (initial view) is safe.
+    return pageIndex === 0;
+  }
+  if (await displayedPageMatches(tabId, expectedLbIds)) return true;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    const thumb = await locatePageThumb(tabId, pageIndex + 1);
+    if (thumb) {
+      try {
+        await trustedClickAt(tabId, thumb.x, thumb.y);
+      } catch (clickError) {
+        logger.warn("Trusted page-thumbnail click failed", { pageIndex }, clickError);
+      }
+    }
+    await sleep(900);
+    if (await displayedPageMatches(tabId, expectedLbIds)) return true;
+  }
+  return false;
+}
+
+// Brings a page's [data-page-id] node into view, retry-scrolling to force virtualized editors
+// (one mounted page at a time, attribute value = page index) to materialize it.
+async function ensureCanvaPageVisible(tabId, pageId, maxAttempts = 12) {
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let outcome = "";
+    try {
+      const results = await chrome.scripting.executeScript({
+        target: { tabId },
+        args: [String(pageId || "")],
+        func: (targetPageId) => {
+          const scrollTo = globalThis.__canvaImporterScrollToPage;
+          return typeof scrollTo === "function" ? scrollTo(targetPageId) : "";
+        },
+      });
+      outcome = String(
+        (Array.isArray(results)
+          ? results.find((entry) => entry && typeof entry.result === "string")?.result
+          : "") || ""
+      );
+    } catch (_error) {
+      outcome = "";
+    }
+    if (outcome === "found") return true;
+    if (!outcome) return false;
+    await sleep(450);
+  }
+  return false;
+}
+
 async function getCaptureMetaFromTab(tabId, options = {}) {
   const shouldCollectLayerMetadata = Boolean(options?.captureMetadata);
+  const targetPageId = String(options?.targetPageId || "").trim();
+  const expectedLbIds = Array.isArray(options?.expectedLbIds) ? options.expectedLbIds : [];
   let results = null;
   let primaryError = "";
   try {
@@ -2695,57 +2921,13 @@ async function getCaptureMetaFromTab(tabId, options = {}) {
       target: { tabId },
       files: ["canva-scraper.js"],
     });
-    // Extract Canva's design model in the MAIN world (the ONLY world that can see React's
-    // __reactFiber$), then hand it to the isolated scraper. This is what makes timeline/video
-    // designs import their full layer set + animations — the isolated content script can't reach
-    // the fiber itself. Best-effort: on failure the scraper still imports the current frame's DOM.
-    let fiberModel = {};
-    try {
-      let extracted = null;
-      // PREFER file injection over the serialized `func` below. A `func` is serialized from THIS
-      // service worker, which Chrome caches hard — so fiber-derived features (animations, text,
-      // editable shapes, flips) silently ran stale until a full Remove+Load-unpacked. canva-fiber-
-      // main.js is re-read from disk on every import (like canva-scraper.js), so it updates on a
-      // plain reload. It stashes its result on globalThis; a trivial (never-changing → cache-immune)
-      // read-back func retrieves it. Falls back to the in-worker func if file injection is blocked.
-      try {
-        await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          files: ["canva-fiber-main.js"],
-        });
-        const readBack = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          func: () =>
-            globalThis.__canvaFiberModelResult && typeof globalThis.__canvaFiberModelResult === "object"
-              ? globalThis.__canvaFiberModelResult
-              : null,
-        });
-        const fromFile = Array.isArray(readBack)
-          ? readBack.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
-          : null;
-        if (fromFile && typeof fromFile === "object" && Object.keys(fromFile).length) extracted = fromFile;
-      } catch (_fileInjectError) {
-        /* file injection unavailable (older Chrome / blocked) — fall through to the func path */
-      }
-      if (!extracted) {
-        const fiberResults = await chrome.scripting.executeScript({
-          target: { tabId },
-          world: "MAIN",
-          func: extractCanvaFiberModel,
-        });
-        extracted = Array.isArray(fiberResults)
-          ? fiberResults.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
-          : null;
-      }
-      if (extracted && typeof extracted === "object") fiberModel = extracted;
-    } catch (_fiberError) {
-      /* MAIN-world injection blocked or fiber shape changed — static designs still import. */
-    }
+    const fiberModel =
+      options?.fiberModel && typeof options.fiberModel === "object"
+        ? sliceFiberModelForPage(options.fiberModel, Number(options?.pageIndex))
+        : await extractFiberModelFromTab(tabId);
     results = await chrome.scripting.executeScript({
       target: { tabId },
-      args: [{ captureMetadata: shouldCollectLayerMetadata, fiberModel }],
+      args: [{ captureMetadata: shouldCollectLayerMetadata, fiberModel, targetPageId, expectedLbIds }],
       func: async (runtimeOptions = {}) => {
         const scraper = globalThis.__canvaImporterGetCaptureMetaFromTab;
         if (typeof scraper !== "function") {
@@ -3561,366 +3743,524 @@ async function importActiveCanvaTab(message, options = {}) {
   reportProgress("Waiting for Canva tab to finish loading...");
   await timePhase("waitForTabReady", () => waitForTabReady(tab.id));
   reportProgress("Reading Canva design structure...");
-  const captureMeta = await timePhase("getCaptureMetaFromTab", () =>
-    getCaptureMetaFromTab(tab.id, { captureMetadata })
-  );
-  if (!captureMeta?.ok) {
-    throw new Error(captureMeta?.error || "Could not detect Canva design frame.");
-  }
-
-  let imageDataUrl = String(captureMeta.directDataUrl || "");
-  let sourceWidth = Number(captureMeta.designWidth || 0);
-  let sourceHeight = Number(captureMeta.designHeight || 0);
-  let screenshotDataUrl = "";
-  const hasExtractedLayerMetadata =
-    Array.isArray(captureMeta.layers) && captureMeta.layers.length > 0;
-
-  if (!imageDataUrl.startsWith("data:image/") || hasExtractedLayerMetadata) {
-    reportProgress("Capturing Canva canvas snapshot...");
-    screenshotDataUrl = await timePhase("captureVisibleTab", () =>
-      chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
-    );
-  }
-
-  if (!imageDataUrl.startsWith("data:image/")) {
-    const cropped = await timePhase("cropScreenshotToCanvas", () =>
-      cropScreenshotToCanvas(screenshotDataUrl, captureMeta)
-    );
-    imageDataUrl = cropped.dataUrl;
-    sourceWidth = sourceWidth || cropped.width;
-    sourceHeight = sourceHeight || cropped.height;
-  }
-
-  if (!imageDataUrl.startsWith("data:image/")) {
-    throw new Error("Failed to build image payload from Canva tab.");
-  }
-
-  let extractedLayers = hasExtractedLayerMetadata ? captureMeta.layers : [];
-  const isolatedSnapshotWarnings = [];
-  if (screenshotDataUrl.startsWith("data:image/") && extractedLayers.length > 0) {
-    const preferSnapshotLayers = extractedLayers
-      .filter((layer) => String(layer?.kind || "").toLowerCase() === "image")
-      .filter((layer) => Boolean(layer?.preferSnapshot))
-      .filter((layer) => !layer?.hasCompanionText)
-      // Compute the isolation snapshot for ALL prefer-snapshot image layers (including
-      // plain crops that captured an asset). buildHybridFabricObjects compares the asset
-      // against this snapshot and uses the snapshot only when the asset has the page
-      // background baked in; otherwise it keeps the high-res asset.
-      .filter((layer) => String(layer?.id || "").trim().startsWith("LB"))
-      .filter((layer) => layer?.viewportRect)
-      .sort((a, b) => {
-        const aArea = numberOr(a?.width, 0) * numberOr(a?.height, 0);
-        const bArea = numberOr(b?.width, 0) * numberOr(b?.height, 0);
-        return bArea - aArea;
+  const designFiberModel = await timePhase("extractFiberModel", () => extractFiberModelFromTab(tab.id));
+  const pageInventory = await timePhase("listCanvaPages", () => listCanvaPagesInTab(tab.id));
+  const fiberPageCount = Array.isArray(designFiberModel?.__pages)
+    ? designFiberModel.__pages.length
+    : 0;
+  const totalPageCount = Math.max(pageInventory.length, fiberPageCount, 1);
+  let pagePlan;
+  if (pageInventory.length > 1) {
+    // Classic editor: every page node is in the DOM with its own id.
+    pagePlan = pageInventory.slice(0, MAX_IMPORT_PAGES);
+  } else if (fiberPageCount > 1) {
+    // Virtualized editor: one mounted [data-page-id] node at a time (the attribute is the
+    // viewport slot) — the design model (fiber) is the source of truth for the page count, and
+    // each page is recognized on screen by its own LB element ids.
+    pagePlan = Array.from(
+      { length: Math.min(fiberPageCount, MAX_IMPORT_PAGES) },
+      (_, index) => ({
+        index,
+        pageId: String(index),
+        virtualized: true,
+        expectedLbIds: Object.keys(designFiberModel.__pages[index]?.elements || {}).slice(0, 8),
       })
-      .slice(0, 24);
+    );
+  } else {
+    pagePlan = [null];
+  }
+  const isMultiPageImport = pagePlan.length > 1;
+  const truncatedPageCount = isMultiPageImport ? totalPageCount - pagePlan.length : 0;
 
-    if (preferSnapshotLayers.length > 0) {
-      try {
-        reportProgress(`Preparing ${preferSnapshotLayers.length} merged image layer snapshots...`);
-        const isolatedSnapshotsById = new Map();
-        const preferSnapshotLayerIds = preferSnapshotLayers
-          .map((layer) => String(layer?.id || "").trim())
-          .filter(Boolean);
-        let hiddenAllBitmap = null;
-        // Editable text is re-added as its own layer, so hide it for every isolation
-        // capture. Otherwise overlapping (often semi-transparent) text blends against
-        // the layer in the "visible" shot but the background in the "hidden" shot, so
-        // the visible-vs-hidden diff keeps a faint ghost copy baked into the snapshot.
-        const isolationTextLayerIds = extractedLayers
-          .filter((l) => String(l?.kind || "").toLowerCase() === "text")
-          .map((l) => String(l?.id || "").trim())
-          .filter((id) => id.startsWith("LB"));
-
-        try {
-          await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, true);
-          if (isolationTextLayerIds.length > 0) {
-            await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, true).catch(() => {});
-          }
-          await sleep(180);
-          const allHiddenScreenshotDataUrl = await timePhase("captureLayersAllHidden", () =>
-            chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
-          );
-          hiddenAllBitmap = await timePhase("decodeLayersAllHiddenBitmap", () =>
-            decodeDataUrlToBitmap(allHiddenScreenshotDataUrl)
-          );
-
-          for (let index = 0; index < preferSnapshotLayers.length; index += 1) {
-            const layer = preferSnapshotLayers[index];
-            const layerId = String(layer?.id || "").trim();
-            if (!layerId) continue;
-            reportProgress(
-              `Isolating merged image layer ${index + 1} of ${preferSnapshotLayers.length}...`
-            );
-            try {
-              await setCanvaLayerVisibility(tab.id, [layerId], false);
-              let isolatedDataUrl = "";
-              const isolationWaits = [140, 240];
-              for (let attempt = 0; attempt < isolationWaits.length; attempt += 1) {
-                await sleep(isolationWaits[attempt]);
-                const visibleLayerScreenshotDataUrl = await timePhase(
-                  `captureLayerVisible_${index + 1}_${attempt + 1}`,
-                  () => chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
-                );
-                const visibleLayerBitmap = await timePhase(
-                  `decodeLayerVisibleBitmap_${index + 1}_${attempt + 1}`,
-                  () => decodeDataUrlToBitmap(visibleLayerScreenshotDataUrl)
-                );
-                isolatedDataUrl = await timePhase(
-                  `isolateLayerSnapshot_${index + 1}_${attempt + 1}`,
-                  () =>
-                    isolateLayerSnapshotFromBitmaps(visibleLayerBitmap, hiddenAllBitmap, layer.viewportRect, {
-                      dpr: Number(captureMeta.devicePixelRatio || 1),
-                      targetWidth: Math.max(1, Math.round(numberOr(layer?.width, 1))),
-                      targetHeight: Math.max(1, Math.round(numberOr(layer?.height, 1))),
-                    })
-                );
-                if (isolatedDataUrl.startsWith("data:image/")) break;
-              }
-              if (isolatedDataUrl.startsWith("data:image/")) {
-                isolatedSnapshotsById.set(layerId, isolatedDataUrl);
-              } else {
-                isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
-              }
-            } catch (error) {
-              logger.warn("Layer isolation failed for merged Canva layer", { layerId }, error);
-              isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
-            } finally {
-              await setCanvaLayerVisibility(tab.id, [layerId], true).catch(() => {});
-              await sleep(40);
-            }
-          }
-        } finally {
-          await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, false).catch(() => {});
-          if (isolationTextLayerIds.length > 0) {
-            await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, false).catch(() => {});
-          }
-        }
-
-        if (isolatedSnapshotsById.size > 0) {
-          extractedLayers = extractedLayers.map((layer) => {
-            const layerId = String(layer?.id || "").trim();
-            const isolatedImageDataUrl = isolatedSnapshotsById.get(layerId);
-            return isolatedImageDataUrl
-              ? { ...layer, isolatedImageDataUrl }
-              : layer;
-          });
-        }
-      } catch (error) {
-        logger.warn("Merged Canva layer isolation batch failed", {}, error);
-        isolatedSnapshotWarnings.push("Could not isolate merged Canva layers; using screenshot crops.");
-      }
+  // One full capture pass (DOM scrape + screenshots + isolation + hybrid build + font
+  // resolution) scoped to a single design page. pageInfo === null runs the legacy
+  // whole-viewport single-page behavior.
+  const capturePageArtifacts = async (pageInfo, pageIndex) => {
+    const pagePrefix = isMultiPageImport ? `Page ${pageIndex + 1}/${pagePlan.length}: ` : "";
+    const pageProgress = (text) => reportProgress(`${pagePrefix}${text}`);
+    const captureMeta = await timePhase("getCaptureMetaFromTab", () =>
+      getCaptureMetaFromTab(tab.id, {
+        captureMetadata,
+        targetPageId: pageInfo?.pageId || "",
+        expectedLbIds: pageInfo?.expectedLbIds || [],
+        pageIndex,
+        fiberModel: designFiberModel,
+      })
+    );
+    if (!captureMeta?.ok) {
+      throw new Error(captureMeta?.error || "Could not detect Canva design frame.");
     }
-  }
-  const extractionLikelyDegraded = extractedLayers.length <= 1;
-  const usedFontsFromLayers = collectUsedFontFamilies(extractedLayers);
-  const fontTargetsByFamily = buildUsedFontTargetsByFamily(extractedLayers);
-  const fontAssetMap = normalizeFontAssetMap(captureMeta?.fontAssets);
-  const fallbackFontsFromAssets = Object.keys(fontAssetMap || {})
-    .map((family) => normalizeFontFamilyName(family))
-    .filter(Boolean);
-  const usedFonts = mergeUsedFontFamilies(
-    usedFontsFromLayers,
-    usedFontsFromLayers.length > 0 ? [] : fallbackFontsFromAssets
-  );
-  const textLayers = extractedLayers.filter((layer) => String(layer?.kind || "").toLowerCase() === "text");
-  const resolvableImageLayerCount = extractedLayers.filter((layer) => {
-    if (String(layer?.kind || "").toLowerCase() !== "image") return false;
-    const dataUrl = String(layer?.imageDataUrl || "");
-    const src = String(layer?.imageSrc || "");
-    return (
-      dataUrl.startsWith("data:image/") ||
-      /^https?:\/\//i.test(src) ||
-      /^file:\/\//i.test(src)
-    );
-  }).length;
-  const textLayerIds = textLayers
-    .map((layer) => String(layer?.id || "").trim())
-    .filter((id) => id.startsWith("LB"));
-  const shouldUseTextOverlayFallback = textLayers.length > 0 && resolvableImageLayerCount === 0;
-  const importWarnings = extractionLikelyDegraded
-    ? ["Canva DOM layer mapping is limited for this design; fallback extraction was used."]
-    : [];
-  if (usedFontsFromLayers.length === 0 && fallbackFontsFromAssets.length > 0) {
-    importWarnings.push("Text font detection from layers was empty; using document font assets fallback.");
-  }
-  if (usedFonts.length === 0) {
-    importWarnings.push("No text font families were detected for this import.");
-  }
-  if (String(captureMeta?.sourceType || "").toLowerCase().startsWith("fallback")) {
-    importWarnings.push("Canvas frame detection used fallback mode.");
-  }
-  // Off-screen model elements are skipped when their image has NO rendered instance at the import
-  // frame (nothing to capture pixels from). Silent skipping loses elements — e.g. a video design's
-  // opening doors imported from a late frame. Tell the user how to get a complete capture.
-  const unresolvedMediaCount = Number(captureMeta?.timelineSupplement?.unresolvedMedia || 0);
-  if (unresolvedMediaCount > 0) {
-    const animatedCount = Number(captureMeta?.timelineSupplement?.unresolvedAnimated || 0);
-    importWarnings.push(
-      `${unresolvedMediaCount} image element(s) were SKIPPED because their image is not visible at the current frame` +
-        (animatedCount > 0 ? ` (${animatedCount} of them animated)` : "") +
-        ". Move the Canva playhead to the START of the video (0:00) and reimport to capture the full design."
-    );
-  }
-  if (captureMeta?.timelineSupplement?.backgroundVideoPoster) {
-    importWarnings.push(
-      "Background video imported as a static poster frame (Canva video files are download-protected); timing and transparency preserved."
-    );
-  }
-  if (isolatedSnapshotWarnings.length > 0) {
-    importWarnings.push(...isolatedSnapshotWarnings);
-  }
-  const fontResolutionWarnings = [];
-  const resolvedFontsPromise = resolveImportedCustomFonts(
-    usedFonts,
-    fontAssetMap,
-    fontTargetsByFamily,
-    fontResolutionWarnings
-  );
-  let fabricObjects = [];
-  let backgroundNoTextDataUrl = "";
-  if (shouldUseTextOverlayFallback) {
-    try {
-      reportProgress("Capturing text-free background snapshot...");
-      await setCanvaLayerVisibility(tab.id, textLayerIds, true);
-      const hiddenTextScreenshotDataUrl = await timePhase("captureVisibleTabWithoutText", () =>
+
+    let imageDataUrl = String(captureMeta.directDataUrl || "");
+    let sourceWidth = Number(captureMeta.designWidth || 0);
+    let sourceHeight = Number(captureMeta.designHeight || 0);
+    let screenshotDataUrl = "";
+    const hasExtractedLayerMetadata =
+      Array.isArray(captureMeta.layers) && captureMeta.layers.length > 0;
+
+    if (!imageDataUrl.startsWith("data:image/") || hasExtractedLayerMetadata) {
+      pageProgress("Capturing Canva canvas snapshot...");
+      screenshotDataUrl = await timePhase("captureVisibleTab", () =>
         chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
       );
-      const croppedNoText = await timePhase("cropScreenshotToCanvasWithoutText", () =>
-        cropScreenshotToCanvas(hiddenTextScreenshotDataUrl, captureMeta)
-      );
-      backgroundNoTextDataUrl = String(croppedNoText?.dataUrl || "");
-    } finally {
-      await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
     }
-  }
-  if (shouldUseTextOverlayFallback) {
-    if (backgroundNoTextDataUrl.startsWith("data:image/")) {
-      const textObjects = await timePhase("buildFabricObjectsTextFallback", () =>
-        buildFabricObjects(textLayers)
+
+    if (!imageDataUrl.startsWith("data:image/")) {
+      const cropped = await timePhase("cropScreenshotToCanvas", () =>
+        cropScreenshotToCanvas(screenshotDataUrl, captureMeta)
       );
-      fabricObjects = [
-        buildSingleImageFabricObject(
-          backgroundNoTextDataUrl,
-          Math.max(1, Math.round(sourceWidth || captureMeta.designWidth || 1080)),
-          Math.max(1, Math.round(sourceHeight || captureMeta.designHeight || 1080)),
-          {
-            importNodeId: "canva-background-no-text",
-            fallback: true,
-            fallbackReason: "text-overlay-background",
-          }
-        ),
-        ...textObjects,
-      ];
-      importWarnings.push("Text-only fallback used: background snapshot with editable text overlays.");
+      imageDataUrl = cropped.dataUrl;
+      sourceWidth = sourceWidth || cropped.width;
+      sourceHeight = sourceHeight || cropped.height;
     }
-  }
-  reportProgress("Resolving imported fonts...");
-  const resolvedFonts = await timePhase("resolveImportedCustomFonts", () => resolvedFontsPromise);
-  if (fontResolutionWarnings.length > 0) {
-    importWarnings.push(...fontResolutionWarnings);
-  }
-  const importedCustomFonts = Array.isArray(resolvedFonts?.importedFonts)
-    ? resolvedFonts.importedFonts
-    : [];
-  const unsupportedTextFamilies = Array.isArray(resolvedFonts?.unsupportedFamilies)
-    ? resolvedFonts.unsupportedFamilies
-    : [];
-  if (fabricObjects.length === 0 && screenshotDataUrl && extractedLayers.length > 0) {
-    try {
-      const screenshotBitmap = await timePhase("decodeScreenshotBitmap", () =>
-        decodeDataUrlToBitmap(screenshotDataUrl)
-      );
-      // Capture a parallel screenshot with editable text hidden, so image layers that
-      // fall back to raster screenshot crops don't bake in overlapping foreground text
-      // (which is also emitted as an editable text layer — otherwise it renders twice).
-      let screenshotBitmapNoText = null;
-      if (textLayerIds.length > 0) {
+
+    if (!imageDataUrl.startsWith("data:image/")) {
+      throw new Error("Failed to build image payload from Canva tab.");
+    }
+
+    let extractedLayers = hasExtractedLayerMetadata ? captureMeta.layers : [];
+    const isolatedSnapshotWarnings = [];
+    if (screenshotDataUrl.startsWith("data:image/") && extractedLayers.length > 0) {
+      const preferSnapshotLayers = extractedLayers
+        .filter((layer) => String(layer?.kind || "").toLowerCase() === "image")
+        .filter((layer) => Boolean(layer?.preferSnapshot))
+        .filter((layer) => !layer?.hasCompanionText)
+        // Compute the isolation snapshot for ALL prefer-snapshot image layers (including
+        // plain crops that captured an asset). buildHybridFabricObjects compares the asset
+        // against this snapshot and uses the snapshot only when the asset has the page
+        // background baked in; otherwise it keeps the high-res asset.
+        .filter((layer) => String(layer?.id || "").trim().startsWith("LB"))
+        .filter((layer) => layer?.viewportRect)
+        .sort((a, b) => {
+          const aArea = numberOr(a?.width, 0) * numberOr(a?.height, 0);
+          const bArea = numberOr(b?.width, 0) * numberOr(b?.height, 0);
+          return bArea - aArea;
+        })
+        .slice(0, 24);
+
+      if (preferSnapshotLayers.length > 0) {
         try {
-          reportProgress("Capturing text-free snapshot for image layers...");
-          await setCanvaLayerVisibility(tab.id, textLayerIds, true);
-          await sleep(180);
-          const noTextScreenshotDataUrl = await timePhase("captureVisibleTabHybridNoText", () =>
-            chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
-          );
-          if (String(noTextScreenshotDataUrl || "").startsWith("data:image/")) {
-            screenshotBitmapNoText = await timePhase("decodeScreenshotBitmapNoText", () =>
-              decodeDataUrlToBitmap(noTextScreenshotDataUrl)
+          pageProgress(`Preparing ${preferSnapshotLayers.length} merged image layer snapshots...`);
+          const isolatedSnapshotsById = new Map();
+          const preferSnapshotLayerIds = preferSnapshotLayers
+            .map((layer) => String(layer?.id || "").trim())
+            .filter(Boolean);
+          let hiddenAllBitmap = null;
+          // Editable text is re-added as its own layer, so hide it for every isolation
+          // capture. Otherwise overlapping (often semi-transparent) text blends against
+          // the layer in the "visible" shot but the background in the "hidden" shot, so
+          // the visible-vs-hidden diff keeps a faint ghost copy baked into the snapshot.
+          const isolationTextLayerIds = extractedLayers
+            .filter((l) => String(l?.kind || "").toLowerCase() === "text")
+            .map((l) => String(l?.id || "").trim())
+            .filter((id) => id.startsWith("LB"));
+
+          try {
+            await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, true);
+            if (isolationTextLayerIds.length > 0) {
+              await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, true).catch(() => {});
+            }
+            await sleep(180);
+            const allHiddenScreenshotDataUrl = await timePhase("captureLayersAllHidden", () =>
+              chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
             );
+            hiddenAllBitmap = await timePhase("decodeLayersAllHiddenBitmap", () =>
+              decodeDataUrlToBitmap(allHiddenScreenshotDataUrl)
+            );
+
+            for (let index = 0; index < preferSnapshotLayers.length; index += 1) {
+              const layer = preferSnapshotLayers[index];
+              const layerId = String(layer?.id || "").trim();
+              if (!layerId) continue;
+              pageProgress(
+                `Isolating merged image layer ${index + 1} of ${preferSnapshotLayers.length}...`
+              );
+              try {
+                await setCanvaLayerVisibility(tab.id, [layerId], false);
+                let isolatedDataUrl = "";
+                const isolationWaits = [140, 240];
+                for (let attempt = 0; attempt < isolationWaits.length; attempt += 1) {
+                  await sleep(isolationWaits[attempt]);
+                  const visibleLayerScreenshotDataUrl = await timePhase(
+                    `captureLayerVisible_${index + 1}_${attempt + 1}`,
+                    () => chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
+                  );
+                  const visibleLayerBitmap = await timePhase(
+                    `decodeLayerVisibleBitmap_${index + 1}_${attempt + 1}`,
+                    () => decodeDataUrlToBitmap(visibleLayerScreenshotDataUrl)
+                  );
+                  isolatedDataUrl = await timePhase(
+                    `isolateLayerSnapshot_${index + 1}_${attempt + 1}`,
+                    () =>
+                      isolateLayerSnapshotFromBitmaps(visibleLayerBitmap, hiddenAllBitmap, layer.viewportRect, {
+                        dpr: Number(captureMeta.devicePixelRatio || 1),
+                        targetWidth: Math.max(1, Math.round(numberOr(layer?.width, 1))),
+                        targetHeight: Math.max(1, Math.round(numberOr(layer?.height, 1))),
+                      })
+                  );
+                  if (isolatedDataUrl.startsWith("data:image/")) break;
+                }
+                if (isolatedDataUrl.startsWith("data:image/")) {
+                  isolatedSnapshotsById.set(layerId, isolatedDataUrl);
+                } else {
+                  isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
+                }
+              } catch (error) {
+                logger.warn("Layer isolation failed for merged Canva layer", { layerId }, error);
+                isolatedSnapshotWarnings.push(`Could not isolate merged Canva layer "${layerId}".`);
+              } finally {
+                await setCanvaLayerVisibility(tab.id, [layerId], true).catch(() => {});
+                await sleep(40);
+              }
+            }
+          } finally {
+            await setCanvaLayerVisibility(tab.id, preferSnapshotLayerIds, false).catch(() => {});
+            if (isolationTextLayerIds.length > 0) {
+              await setCanvaLayerVisibility(tab.id, isolationTextLayerIds, false).catch(() => {});
+            }
           }
-        } catch (noTextError) {
-          logger.warn(
-            "Text-hidden screenshot capture failed; image crops may include text",
-            {},
-            noTextError
-          );
-        } finally {
-          await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
+
+          if (isolatedSnapshotsById.size > 0) {
+            extractedLayers = extractedLayers.map((layer) => {
+              const layerId = String(layer?.id || "").trim();
+              const isolatedImageDataUrl = isolatedSnapshotsById.get(layerId);
+              return isolatedImageDataUrl
+                ? { ...layer, isolatedImageDataUrl }
+                : layer;
+            });
+          }
+        } catch (error) {
+          logger.warn("Merged Canva layer isolation batch failed", {}, error);
+          isolatedSnapshotWarnings.push("Could not isolate merged Canva layers; using screenshot crops.");
         }
       }
-      fabricObjects = await timePhase("buildHybridFabricObjects", () =>
-        buildHybridFabricObjects(
-          extractedLayers,
-          screenshotBitmap,
-          Number(captureMeta.devicePixelRatio || 1),
-          sourceWidth || Number(captureMeta.designWidth || 0),
-          sourceHeight || Number(captureMeta.designHeight || 0),
-          {
-            unsupportedTextFamilies,
-            screenshotBitmapNoText,
-          }
-        )
+    }
+    const extractionLikelyDegraded = extractedLayers.length <= 1;
+    const usedFontsFromLayers = collectUsedFontFamilies(extractedLayers);
+    const fontTargetsByFamily = buildUsedFontTargetsByFamily(extractedLayers);
+    const fontAssetMap = normalizeFontAssetMap(captureMeta?.fontAssets);
+    const fallbackFontsFromAssets = Object.keys(fontAssetMap || {})
+      .map((family) => normalizeFontFamilyName(family))
+      .filter(Boolean);
+    const usedFonts = mergeUsedFontFamilies(
+      usedFontsFromLayers,
+      usedFontsFromLayers.length > 0 ? [] : fallbackFontsFromAssets
+    );
+    const textLayers = extractedLayers.filter((layer) => String(layer?.kind || "").toLowerCase() === "text");
+    const resolvableImageLayerCount = extractedLayers.filter((layer) => {
+      if (String(layer?.kind || "").toLowerCase() !== "image") return false;
+      const dataUrl = String(layer?.imageDataUrl || "");
+      const src = String(layer?.imageSrc || "");
+      return (
+        dataUrl.startsWith("data:image/") ||
+        /^https?:\/\//i.test(src) ||
+        /^file:\/\//i.test(src)
       );
-    } catch (error) {
-      logger.warn("Hybrid fabric object build failed; falling back to simple objects", {}, error);
-      fabricObjects = [];
+    }).length;
+    const textLayerIds = textLayers
+      .map((layer) => String(layer?.id || "").trim())
+      .filter((id) => id.startsWith("LB"));
+    const shouldUseTextOverlayFallback = textLayers.length > 0 && resolvableImageLayerCount === 0;
+    const importWarnings = extractionLikelyDegraded
+      ? ["Canva DOM layer mapping is limited for this design; fallback extraction was used."]
+      : [];
+    if (usedFontsFromLayers.length === 0 && fallbackFontsFromAssets.length > 0) {
+      importWarnings.push("Text font detection from layers was empty; using document font assets fallback.");
+    }
+    if (usedFonts.length === 0) {
+      importWarnings.push("No text font families were detected for this import.");
+    }
+    if (String(captureMeta?.sourceType || "").toLowerCase().startsWith("fallback")) {
+      importWarnings.push("Canvas frame detection used fallback mode.");
+    }
+    // Off-screen model elements are skipped when their image has NO rendered instance at the import
+    // frame (nothing to capture pixels from). Silent skipping loses elements — e.g. a video design's
+    // opening doors imported from a late frame. Tell the user how to get a complete capture.
+    const unresolvedMediaCount = Number(captureMeta?.timelineSupplement?.unresolvedMedia || 0);
+    if (unresolvedMediaCount > 0) {
+      const animatedCount = Number(captureMeta?.timelineSupplement?.unresolvedAnimated || 0);
+      importWarnings.push(
+        `${unresolvedMediaCount} image element(s) were SKIPPED because their image is not visible at the current frame` +
+          (animatedCount > 0 ? ` (${animatedCount} of them animated)` : "") +
+          ". Move the Canva playhead to the START of the video (0:00) and reimport to capture the full design."
+      );
+    }
+    if (captureMeta?.timelineSupplement?.backgroundVideoPoster) {
+      importWarnings.push(
+        "Background video imported as a static poster frame (Canva video files are download-protected); timing and transparency preserved."
+      );
+    }
+    if (isolatedSnapshotWarnings.length > 0) {
+      importWarnings.push(...isolatedSnapshotWarnings);
+    }
+    const fontResolutionWarnings = [];
+    const resolvedFontsPromise = resolveImportedCustomFonts(
+      usedFonts,
+      fontAssetMap,
+      fontTargetsByFamily,
+      fontResolutionWarnings
+    );
+    let fabricObjects = [];
+    let backgroundNoTextDataUrl = "";
+    if (shouldUseTextOverlayFallback) {
+      try {
+        pageProgress("Capturing text-free background snapshot...");
+        await setCanvaLayerVisibility(tab.id, textLayerIds, true);
+        const hiddenTextScreenshotDataUrl = await timePhase("captureVisibleTabWithoutText", () =>
+          chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
+        );
+        const croppedNoText = await timePhase("cropScreenshotToCanvasWithoutText", () =>
+          cropScreenshotToCanvas(hiddenTextScreenshotDataUrl, captureMeta)
+        );
+        backgroundNoTextDataUrl = String(croppedNoText?.dataUrl || "");
+      } finally {
+        await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
+      }
+    }
+    if (shouldUseTextOverlayFallback) {
+      if (backgroundNoTextDataUrl.startsWith("data:image/")) {
+        const textObjects = await timePhase("buildFabricObjectsTextFallback", () =>
+          buildFabricObjects(textLayers)
+        );
+        fabricObjects = [
+          buildSingleImageFabricObject(
+            backgroundNoTextDataUrl,
+            Math.max(1, Math.round(sourceWidth || captureMeta.designWidth || 1080)),
+            Math.max(1, Math.round(sourceHeight || captureMeta.designHeight || 1080)),
+            {
+              importNodeId: "canva-background-no-text",
+              fallback: true,
+              fallbackReason: "text-overlay-background",
+            }
+          ),
+          ...textObjects,
+        ];
+        importWarnings.push("Text-only fallback used: background snapshot with editable text overlays.");
+      }
+    }
+    pageProgress("Resolving imported fonts...");
+    const resolvedFonts = await timePhase("resolveImportedCustomFonts", () => resolvedFontsPromise);
+    if (fontResolutionWarnings.length > 0) {
+      importWarnings.push(...fontResolutionWarnings);
+    }
+    const importedCustomFonts = Array.isArray(resolvedFonts?.importedFonts)
+      ? resolvedFonts.importedFonts
+      : [];
+    const unsupportedTextFamilies = Array.isArray(resolvedFonts?.unsupportedFamilies)
+      ? resolvedFonts.unsupportedFamilies
+      : [];
+    if (fabricObjects.length === 0 && screenshotDataUrl && extractedLayers.length > 0) {
+      try {
+        const screenshotBitmap = await timePhase("decodeScreenshotBitmap", () =>
+          decodeDataUrlToBitmap(screenshotDataUrl)
+        );
+        // Capture a parallel screenshot with editable text hidden, so image layers that
+        // fall back to raster screenshot crops don't bake in overlapping foreground text
+        // (which is also emitted as an editable text layer — otherwise it renders twice).
+        let screenshotBitmapNoText = null;
+        if (textLayerIds.length > 0) {
+          try {
+            pageProgress("Capturing text-free snapshot for image layers...");
+            await setCanvaLayerVisibility(tab.id, textLayerIds, true);
+            await sleep(180);
+            const noTextScreenshotDataUrl = await timePhase("captureVisibleTabHybridNoText", () =>
+              chrome.tabs.captureVisibleTab(tab.windowId, { format: PROGRESS_CAPTURE_FORMAT })
+            );
+            if (String(noTextScreenshotDataUrl || "").startsWith("data:image/")) {
+              screenshotBitmapNoText = await timePhase("decodeScreenshotBitmapNoText", () =>
+                decodeDataUrlToBitmap(noTextScreenshotDataUrl)
+              );
+            }
+          } catch (noTextError) {
+            logger.warn(
+              "Text-hidden screenshot capture failed; image crops may include text",
+              {},
+              noTextError
+            );
+          } finally {
+            await setCanvaLayerVisibility(tab.id, textLayerIds, false).catch(() => {});
+          }
+        }
+        fabricObjects = await timePhase("buildHybridFabricObjects", () =>
+          buildHybridFabricObjects(
+            extractedLayers,
+            screenshotBitmap,
+            Number(captureMeta.devicePixelRatio || 1),
+            sourceWidth || Number(captureMeta.designWidth || 0),
+            sourceHeight || Number(captureMeta.designHeight || 0),
+            {
+              unsupportedTextFamilies,
+              screenshotBitmapNoText,
+            }
+          )
+        );
+      } catch (error) {
+        logger.warn("Hybrid fabric object build failed; falling back to simple objects", {}, error);
+        fabricObjects = [];
+      }
+    }
+    if (fabricObjects.length === 0) {
+      fabricObjects = await timePhase("buildFabricObjectsFallback", () =>
+        buildFabricObjects(extractedLayers)
+      );
+    }
+    // Keep a full-page opaque background rect from painting over the real background image.
+    fabricObjects = reorderBackgroundRectsToBottom(
+      fabricObjects,
+      Math.round(sourceWidth || Number(captureMeta.designWidth || 1080)),
+      Math.round(sourceHeight || Number(captureMeta.designHeight || 1920))
+    );
+    const fallbackWidth = Math.max(1, Math.round(sourceWidth || 1080));
+    const fallbackHeight = Math.max(1, Math.round(sourceHeight || 1080));
+    const hasMeaningfulDrawableLayers = fabricObjects.some((object) => {
+      const type = String(object?.type || "").toLowerCase();
+      if (type === "image") return Boolean(String(object?.src || "").startsWith("data:image/") || /^https?:\/\//i.test(String(object?.src || "")));
+      if (type === "textbox") return Boolean(String(object?.text || "").trim());
+      return false;
+    });
+    const thinVectorDebugEntries = extractedLayers
+      .filter((layer) => {
+        const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
+        const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
+        const ratio = Math.max(width, height) / Math.max(1, Math.min(width, height));
+        return ratio >= 12 && Math.min(width, height) <= 8;
+      })
+      .slice(0, 6)
+      .map((layer) => {
+        const object = fabricObjects.find(
+          (candidate) => String(candidate?.importNodeId || "").trim() === String(layer?.id || "").trim()
+        );
+        const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
+        const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
+        const angle = Math.round(numberOr(layer?.angle, 0));
+        return `${String(layer?.id || "layer").trim()}:${String(layer?.kind || "?")}/${width}x${height}@${angle}->${String(object?.type || "missing").toLowerCase()}`;
+      });
+    if (thinVectorDebugEntries.length > 0) {
+      importWarnings.push(`Thin vector debug: ${thinVectorDebugEntries.join(", ")}`);
+    }
+    // Per-page snapshot fallback keeps a failed page from collapsing the whole import.
+    const pageHasExtractedLayers = fabricObjects.length > 0 && hasMeaningfulDrawableLayers;
+    let pageFabricObjects = fabricObjects;
+    if (!pageHasExtractedLayers && imageDataUrl.startsWith("data:image/")) {
+      pageFabricObjects = [
+        buildSingleImageFabricObject(imageDataUrl, fallbackWidth, fallbackHeight, {
+          importNodeId: `canva-snapshot-${pageIndex + 1}`,
+          fallback: true,
+          fallbackReason: "full-snapshot",
+        }),
+      ];
+      importWarnings.push("Could not extract reliable Canva layers; imported as full-page snapshot.");
+    }
+
+    return {
+      captureMeta,
+      imageDataUrl,
+      sourceWidth,
+      sourceHeight,
+      fallbackWidth,
+      fallbackHeight,
+      extractedLayers,
+      fabricObjects: pageFabricObjects,
+      importWarnings,
+      usedFonts,
+      importedCustomFonts,
+      hasExtractedLayers: pageHasExtractedLayers,
+    };
+  };
+
+  const pageArtifacts = [];
+  for (let pageIndex = 0; pageIndex < pagePlan.length; pageIndex += 1) {
+    const pageInfo = pagePlan[pageIndex];
+    if (pageInfo) {
+      reportProgress(`Opening page ${pageIndex + 1} of ${pagePlan.length}...`);
+      const pageVisible = pageInfo.virtualized
+        ? await ensureVirtualizedPageDisplayed(tab.id, pageIndex, pageInfo.expectedLbIds)
+        : await ensureCanvaPageVisible(tab.id, pageInfo.pageId);
+      if (!pageVisible && pageIndex > 0) {
+        logger.warn("Multi-page import: page never became visible; skipping page", {
+          pageIndex,
+          pageId: pageInfo.pageId,
+          virtualized: Boolean(pageInfo.virtualized),
+        });
+        pageArtifacts.push(null);
+        continue;
+      }
+      // Let Canva lazy-render the newly displayed page before scraping/capturing it.
+      await sleep(700);
+    }
+    try {
+      pageArtifacts.push(await capturePageArtifacts(pageInfo, pageIndex));
+    } catch (pageError) {
+      if (!isMultiPageImport || pageIndex === 0) throw pageError;
+      logger.warn("Multi-page import: page capture failed; skipping page", { pageIndex }, pageError);
+      pageArtifacts.push(null);
     }
   }
-  if (fabricObjects.length === 0) {
-    fabricObjects = await timePhase("buildFabricObjectsFallback", () =>
-      buildFabricObjects(extractedLayers)
+  const capturedArtifacts = pageArtifacts.filter(Boolean);
+  if (capturedArtifacts.length === 0) {
+    throw new Error("Could not capture any Canva pages.");
+  }
+
+  // ── Merge per-page artifacts into the single import payload ─────────────────────────────────
+  const primaryArtifacts = capturedArtifacts[0];
+  const captureMeta = primaryArtifacts.captureMeta;
+  const imageDataUrl = primaryArtifacts.imageDataUrl;
+  const sourceWidth = primaryArtifacts.sourceWidth;
+  const sourceHeight = primaryArtifacts.sourceHeight;
+  const fallbackWidth = primaryArtifacts.fallbackWidth;
+  const fallbackHeight = primaryArtifacts.fallbackHeight;
+  const fabricObjects = [];
+  capturedArtifacts.forEach((artifacts, mergedPageIndex) => {
+    artifacts.fabricObjects.forEach((object) => {
+      fabricObjects.push(
+        isMultiPageImport ? { ...object, importPageIndex: mergedPageIndex } : object
+      );
+    });
+  });
+  const extractedLayers = capturedArtifacts.flatMap((artifacts) => artifacts.extractedLayers);
+  const importWarnings = [];
+  if (isMultiPageImport) {
+    // Diagnostic breadcrumb: makes "why did only N pages import" answerable from the stored
+    // template alone (DOM node count vs model page count vs what was actually captured).
+    importWarnings.push(
+      `Multi-page debug: domPages=${pageInventory.length}, modelPages=${fiberPageCount}, planned=${pagePlan.length}, captured=${capturedArtifacts.length}.`
     );
   }
-  // Keep a full-page opaque background rect from painting over the real background image.
-  fabricObjects = reorderBackgroundRectsToBottom(
-    fabricObjects,
-    Math.round(sourceWidth || Number(captureMeta.designWidth || 1080)),
-    Math.round(sourceHeight || Number(captureMeta.designHeight || 1920))
-  );
-  const fallbackWidth = Math.max(1, Math.round(sourceWidth || 1080));
-  const fallbackHeight = Math.max(1, Math.round(sourceHeight || 1080));
-  const hasMeaningfulDrawableLayers = fabricObjects.some((object) => {
-    const type = String(object?.type || "").toLowerCase();
-    if (type === "image") return Boolean(String(object?.src || "").startsWith("data:image/") || /^https?:\/\//i.test(String(object?.src || "")));
-    if (type === "textbox") return Boolean(String(object?.text || "").trim());
-    return false;
-  });
-  const thinVectorDebugEntries = extractedLayers
-    .filter((layer) => {
-      const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
-      const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
-      const ratio = Math.max(width, height) / Math.max(1, Math.min(width, height));
-      return ratio >= 12 && Math.min(width, height) <= 8;
-    })
-    .slice(0, 6)
-    .map((layer) => {
-      const object = fabricObjects.find(
-        (candidate) => String(candidate?.importNodeId || "").trim() === String(layer?.id || "").trim()
-      );
-      const width = Math.max(1, Math.round(numberOr(layer?.width, 1)));
-      const height = Math.max(1, Math.round(numberOr(layer?.height, 1)));
-      const angle = Math.round(numberOr(layer?.angle, 0));
-      return `${String(layer?.id || "layer").trim()}:${String(layer?.kind || "?")}/${width}x${height}@${angle}->${String(object?.type || "missing").toLowerCase()}`;
-    });
-  if (thinVectorDebugEntries.length > 0) {
-    importWarnings.push(`Thin vector debug: ${thinVectorDebugEntries.join(", ")}`);
+  if (truncatedPageCount > 0) {
+    importWarnings.push(
+      `Design has ${totalPageCount} pages; imported the first ${pagePlan.length} (page cap).`
+    );
   }
-  const hasExtractedLayers = fabricObjects.length > 0 && hasMeaningfulDrawableLayers;
+  pageArtifacts.forEach((artifacts, pageIndex) => {
+    if (!artifacts) {
+      importWarnings.push(`Page ${pageIndex + 1}: capture failed; page was skipped.`);
+      return;
+    }
+    const prefix = isMultiPageImport ? `Page ${pageIndex + 1}: ` : "";
+    artifacts.importWarnings.forEach((warning) => importWarnings.push(`${prefix}${warning}`));
+  });
+  const usedFonts = capturedArtifacts.reduce(
+    (merged, artifacts) => mergeUsedFontFamilies(merged, artifacts.usedFonts),
+    []
+  );
+  const importedCustomFontsByFamily = new Map();
+  capturedArtifacts.forEach((artifacts) => {
+    (artifacts.importedCustomFonts || []).forEach((font) => {
+      const familyKey = String(font?.family || "").trim().toLowerCase();
+      if (familyKey && !importedCustomFontsByFamily.has(familyKey)) {
+        importedCustomFontsByFamily.set(familyKey, font);
+      }
+    });
+  });
+  const importedCustomFonts = [...importedCustomFontsByFamily.values()];
+  const hasExtractedLayers = capturedArtifacts.some((artifacts) => artifacts.hasExtractedLayers);
 
+  // Per-page capture already degraded empty pages to their own snapshot objects; this outer
+  // fallback only fires when merging produced nothing at all.
   const fabricData = {
     version: "7.0.0",
     objects:
-      hasExtractedLayers
+      fabricObjects.length > 0
         ? fabricObjects
         : [
             buildSingleImageFabricObject(imageDataUrl, fallbackWidth, fallbackHeight, {
@@ -3930,9 +4270,6 @@ async function importActiveCanvaTab(message, options = {}) {
             }),
           ],
   };
-  if (!hasExtractedLayers) {
-    importWarnings.push("Could not extract reliable Canva layers; imported as full-page snapshot.");
-  }
   const layerTreeFromExtraction = buildLayerTreeFromExtractedLayers(extractedLayers);
   const layerTree =
     layerTreeFromExtraction.length > 0 ? layerTreeFromExtraction : buildLayerTreeFromFabricObjects(fabricData.objects);
@@ -3975,6 +4312,24 @@ async function importActiveCanvaTab(message, options = {}) {
             sourceWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
             sourceHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
           },
+          // Multi-page designs: ordered page descriptors; every fabric object carries an
+          // importPageIndex pointing into this list. `page` above stays the first page for
+          // single-page consumers.
+          ...(isMultiPageImport
+            ? {
+                pages: capturedArtifacts.map((artifacts, mergedPageIndex) => ({
+                  id: `canva-page-${mergedPageIndex + 1}`,
+                  name: `Page ${mergedPageIndex + 1}`,
+                  width: Math.max(1, Math.round(artifacts.sourceWidth || sourceWidth || 1080)),
+                  height: Math.max(1, Math.round(artifacts.sourceHeight || sourceHeight || 1080)),
+                  // The page's own cropped screenshot, reused as its preview image — the app's
+                  // page strip paints these instead of compositing every page on first open.
+                  ...(String(artifacts.imageDataUrl || "").startsWith("data:image/")
+                    ? { thumbnailDataUrl: artifacts.imageDataUrl }
+                    : {}),
+                })),
+              }
+            : {}),
           layerTree,
           layerStats,
           usedFonts,

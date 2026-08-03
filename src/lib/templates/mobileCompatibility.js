@@ -89,10 +89,10 @@ export function validateEditorProMobilePublishCompatibility(templateData) {
   const errors = [];
   const pages = getEditorProPages(templateData);
 
+  // Multi-page designs publish since the pages[] wire format; the API serves
+  // page 1 as top-level background/layers for app builds that predate it.
   if (pages.length === 0) {
     errors.push("Only Editor Pro templates can be published to mobile.");
-  } else if (pages.length !== 1) {
-    errors.push("Mobile publish supports single-canvas templates only.");
   }
 
   return {

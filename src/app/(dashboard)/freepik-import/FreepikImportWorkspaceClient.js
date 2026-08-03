@@ -970,12 +970,20 @@ export default function FreepikImportWorkspaceClient() {
                   Fast workflow
                 </div>
                 <p className="mt-1 text-sm leading-6 text-[color:var(--ds-text-muted)]">
-                  Credentials live in
+                  {canEdit ? (
+                    <>
+                      Credentials live in
+                      {" "}
+                      <a href="/settings" className="font-medium text-[color:var(--ds-primary)] underline-offset-4 hover:underline">
+                        Settings
+                      </a>
+                      .
+                    </>
+                  ) : (
+                    "Credentials are managed by an admin."
+                  )}
                   {" "}
-                  <a href="/settings" className="font-medium text-[color:var(--ds-primary)] underline-offset-4 hover:underline">
-                    Settings
-                  </a>
-                  . This page focuses on searching, previewing, and importing assets.
+                  This page focuses on searching, previewing, and importing assets.
                 </p>
               </div>
             </div>
@@ -1103,10 +1111,12 @@ export default function FreepikImportWorkspaceClient() {
       </WorkspaceSection>
 
       <div className="flex flex-wrap gap-3">
-        <Button as="a" href="/settings" variant="secondary">
-          Open Settings
-          <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
-        </Button>
+        {canEdit ? (
+          <Button as="a" href="/settings" variant="secondary">
+            Open Settings
+            <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        ) : null}
         <Button as="a" href="/categories" variant="ghost">
           Open categories
           <ArrowUpRight className="h-4 w-4" aria-hidden="true" />
