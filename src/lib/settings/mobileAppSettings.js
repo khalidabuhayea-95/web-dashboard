@@ -15,6 +15,7 @@ import {
   normalizeObjectRemovalModelId,
   normalizeObjectRemovalModelOrder,
 } from "../media/objectRemoval/models.js";
+import { normalizeMediaCreditSettings } from "../media/credits/config.js";
 
 export const SUPPORTED_MOBILE_DEVICE_TYPES = ["android", "ios"];
 
@@ -31,6 +32,7 @@ const ROOT_SETTING_KEYS = new Set([
   "aiExpandModel",
   "upscaleModel",
   "editImageModel",
+  "mediaCredits",
   "updatedAt",
 ]);
 
@@ -197,6 +199,9 @@ export function normalizeStoredMobileAppSettings(value = {}) {
     aiExpandModel,
     upscaleModel,
     editImageModel,
+    // Always fully populated (allowance + every feature cost + every model price),
+    // so callers never have to null-check a partially-saved blob.
+    mediaCredits: normalizeMediaCreditSettings(source.mediaCredits),
     updatedAt: sanitizeString(source.updatedAt) || new Date().toISOString(),
   };
 }
@@ -225,6 +230,25 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
       "editImageModel" in input
         ? sanitizeEditImageModel(input.editImageModel)
         : current.editImageModel,
+    // Merge over the current values so a partial payload (e.g. only the allowance)
+    // does not reset the costs and prices back to their defaults.
+    mediaCredits:
+      "mediaCredits" in input
+        ? normalizeMediaCreditSettings({
+            ...current.mediaCredits,
+            ...(isPlainObject(input.mediaCredits) ? input.mediaCredits : {}),
+            costs: {
+              ...current.mediaCredits.costs,
+              ...(isPlainObject(input.mediaCredits?.costs) ? input.mediaCredits.costs : {}),
+            },
+            modelPrices: {
+              ...current.mediaCredits.modelPrices,
+              ...(isPlainObject(input.mediaCredits?.modelPrices)
+                ? input.mediaCredits.modelPrices
+                : {}),
+            },
+          })
+        : current.mediaCredits,
     updatedAt: new Date().toISOString(),
   };
 }

@@ -24,6 +24,8 @@ import {
   checkRateLimit,
   createRateLimitResponse,
 } from "@/lib/security/rateLimit.server";
+import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
+import { enforceMediaCredits, recordMediaUsage } from "@/lib/media/credits/index.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -84,6 +86,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const insufficientCredits = await enforceMediaCredits({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL,
+    });
+    if (insufficientCredits) {
+      requestLogger.info("Object removal rejected: insufficient credits", {
+        mobileUserId: mobileUser.id,
+      });
+      return attachRequestIdHeader(insufficientCredits, requestId);
+    }
+
     const formData = await request.formData().catch(() => null);
     if (!formData) {
       return jsonResponse(requestId, { error: "Invalid multipart form data." }, 400, {
@@ -139,6 +152,13 @@ export async function POST(request: NextRequest) {
       maskMimeType: maskFile.type,
       maskFileName: maskFile.name,
       modelId: configuredModel,
+    });
+
+    await recordMediaUsage({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL,
+      provider: result.provider,
+      model: result.model,
     });
 
     requestLogger.info("Object removal completed", {

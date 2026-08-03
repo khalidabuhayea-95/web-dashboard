@@ -14,7 +14,8 @@
     "backfill:font-names": "node --env-file=.env --env-file=.env.local --import tsx scripts/backfill-font-names.ts",
     "sign:mobile": "node scripts/sign-mobile-request.mjs",
     "smoke:object-remove": "node scripts/smoke-object-remove.mjs",
-    "smoke:upscale": "node scripts/smoke-upscale.mjs"
+    "smoke:upscale": "node scripts/smoke-upscale.mjs",
+    "smoke:credits": "node --env-file=.env --import tsx scripts/smoke-credits.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1032.0",

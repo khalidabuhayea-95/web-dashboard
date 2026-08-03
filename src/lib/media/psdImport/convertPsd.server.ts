@@ -4,7 +4,7 @@ import { toMobileProjectSlim } from "@/lib/templates/mobileProject";
 
 // PSD → mobile-template converter.
 //
-// Strategy (hybrid, mirrors the image-to-layers precedent):
+// Strategy (hybrid):
 //   • Text layers  -> editable Fabric text objects (re-typeable, with font name,
 //     size, color, alignment extracted from the PSD type-tool data).
 //   • Everything else (pixels, shapes, smart objects) -> the layer's rendered
@@ -282,9 +282,9 @@ export async function convertPsdToMobileProject(
 
   // Flatten the PSD layer tree depth-first. ag-psd preserves the file's storage
   // order (bottom → top), so pushing in natural order makes array index == zIndex
-  // with later objects painted on top — matching the Fabric/mobile convention and
-  // the image-to-layers pipeline. (If a test file ever renders inverted, reverse
-  // `objects`/`sourceLayers` before mapping.)
+  // with later objects painted on top — matching the Fabric/mobile convention.
+  // (If a test file ever renders inverted, reverse `objects`/`sourceLayers`
+  // before mapping.)
   async function walk(layers: AnyLayer[], ctx: { hidden: boolean; opacity: number }) {
     for (const layer of Array.isArray(layers) ? layers : []) {
       if (objects.length >= MAX_EMITTED_LAYERS) {

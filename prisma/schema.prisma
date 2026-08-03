@@ -177,6 +177,9 @@ model MobileUser {
   emailVerified   Boolean              @default(false)
   role            String               @default("user")
   bannedUntil     DateTime?
+  // Per-user monthly AI credit allowance. Null = use the global default from
+  // mobile app settings; set a number to give this account its own balance.
+  creditAllowance Int?
   lastLoginAt     DateTime?
   createdAt       DateTime             @default(now())
   updatedAt       DateTime             @updatedAt
@@ -185,11 +188,34 @@ model MobileUser {
   deviceTokens    MobileDeviceToken[]
   favorites       MobileFavoriteTemplate[]
   contactMessages ContactMessage[]
+  mediaUsage      MediaUsage[]
 
   @@index([normalizedEmail])
   @@index([createdAt])
   @@index([bannedUntil])
   @@index([role])
+}
+
+// One row per successful paid AI media run. Backs the monthly per-user credit
+// wallet (src/lib/media/credits) and the spend breakdown per feature/model.
+model MediaUsage {
+  id           String     @id @default(uuid()) @db.Uuid
+  mobileUserId String     @db.Uuid
+  feature      String
+  provider     String?
+  model        String?
+  // Credits deducted from the user's monthly wallet for this run.
+  credits      Int        @default(0)
+  // Provider cost in micro-dollars (1_000_000 = $1) — integer to avoid float drift.
+  costMicros   Int        @default(0)
+  // UTC "YYYY-MM" bucket the run counts against.
+  periodKey    String     @db.VarChar(7)
+  createdAt    DateTime   @default(now())
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@index([mobileUserId, feature, periodKey])
+  @@index([periodKey])
+  @@index([createdAt])
 }
 
 model MobileIdentity {

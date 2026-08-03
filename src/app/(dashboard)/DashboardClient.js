@@ -16,8 +16,10 @@ import {
   Send,
   ShieldCheck,
   Smartphone,
+  Sparkles,
   Tags,
   TrendingUp,
+  Wallet,
   TriangleAlert,
   Type,
   UserCheck,
@@ -40,8 +42,72 @@ import {
   StatCardSkeleton,
 } from "@/components/dashboard/charts";
 
+// Keep the overview readable without importing the credits config into the client
+// bundle; the API returns raw feature keys.
+const AI_FEATURE_LABELS = {
+  "edit-image": "Edit by prompt",
+  "ai-expand": "AI expand",
+  upscale: "Upscale",
+  "object-removal": "Object removal",
+};
+
 function fmt(value) {
   return (Number(value) || 0).toLocaleString();
+}
+
+// Provider costs run from $0.00052 to tens of dollars, so show cents when that is
+// exact and more digits when it is not — never round a real figure to "$0.00".
+function fmtUsd(value) {
+  const amount = Number(value) || 0;
+  if (!amount) return "$0.00";
+  if (amount >= 1) return `$${amount.toFixed(2)}`;
+  const exact = Number(amount.toFixed(6));
+  return Number(exact.toFixed(2)) === exact ? `$${exact.toFixed(2)}` : `$${exact}`;
+}
+
+// Like HorizontalBarList, but each row carries both a count and a cost — the whole
+// point of this section is seeing volume and spend together.
+function UsageBarList({ items, color = "var(--chart-1)", emptyMessage = "No AI usage yet" }) {
+  const rows = items || [];
+  if (rows.length === 0) {
+    return (
+      <div className="flex h-[120px] items-center justify-center text-xs text-muted-foreground">
+        {emptyMessage}
+      </div>
+    );
+  }
+
+  const max = Math.max(1, ...rows.map((row) => Number(row.runs) || 0));
+
+  return (
+    <ul className="space-y-3.5">
+      {rows.map((row, idx) => {
+        const runs = Number(row.runs) || 0;
+        const segColor = Array.isArray(color) ? color[idx % color.length] : color;
+        return (
+          <li key={row.label ?? idx}>
+            <div className="mb-1.5 flex items-center justify-between gap-2 text-xs">
+              <span className="truncate font-medium" title={row.label}>
+                {row.label || "unknown"}
+              </span>
+              <span className="shrink-0 tabular-nums text-muted-foreground">
+                {fmt(runs)} runs · {fmtUsd(row.costUsd)}
+              </span>
+            </div>
+            <div
+              className="h-2 overflow-hidden rounded-full"
+              style={{ background: "var(--ds-surface-2)" }}
+            >
+              <div
+                className="h-full rounded-full transition-[width] duration-500"
+                style={{ width: `${Math.max((runs / max) * 100, 2)}%`, background: segColor }}
+              />
+            </div>
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
 function SectionHeader({ icon: Icon, title, hint }) {
@@ -119,6 +185,13 @@ export default function DashboardClient({ role }) {
     { key: "failed", label: "Failed", color: "var(--destructive)" },
     { key: "queued", label: "Queued", color: "var(--chart-4)" },
   ];
+
+  const aiUsage = stats?.aiUsage;
+  const aiTotals = aiUsage?.totals || { runs: 0, credits: 0, costUsd: 0, activeUsers: 0 };
+  // The AreaChart reads `count`, so map runs onto that key.
+  const aiTrendData = (aiUsage?.trend || []).map((d) => ({ day: d.day, count: d.runs }));
+  const aiCostPerUser =
+    aiTotals.activeUsers > 0 ? aiTotals.costUsd / aiTotals.activeUsers : 0;
 
   const mobileFunnelData = (charts?.mobileVerificationFunnel || []).map((d) => ({
     day: d.day,
@@ -342,6 +415,82 @@ export default function DashboardClient({ role }) {
                   data={mobileFunnelData}
                   series={verificationSeries}
                   ariaLabel="Mobile signups versus verified accounts per day, last 30 days"
+                />
+              </ChartCard>
+            </section>
+
+            {/* AI usage & spend */}
+            <SectionHeader
+              icon={Sparkles}
+              title="AI usage"
+              hint={aiUsage?.periodKey ? `this month · ${aiUsage.periodKey}` : "this month"}
+            />
+            <section className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <StatCard
+                icon={Sparkles}
+                label="AI runs"
+                value={fmt(aiTotals.runs)}
+                hint={`${fmt(aiTotals.credits)} credits spent`}
+              />
+              <StatCard
+                icon={Wallet}
+                label="Provider spend"
+                value={fmtUsd(aiTotals.costUsd)}
+                hint="what these runs cost us"
+                accent="var(--chart-2)"
+              />
+              <StatCard
+                icon={Users}
+                label="Users using AI"
+                value={fmt(aiTotals.activeUsers)}
+                hint="ran at least one action"
+                accent="var(--chart-3)"
+              />
+              <StatCard
+                icon={TrendingUp}
+                label="Spend per user"
+                value={fmtUsd(aiCostPerUser)}
+                hint="average this month"
+                accent="var(--chart-4)"
+              />
+            </section>
+
+            <section className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+              <ChartCard icon={Layers} title="By feature" subtitle="Runs and cost this month">
+                <UsageBarList
+                  items={(aiUsage?.byFeature || []).map((d) => ({
+                    label: AI_FEATURE_LABELS[d.feature] || d.feature,
+                    runs: d.runs,
+                    costUsd: d.costUsd,
+                  }))}
+                  color={CHART_PALETTE}
+                  emptyMessage={
+                    aiUsage?.available === false
+                      ? "AI usage unavailable"
+                      : "No AI usage this month"
+                  }
+                />
+              </ChartCard>
+              <ChartCard icon={Sparkles} title="By model" subtitle="Which models are running">
+                <UsageBarList
+                  items={(aiUsage?.byModel || []).map((d) => ({
+                    label: d.model,
+                    runs: d.runs,
+                    costUsd: d.costUsd,
+                  }))}
+                  color="var(--chart-2)"
+                  emptyMessage={
+                    aiUsage?.available === false
+                      ? "AI usage unavailable"
+                      : "No AI usage this month"
+                  }
+                />
+              </ChartCard>
+              <ChartCard icon={Activity} title="AI runs per day" subtitle="Last 30d">
+                <AreaChart
+                  data={aiTrendData}
+                  color="var(--chart-3)"
+                  ariaLabel="AI runs per day over the last 30 days"
                 />
               </ChartCard>
             </section>

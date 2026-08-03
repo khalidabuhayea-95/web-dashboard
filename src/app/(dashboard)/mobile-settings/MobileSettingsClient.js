@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   Apple,
+  Coins,
   Globe,
   KeyRound,
   Loader2,
@@ -15,6 +16,37 @@ import {
 
 import Button from "@/components/ui/button";
 import { Input, Label, Select, Textarea } from "@/components/ui/form";
+import {
+  DEFAULT_MODEL_PRICES_MICROS,
+  MEDIA_CREDIT_FEATURE_LABELS,
+  SUPPORTED_MEDIA_CREDIT_FEATURES,
+  normalizeMediaCreditSettings,
+} from "@/lib/media/credits/config.js";
+
+const MODEL_PRICE_IDS = Object.keys(DEFAULT_MODEL_PRICES_MICROS);
+
+// Settings store provider prices in micro-dollars; the form edits plain dollars.
+function microsToDollarInput(micros) {
+  const value = Number(micros || 0) / 1_000_000;
+  return value ? String(Number(value.toFixed(6))) : "0";
+}
+
+function dollarInputToMicros(value) {
+  const parsed = Number(String(value ?? "").trim());
+  if (!Number.isFinite(parsed) || parsed < 0) return 0;
+  return Math.round(parsed * 1_000_000);
+}
+
+// Provider prices span three orders of magnitude ($0.00052 → $0.04). Never round a
+// real digit away: use plain 2-decimal money when that is exact, otherwise show
+// every meaningful digit so the figure matches the price table exactly.
+function formatUsd(value) {
+  const amount = Number(value) || 0;
+  if (!amount) return "$0.00";
+  if (amount >= 1) return `$${amount.toFixed(2)}`;
+  const exact = Number(amount.toFixed(6)); // drop float noise, keep real digits
+  return Number(exact.toFixed(2)) === exact ? `$${exact.toFixed(2)}` : `$${exact}`;
+}
 
 const MOBILE_RELEASE_INITIAL_FORM = {
   androidMinimumSupportedVersion: "",
@@ -36,6 +68,8 @@ const MOBILE_AI_EXPAND_INITIAL_FORM = {
 const MOBILE_IMAGE_UPSCALE_INITIAL_FORM = {
   upscaleModel: "prunaai/p-image-upscale",
 };
+
+const MOBILE_CREDITS_INITIAL_FORM = mapMobileCreditSettings({});
 
 const MOBILE_IMAGE_EDIT_INITIAL_FORM = {
   editImageModel: "google/nano-banana",
@@ -149,6 +183,28 @@ function mapMobileImageUpscaleSettings(settings) {
 function mapMobileImageEditSettings(settings) {
   return {
     editImageModel: String(settings?.editImageModel || "google/nano-banana"),
+  };
+}
+
+function mapMobileCreditSettings(settings) {
+  // Normalizing here means a settings blob saved before this section existed still
+  // renders with every field populated instead of blank inputs.
+  const credits = normalizeMediaCreditSettings(settings?.mediaCredits);
+
+  const costs = {};
+  for (const feature of SUPPORTED_MEDIA_CREDIT_FEATURES) {
+    costs[feature] = String(credits.costs[feature]);
+  }
+
+  const modelPrices = {};
+  for (const modelId of MODEL_PRICE_IDS) {
+    modelPrices[modelId] = microsToDollarInput(credits.modelPrices[modelId]);
+  }
+
+  return {
+    monthlyAllowance: String(credits.monthlyAllowance),
+    costs,
+    modelPrices,
   };
 }
 
@@ -601,6 +657,32 @@ function MobileSettingsClient() {
     }),
   });
 
+  const creditSettings = useSettingsForm({
+    endpoint: "/api/settings/mobile-app",
+    initialForm: MOBILE_CREDITS_INITIAL_FORM,
+    loadingMessage: "Loading AI credit settings...",
+    savingMessage: "Saving AI credit settings...",
+    successMessage: "AI credit settings saved.",
+    mapSettings: mapMobileCreditSettings,
+    buildPayload: (form) => ({
+      mediaCredits: {
+        monthlyAllowance: Number(form.monthlyAllowance),
+        costs: Object.fromEntries(
+          SUPPORTED_MEDIA_CREDIT_FEATURES.map((feature) => [
+            feature,
+            Number(form.costs[feature]),
+          ])
+        ),
+        modelPrices: Object.fromEntries(
+          MODEL_PRICE_IDS.map((modelId) => [
+            modelId,
+            dollarInputToMicros(form.modelPrices[modelId]),
+          ])
+        ),
+      },
+    }),
+  });
+
   const mobileAuth = useSettingsForm({
     endpoint: "/api/settings/mobile-auth",
     initialForm: MOBILE_AUTH_INITIAL_FORM,
@@ -631,6 +713,45 @@ function MobileSettingsClient() {
       },
     }),
   });
+
+  // Each feature's currently-selected model, so credit costs can be shown in real
+  // dollars. Reads the live form values, so switching a model above updates the
+  // figures immediately — before anything is saved.
+  const creditFeatureModels = {
+    "edit-image": imageEditSettings.form.editImageModel,
+    "ai-expand": aiExpandSettings.form.aiExpandModel,
+    upscale: imageUpscaleSettings.form.upscaleModel,
+    "object-removal": objectRemovalSettings.form.objectRemovalModel,
+  };
+
+  const creditAllowanceValue = Number(creditSettings.form.monthlyAllowance) || 0;
+
+  const creditCostBreakdown = SUPPORTED_MEDIA_CREDIT_FEATURES.map((feature) => {
+    const cost = Number(creditSettings.form.costs[feature]) || 0;
+    const modelId = creditFeatureModels[feature] || "";
+    const pricePerRun = Number(creditSettings.form.modelPrices[modelId] || 0);
+    const runs = cost > 0 ? Math.floor(creditAllowanceValue / cost) : null;
+
+    return {
+      feature,
+      cost,
+      modelId,
+      pricePerRun,
+      runs,
+      // What one user could spend if they used the whole allowance on this action.
+      monthlyMax: runs === null ? 0 : runs * pricePerRun,
+    };
+  });
+
+  // Rank by actual dollars, not by dollars-per-credit: `runs` is floored, so an
+  // action costing 8 credits out of a 100-credit allowance strands 4 credits and
+  // really spends less than its ratio implies. Comparing the ratio picks the wrong
+  // action and under-reports the ceiling.
+  const costliestCreditUse = creditCostBreakdown.reduce(
+    (worst, row) => (row.monthlyMax > (worst?.monthlyMax ?? -1) ? row : worst),
+    null
+  );
+  const maxMonthlyCostPerUser = costliestCreditUse?.monthlyMax ?? 0;
 
   return (
     <div className="mx-auto flex max-w-4xl flex-col gap-5 px-4 pb-10 sm:px-6 lg:px-8">
@@ -841,6 +962,159 @@ function MobileSettingsClient() {
           disabled={imageEditSettings.disabled}
           options={IMAGE_EDIT_MODEL_OPTIONS}
         />
+      </SettingsSection>
+
+      <SettingsSection
+        title="AI credits"
+        icon={Coins}
+        badge={statusBadge(creditSettings)}
+        footer={
+          <SectionFooter
+            status={creditSettings.status}
+            updatedAt={creditSettings.updatedAt}
+            canEdit={creditSettings.canEdit}
+            saving={creditSettings.saving}
+            hasChanges={creditSettings.hasChanges}
+            onSave={creditSettings.save}
+            saveLabel="Save"
+          />
+        }
+      >
+        <FieldBlock
+          id="mobile-credit-allowance"
+          label="Monthly credits per user"
+          hint="Every user gets this many credits at the start of each month (UTC). Each AI action below deducts its credit cost from this one balance. A specific user can be given a different allowance from the Users page."
+        >
+          <Input
+            id="mobile-credit-allowance"
+            type="number"
+            min="0"
+            step="1"
+            inputMode="numeric"
+            value={creditSettings.form.monthlyAllowance}
+            onChange={(event) =>
+              creditSettings.setForm((current) => ({
+                ...current,
+                monthlyAllowance: event.target.value,
+              }))
+            }
+            disabled={creditSettings.disabled}
+          />
+        </FieldBlock>
+
+        <div className="rounded-xl border border-border/70 bg-[color:var(--ds-primary)]/5 px-4 py-3">
+          <p className="text-sm font-medium text-[color:var(--ds-text)]">
+            Maximum{" "}
+            <span className="text-[color:var(--ds-primary)]">
+              {formatUsd(maxMonthlyCostPerUser)}
+            </span>{" "}
+            per user each month
+          </p>
+          {costliestCreditUse ? (
+            <p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">
+              Reached when a user spends all {creditAllowanceValue} credits on{" "}
+              {MEDIA_CREDIT_FEATURE_LABELS[costliestCreditUse.feature]}:{" "}
+              {costliestCreditUse.runs} runs × {formatUsd(costliestCreditUse.pricePerRun)} on{" "}
+              <span className="font-mono">{costliestCreditUse.modelId}</span>. Every other mix
+              of actions costs less.
+            </p>
+          ) : null}
+          <p className="mt-1 text-xs text-[color:var(--ds-text-muted)]">
+            At that ceiling: 100 users = {formatUsd(maxMonthlyCostPerUser * 100)} · 1,000 users
+            = {formatUsd(maxMonthlyCostPerUser * 1000)} per month.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <Label>Credit cost per action</Label>
+            <p className="field-help">
+              What each AI action costs the user. Expensive actions should cost more so one
+              user cannot drain the provider budget on the priciest model.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {creditCostBreakdown.map(({ feature, modelId, pricePerRun, runs, monthlyMax }) => (
+              <div key={feature} className="space-y-1.5">
+                <Label htmlFor={`mobile-credit-cost-${feature}`}>
+                  {MEDIA_CREDIT_FEATURE_LABELS[feature]}
+                </Label>
+                <Input
+                  id={`mobile-credit-cost-${feature}`}
+                  type="number"
+                  min="0"
+                  step="1"
+                  inputMode="numeric"
+                  value={creditSettings.form.costs[feature]}
+                  onChange={(event) =>
+                    creditSettings.setForm((current) => ({
+                      ...current,
+                      costs: { ...current.costs, [feature]: event.target.value },
+                    }))
+                  }
+                  disabled={creditSettings.disabled}
+                />
+                {runs === null ? (
+                  <p className="field-help">Free — this action never costs credits.</p>
+                ) : (
+                  <p className="field-help">
+                    {runs} runs per user each month ·{" "}
+                    <span className="font-medium text-[color:var(--ds-text)]">
+                      {formatUsd(pricePerRun)}
+                    </span>{" "}
+                    per run ={" "}
+                    <span className="font-medium text-[color:var(--ds-text)]">
+                      {formatUsd(monthlyMax)}
+                    </span>{" "}
+                    per user
+                    {modelId ? (
+                      <>
+                        {" "}
+                        <span className="font-mono text-[color:var(--ds-text-muted)]">
+                          {modelId}
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-3">
+          <div>
+            <Label>Provider price per run (USD)</Label>
+            <p className="field-help">
+              What each model actually costs us per run. These feed the spend report only —
+              they never block a request. Update them when the provider changes pricing.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            {MODEL_PRICE_IDS.map((modelId) => (
+              <div key={modelId} className="space-y-1.5">
+                <Label htmlFor={`mobile-model-price-${modelId}`} className="font-mono text-xs">
+                  {modelId}
+                </Label>
+                <Input
+                  id={`mobile-model-price-${modelId}`}
+                  type="number"
+                  min="0"
+                  step="0.0001"
+                  inputMode="decimal"
+                  value={creditSettings.form.modelPrices[modelId]}
+                  onChange={(event) =>
+                    creditSettings.setForm((current) => ({
+                      ...current,
+                      modelPrices: { ...current.modelPrices, [modelId]: event.target.value },
+                    }))
+                  }
+                  disabled={creditSettings.disabled}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
       </SettingsSection>
 
       <SettingsSection

@@ -42,6 +42,8 @@ const updateSchema = z.object({
   role: roleField.optional(),
   ban: z.boolean().optional(),
   revokeSessions: z.boolean().optional(),
+  // null clears the per-user override (fall back to the global monthly allowance).
+  creditAllowance: z.number().int().min(0).max(1_000_000).nullable().optional(),
 });
 
 export async function GET(request: NextRequest) {

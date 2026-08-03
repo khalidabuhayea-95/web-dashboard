@@ -2,6 +2,8 @@ import prisma from "@/lib/prisma";
 import { normalizeEmail, sanitizeDisplayName } from "@/lib/auth/utils";
 import { INDEFINITE_BAN_UNTIL, isMobileUserBanned } from "@/lib/mobile/mobileUserBan";
 import { normalizeMobileUserRole } from "@/lib/mobile/mobileUserRoles";
+import { resolveMonthlyAllowance, resolvePeriodKey } from "@/lib/media/credits/config.js";
+import { getMobileAppSettings } from "@/lib/settings/mobileAppSettings.server";
 
 // Admin-side CRUD for mobile app accounts (MobileUser + its identities,
 // sessions, devices and favorites). Mobile accounts are normally created by a
@@ -19,6 +21,17 @@ function toIso(value) {
 }
 
 export function mapMobileUserForApi(user, extras = {}) {
+  const hasOwnAllowance = user.creditAllowance !== null && user.creditAllowance !== undefined;
+  // The wallet is only reportable when the caller actually read it. Without the
+  // spend figure, even a user with their own allowance would show a full balance
+  // that is not real — so omit `credits` rather than guess.
+  const walletReadable =
+    extras.defaultCreditAllowance !== null && extras.defaultCreditAllowance !== undefined;
+  const creditAllowance = hasOwnAllowance
+    ? Number(user.creditAllowance)
+    : Number(extras.defaultCreditAllowance || 0);
+  const creditsUsed = Number(extras.creditsUsed || 0);
+
   return {
     id: user.id,
     name: user.name || null,
@@ -27,6 +40,19 @@ export function mapMobileUserForApi(user, extras = {}) {
     role: normalizeMobileUserRole(user.role),
     banned: isMobileUserBanned(user),
     bannedUntil: toIso(user.bannedUntil),
+    // null = this account uses the global monthly allowance from app settings.
+    creditAllowance: user.creditAllowance ?? null,
+    // This month's AI wallet, or null when it could not be read. `custom` marks an
+    // account with its own allowance so the dashboard can flag it instead of it
+    // looking like a data error.
+    credits: walletReadable
+      ? {
+          allowance: creditAllowance,
+          used: creditsUsed,
+          remaining: Math.max(0, creditAllowance - creditsUsed),
+          custom: hasOwnAllowance,
+        }
+      : null,
     lastLoginAt: toIso(user.lastLoginAt),
     createdAt: toIso(user.createdAt),
     updatedAt: toIso(user.updatedAt),
@@ -81,13 +107,46 @@ function buildStatusWhere(status) {
   return {};
 }
 
+/**
+ * This month's credit spend per user, plus the global default allowance.
+ *
+ * Deliberately fail-soft: the credit wallet is supplementary information on the
+ * users page, so a missing MediaUsage table (migration not yet applied, or a dev
+ * server still holding a Prisma client generated before it existed) must not take
+ * the whole user list down. Callers get no balances and the UI renders a dash.
+ */
+async function collectCreditUsage(ids, now) {
+  try {
+    const [creditSpend, settings] = await Promise.all([
+      prisma.mediaUsage.groupBy({
+        by: ["mobileUserId"],
+        where: { mobileUserId: { in: ids }, periodKey: resolvePeriodKey(now) },
+        _sum: { credits: true },
+      }),
+      getMobileAppSettings(),
+    ]);
+
+    return {
+      usedByUser: new Map(
+        creditSpend.map((row) => [row.mobileUserId, Number(row._sum.credits || 0)])
+      ),
+      defaultAllowance: resolveMonthlyAllowance(settings),
+      available: true,
+    };
+  } catch (error) {
+    console.error("Failed to read AI credit usage for the user list", error);
+    return { usedByUser: new Map(), defaultAllowance: null, available: false };
+  }
+}
+
 async function collectUserExtras(ids) {
   if (ids.length === 0) {
     return new Map();
   }
 
   const now = new Date();
-  const [identities, devices, sessions, favorites] = await Promise.all([
+  // One grouped query for the whole page rather than a balance lookup per row.
+  const [identities, devices, sessions, favorites, credits] = await Promise.all([
     prisma.mobileIdentity.findMany({
       where: { mobileUserId: { in: ids } },
       select: { mobileUserId: true, provider: true },
@@ -107,6 +166,7 @@ async function collectUserExtras(ids) {
       where: { mobileUserId: { in: ids } },
       _count: { _all: true },
     }),
+    collectCreditUsage(ids, now),
   ]);
 
   const providersByUser = new Map();
@@ -131,6 +191,10 @@ async function collectUserExtras(ids) {
         deviceCount: deviceCounts.get(id) || 0,
         sessionCount: sessionCounts.get(id) || 0,
         favoriteCount: favoriteCounts.get(id) || 0,
+        creditsUsed: credits.usedByUser.get(id) || 0,
+        // null when the wallet could not be read, so the mapper omits the balance
+        // entirely rather than reporting a misleading "0 credits left".
+        defaultCreditAllowance: credits.available ? credits.defaultAllowance : null,
       },
     ])
   );
@@ -271,7 +335,8 @@ export async function createMobileUser({
  * @param {{ id: string, name?: string, email?: string, emailVerified?: boolean, role?: string, ban?: boolean, revokeSessions?: boolean }} input
  */
 export async function updateMobileUser(input) {
-  const { id, name, email, emailVerified, role, ban, revokeSessions } = input;
+  const { id, name, email, emailVerified, role, ban, revokeSessions, creditAllowance } =
+    input;
 
   const user = await prisma.mobileUser.findUnique({ where: { id } });
   if (!user) {
@@ -306,6 +371,13 @@ export async function updateMobileUser(input) {
 
   if (ban !== undefined) {
     data.bannedUntil = ban ? INDEFINITE_BAN_UNTIL : null;
+  }
+
+  if (creditAllowance !== undefined) {
+    // null clears the override so the account falls back to the global allowance;
+    // 0 is a real value meaning "this account gets no AI credits".
+    data.creditAllowance =
+      creditAllowance === null ? null : Math.max(0, Math.floor(Number(creditAllowance)));
   }
 
   const updated = Object.keys(data).length

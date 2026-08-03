@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Search } from "lucide-react";
+import clsx from "clsx";
 
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
@@ -24,6 +25,8 @@ const initialForm = {
   email: "",
   emailVerified: false,
   role: "user",
+  // "" means no override — the account uses the global monthly AI allowance.
+  creditAllowance: "",
 };
 
 const STATUS_FILTERS = [
@@ -56,6 +59,52 @@ function formatDate(value) {
 function formatDateTime(value) {
   if (!value) return "—";
   return new Date(value).toLocaleString();
+}
+
+// This month's AI wallet for one account. Older API responses predate the field,
+// so a missing `credits` renders as a dash rather than "0 left".
+function CreditBalance({ credits }) {
+  if (!credits) return <span className="text-xs text-muted-foreground">—</span>;
+
+  const allowance = Number(credits.allowance) || 0;
+  const remaining = Number(credits.remaining) || 0;
+  const used = Number(credits.used) || 0;
+  const spentPercent = allowance > 0 ? Math.min(100, (used / allowance) * 100) : 100;
+
+  // An account is worth flagging when it is out of credits, or nearly so.
+  const tone =
+    allowance === 0 || remaining === 0
+      ? "destructive"
+      : remaining / allowance <= 0.15
+        ? "warning"
+        : "success";
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5">
+        <Badge variant={tone}>
+          {remaining} / {allowance}
+        </Badge>
+        {credits.custom ? <Badge variant="neutral">Custom</Badge> : null}
+      </div>
+      <div className="h-1 w-20 overflow-hidden rounded-full bg-slate-200">
+        <div
+          className={clsx(
+            "h-full rounded-full transition-all",
+            tone === "destructive"
+              ? "bg-red-500"
+              : tone === "warning"
+                ? "bg-amber-500"
+                : "bg-emerald-500"
+          )}
+          style={{ width: `${spentPercent}%` }}
+        />
+      </div>
+      <div className="text-[11px] text-muted-foreground">
+        {allowance === 0 ? "AI disabled" : `${used} used this month`}
+      </div>
+    </div>
+  );
 }
 
 function MobileUserDetails({ user, onClose }) {
@@ -94,14 +143,25 @@ function MobileUserDetails({ user, onClose }) {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
         {[
+          {
+            label: "AI credits left",
+            value: user.credits
+              ? `${user.credits.remaining} / ${user.credits.allowance}`
+              : "—",
+            hint: user.credits
+              ? `${user.credits.used} used this month${user.credits.custom ? " · custom allowance" : ""}`
+              : null,
+          },
           { label: "Sessions", value: user.sessionCount },
           { label: "Devices", value: user.deviceCount },
           { label: "Favorites", value: user.favoriteCount },
-          { label: "Providers", value: user.providers.length },
         ].map((stat) => (
           <div key={stat.label} className="rounded-xl border border-border bg-muted/20 p-3">
             <div className="text-xs text-muted-foreground">{stat.label}</div>
             <div className="text-lg font-semibold tabular-nums">{stat.value}</div>
+            {stat.hint ? (
+              <div className="mt-0.5 text-[11px] text-muted-foreground">{stat.hint}</div>
+            ) : null}
           </div>
         ))}
       </div>
@@ -306,6 +366,10 @@ export default function MobileUsersSection() {
       email: user.email ?? "",
       emailVerified: Boolean(user.emailVerified),
       role: user.role || "user",
+      creditAllowance:
+        user.creditAllowance === null || user.creditAllowance === undefined
+          ? ""
+          : String(user.creditAllowance),
     });
   };
 
@@ -328,6 +392,10 @@ export default function MobileUsersSection() {
           email: editing.email.trim(),
           emailVerified: editing.emailVerified,
           role: editing.role,
+          creditAllowance:
+            String(editing.creditAllowance).trim() === ""
+              ? null
+              : Number(editing.creditAllowance),
         }),
       });
       const payload = await response.json();
@@ -564,6 +632,7 @@ export default function MobileUsersSection() {
                 <TableHeaderCell>Sign-in</TableHeaderCell>
                 <TableHeaderCell>Status</TableHeaderCell>
                 <TableHeaderCell>Activity</TableHeaderCell>
+                <TableHeaderCell>AI credits</TableHeaderCell>
                 <TableHeaderCell>Last login</TableHeaderCell>
                 <TableHeaderCell>Actions</TableHeaderCell>
               </TableRow>
@@ -616,6 +685,9 @@ export default function MobileUsersSection() {
                     </div>
                   </TableCell>
                   <TableCell>
+                    <CreditBalance credits={user.credits} />
+                  </TableCell>
+                  <TableCell>
                     <div className="text-xs text-muted-foreground">
                       {user.lastLoginAt ? formatDate(user.lastLoginAt) : "Never"}
                     </div>
@@ -664,6 +736,26 @@ export default function MobileUsersSection() {
                           />
                           Tester (sees drafts)
                         </label>
+                        <div className="space-y-1">
+                          <Input
+                            type="number"
+                            min="0"
+                            step="1"
+                            inputMode="numeric"
+                            placeholder="AI credits / month"
+                            value={editing.creditAllowance}
+                            onChange={(event) =>
+                              setEditing((prev) => ({
+                                ...prev,
+                                creditAllowance: event.target.value,
+                              }))
+                            }
+                          />
+                          <p className="text-[11px] text-muted-foreground">
+                            Leave blank to use the default from Mobile settings. 0 blocks this
+                            account from AI features.
+                          </p>
+                        </div>
                         <div className="flex flex-wrap gap-2">
                           <Button type="submit">Save</Button>
                           <Button type="button" variant="ghost" onClick={cancelEdit}>

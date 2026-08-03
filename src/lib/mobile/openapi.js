@@ -2907,175 +2907,60 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           },
         },
       },
-      "/api/mobile/media/image-to-layers": {
-        post: {
+      "/api/mobile/media/credits": {
+        get: {
           tags: ["Mobile Media"],
-          summary: "Decompose an image into editable layers",
+          summary: "Get the caller's AI credit balance",
           description:
-            "Accepts a single flat image, runs it through the Replicate layered-decomposition model (qwen/qwen-image-layered), persists each resulting RGBA layer, and returns an editable project in the same shape as GET /api/mobile/templates/{id}. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+            "Returns the signed-in user's AI credit wallet for the current month, plus the credit cost of each AI action.\n\nEvery AI media endpoint (edit-image, ai-expand, upscale, object-remove) deducts credits from this one balance when it succeeds; failed runs are never charged. Call this before showing the AI tools so the app can display the remaining balance and label each action with its price, and refresh it after a successful run.\n\nThe balance resets to the full allowance at the start of each month (UTC) — `resetAt` is that moment. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
           security: [{ bearerAuth: [] }],
-          requestBody: {
-            required: true,
-            content: {
-              "multipart/form-data": {
-                schema: {
-                  type: "object",
-                  required: ["image"],
-                  properties: {
-                    image: {
-                      type: "string",
-                      format: "binary",
-                    },
-                    includeText: {
-                      type: "boolean",
-                      description:
-                        "Defaults to true. Set false for movable image layers only (text stays baked into the raster).",
-                    },
-                    model: {
-                      type: "string",
-                      description: "Optional model id override.",
-                    },
-                  },
-                },
-              },
-            },
-          },
           responses: {
             200: {
-              description:
-                "Decomposed editable layers to insert in place of the source layer",
+              description: "Current credit balance",
               content: {
                 "application/json": {
                   schema: {
                     type: "object",
-                    required: ["canvasWidth", "canvasHeight", "sourceWidth", "sourceHeight", "layers", "meta"],
                     properties: {
-                      canvasWidth: {
-                        type: "number",
-                        description:
-                          "Width of the coordinate space the layer transforms live in. The client maps this group onto the source layer's region (position, scale, rotation).",
-                      },
-                      canvasHeight: { type: "number" },
-                      sourceWidth: {
+                      allowance: {
                         type: "integer",
-                        description: "Original uploaded image width in pixels.",
-                      },
-                      sourceHeight: { type: "integer" },
-                      layers: {
-                        type: "array",
+                        example: 100,
                         description:
-                          "Decomposed layers ordered bottom→top, in the same format as a template project's `layers`. IMAGE layers carry `imageUri`, `frameWidth`, `frameHeight`, `cropRect`, and `filters`; TEXT layers carry `text`, `fontName`, `size`, `colorHex`, `alignment`, and `isRtl`. Every layer has a center-based `transform` ({x, y, scale, scaleX, scaleY, rotation, flipX, flipY}), `opacity`, `zIndex`, and `animation`. Flip lives on the sign of scaleX/scaleY; `flipX`/`flipY` booleans restate it (flipX === scaleX < 0) — apply one, not both.",
-                        items: {
-                          type: "object",
-                          additionalProperties: true,
-                          properties: {
-                            id: { type: "string" },
-                            type: {
-                              type: "string",
-                              enum: ["IMAGE", "TEXT"],
-                              description: "Layer kind produced by this endpoint.",
-                            },
-                            zIndex: { type: "integer" },
-                            transform: {
-                              type: "object",
-                              additionalProperties: true,
-                              description:
-                                "Center-based transform: x, y, scale, scaleX, scaleY, rotation, flipX, flipY. Flip is authoritative on the sign of scaleX/scaleY (negative = mirrored); flipX/flipY are booleans restating that sign (flipX === scaleX < 0). Apply one representation, not both.",
-                            },
-                            animation: { $ref: "#/components/schemas/MobileLayerAnimation" },
-                          },
-                        },
+                          "Total credits this user gets each month (their personal allowance if set, otherwise the global default).",
                       },
-                      meta: {
+                      used: { type: "integer", example: 24 },
+                      remaining: { type: "integer", example: 76 },
+                      periodKey: {
+                        type: "string",
+                        example: "2026-08",
+                        description: "UTC month the balance applies to.",
+                      },
+                      resetAt: {
+                        type: "string",
+                        format: "date-time",
+                        example: "2026-09-01T00:00:00.000Z",
+                      },
+                      costs: {
                         type: "object",
-                        properties: {
-                          layerCount: { type: "integer" },
-                          textBlockCount: {
-                            type: "integer",
-                            description: "Number of editable text layers extracted via OCR.",
-                          },
-                          textRemoved: {
-                            type: "boolean",
-                            description:
-                              "Whether baked-in text was inpainted out of the raster layers.",
-                          },
-                          provider: { type: "string", example: "replicate" },
-                          model: { type: "string", example: "qwen/qwen-image-layered" },
-                          predictionId: { type: "string" },
+                        description: "Credits deducted per successful run, per feature.",
+                        additionalProperties: { type: "integer" },
+                        example: {
+                          "edit-image": 8,
+                          "ai-expand": 8,
+                          upscale: 1,
+                          "object-removal": 1,
                         },
                       },
                     },
-                  },
-                },
-              },
-            },
-            400: {
-              description: "Invalid multipart payload or empty upload",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
               },
             },
             401: {
-              description: "Missing or invalid bearer token",
+              description: "Missing or invalid access token",
               content: {
                 "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
-                },
-              },
-            },
-            413: {
-              description: "Image file is too large",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
-                },
-              },
-            },
-            415: {
-              description: "Unsupported image type",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
-                },
-              },
-            },
-            422: {
-              description: "Image could not be processed safely",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
-                },
-              },
-            },
-            429: {
-              description: "Rate limit exceeded",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
-                },
-              },
-            },
-            503: {
-              description: "Replicate image layering is unavailable",
-              content: {
-                "application/json": {
-                  schema: {
-                    $ref: "#/components/schemas/ErrorResponse",
-                  },
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
                 },
               },
             },
@@ -3185,7 +3070,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               },
             },
             429: {
-              description: "Rate limit exceeded",
+              description:
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3308,7 +3194,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               },
             },
             429: {
-              description: "Rate limit exceeded",
+              description:
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3429,7 +3316,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               },
             },
             429: {
-              description: "Rate limit exceeded",
+              description:
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3570,7 +3458,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               },
             },
             429: {
-              description: "Rate limit exceeded",
+              description:
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {

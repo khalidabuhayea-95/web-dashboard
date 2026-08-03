@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/compon
 import { Input, Label } from "@/components/ui/form";
 
 import AnalyticsOverview from "./AnalyticsOverview";
+import AiUsageSection from "./AiUsageSection";
 
 const CONFIG_ENDPOINT = "/api/admin/analytics/config";
 // The GA4 property Firebase already created for the mobile apps (account
@@ -201,6 +202,10 @@ export default function AnalyticsClient() {
       {/* Everything on this page reads the GA4 Data API server-side, so it needs
           no Google session from the viewer. */}
       <AnalyticsOverview />
+
+      {/* Our own database, not GA4 — rendered separately so it still works when
+          Google Analytics is not configured. */}
+      <AiUsageSection />
 
       {showSettings ? (
         <Card>

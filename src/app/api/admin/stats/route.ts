@@ -6,6 +6,7 @@ import {
   resolveRequestIp,
 } from "@/lib/security/rateLimit.server";
 import { getImportJobStatusSummary } from "@/lib/tools/importJobsStore.server";
+import { getMediaUsageStats } from "@/lib/media/credits/index.server";
 import { getDashboardSession, Roles } from "@/lib/auth/roles";
 import { ensureLegacyDashboardUsersMigrated } from "@/lib/auth/dashboardUsers.server";
 import prisma from "@/lib/prisma";
@@ -317,11 +318,15 @@ export async function GET(request: NextRequest) {
       })),
     };
 
+    // Self-contained and fail-soft, so it cannot break the rest of the payload.
+    const aiUsage = await getMediaUsageStats({ trendDays: 30 });
+
     logger.info("Admin stats retrieved", {
       userId: session.userId,
     });
 
     return NextResponse.json({
+      aiUsage,
       totalUsers,
       totalTemplates,
       templatesLast7Days,
