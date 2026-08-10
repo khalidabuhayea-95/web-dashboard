@@ -42,6 +42,7 @@ import {
   type FrameContentTransform,
   type FrameShape,
 } from "@/lib/editor/frames";
+import { trimTrailingBlankTextLines } from "@/lib/editor/textContent";
 
 export type ToolMode = "select" | "pan" | "draw" | "crop";
 export type SidebarTab =
@@ -668,6 +669,18 @@ function normalizeElementForEditor(
   };
 }
 
+/**
+ * Trailing blank lines are dropped at the whole-design boundaries only (load / apply-template /
+ * export), never in `reconcilePageWithElements` — that runs on every keystroke, and a text layer
+ * mid-edit is the user's to shape. Konva renders a trailing empty line as a real line box, so
+ * "abc\n" would keep a text box a full line taller than the glyphs it shows.
+ */
+function trimTextElementForEditor(element: EditorElement): EditorElement {
+  if (element.type !== "text") return element;
+  const text = trimTrailingBlankTextLines(element.text);
+  return text === element.text ? element : { ...element, text };
+}
+
 function normalizePageForEditor(page: EditorPage): EditorPage {
   const storedDurationMs = normalizePageDuration(page.durationMs);
   const durationMs = getPageDurationMs({
@@ -678,7 +691,11 @@ function normalizePageForEditor(page: EditorPage): EditorPage {
     ...page,
     durationMs,
     elements: Array.isArray(page.elements)
-      ? page.elements.map((element) => normalizeElementForEditor(element, durationMs, storedDurationMs))
+      ? page.elements.map((element) =>
+          trimTextElementForEditor(
+            normalizeElementForEditor(element, durationMs, storedDurationMs)
+          )
+        )
       : [],
   };
 }

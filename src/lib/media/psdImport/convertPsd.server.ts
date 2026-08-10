@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 
+import { trimTrailingBlankTextLines } from "@/lib/editor/textContent";
 import { toMobileProjectSlim } from "@/lib/templates/mobileProject";
 
 // PSD → mobile-template converter.
@@ -327,7 +328,12 @@ export async function convertPsdToMobileProject(
       const id = `psd-layer-${index}`;
 
       if (isText) {
-        const text = String(layer.text.text || "").replace(/\r\n?/g, "\n").replace(/\u0003/g, "\n");
+        // \u0003 is Photoshop's paragraph separator. A trailing blank line becomes a real
+        // (empty) line box in the editor, so the layer would import a full line taller than
+        // the glyphs it shows.
+        const text = trimTrailingBlankTextLines(
+          String(layer.text.text || "").replace(/\r\n?/g, "\n").replace(/\u0003/g, "\n")
+        );
         const style = resolveTextStyle(layer.text);
         const transform = Array.isArray(layer.text.transform) ? layer.text.transform : [1, 0, 0, 1, 0, 0];
         const scaleY = Math.hypot(num(transform[2], 0), num(transform[3], 1)) || 1;

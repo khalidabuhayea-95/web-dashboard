@@ -43,10 +43,22 @@ function parseDataUri(value) {
   }
 }
 
-async function rasterizeSvgBytes(svgBytes) {
+async function loadSharp() {
   const sharpModule = await import("sharp");
-  const sharp = sharpModule.default || sharpModule;
-  return sharp(svgBytes).png().toBuffer();
+  return sharpModule.default || sharpModule;
+}
+
+async function rasterizeSvgBytes(svgBytes) {
+  const sharp = await loadSharp();
+  return sharp(svgBytes).webp({ lossless: true, effort: 6 }).toBuffer();
+}
+
+// Shape/frame rasters are flat artwork with alpha, where lossless WebP is both
+// smaller than PNG and pixel-exact. node-canvas can't encode WebP, so buffers
+// coming from it are re-encoded here.
+async function pngBufferToWebp(pngBytes) {
+  const sharp = await loadSharp();
+  return sharp(pngBytes).webp({ lossless: true, effort: 6 }).toBuffer();
 }
 
 async function objectBodyToBuffer(body) {
@@ -136,7 +148,7 @@ async function readImageSourceBytes(source) {
   return parsed?.bytes || null;
 }
 
-async function renderFrameContentPreviewPng(object) {
+async function renderFrameContentPreviewWebp(object) {
   const frameContent = object?.frameContent && typeof object.frameContent === "object"
     ? object.frameContent
     : null;
@@ -152,8 +164,7 @@ async function renderFrameContentPreviewPng(object) {
   const sourceBytes = await readImageSourceBytes(source);
   if (!sourceBytes) return null;
 
-  const sharpModule = await import("sharp");
-  const sharp = sharpModule.default || sharpModule;
+  const sharp = await loadSharp();
   const layout = resolveFramePreviewLayout(object);
   const extendLeft = Math.max(0, layout.x);
   const extendTop = Math.max(0, layout.y);
@@ -181,7 +192,9 @@ async function renderFrameContentPreviewPng(object) {
       width: layout.frameWidth,
       height: layout.frameHeight,
     })
-    .png()
+    // Frame contents are photographic, so lossy WebP wins here — but keep alpha
+    // exact, since the frame mask depends on it.
+    .webp({ quality: 88, alphaQuality: 100, effort: 5 })
     .toBuffer();
 }
 
@@ -328,14 +341,14 @@ export async function GET(request, { params }) {
     scope === "layer" ? findLayerObject(template.data, elementId, index, pageIndex) : null;
   if (scope === "layer" && (field === "frameContent.preview" || field === "frameContentPreview")) {
     try {
-      const bytes = await renderFrameContentPreviewPng(layerObject);
+      const bytes = await renderFrameContentPreviewWebp(layerObject);
       if (!bytes) {
         return NextResponse.json({ error: "Asset not found." }, { status: 404 });
       }
       return new NextResponse(bytes, {
         status: 200,
         headers: {
-          "Content-Type": "image/png",
+          "Content-Type": "image/webp",
           "Cache-Control": audience.cacheControl("public, max-age=300"),
           Vary: "Authorization",
         },
@@ -354,11 +367,11 @@ export async function GET(request, { params }) {
     }
 
     try {
-      const bytes = renderShapeLayerToPngBuffer(layerObject);
+      const bytes = await pngBufferToWebp(renderShapeLayerToPngBuffer(layerObject));
       return new NextResponse(bytes, {
         status: 200,
         headers: {
-          "Content-Type": "image/png",
+          "Content-Type": "image/webp",
           "Cache-Control": audience.cacheControl("public, max-age=300"),
           Vary: "Authorization",
         },
@@ -439,11 +452,11 @@ export async function GET(request, { params }) {
   }
 
   if (parsed.mimeType.toLowerCase() === "image/svg+xml") {
-    const pngBytes = await rasterizeSvgBytes(parsed.bytes);
-    return new NextResponse(pngBytes, {
+    const webpBytes = await rasterizeSvgBytes(parsed.bytes);
+    return new NextResponse(webpBytes, {
       status: 200,
       headers: {
-        "Content-Type": "image/png",
+        "Content-Type": "image/webp",
         "Cache-Control": audience.cacheControl("public, max-age=300"),
         Vary: "Authorization",
       },

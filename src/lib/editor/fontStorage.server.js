@@ -31,6 +31,22 @@ export function normalizeFontStorageKey(value) {
     .toLowerCase();
 }
 
+// The default weight is spelled two ways across our import paths: the Google
+// catalog calls it "Cairo", the appchief one "Cairo Regular". Both are the same
+// file at the same weight, so treat them as one font when checking for an
+// existing family. Any other weight ("Cairo Bold") is deliberately its own
+// family — FontFile is one-file-per-family — so only Regular/Normal folds.
+const DEFAULT_WEIGHT_SUFFIX = /[\s_-]*(regular|normal)$/i;
+
+export function defaultWeightVariants(family) {
+  const value = String(family || "").trim();
+  if (!value) return [];
+  const base = value.replace(DEFAULT_WEIGHT_SUFFIX, "").trim();
+  // "Cairo Regular" -> "Cairo"; "Cairo" -> "Cairo Regular" / "Cairo Normal".
+  if (base && base !== value) return [base];
+  return [`${value} Regular`, `${value} Normal`];
+}
+
 export function normalizeFontCategories(value, fallbackSample = "") {
   const categories = Array.isArray(value)
     ? value

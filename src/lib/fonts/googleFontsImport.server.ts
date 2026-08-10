@@ -1,5 +1,6 @@
 import { upsertEditorCustomFont } from "@/lib/editor/customFonts.server";
 import {
+  defaultWeightVariants,
   findFontFamiliesByNames,
   normalizeFontStorageKey,
 } from "@/lib/editor/fontStorage.server";
@@ -159,8 +160,17 @@ export async function importGoogleFontsBatch({
   const slice = catalog.slice(start, start + size);
 
   // Skip families already present (idempotent / resumable). One lookup per batch.
-  const existing = await findFontFamiliesByNames(slice.map((c) => c.family)).catch(() => new Map());
-  const toImport = slice.filter((c) => !existing.has(normalizeFontStorageKey(c.family)));
+  // Matches default-weight spellings too, so "Cairo" here recognises an
+  // already-imported "Cairo Regular" and doesn't re-download it.
+  const existing = await findFontFamiliesByNames(
+    slice.flatMap((c) => [c.family, ...defaultWeightVariants(c.family)])
+  ).catch(() => new Map());
+  const toImport = slice.filter(
+    (c) =>
+      ![c.family, ...defaultWeightVariants(c.family)].some((name) =>
+        existing.has(normalizeFontStorageKey(name))
+      )
+  );
   let skipped = slice.length - toImport.length;
 
   let imported = 0;

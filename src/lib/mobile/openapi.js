@@ -1508,7 +1508,7 @@ const schemas = {
         type: "object",
         nullable: true,
         description:
-          "Pre-rendered preview images of the font's sample text (transparent PNG). `light` has dark text for light backgrounds; `dark` has light text for dark backgrounds. Null until previews are generated in the admin console.",
+          "Pre-rendered preview images of the font's sample text (transparent lossless WebP). `light` has dark text for light backgrounds; `dark` has light text for dark backgrounds. Null until previews are generated in the admin console.",
         properties: {
           light: { type: "string", format: "uri", nullable: true },
           dark: { type: "string", format: "uri", nullable: true },
@@ -2741,7 +2741,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Shapes"],
           summary: "Resolve built-in shape image",
           description:
-            "Renders a built-in editor shape for mobile clients. Defaults to a PNG; pass `?format=svg` to get the resolution-independent SVG source, which stays crisp when the shape is scaled up on the client.",
+            "Renders a built-in editor shape for mobile clients. Defaults to a lossless WebP raster; pass `?format=svg` to get the resolution-independent SVG source, which stays crisp when the shape is scaled up on the client.",
           parameters: [
             reusableParameters.shapeIdPath,
             {
@@ -2749,20 +2749,20 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               in: "query",
               required: false,
               description:
-                "Output format. `png` (default) returns a rasterized image; `svg` returns the untouched vector source as `image/svg+xml`.",
+                "Output format. `webp` (default) returns a rasterized image; `png` is a legacy alias that also returns WebP; `svg` returns the untouched vector source as `image/svg+xml`.",
               schema: {
                 type: "string",
-                enum: ["png", "svg"],
-                default: "png",
+                enum: ["webp", "png", "svg"],
+                default: "webp",
               },
             },
           ],
           responses: {
             200: {
               description:
-                "Shape image (PNG by default, or SVG when `format=svg`).",
+                "Shape image (lossless WebP by default, or SVG when `format=svg`).",
               content: {
-                "image/png": {
+                "image/webp": {
                   schema: {
                     type: "string",
                     format: "binary",
@@ -3486,7 +3486,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Fonts"],
           summary: "List mobile fonts",
           description:
-            "Returns mobile font catalog merged with custom uploaded fonts and synced source fonts. By default returns the ENTIRE catalog in one response (no pagination) plus a `version` field for local caching — cache the list keyed by `version` and re-fetch only when `fontsVersion` from `/api/mobile/app-settings` changes. Supports search/category/language filtering; pass `pageSize` to paginate instead of returning everything. Each font includes a `previewImage` object with pre-rendered light/dark sample-text PNGs (transparent background); it is `null` until previews are generated in the admin console.",
+            "Returns mobile font catalog merged with custom uploaded fonts and synced source fonts. By default returns the ENTIRE catalog in one response (no pagination) plus a `version` field for local caching — cache the list keyed by `version` and re-fetch only when `fontsVersion` from `/api/mobile/app-settings` changes. Supports search/category/language filtering; pass `pageSize` to paginate instead of returning everything. Each font includes a `previewImage` object with pre-rendered light/dark sample-text images (transparent lossless WebP); it is `null` until previews are generated in the admin console.",
           parameters: [
             reusableParameters.fontSearch,
             reusableParameters.fontQuery,

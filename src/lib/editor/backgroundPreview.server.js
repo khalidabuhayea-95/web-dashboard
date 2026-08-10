@@ -69,15 +69,11 @@ function extensionFromMimeType(mimeType) {
   return "bin";
 }
 
-function preferredPreviewMimeType({ inputMimeType = "", format = "", hasAlpha = false }) {
-  const normalizedInput = normalizeMimeType(inputMimeType);
-  const normalizedFormat = sanitizeText(format).toLowerCase();
-
-  if (normalizedFormat === "webp" || normalizedInput.includes("webp")) return "image/webp";
-  if (hasAlpha || normalizedFormat === "png" || normalizedFormat === "svg" || normalizedInput.includes("png")) {
-    return "image/png";
-  }
-  return "image/jpeg";
+// Previews are a derivative we generate ourselves, so the source format doesn't
+// constrain us: WebP carries alpha like PNG and beats JPEG on photos, and every
+// consumer (browsers, Coil 3 on both mobile platforms) decodes it.
+function preferredPreviewMimeType() {
+  return "image/webp";
 }
 
 async function loadSharp() {
@@ -172,28 +168,17 @@ export async function createBackgroundPreview({
       };
     }
 
-    const outputMimeType = preferredPreviewMimeType({
-      inputMimeType,
-      format: metadata?.format,
-      hasAlpha: Boolean(metadata?.hasAlpha),
-    });
+    const outputMimeType = preferredPreviewMimeType();
 
-    let pipeline = image.resize({
-      width: safeMaxDimension,
-      height: safeMaxDimension,
-      fit: "inside",
-      withoutEnlargement: true,
-    });
-
-    if (outputMimeType === "image/png") {
-      pipeline = pipeline.png({ compressionLevel: 9 });
-    } else if (outputMimeType === "image/webp") {
-      pipeline = pipeline.webp({ quality: 82 });
-    } else {
-      pipeline = pipeline.jpeg({ quality: 82, mozjpeg: true });
-    }
-
-    const outputBytes = await pipeline.toBuffer();
+    const outputBytes = await image
+      .resize({
+        width: safeMaxDimension,
+        height: safeMaxDimension,
+        fit: "inside",
+        withoutEnlargement: true,
+      })
+      .webp({ quality: 82 })
+      .toBuffer();
     const outputMetadata = await sharp(outputBytes, {
       animated: false,
       pages: 1,

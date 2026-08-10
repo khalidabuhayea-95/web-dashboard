@@ -104,6 +104,17 @@ html,body{margin:0;padding:0;background:transparent;}
 </style></head><body><div id="w"><div id="t" dir="${rtl ? "rtl" : "ltr"}">${escapeHtml(previewText)}</div></div></body></html>`;
 }
 
+/**
+ * Playwright only screenshots PNG/JPEG, so re-encode to WebP here. Lossless is
+ * both smaller *and* pixel-exact for this content — flat anti-aliased glyphs on
+ * transparency have no gradients for a lossy encoder to win on, so lossless beat
+ * quality-90 by a wide margin when measured (~67% under PNG vs ~45%).
+ */
+async function toWebp(png: Buffer): Promise<Buffer> {
+  const sharp = (await import("sharp")).default;
+  return sharp(png).webp({ lossless: true, effort: 6 }).toBuffer();
+}
+
 export interface FontPreviewResult {
   id: string;
   ok: boolean;
@@ -113,8 +124,8 @@ export interface FontPreviewResult {
 }
 
 /**
- * Generate light + dark preview PNGs for each font family id, upload them to
- * R2 at `fonts/{id}/preview-light.png` and `preview-dark.png`, and persist the
+ * Generate light + dark preview images for each font family id, upload them to
+ * R2 at `fonts/{id}/preview-light.webp` and `preview-dark.webp`, and persist the
  * public URLs on the FontFamily row. Processes ids sequentially on one shared
  * browser page. Individual failures are captured per id and do not abort the batch.
  */
@@ -179,22 +190,27 @@ export async function generateFontFamilyPreviews(
         }, DARK_TEXT_COLOR);
         const darkPng = await el.screenshot({ omitBackground: true, timeout: RENDER_TIMEOUT_MS });
 
+        const [lightWebp, darkWebp] = await Promise.all([
+          toWebp(lightPng),
+          toWebp(darkPng),
+        ]);
+
         const version = String(Date.now());
-        const lightKey = `fonts/${id}/preview-light.png`;
-        const darkKey = `fonts/${id}/preview-dark.png`;
+        const lightKey = `fonts/${id}/preview-light.webp`;
+        const darkKey = `fonts/${id}/preview-dark.webp`;
         await uploadObject({
           bucket,
           key: lightKey,
-          body: lightPng,
-          contentType: "image/png",
+          body: lightWebp,
+          contentType: "image/webp",
           cacheControl: "public, max-age=86400",
           upsert: true,
         });
         await uploadObject({
           bucket,
           key: darkKey,
-          body: darkPng,
-          contentType: "image/png",
+          body: darkWebp,
+          contentType: "image/webp",
           cacheControl: "public, max-age=86400",
           upsert: true,
         });

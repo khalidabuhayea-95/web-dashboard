@@ -28,7 +28,7 @@ function decodeSvgDataUrl(dataUrl: string) {
   return Buffer.from(decodeURIComponent(payload), "utf8");
 }
 
-async function rasterizeSvgToPng(svgBytes: Buffer) {
+async function rasterizeSvgToWebp(svgBytes: Buffer) {
   const sharpModule = await import("sharp");
   const sharp = sharpModule.default || sharpModule;
 
@@ -41,7 +41,7 @@ async function rasterizeSvgToPng(svgBytes: Buffer) {
       fit: "inside",
       withoutEnlargement: false,
     })
-    .png()
+    .webp({ lossless: true, effort: 6 })
     .toBuffer();
 
   // Trim the transparent margins so the shape fills the frame edge-to-edge.
@@ -50,7 +50,7 @@ async function rasterizeSvgToPng(svgBytes: Buffer) {
   try {
     return await sharp(rendered)
       .trim({ background: { r: 0, g: 0, b: 0, alpha: 0 }, threshold: 0 })
-      .png()
+      .webp({ lossless: true, effort: 6 })
       .toBuffer();
   } catch {
     // No transparent border to trim (or trim unavailable) — keep the full render.
@@ -95,12 +95,12 @@ export async function GET(
       });
     }
 
-    const pngBytes = await rasterizeSvgToPng(decodeSvgDataUrl(shape.src));
+    const webpBytes = await rasterizeSvgToWebp(decodeSvgDataUrl(shape.src));
 
-    return new NextResponse(pngBytes, {
+    return new NextResponse(webpBytes, {
       status: 200,
       headers: {
-        "Content-Type": "image/png",
+        "Content-Type": "image/webp",
         "Cache-Control": isVersioned
           ? "public, max-age=31536000, immutable"
           : "public, max-age=3600",

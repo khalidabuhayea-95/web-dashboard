@@ -6,6 +6,7 @@ import { NextResponse } from "next/server";
 
 import { upsertEditorCustomFont } from "@/lib/editor/customFonts.server";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
+import { isFabricTextObject, trimTrailingBlankTextLines } from "@/lib/editor/textContent";
 import { createLogger } from "@/lib/logging/logger";
 import { attachRequestIdHeader, getRequestLogContext, resolveRequestId } from "@/lib/logging/request";
 import { checkRateLimit, createRateLimitResponse, resolveRequestIp } from "@/lib/security/rateLimit.server";
@@ -489,13 +490,24 @@ function normalizeCanvaObjectToTopLeftOrigin(input) {
   };
 }
 
+// Canva regularly hands us text that ends in a blank line. Konva renders that empty line as a
+// real line box, so the layer imports with a box a full line taller than its glyphs — padding in
+// the editor's selection overlay, and text nudged up on mobile (which centres on the box).
+function trimImportedTextObject(object) {
+  if (!isFabricTextObject(object)) return object;
+  const text = trimTrailingBlankTextLines(object.text);
+  return text === object.text ? object : { ...object, text };
+}
+
 function normalizeFabricDataOrigins(fabricData) {
   if (!fabricData || typeof fabricData !== "object") return fabricData;
   const objects = Array.isArray(fabricData.objects) ? fabricData.objects : [];
   if (!objects.length) return fabricData;
   return {
     ...fabricData,
-    objects: objects.map((object) => normalizeCanvaObjectToTopLeftOrigin(object)),
+    objects: objects.map((object) =>
+      trimImportedTextObject(normalizeCanvaObjectToTopLeftOrigin(object))
+    ),
   };
 }
 

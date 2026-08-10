@@ -199,24 +199,19 @@ function applyFrameTrimGeometry(object, geometry, nextSourceUrl) {
   return next;
 }
 
-async function encodeTrimmedCanvas(canvas, preferredMimeType) {
-  const normalizedMimeType = normalizeMimeType(preferredMimeType);
-
-  if (normalizedMimeType.includes("webp")) {
-    try {
-      const bytes = canvas.toBuffer("image/webp");
-      if (bytes?.length) {
-        return { bytes, mimeType: "image/webp" };
-      }
-    } catch {
-      // Fall back to PNG if WebP encoding is unavailable in this runtime.
-    }
+async function encodeTrimmedCanvas(canvas) {
+  // node-canvas has no WebP encoder, so go through sharp. Trimmed frames carry
+  // transparency, so this is lossless — which for flat/alpha artwork is also
+  // smaller than PNG. Falls back to PNG if sharp is unavailable at runtime.
+  const png = canvas.toBuffer("image/png");
+  try {
+    const sharp = (await import("sharp")).default;
+    const bytes = await sharp(png).webp({ lossless: true, effort: 6 }).toBuffer();
+    if (bytes?.length) return { bytes, mimeType: "image/webp" };
+  } catch {
+    // fall through
   }
-
-  return {
-    bytes: canvas.toBuffer("image/png"),
-    mimeType: "image/png",
-  };
+  return { bytes: png, mimeType: "image/png" };
 }
 
 export async function trimTransparentPaddingForImportedFrameObject(
@@ -294,7 +289,7 @@ export async function trimTransparentPaddingForImportedFrameObject(
     geometry.trimmedHeight
   );
 
-  const encoded = await encodeTrimmedCanvas(trimmedCanvas, sourceMimeType);
+  const encoded = await encodeTrimmedCanvas(trimmedCanvas);
   await uploadObject({
     bucket,
     key,

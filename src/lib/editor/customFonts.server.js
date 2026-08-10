@@ -8,6 +8,7 @@ import {
   FONT_STATUS_FAILED,
   FONT_STATUS_PENDING,
   FONT_STATUS_READY,
+  defaultWeightVariants,
   findFontFamiliesByNames,
   listFontFamilies,
   normalizeFontStorageKey,
@@ -908,12 +909,20 @@ export async function upsertEditorCustomFont({
   // font already exists, skip before any download/convert/upload/overwrite. For
   // Canva's opaque synthetic ids, also check the real family name embedded in the
   // font file so e.g. a scraped "Poppins" won't duplicate an existing Poppins.
+  // Default-weight spellings count as the same font, so the Google catalog's
+  // "Cairo" won't land alongside the appchief catalog's "Cairo Regular".
   if (skipIfExists) {
-    const dedupeNames = [normalizedFamily, familyKey];
+    const dedupeNames = [
+      normalizedFamily,
+      familyKey,
+      ...defaultWeightVariants(normalizedFamily),
+    ];
     if (isSyntheticFontFamily(normalizedFamily) && safeDataUrl) {
       const parsedForName = parseDataUri(safeDataUrl);
       const realName = parsedForName?.bytes?.length ? extractFontFamilyName(parsedForName.bytes) : "";
-      if (realName && !isSyntheticFontFamily(realName)) dedupeNames.push(realName);
+      if (realName && !isSyntheticFontFamily(realName)) {
+        dedupeNames.push(realName, ...defaultWeightVariants(realName));
+      }
     }
     const existingLookup = await findFontFamiliesByNames(dedupeNames);
     let existingMatch = null;

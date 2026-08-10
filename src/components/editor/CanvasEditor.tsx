@@ -66,6 +66,12 @@ import {
 import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import {
+  clearTextBoxMeasurementCache,
+  resolveSnugTextBox,
+  textBoxAnchorDeltaX,
+  type TextBoxInput,
+} from "@/lib/editor/textBox";
+import {
   revealFraction,
   glyphVisual,
   splitWordsForMotion,
@@ -1951,9 +1957,7 @@ function CanvasPageSceneImpl({
                     fillAfterStrokeEnabled: true,
                   }
                 : {};
-            const hasTextCurve =
-              Boolean(element.textCurveEnabled) &&
-              Math.abs(Number(element.textCurveAmount || 0)) > 0.5;
+            const hasTextCurve = isCurvedText(element);
 
             if (hasTextCurve) {
               return (
@@ -2318,6 +2322,31 @@ function normalizeRect(rect: { x: number; y: number; width: number; height: numb
     width: Math.abs(rect.width),
     height: Math.abs(rect.height),
   };
+}
+
+const TRANSFORMER_ANCHORS = [
+  "top-left",
+  "top-center",
+  "top-right",
+  "middle-left",
+  "middle-right",
+  "bottom-left",
+  "bottom-center",
+  "bottom-right",
+];
+// A text box's height is derived from the text it renders (see the snug-fit effect), so the
+// top/bottom-center handles would snap straight back — don't offer them on text.
+const TEXT_TRANSFORMER_ANCHORS = TRANSFORMER_ANCHORS.filter(
+  (anchor) => anchor !== "top-center" && anchor !== "bottom-center"
+);
+
+/** Curved text is laid out along a path built from the box, so its box is never re-fitted. */
+function isCurvedText(element: EditorElement) {
+  return (
+    element.type === "text" &&
+    Boolean(element.textCurveEnabled) &&
+    Math.abs(Number(element.textCurveAmount) || 0) > 0.5
+  );
 }
 
 const MIN_SCALE = 0.1;
@@ -3917,6 +3946,17 @@ export default function CanvasEditor() {
     transformer.getLayer()?.batchDraw();
   }, [selectedIds, elements, frameContentEditId]);
 
+  // Text boxes derive their height from their text, so the vertical-only handles are dropped for
+  // a selection made purely of (uncurved) text — dragging them would just snap back.
+  const transformerAnchors = useMemo(() => {
+    if (selectedIds.length === 0) return TRANSFORMER_ANCHORS;
+    const allText = selectedIds.every((id) => {
+      const element = elements.find((item) => item.id === id);
+      return Boolean(element && element.type === "text" && !isCurvedText(element));
+    });
+    return allText ? TEXT_TRANSFORMER_ANCHORS : TRANSFORMER_ANCHORS;
+  }, [elements, selectedIds]);
+
   const syncTransformerVisuals = useCallback(() => {
     const transformer = transformerRef.current;
     if (!transformer) return;
@@ -3970,7 +4010,12 @@ export default function CanvasEditor() {
 
     void loadFontsAndRedraw();
 
-    const handleLoadingDone = () => remeasureText();
+    const handleLoadingDone = () => {
+      // Box measurements taken while a family was still resolving to the fallback are stale the
+      // moment the real font lands — this is the browser's own "new fonts arrived" signal.
+      clearTextBoxMeasurementCache();
+      remeasureText();
+    };
     if (document.fonts?.addEventListener) {
       document.fonts.addEventListener("loadingdone", handleLoadingDone);
     }
@@ -4455,6 +4500,116 @@ export default function CanvasEditor() {
     },
     [updateElement, viewport.scale]
   );
+
+  // A text layer's selection overlay IS its Konva box, so a box bigger than the text reads as
+  // padding around the glyphs, and a box that ignores `fontSize` looks frozen at its old size
+  // when the font size changes. Keep every text box glued to the text it renders:
+  //   • height is ALWAYS the measured line stack — no dead vertical space, and it follows the
+  //     font size, line height, wrapping and edits for free. Text draws from the top of the box
+  //     (no verticalAlign anywhere), so shrinking it never moves a glyph.
+  //   • width is only re-fitted for a box that is HUGGING its text. A narrower box is wrapping
+  //     on purpose and a much wider one was widened on purpose, so both keep their width and
+  //     only re-wrap. A hugging box is re-measured unconstrained, so it grows/shrinks with the
+  //     font size instead of folding the line — and `x` shifts by the alignment rule so the
+  //     glyphs stay in the exact same spot while the box resizes around them.
+  const textBoxFitsRef = useRef<Map<string, { fontSize: number; width: number; hugging: boolean }>>(
+    new Map()
+  );
+  const pendingFontWaitRef = useRef(false);
+  const [textMetricsTick, setTextMetricsTick] = useState(0);
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    if (inlineEditActiveRef.current) return; // mid-edit: the textarea owns the box
+
+    let waitingOnFonts = false;
+
+    elements.forEach((element) => {
+      if (element.type !== "text" || isCurvedText(element)) return;
+      const text = String(element.text || "");
+      if (!text.trim()) return;
+      const fontSize = Number(element.fontSize) || 0;
+      if (fontSize <= 0) return;
+
+      const fontFamily = resolveCssFontFamily(element.fontFamily);
+      try {
+        // Measuring against the fallback font would size the box for glyphs nobody sees.
+        if (document.fonts?.check && !document.fonts.check(`${fontSize}px ${fontFamily}`)) {
+          waitingOnFonts = true;
+          return;
+        }
+      } catch {
+        /* measure anyway when the check isn't supported */
+      }
+
+      const input: TextBoxInput = {
+        text,
+        fontSize,
+        fontFamily,
+        fontStyle: toKonvaFontStyle(element.fontStyle, element.fontWeight),
+        letterSpacing: Number(element.letterSpacing) || 0,
+        lineHeight: Number(element.lineHeight) || 1,
+        align: element.align,
+        direction: resolveTextDirection(text),
+      };
+
+      const currentWidth = Math.max(0, Number(element.width) || 0);
+      const currentHeight = Math.max(0, Number(element.height) || 0);
+      const previous = textBoxFitsRef.current.get(element.id);
+      // Still hugging as long as nothing has resized the box since the last fit — a resize
+      // (side handle, corner drag, imported width) hands the width back to the user.
+      const hugsText = Boolean(previous?.hugging) && Math.abs((previous?.width ?? 0) - currentWidth) < 0.5;
+      const fit = resolveSnugTextBox(input, hugsText ? null : currentWidth);
+      if (!fit) return;
+
+      textBoxFitsRef.current.set(element.id, {
+        fontSize,
+        width: fit.width,
+        hugging: fit.hugging,
+      });
+
+      const widthChanged = Math.abs(fit.width - currentWidth) > 0.5;
+      const heightChanged = Math.abs(fit.height - currentHeight) > 0.5;
+      if (!widthChanged && !heightChanged) return;
+
+      // The box resizes around the glyphs, so re-anchor it. A line sits inside the box by
+      // `align`, so the shift runs along the box's own x axis — through the node's scale (a
+      // flipped box moves the other way) and rotation, since `x`/`y` live in page space. The
+      // height only ever grows/shrinks downward (text draws from the top), so `y` is untouched
+      // by it.
+      let nextX = Number(element.x) || 0;
+      let nextY = Number(element.y) || 0;
+      if (widthChanged) {
+        const localShift =
+          textBoxAnchorDeltaX(element.align, currentWidth, fit.width) * (Number(element.scaleX) || 1);
+        const radians = ((Number(element.rotation) || 0) * Math.PI) / 180;
+        nextX += localShift * Math.cos(radians);
+        nextY += localShift * Math.sin(radians);
+      }
+
+      updateElement(
+        element.id,
+        {
+          width: fit.width,
+          height: fit.height,
+          ...(widthChanged ? { x: nextX, y: nextY } : {}),
+        },
+        // An automatic box fit is not an edit the user should have to undo.
+        { recordHistory: false }
+      );
+    });
+
+    // Re-run once the fonts that were still loading arrive. Gated on `status === "loading"` so a
+    // family that never resolves can't spin this forever.
+    if (waitingOnFonts && !pendingFontWaitRef.current && document.fonts?.status === "loading") {
+      pendingFontWaitRef.current = true;
+      void document.fonts.ready
+        .catch(() => undefined)
+        .then(() => {
+          pendingFontWaitRef.current = false;
+          setTextMetricsTick((tick) => tick + 1);
+        });
+    }
+  }, [elements, textMetricsTick, updateElement]);
 
   // The scene handlers below are hoisted out of the JSX and memoized on purpose:
   // CanvasPageScene is wrapped in React.memo, and a fresh inline arrow on every
@@ -5106,16 +5261,7 @@ export default function CanvasEditor() {
                 centerY > activePage.height
               );
             })()}
-            enabledAnchors={[
-              "top-left",
-              "top-center",
-              "top-right",
-              "middle-left",
-              "middle-right",
-              "bottom-left",
-              "bottom-center",
-              "bottom-right",
-            ]}
+            enabledAnchors={transformerAnchors}
             boundBoxFunc={(oldBox, newBox) => {
               if (newBox.width < 5 || newBox.height < 5) {
                 return oldBox;
