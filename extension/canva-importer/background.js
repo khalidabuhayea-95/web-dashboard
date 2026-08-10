@@ -770,6 +770,18 @@ function annotateImportMetadata(object, layer, fallbackOverride) {
       : {}),
     // Per-element animation captured from Canva's design model (fiber-walk) → editor fields.
     ...buildEditorAnimationFields(layer?.animation),
+    // Drop shadow from the model, applied HERE so every emitted object type gets it — editable
+    // shape, rebuilt vector, image and text all funnel through this annotator. The alpha rides in
+    // the colour (`rgba(...)`) because the editor element has no separate shadow-opacity field;
+    // the mobile exporter splits it back out via rgbaToHexWithOpacity.
+    ...(layer?.modelShadow && typeof layer.modelShadow === "object"
+      ? {
+          shadowColor: String(layer.modelShadow.color || "rgba(0, 0, 0, 0.3)"),
+          shadowBlur: Math.max(0, numberOr(layer.modelShadow.blur, 0)),
+          shadowOffsetX: numberOr(layer.modelShadow.offsetX, 0),
+          shadowOffsetY: numberOr(layer.modelShadow.offsetY, 0),
+        }
+      : {}),
     // Per-element timeline window (when the element appears/disappears) from the model's
     // startUs/durationUs — so a sequenced timeline/video design plays in order instead of piling
     // every element at t=0. The editor reads these (SidePanel → resolveTimelineWindow).
@@ -1227,6 +1239,43 @@ async function layerToFabricObject(layer, index) {
     );
   }
 
+  // Model-rebuilt VECTOR shape (arch / blob / badge / gradient fill — anything the editable
+  // circle/rect branch above can't express). Canva renders these as PROTECTED rasters, so the DOM
+  // paths can only screenshot-crop them: no alpha, so the shape's silhouette is lost and whatever
+  // was painted behind it bakes into every pixel outside the path (a rounded arch imported as a
+  // hard rectangle with the page baked into its corners). The SVG rebuilt from the design model
+  // has the exact path and real transparency; the server rasterizes it to a PNG, alpha intact.
+  const modelVectorSvg = String(layer?.modelVectorSvg || "");
+  if (modelVectorSvg.includes("<svg")) {
+    const vectorAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
+    return annotateImportMetadata(
+      {
+        type: "image",
+        version: "7.0.0",
+        originX: "left",
+        originY: "top",
+        left: vectorAnchor.left,
+        top: vectorAnchor.top,
+        width,
+        height,
+        scaleX: 1,
+        scaleY: 1,
+        angle,
+        opacity,
+        src: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(modelVectorSvg)}`,
+        flipX,
+        flipY,
+        layerType: "image",
+        layerName: String(layer?.name || "").trim() || `Shape ${index + 1}`,
+        layerLocked: false,
+        layerHidden: false,
+        sourceWidth: width,
+        sourceHeight: height,
+      },
+      layer
+    );
+  }
+
   if (layer?.kind === "shape") {
     const resolvedAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
     return annotateImportMetadata({
@@ -1348,7 +1397,14 @@ async function layerToFabricObject(layer, index) {
       imageObject.stroke = border.strokeColor;
       imageObject.strokeWidth = Math.max(1, Math.round(Number(border.strokeWidth)));
     }
-    if (Number(border.cornerRadius) > 0) {
+    if (border.circleFrame) {
+      // Canva's round photo frame. Radius is measured against the DISPLAYED box (width/height
+      // here, not the intrinsic objectWidth/Height), matching how the editor and the mobile
+      // renderer read it; both clamp to min(w,h)/2, so half the short side IS the circle. The
+      // frame's stroke follows the same rounded path, which is what draws the white ring —
+      // previously it squared off around the element because the radius was 0.
+      imageObject.cornerRadius = Math.max(1, Math.round(Math.min(width, height) / 2));
+    } else if (Number(border.cornerRadius) > 0) {
       imageObject.cornerRadius = Math.round(Number(border.cornerRadius));
     }
   }
@@ -1493,6 +1549,17 @@ async function buildHybridFabricObjects(
         continue;
       }
     }
+    // Same short-circuit for a shape rebuilt as a VECTOR (arch / blob / gradient fill): the SVG
+    // from the design model is the only source with the real silhouette and true transparency, so
+    // it must not fall through to the snapshot/crop branches that would flatten it back into an
+    // opaque rectangle.
+    if (String(layer?.modelVectorSvg || "").includes("<svg")) {
+      const vectorObject = await layerToFabricObject(layer, result.length);
+      if (vectorObject) {
+        result.push(vectorObject);
+        continue;
+      }
+    }
     const layerKind = String(layer?.kind || "").toLowerCase();
     // Plain overflow/aspect crops (snapshotIsLossyFallback) keep the high-resolution
     // fetched asset that the scraper already cropped to the visible region, so skip the
@@ -1510,7 +1577,16 @@ async function buildHybridFabricObjects(
     // Auto-pick: if the captured asset has the page background baked into it (markedly more
     // opaque than the clean isolation snapshot), use the snapshot instead — it diffs the
     // background out. Genuine cut-outs keep their high-res asset.
-    if (directAssetPreferredOverSnapshot) {
+    // A model-confirmed photo frame (rect or circle) is EXEMPT from that auto-pick: its asset is
+    // meant to be a fully-opaque rectangle, because the editor applies the frame itself via
+    // cornerRadius. Comparing opaqueness would otherwise always hand a ROUND frame back to the
+    // snapshot — a circle covers only ~79% of its box, so the asset reads 21% "more opaque",
+    // over the baked-background threshold — and the snapshot has no alpha to mask with, which is
+    // exactly how a circular photo ended up an opaque square.
+    const modelFrame = Boolean(
+      layer?.modelBorder && (layer.modelBorder.rectFrame || layer.modelBorder.circleFrame)
+    );
+    if (directAssetPreferredOverSnapshot && !modelFrame) {
       const snapshotDataUrl = String(layer?.isolatedImageDataUrl || "");
       const hadSnapshot = snapshotDataUrl.startsWith("data:image/");
       const assetOpaque = await imageOpaqueFraction(String(layer?.imageDataUrl || ""));
@@ -2460,11 +2536,158 @@ function extractCanvaFiberModel() {
         const strokeWidth =
           stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
         const cornerRadius = readPathCornerRadius(p0);
-        if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0)) return null;
+        const d = String(p0.d || "").trim();
         // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
-        // rendered snapshot never needed (blob/circle frames stay false).
-        const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(String(p0.d || "").trim());
-        return { strokeColor, strokeWidth, cornerRadius, rectFrame };
+        // rendered snapshot never needed.
+        const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
+        // circleFrame: arc-only path = Canva's round photo frame. Equally reproducible — the
+        // editor clips with cornerRadius = half the short side and strokes that same rounded
+        // path. See the canonical copy in canva-fiber-main.js.
+        const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
+        if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+        return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
+      } catch (_e) {
+        return null;
+      }
+    };
+    // Drop shadow: found STRUCTURALLY (the array keys are minified and rotate between deploys)
+    // via the stable "shadow" id + "drop-shadow" type. offset/blur are design px 1:1, angle is
+    // anticlockwise from +x with y pointing down, alpha = 1 - transparency. See the canonical,
+    // commented copy in canva-fiber-main.js.
+    const hexToRgba = (hex, alpha) => {
+      const raw = String(hex || "").trim().replace(/^#/, "");
+      const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+      if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+      const r = parseInt(full.slice(0, 2), 16);
+      const g = parseInt(full.slice(2, 4), 16);
+      const b = parseInt(full.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${Math.round(alpha * 1000) / 1000})`;
+    };
+    const extractShadow = (el) => {
+      try {
+        for (const key in el) {
+          let bucket;
+          try {
+            bucket = el[key];
+          } catch (_e) {
+            continue;
+          }
+          if (!Array.isArray(bucket)) continue;
+          for (const entry of bucket) {
+            if (!entry || typeof entry !== "object" || entry.id !== "shadow") continue;
+            for (const innerKey in entry) {
+              const effects = entry[innerKey];
+              if (!Array.isArray(effects)) continue;
+              const drop = effects.find((e) => e && String(e.type || "") === "drop-shadow");
+              if (!drop) continue;
+              const blur = Math.max(0, Number(drop.blur) || 0);
+              const offset = Math.max(0, Number(drop.offset) || 0);
+              if (blur <= 0 && offset <= 0) return null;
+              let transparency = Number(drop.fill && drop.fill.transparency) || 0;
+              if (transparency > 1) transparency /= 100;
+              const alpha = Math.max(0, Math.min(1, 1 - transparency));
+              if (alpha <= 0) return null;
+              const color = hexToRgba((drop.fill && drop.fill.color) || "#000000", alpha);
+              if (!color) return null;
+              const radians = ((Number(drop.direction) || 0) * Math.PI) / 180;
+              return {
+                color,
+                blur: Math.round(blur * 100) / 100,
+                offsetX: Math.round(-offset * Math.sin(radians) * 100) / 100,
+                offsetY: Math.round(offset * Math.cos(radians) * 100) / 100,
+              };
+            }
+          }
+        }
+      } catch (_e) {
+        return null;
+      }
+      return null;
+    };
+    // Rebuild a non-simple shape (arch / blob / gradient fill) as an SVG — Canva renders these as
+    // protected rasters, and a screenshot crop has no alpha so the silhouette is lost. See the
+    // canonical, commented copy in canva-fiber-main.js.
+    const svgColor = (color, transparency) => {
+      const hex = typeof color === "string" ? color.trim() : "";
+      if (!hex) return null;
+      let t = Number(transparency) || 0;
+      if (t > 1) t /= 100;
+      return { hex, alpha: Math.max(0, Math.min(1, 1 - t)) };
+    };
+    const svgPaintFromFill = (fill, gradientId) => {
+      if (!fill || typeof fill !== "object") return null;
+      const gradient = fill.gradient && typeof fill.gradient === "object" ? fill.gradient : null;
+      if (gradient && Array.isArray(gradient.stops) && gradient.stops.length > 0) {
+        const stops = gradient.stops
+          .map((stop) => {
+            const paint = svgColor(stop && stop.color, stop && stop.transparency);
+            if (!paint) return null;
+            const offset = Math.max(0, Math.min(1, Number(stop.position) || 0));
+            return `<stop offset="${offset}" stop-color="${paint.hex}" stop-opacity="${paint.alpha}"/>`;
+          })
+          .filter(Boolean);
+        if (stops.length === 0) return null;
+        const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+        const cx = Number(gradient.center && gradient.center.left);
+        const cy = Number(gradient.center && gradient.center.top);
+        const defs = isRadial
+          ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
+              Number.isFinite(cy) ? cy : 0.5
+            }" r="0.75">${stops.join("")}</radialGradient>`
+          : `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+        return { paint: `url(#${gradientId})`, alpha: 1, defs };
+      }
+      const solid = svgColor(fill.color, fill.transparency);
+      if (!solid) return null;
+      return { paint: solid.hex, alpha: solid.alpha, defs: "" };
+    };
+    const extractVectorShape = (el) => {
+      try {
+        const paths = Array.isArray(el.paths) ? el.paths : null;
+        if (!paths || paths.length === 0 || paths.length > 12) return null;
+        if (paths.some((p) => p && p.fill && typeof p.fill === "object" && p.fill.image)) return null;
+        const viewBox = el.viewBox && typeof el.viewBox === "object" ? el.viewBox : null;
+        const vbWidth = Number(viewBox && viewBox.width) || 0;
+        const vbHeight = Number(viewBox && viewBox.height) || 0;
+        if (!(vbWidth > 0 && vbHeight > 0)) return null;
+        const vbLeft = Number(viewBox.left) || 0;
+        const vbTop = Number(viewBox.top) || 0;
+        const defs = [];
+        const body = [];
+        paths.forEach((p, i) => {
+          const d = p && typeof p.d === "string" ? p.d.trim() : "";
+          if (!d) return;
+          const fillPaint = svgPaintFromFill(p.fill, `g${i}`);
+          const stroke = p.stroke && typeof p.stroke === "object" ? p.stroke : null;
+          const strokePaint = stroke ? svgColor(stroke.color, stroke.transparency) : null;
+          const strokeWidth = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
+          if (!fillPaint && !(strokePaint && strokeWidth > 0)) return;
+          if (fillPaint && fillPaint.defs) defs.push(fillPaint.defs);
+          const attrs = [
+            `d="${d.replace(/"/g, "'")}"`,
+            fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"',
+            fillPaint && fillPaint.alpha < 1 ? `fill-opacity="${fillPaint.alpha}"` : "",
+            strokePaint && strokeWidth > 0 ? `stroke="${strokePaint.hex}"` : "",
+            strokePaint && strokeWidth > 0 ? `stroke-width="${strokeWidth}"` : "",
+            strokePaint && strokeWidth > 0 && strokePaint.alpha < 1
+              ? `stroke-opacity="${strokePaint.alpha}"`
+              : "",
+          ].filter(Boolean);
+          body.push(`<path ${attrs.join(" ")}/>`);
+        });
+        if (body.length === 0) return null;
+        const boxWidth = Math.max(1, Math.round(Number(el.width) || vbWidth));
+        const boxHeight = Math.max(1, Math.round(Number(el.height) || vbHeight));
+        const scale = Math.min(1, 2048 / Math.max(boxWidth, boxHeight));
+        const outWidth = Math.max(1, Math.round(boxWidth * scale));
+        const outHeight = Math.max(1, Math.round(boxHeight * scale));
+        const svg =
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" ` +
+          `viewBox="${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}" preserveAspectRatio="none">` +
+          (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
+          body.join("") +
+          `</svg>`;
+        return { svg, width: outWidth, height: outHeight };
       } catch (_e) {
         return null;
       }
@@ -2513,6 +2736,8 @@ function extractCanvaFiberModel() {
         shape: el.type === "shape" ? extractShape(el) : null,
         line: el.type === "line" ? extractLine(el) : null,
         border: el.type === "shape" ? extractBorder(el) : null,
+        vector: el.type === "shape" && !extractShape(el) ? extractVectorShape(el) : null,
+        shadow: extractShadow(el),
       };
     }
 

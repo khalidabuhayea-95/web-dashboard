@@ -1324,6 +1324,13 @@ function toEditorDesignFromTemplate(
         stroke: parseColor(item.stroke, "#1e293b"),
         strokeWidth: Math.max(0, toNumber(item.strokeWidth, 0)),
         cornerRadius: Math.max(0, toNumber(item.cornerRadius, 0)),
+        // Drop shadow. The alpha rides in the colour (`rgba(...)`) — the element has no separate
+        // shadow-opacity field, and Konva takes any CSS colour. Offsets can be negative (the
+        // shadow falls up/left), so they are NOT clamped at 0 like the blur.
+        shadowColor: parseColor(item.shadowColor, "#000000"),
+        shadowBlur: Math.max(0, toNumber(item.shadowBlur, 0)),
+        shadowOffsetX: toNumber(item.shadowOffsetX, 0),
+        shadowOffsetY: toNumber(item.shadowOffsetY, 0),
         scaleX: signedScaleX,
         scaleY: signedScaleY,
         blendMode: toEditorBlendMode(item.blendMode),

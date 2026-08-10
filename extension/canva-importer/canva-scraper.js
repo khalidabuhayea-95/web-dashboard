@@ -618,11 +618,158 @@
               const strokeWidth =
                 stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
               const cornerRadius = readPathCornerRadius(p0);
-              if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0)) return null;
+              const d = String(p0.d || "").trim();
               // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
-              // rendered snapshot never needed (blob/circle frames stay false).
-              const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(String(p0.d || "").trim());
-              return { strokeColor, strokeWidth, cornerRadius, rectFrame };
+              // rendered snapshot never needed.
+              const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
+              // circleFrame: arc-only path = Canva's round photo frame. Equally reproducible —
+              // the editor clips with cornerRadius = half the short side and strokes that same
+              // rounded path. See the canonical copy in canva-fiber-main.js.
+              const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
+              if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+              return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
+            } catch (_e) {
+              return null;
+            }
+          };
+          // Drop shadow: found STRUCTURALLY (the array keys are minified and rotate between
+          // deploys) via the stable "shadow" id + "drop-shadow" type. offset/blur are design px
+          // 1:1, angle is anticlockwise from +x with y pointing down, alpha = 1 - transparency.
+          // See the canonical, commented copy in canva-fiber-main.js.
+          const hexToRgba = (hex, alpha) => {
+            const raw = String(hex || "").trim().replace(/^#/, "");
+            const full = raw.length === 3 ? raw.split("").map((c) => c + c).join("") : raw;
+            if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+            const r = parseInt(full.slice(0, 2), 16);
+            const g = parseInt(full.slice(2, 4), 16);
+            const b = parseInt(full.slice(4, 6), 16);
+            return `rgba(${r}, ${g}, ${b}, ${Math.round(alpha * 1000) / 1000})`;
+          };
+          const extractShadow = (el) => {
+            try {
+              for (const key in el) {
+                let bucket;
+                try {
+                  bucket = el[key];
+                } catch (_e) {
+                  continue;
+                }
+                if (!Array.isArray(bucket)) continue;
+                for (const entry of bucket) {
+                  if (!entry || typeof entry !== "object" || entry.id !== "shadow") continue;
+                  for (const innerKey in entry) {
+                    const effects = entry[innerKey];
+                    if (!Array.isArray(effects)) continue;
+                    const drop = effects.find((e) => e && String(e.type || "") === "drop-shadow");
+                    if (!drop) continue;
+                    const blur = Math.max(0, Number(drop.blur) || 0);
+                    const offset = Math.max(0, Number(drop.offset) || 0);
+                    if (blur <= 0 && offset <= 0) return null;
+                    let transparency = Number(drop.fill && drop.fill.transparency) || 0;
+                    if (transparency > 1) transparency /= 100;
+                    const alpha = Math.max(0, Math.min(1, 1 - transparency));
+                    if (alpha <= 0) return null;
+                    const color = hexToRgba((drop.fill && drop.fill.color) || "#000000", alpha);
+                    if (!color) return null;
+                    const radians = ((Number(drop.direction) || 0) * Math.PI) / 180;
+                    return {
+                      color,
+                      blur: Math.round(blur * 100) / 100,
+                      offsetX: Math.round(-offset * Math.sin(radians) * 100) / 100,
+                      offsetY: Math.round(offset * Math.cos(radians) * 100) / 100,
+                    };
+                  }
+                }
+              }
+            } catch (_e) {
+              return null;
+            }
+            return null;
+          };
+          // Rebuild a non-simple shape (arch / blob / gradient fill) as an SVG — Canva renders
+          // these as protected rasters, and a screenshot crop has no alpha so the silhouette is
+          // lost. See the canonical, commented copy in canva-fiber-main.js.
+          const svgColor = (color, transparency) => {
+            const hex = typeof color === "string" ? color.trim() : "";
+            if (!hex) return null;
+            let t = Number(transparency) || 0;
+            if (t > 1) t /= 100;
+            return { hex, alpha: Math.max(0, Math.min(1, 1 - t)) };
+          };
+          const svgPaintFromFill = (fill, gradientId) => {
+            if (!fill || typeof fill !== "object") return null;
+            const gradient = fill.gradient && typeof fill.gradient === "object" ? fill.gradient : null;
+            if (gradient && Array.isArray(gradient.stops) && gradient.stops.length > 0) {
+              const stops = gradient.stops
+                .map((stop) => {
+                  const paint = svgColor(stop && stop.color, stop && stop.transparency);
+                  if (!paint) return null;
+                  const offset = Math.max(0, Math.min(1, Number(stop.position) || 0));
+                  return `<stop offset="${offset}" stop-color="${paint.hex}" stop-opacity="${paint.alpha}"/>`;
+                })
+                .filter(Boolean);
+              if (stops.length === 0) return null;
+              const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+              const cx = Number(gradient.center && gradient.center.left);
+              const cy = Number(gradient.center && gradient.center.top);
+              const defs = isRadial
+                ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
+                    Number.isFinite(cy) ? cy : 0.5
+                  }" r="0.75">${stops.join("")}</radialGradient>`
+                : `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+              return { paint: `url(#${gradientId})`, alpha: 1, defs };
+            }
+            const solid = svgColor(fill.color, fill.transparency);
+            if (!solid) return null;
+            return { paint: solid.hex, alpha: solid.alpha, defs: "" };
+          };
+          const extractVectorShape = (el) => {
+            try {
+              const paths = Array.isArray(el.paths) ? el.paths : null;
+              if (!paths || paths.length === 0 || paths.length > 12) return null;
+              if (paths.some((p) => p && p.fill && typeof p.fill === "object" && p.fill.image)) return null;
+              const viewBox = el.viewBox && typeof el.viewBox === "object" ? el.viewBox : null;
+              const vbWidth = Number(viewBox && viewBox.width) || 0;
+              const vbHeight = Number(viewBox && viewBox.height) || 0;
+              if (!(vbWidth > 0 && vbHeight > 0)) return null;
+              const vbLeft = Number(viewBox.left) || 0;
+              const vbTop = Number(viewBox.top) || 0;
+              const defs = [];
+              const body = [];
+              paths.forEach((p, i) => {
+                const d = p && typeof p.d === "string" ? p.d.trim() : "";
+                if (!d) return;
+                const fillPaint = svgPaintFromFill(p.fill, `g${i}`);
+                const stroke = p.stroke && typeof p.stroke === "object" ? p.stroke : null;
+                const strokePaint = stroke ? svgColor(stroke.color, stroke.transparency) : null;
+                const strokeWidth = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
+                if (!fillPaint && !(strokePaint && strokeWidth > 0)) return;
+                if (fillPaint && fillPaint.defs) defs.push(fillPaint.defs);
+                const attrs = [
+                  `d="${d.replace(/"/g, "'")}"`,
+                  fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"',
+                  fillPaint && fillPaint.alpha < 1 ? `fill-opacity="${fillPaint.alpha}"` : "",
+                  strokePaint && strokeWidth > 0 ? `stroke="${strokePaint.hex}"` : "",
+                  strokePaint && strokeWidth > 0 ? `stroke-width="${strokeWidth}"` : "",
+                  strokePaint && strokeWidth > 0 && strokePaint.alpha < 1
+                    ? `stroke-opacity="${strokePaint.alpha}"`
+                    : "",
+                ].filter(Boolean);
+                body.push(`<path ${attrs.join(" ")}/>`);
+              });
+              if (body.length === 0) return null;
+              const boxWidth = Math.max(1, Math.round(Number(el.width) || vbWidth));
+              const boxHeight = Math.max(1, Math.round(Number(el.height) || vbHeight));
+              const scale = Math.min(1, 2048 / Math.max(boxWidth, boxHeight));
+              const outWidth = Math.max(1, Math.round(boxWidth * scale));
+              const outHeight = Math.max(1, Math.round(boxHeight * scale));
+              const svg =
+                `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" ` +
+                `viewBox="${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}" preserveAspectRatio="none">` +
+                (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
+                body.join("") +
+                `</svg>`;
+              return { svg, width: outWidth, height: outHeight };
             } catch (_e) {
               return null;
             }
@@ -674,6 +821,8 @@
               shape: el.type === "shape" ? extractShape(el) : null,
               line: el.type === "line" ? extractLine(el) : null,
               border: el.type === "shape" ? extractBorder(el) : null,
+              vector: el.type === "shape" && !extractShape(el) ? extractVectorShape(el) : null,
+              shadow: extractShadow(el),
             };
           }
         } catch (_error) {
@@ -2261,7 +2410,12 @@
       const snapshotRequiredForLayer = (layerNode, imageElement, modelBorder) => {
         if (!layerNode || !imageElement) return false;
         if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
-        if (modelBorder && modelBorder.rectFrame) return false;
+        // A rect OR circle frame is fully reproducible from the fetched asset (the editor applies
+        // the frame's corner radius — half the short side for a circle — and its stroke), so no
+        // DOM signal justifies the snapshot. That matters most for the ROUND frames: the
+        // isolation snapshot has no alpha outside the mask, so a circular photo came back as an
+        // opaque square with the page baked into its corners.
+        if (modelBorder && (modelBorder.rectFrame || modelBorder.circleFrame)) return false;
         const modelHandlesRoundedCorners = Number(modelBorder?.cornerRadius) > 0;
         let node = imageElement;
         let depth = 0;
@@ -4010,6 +4164,26 @@
             preferSnapshot = true;
           }
 
+          // A model-confirmed photo FRAME (rect or circle) is reproduced by the editor straight
+          // from the fetched asset — corner radius + stroke — so the rendered snapshot is never
+          // needed, whichever heuristic asked for it. This override is what makes that stick:
+          // `preferSnapshot` is ALSO set by the earlier visible-geometry / rendered-snapshot
+          // check, and that path leaves `snapshotIsLossyFallback` false, so background.js never
+          // reaches `directAssetPreferredOverSnapshot` and force-takes the snapshot. Observed on
+          // a circular photo whose isolation snapshot had the frame's white ring baked into the
+          // pixels — the editor's own stroke then drew a SECOND ring around it. Its twin on the
+          // same page imported clean, so this is decided per layer by DOM heuristics that the
+          // model can settle outright.
+          const modelFrameBorder = (fiberModelById[String(node.id || "")] || {}).border || null;
+          const isReproducibleModelFrame = Boolean(
+            kind === "image" &&
+              modelFrameBorder &&
+              (modelFrameBorder.rectFrame || modelFrameBorder.circleFrame)
+          );
+          if (isReproducibleModelFrame) {
+            preferSnapshot = false;
+          }
+
           const layerAnimation = (fiberModelById[String(node.id || "")] || {}).animation || null;
           const layerRecord = {
             id: String(node.id || `layer-${layerIndex + 1}`),
@@ -4045,7 +4219,9 @@
             imageProvenance,
             imageAcquisitionJob,
             preferSnapshot,
-            snapshotIsLossyFallback,
+            // Same override: a reproducible frame always prefers its fetched asset, so mark the
+            // snapshot as a lossy fallback even when the preserve-pixels branch didn't.
+            snapshotIsLossyFallback: isReproducibleModelFrame ? true : snapshotIsLossyFallback,
             sourceWidth:
               shouldPreserveRenderedImagePixels
                 ? roundedWidth
@@ -4194,10 +4370,22 @@
             // lossy-fallback flag so background.js keeps its isolation snapshot, which
             // subtracts the page background and yields a clean cut-out. The genuine
             // full-page background is exempt — it SHOULD keep its baked colour.
+            //
+            // So is a model-confirmed photo FRAME (rect or circle): its asset is a plain opaque
+            // rectangle by construction — the frame is applied by the editor as a corner radius —
+            // and a photo with one dominant flat-ish tone (a wide sky, a studio backdrop) reads
+            // as "baked" to this heuristic. Handing it to the isolation snapshot would throw away
+            // the mask the frame depends on, so keep the asset. Read straight from the model:
+            // layer.modelBorder isn't attached until the timeline pass further below.
+            const frameBorder = (fiberModelById[String(layer.id || "")] || {}).border || null;
+            const isReproducibleFrame = Boolean(
+              frameBorder && (frameBorder.rectFrame || frameBorder.circleFrame)
+            );
             if (
               layer.snapshotIsLossyFallback &&
               !layer.isFullPageBackground &&
               !layer.isBackgroundNode &&
+              !isReproducibleFrame &&
               (await isBackgroundBakedAsset(layer.imageDataUrl))
             ) {
               layer.snapshotIsLossyFallback = false;
@@ -4622,6 +4810,21 @@
             // Canva photo-frame outline: the shape clips the captured photo AND draws a stroke.
             // Carry it so the emitted IMAGE object gets the border (matches Canva's framed photos).
             if (model.border) layer.modelBorder = model.border;
+            // Model-rebuilt VECTOR for shapes with no editable equivalent (arches, blobs, badges,
+            // gradient fills). Canva renders these as protected rasters, so every capture path can
+            // only screenshot-crop them — and a crop has no alpha, so the silhouette is lost and
+            // the page bakes into everything outside the path. The rebuilt SVG is the clean
+            // source, so also keep the layer OUT of the snapshot/isolation branches (each of them
+            // overwrites the src with captured pixels).
+            if (model.vector && typeof model.vector.svg === "string" && model.vector.svg) {
+              layer.modelVectorSvg = model.vector.svg;
+              layer.preferSnapshot = false;
+              layer.snapshotIsLossyFallback = true;
+            }
+            // Drop shadow (any layer type). The DOM capture can't carry one: a shadow is painted
+            // OUTSIDE the layer's own box, so it either falls outside the crop entirely or, on the
+            // isolation path, gets diffed away with the background. The model has it exactly.
+            if (model.shadow) layer.modelShadow = model.shadow;
             // ── Model-authoritative TEXT content ──────────────────────────────────────────────
             // The DOM read loses line breaks when Canva renders a multi-line text without per-line
             // <p> nodes — a narrow price column "$5\n$5\n$5\n$5" imported as "$5$5$5$5". The model's

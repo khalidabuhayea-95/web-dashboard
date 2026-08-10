@@ -350,12 +350,197 @@
           const strokeWidth =
             stroke && Number(stroke.weight) > 0 ? Math.max(1, Math.round(Number(stroke.weight))) : 0;
           const cornerRadius = readPathCornerRadius(p0);
-          if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0)) return null;
+          const d = String(p0.d || "").trim();
           // rectFrame: the frame is a PLAIN RECT path, so frame + radius + stroke are fully
           // reproducible by the editor (image cornerRadius/stroke props) — the rendered
-          // snapshot is never needed for such layers (blob/circle frames stay false).
-          const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(String(p0.d || "").trim());
-          return { strokeColor, strokeWidth, cornerRadius, rectFrame };
+          // snapshot is never needed for such layers.
+          const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
+          // circleFrame: an ARC-ONLY path is Canva's circle/ellipse photo frame. It is just as
+          // reproducible as a rect frame — the editor clips the image with cornerRadius = half the
+          // short side and strokes that SAME rounded path, so the frame AND its ring come out
+          // right. Without this the layer fell to the isolation snapshot, which flattens the round
+          // mask into an opaque rectangle (the backdrop bakes into the corners) and leaves the
+          // ring to be drawn as a square around the element.
+          const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
+          // A circle frame is worth reporting even with no stroke and no radius — the round mask
+          // itself is the thing the editor needs to know about.
+          if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+          return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
+        } catch (_e) {
+          return null;
+        }
+      };
+      // ── Drop shadow ───────────────────────────────────────────────────────────────────────────
+      // Canva keeps a layer's effects in an array on the element: an entry `{ id: "shadow" }`
+      // holding a nested array with `{ type: "drop-shadow", fill, offset, blur, direction }`.
+      // BOTH array keys are minified (observed `vd` → `vd`) and minified names rotate between
+      // Canva deploys, so this walks for the two STABLE anchors instead: the literal `"shadow"`
+      // id and the `"drop-shadow"` type.
+      //
+      // Units verified against the layer's own rendered CSS: model {offset:20, blur:10,
+      // direction:-45} renders as `drop-shadow(rgba(0,0,0,0.3) 14.142px 14.142px 10px)`, i.e.
+      //   • offset and blur are DESIGN px, 1:1 (14.142 = 20·cos45, and blur passes straight
+      //     through — CSS and canvas both treat the radius as 2σ, so Konva's shadowBlur matches);
+      //   • the angle runs anticlockwise from +x while the y axis points DOWN, hence the -sin;
+      //   • alpha = 1 - fill.transparency, the same convention as every other Canva paint.
+      const hexToRgba = (hex, alpha) => {
+        const raw = String(hex || "").trim().replace(/^#/, "");
+        const full =
+          raw.length === 3
+            ? raw
+                .split("")
+                .map((c) => c + c)
+                .join("")
+            : raw;
+        if (!/^[0-9a-f]{6}$/i.test(full)) return null;
+        const r = parseInt(full.slice(0, 2), 16);
+        const g = parseInt(full.slice(2, 4), 16);
+        const b = parseInt(full.slice(4, 6), 16);
+        return `rgba(${r}, ${g}, ${b}, ${Math.round(alpha * 1000) / 1000})`;
+      };
+      const extractShadow = (el) => {
+        try {
+          for (const key in el) {
+            let bucket;
+            try {
+              bucket = el[key];
+            } catch (_e) {
+              continue;
+            }
+            if (!Array.isArray(bucket)) continue;
+            for (const entry of bucket) {
+              if (!entry || typeof entry !== "object" || entry.id !== "shadow") continue;
+              for (const innerKey in entry) {
+                const effects = entry[innerKey];
+                if (!Array.isArray(effects)) continue;
+                const drop = effects.find((e) => e && String(e.type || "") === "drop-shadow");
+                if (!drop) continue;
+                const blur = Math.max(0, Number(drop.blur) || 0);
+                const offset = Math.max(0, Number(drop.offset) || 0);
+                // A shadow with no blur AND no offset sits exactly behind its layer: invisible.
+                if (blur <= 0 && offset <= 0) return null;
+                let transparency = Number(drop.fill && drop.fill.transparency) || 0;
+                if (transparency > 1) transparency /= 100;
+                const alpha = Math.max(0, Math.min(1, 1 - transparency));
+                if (alpha <= 0) return null;
+                const color = hexToRgba((drop.fill && drop.fill.color) || "#000000", alpha);
+                if (!color) return null;
+                const radians = ((Number(drop.direction) || 0) * Math.PI) / 180;
+                return {
+                  color,
+                  blur: Math.round(blur * 100) / 100,
+                  offsetX: Math.round(-offset * Math.sin(radians) * 100) / 100,
+                  offsetY: Math.round(offset * Math.cos(radians) * 100) / 100,
+                };
+              }
+            }
+          }
+        } catch (_e) {
+          return null;
+        }
+        return null;
+      };
+      // ── Vector rebuild for shapes that aren't a simple circle/rect ────────────────────────────
+      // A Canva `shape` with an arch / blob / badge path (or a gradient fill) has no editable
+      // editor equivalent, so it used to fall through to the image path — and its DOM node is a
+      // PROTECTED raster, so the only capture available was a screenshot crop. That crop has no
+      // alpha: everything outside the path comes back as whatever was painted behind it, which is
+      // why a rounded arch imported as a hard-edged rectangle with the page baked into its
+      // corners. The model holds the real vector, so rebuild an SVG from it: exact silhouette,
+      // true transparency outside the path, and resolution-independent.
+      //
+      // `preserveAspectRatio="none"` is deliberate — Canva stretches the path's viewBox to the
+      // element box (a 52×64 viewBox drawn at 663×1035), so the SVG must stretch the same way.
+      const svgColor = (color, transparency) => {
+        const hex = typeof color === "string" ? color.trim() : "";
+        if (!hex) return null;
+        let t = Number(transparency) || 0;
+        if (t > 1) t /= 100;
+        const alpha = Math.max(0, Math.min(1, 1 - t));
+        return { hex, alpha };
+      };
+      const svgPaintFromFill = (fill, gradientId) => {
+        // → { paint, alpha, defs } where paint is a colour or url(#id).
+        if (!fill || typeof fill !== "object") return null;
+        const gradient = fill.gradient && typeof fill.gradient === "object" ? fill.gradient : null;
+        if (gradient && Array.isArray(gradient.stops) && gradient.stops.length > 0) {
+          const stops = gradient.stops
+            .map((stop) => {
+              const paint = svgColor(stop && stop.color, stop && stop.transparency);
+              if (!paint) return null;
+              const offset = Math.max(0, Math.min(1, Number(stop.position) || 0));
+              return `<stop offset="${offset}" stop-color="${paint.hex}" stop-opacity="${paint.alpha}"/>`;
+            })
+            .filter(Boolean);
+          if (stops.length === 0) return null;
+          const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+          const cx = Number(gradient.center && gradient.center.left);
+          const cy = Number(gradient.center && gradient.center.top);
+          const defs = isRadial
+            ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
+                Number.isFinite(cy) ? cy : 0.5
+              }" r="0.75">${stops.join("")}</radialGradient>`
+            : // Canva's linear angle isn't exposed under a stable key; top→bottom matches the
+              // common case and never leaves the shape unpainted.
+              `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+          return { paint: `url(#${gradientId})`, alpha: 1, defs };
+        }
+        const solid = svgColor(fill.color, fill.transparency);
+        if (!solid) return null;
+        return { paint: solid.hex, alpha: solid.alpha, defs: "" };
+      };
+      const extractVectorShape = (el) => {
+        try {
+          const paths = Array.isArray(el.paths) ? el.paths : null;
+          if (!paths || paths.length === 0 || paths.length > 12) return null;
+          // An image-filled path is a photo frame — keep the photo (extractBorder handles it).
+          if (paths.some((p) => p && p.fill && typeof p.fill === "object" && p.fill.image)) return null;
+          const viewBox = el.viewBox && typeof el.viewBox === "object" ? el.viewBox : null;
+          const vbWidth = Number(viewBox && viewBox.width) || 0;
+          const vbHeight = Number(viewBox && viewBox.height) || 0;
+          if (!(vbWidth > 0 && vbHeight > 0)) return null;
+          const vbLeft = Number(viewBox.left) || 0;
+          const vbTop = Number(viewBox.top) || 0;
+
+          const defs = [];
+          const body = [];
+          paths.forEach((p, i) => {
+            const d = p && typeof p.d === "string" ? p.d.trim() : "";
+            if (!d) return;
+            const fillPaint = svgPaintFromFill(p.fill, `g${i}`);
+            const stroke = p.stroke && typeof p.stroke === "object" ? p.stroke : null;
+            const strokePaint = stroke ? svgColor(stroke.color, stroke.transparency) : null;
+            const strokeWidth = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
+            if (!fillPaint && !(strokePaint && strokeWidth > 0)) return;
+            if (fillPaint && fillPaint.defs) defs.push(fillPaint.defs);
+            const attrs = [
+              `d="${d.replace(/"/g, "'")}"`,
+              fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"',
+              fillPaint && fillPaint.alpha < 1 ? `fill-opacity="${fillPaint.alpha}"` : "",
+              strokePaint && strokeWidth > 0 ? `stroke="${strokePaint.hex}"` : "",
+              strokePaint && strokeWidth > 0 ? `stroke-width="${strokeWidth}"` : "",
+              strokePaint && strokeWidth > 0 && strokePaint.alpha < 1
+                ? `stroke-opacity="${strokePaint.alpha}"`
+                : "",
+            ].filter(Boolean);
+            body.push(`<path ${attrs.join(" ")}/>`);
+          });
+          if (body.length === 0) return null;
+
+          // Rasterized server-side, so give it real pixels: the element's own design size, capped.
+          const boxWidth = Math.max(1, Math.round(Number(el.width) || vbWidth));
+          const boxHeight = Math.max(1, Math.round(Number(el.height) || vbHeight));
+          const cap = 2048;
+          const scale = Math.min(1, cap / Math.max(boxWidth, boxHeight));
+          const outWidth = Math.max(1, Math.round(boxWidth * scale));
+          const outHeight = Math.max(1, Math.round(boxHeight * scale));
+          const svg =
+            `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" ` +
+            `viewBox="${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}" preserveAspectRatio="none">` +
+            (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
+            body.join("") +
+            `</svg>`;
+          return { svg, width: outWidth, height: outHeight };
         } catch (_e) {
           return null;
         }
@@ -400,6 +585,10 @@
         shape: el.type === "shape" ? extractShape(el) : null,
         line: el.type === "line" ? extractLine(el) : null,
         border: el.type === "shape" ? extractBorder(el) : null,
+        // Only for shapes extractShape can't make editable — an editable circle/rect always wins.
+        vector: el.type === "shape" && !extractShape(el) ? extractVectorShape(el) : null,
+        // Any layer type can carry a drop shadow in Canva, so this is not gated on `type`.
+        shadow: extractShadow(el),
       });
       const buildElementMap = (rootArray) => {
         const out = {};
