@@ -8,13 +8,43 @@ import {
 import { createLogger } from "@/lib/logging/logger";
 import { getObject } from "@/lib/storage/objectStorage.server";
 import {
+  buildFontFileKind,
+  FONT_FILE_KIND_MOBILE,
+  FONT_FILE_KIND_ORIGINAL,
   getFontFamilyById,
   isMobileCompatibleFontFile,
+  normalizeFontStyleValue,
+  normalizeFontWeightValue,
   resolvePreferredFontFile,
 } from "@/lib/editor/fontStorage.server";
 
 export const runtime = "nodejs";
 const logger = createLogger("api.mobile.font-file");
+
+/**
+ * Picks the file for the requested `?variant=` (e.g. "700", "400i"), falling back to the family's
+ * default face when the parameter is absent or that weight was never imported — a missing weight
+ * should still render something rather than 404.
+ */
+function resolveRequestedFontFile(font, request) {
+  let requested = "";
+  try {
+    requested = String(new URL(request.url).searchParams.get("variant") || "").trim().toLowerCase();
+  } catch (_error) {
+    requested = "";
+  }
+  const match = requested.match(/^(\d{2,3})(i)?$/);
+  if (!match) return resolvePreferredFontFile(font);
+  const weight = normalizeFontWeightValue(match[1]);
+  const style = normalizeFontStyleValue(match[2] ? "italic" : "normal");
+  const files = Array.isArray(font?.files) ? font.files : [];
+  for (const baseKind of [FONT_FILE_KIND_MOBILE, FONT_FILE_KIND_ORIGINAL]) {
+    const kind = buildFontFileKind(baseKind, weight, style);
+    const hit = files.find((file) => String(file?.kind || "").toLowerCase() === kind);
+    if (hit) return hit;
+  }
+  return resolvePreferredFontFile(font);
+}
 
 function normalizeMimeType(value) {
   return String(value || "").trim().toLowerCase();
@@ -72,7 +102,10 @@ export async function GET(request, { params }) {
       );
     }
 
-    const file = resolvePreferredFontFile(font);
+    // `?variant=700` / `?variant=400i` serves a specific weight/style of the family; without it
+    // the caller gets the default face, exactly as before. The editor asks per @font-face so a
+    // design using several weights of one family renders each in its REAL cut.
+    const file = resolveRequestedFontFile(font, request);
     if (!file) {
       return attachRequestIdHeader(
         NextResponse.json({ error: "Font data is unavailable." }, { status: 404 }),

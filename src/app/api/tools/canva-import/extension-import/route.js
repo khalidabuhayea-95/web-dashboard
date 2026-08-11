@@ -516,27 +516,51 @@ function normalizeIncomingCustomFonts(editorData) {
     editorData && typeof editorData === "object" && Array.isArray(editorData.customFonts)
       ? editorData.customFonts
       : [];
-  const seen = new Set();
-  const result = [];
+  // Grouped by family, NOT deduped to one file per family: a Canva design regularly uses two or
+  // three weights of the same family, and dropping the extras left the browser faking them
+  // (faux-bold), which renders visibly heavier and differently shaped than the real cut. The
+  // default 400/normal face becomes the family's primary file; every other weight rides along as
+  // an extraVariant and is stored under its own variant-suffixed kind.
+  const byFamily = new Map();
   source.forEach((item) => {
     if (!item || typeof item !== "object") return;
     const family = normalizeFontFamilyName(item.family);
     const dataUrl = String(item.dataUrl || "").trim();
-    const mimeType = String(item.mimeType || "").trim().toLowerCase();
-    const fileName = String(item.fileName || "").trim();
     if (!family || !dataUrl.startsWith("data:")) return;
-    const key = family.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    result.push({
-      family,
+    const weight = Math.max(100, Math.min(900, Math.round(Number(item.fontWeight)) || 400));
+    const style = String(item.fontStyle || "").trim().toLowerCase() === "italic" ? "italic" : "normal";
+    const variant = {
+      weight,
+      style,
       dataUrl,
-      mimeType,
-      fileName,
+      mimeType: String(item.mimeType || "").trim().toLowerCase(),
+      fileName: String(item.fileName || "").trim(),
+    };
+    const key = family.toLowerCase();
+    const entry = byFamily.get(key) || {
+      family,
       categories: sanitizeFontCategories(item.categories, family),
-    });
+      variants: [],
+    };
+    // One file per (weight, style); first wins.
+    if (!entry.variants.some((v) => v.weight === weight && v.style === style)) {
+      entry.variants.push(variant);
+    }
+    byFamily.set(key, entry);
   });
-  return result;
+
+  return [...byFamily.values()].map((entry) => {
+    const primaryIndex = entry.variants.findIndex((v) => v.weight === 400 && v.style === "normal");
+    const primary = entry.variants[primaryIndex >= 0 ? primaryIndex : 0];
+    return {
+      family: entry.family,
+      dataUrl: primary.dataUrl,
+      mimeType: primary.mimeType,
+      fileName: primary.fileName,
+      categories: entry.categories,
+      extraVariants: entry.variants.filter((v) => v !== primary),
+    };
+  });
 }
 
 function rgbToHex(r, g, b) {
@@ -1885,6 +1909,8 @@ export async function POST(request) {
           mimeType: font.mimeType,
           fileName: font.fileName || `${font.family}.ttf`,
           categories: inferredCategories,
+          // Every other weight/style the design uses of this same family.
+          extraVariants: Array.isArray(font.extraVariants) ? font.extraVariants : [],
         });
         const conversionStatus = String(fontResult?.font?.conversionStatus || "").trim().toLowerCase();
         if (conversionStatus === "ready") {

@@ -355,12 +355,11 @@
           // reproducible by the editor (image cornerRadius/stroke props) — the rendered
           // snapshot is never needed for such layers.
           const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
-          // circleFrame: an ARC-ONLY path is Canva's circle/ellipse photo frame. It is just as
-          // reproducible as a rect frame — the editor clips the image with cornerRadius = half the
-          // short side and strokes that SAME rounded path, so the frame AND its ring come out
-          // right. Without this the layer fell to the isolation snapshot, which flattens the round
-          // mask into an opaque rectangle (the backdrop bakes into the corners) and leaves the
-          // ring to be drawn as a square around the element.
+          // circleFrame: an arc-only path is Canva's round photo frame — a true ELLIPSE inscribed
+          // in the box, a circle only when that box is square. The editor reproduces it via
+          // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
+          // instead of the isolation snapshot (which has no alpha outside the mask, and so
+          // came back as an opaque rectangle with the page baked into its corners).
           const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
           // A circle frame is worth reporting even with no stroke and no radius — the round mask
           // itself is the thing the editor needs to know about.

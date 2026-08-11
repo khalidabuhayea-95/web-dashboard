@@ -129,6 +129,14 @@ export interface EditorElement {
    */
   cornerRadiusCorners?: CornerRadiusCorners;
   /**
+   * Mask a media layer (image/video) is clipped to and stroked along. Absent/"rectangle" = the
+   * rounded rect `cornerRadius` describes. "circle" = an ELLIPSE inscribed in the layer's box —
+   * which a corner radius cannot express: maxing the radius on a non-square box gives a stadium
+   * (straight sides between two caps), not an ellipse. Canva's round photo frames are ellipses
+   * whenever their box isn't square. Ships to mobile as `filters.shape` (mapMediaShape).
+   */
+  mediaShape?: "rectangle" | "circle";
+  /**
    * Gaussian blur over the layer's own pixels, in design px (0–40, matching the mobile app's
    * MAX_BLUR_RADIUS). Media only (image/video); ships to mobile as `filters.blurRadius`. The
    * mobile sheet presents it as a percentage of 40, and so does the web Blur control.

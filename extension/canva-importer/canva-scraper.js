@@ -622,9 +622,11 @@
               // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
               // rendered snapshot never needed.
               const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
-              // circleFrame: arc-only path = Canva's round photo frame. Equally reproducible —
-              // the editor clips with cornerRadius = half the short side and strokes that same
-              // rounded path. See the canonical copy in canva-fiber-main.js.
+              // circleFrame: an arc-only path is Canva's round photo frame — a true ELLIPSE inscribed
+              // in the box, a circle only when that box is square. The editor reproduces it via
+              // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
+              // instead of the isolation snapshot (which has no alpha outside the mask, and so
+              // came back as an opaque rectangle with the page baked into its corners).
               const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
               if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
               return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
@@ -2410,11 +2412,11 @@
       const snapshotRequiredForLayer = (layerNode, imageElement, modelBorder) => {
         if (!layerNode || !imageElement) return false;
         if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
-        // A rect OR circle frame is fully reproducible from the fetched asset (the editor applies
-        // the frame's corner radius — half the short side for a circle — and its stroke), so no
-        // DOM signal justifies the snapshot. That matters most for the ROUND frames: the
-        // isolation snapshot has no alpha outside the mask, so a circular photo came back as an
-        // opaque square with the page baked into its corners.
+        // A rect OR round frame is fully reproducible from the fetched asset — the editor applies
+        // the frame itself (cornerRadius + stroke for a rect, an ellipse mask via `mediaShape` for
+        // a round one, at any aspect) — so no DOM signal justifies the snapshot. That matters most
+        // for the ROUND frames: the isolation snapshot has no alpha outside the mask, so a
+        // circular photo came back as an opaque square with the page baked into its corners.
         if (modelBorder && (modelBorder.rectFrame || modelBorder.circleFrame)) return false;
         const modelHandlesRoundedCorners = Number(modelBorder?.cornerRadius) > 0;
         let node = imageElement;
@@ -3761,13 +3763,22 @@
             viewportRect.width >= minImageLayerSide &&
             viewportRect.height >= minImageLayerSide &&
             viewportArea >= minImageLayerArea;
+          // Model-shape gate: a node the design MODEL classifies as a simple circle/rect is
+          // emitted as an editable vector shape — nothing is captured off the screen — so the
+          // area thresholds above, which exist to skip layers too small to rasterize usefully,
+          // don't apply to it. Without this the bullet DOTS of a list (23×23 in design px, ~110px²
+          // on screen at import zoom) fell under `minLayerArea` (320px²) and vanished.
+          const modelShapeForNode = (fiberModelById[String(node.id || "")] || {}).shape || null;
+          const passesModelShapeGate =
+            Boolean(modelShapeForNode) && viewportRect.width >= 1 && viewportRect.height >= 1;
           if (
             !isBackgroundNode &&
             (!isInsidePageFrame ||
               (!passesDefaultSizeGate &&
                 !passesSmallTextGate &&
                 !passesThinVectorGate &&
-                !passesSmallImageGate))
+                !passesSmallImageGate &&
+                !passesModelShapeGate))
           ) {
             continue;
           }
@@ -3790,7 +3801,21 @@
             !isBackgroundNode &&
             Boolean(imageElement) &&
             isGenuinelyMaskedImageLayer(node, imageElement);
-          const shouldUseVisibleGeometry = isMaskedImage;
+          // A model-confirmed photo FRAME (plain rect, or round via `mediaShape`) is redrawn by
+          // the editor from the fetched asset, so it does NOT need the page-clipped geometry that
+          // a snapshot-backed mask needs — a snapshot can only ever hold on-canvas pixels, which
+          // is the whole reason masked layers are clipped here. Keeping the FULL frame box (and
+          // cropping the asset to that same full box, below) lets a frame that bleeds off the
+          // canvas keep its off-canvas part, exactly like Canva: an ellipse frame running past
+          // the page's left edge imported inset at (0,0) instead of hanging off the edge.
+          // The editor clips the overflow for display, so the layer stays repositionable.
+          const modelFrameBorder = (fiberModelById[String(node.id || "")] || {}).border || null;
+          const isReproducibleModelFrame = Boolean(
+            imageElement &&
+              modelFrameBorder &&
+              (modelFrameBorder.rectFrame || modelFrameBorder.circleFrame)
+          );
+          const shouldUseVisibleGeometry = isMaskedImage && !isReproducibleModelFrame;
           // A non-masked image whose FULL frame extends past the canvas edge can NEVER be
           // faithfully captured by a rendered snapshot (the snapshot/isolation pass only sees
           // on-canvas pixels), so it must keep the full fetched asset — otherwise the bleeding
@@ -3811,6 +3836,18 @@
           const rawRect = shouldUseVisibleGeometry
             ? viewportRect
             : viewportInfo.rawRect || viewportRect;
+          // The same full-frame rect the geometry above uses, normalized to {x,y,w,h} for the
+          // crop call. (getBoundingClientRect gives x/y; the synthetic full-page-background
+          // rawRect only has left/top.)
+          const frameRectForCrop =
+            isReproducibleModelFrame && viewportInfo.rawRect
+              ? {
+                  x: viewportInfo.rawRect.x ?? viewportInfo.rawRect.left ?? viewportRect.x,
+                  y: viewportInfo.rawRect.y ?? viewportInfo.rawRect.top ?? viewportRect.y,
+                  width: viewportInfo.rawRect.width,
+                  height: viewportInfo.rawRect.height,
+                }
+              : viewportRect;
           const nodeScale = getCompositeScaleToAncestor(node, bestPage.node);
           const layerScaleX = Math.max(0.01, Number(transform.scaleX || 1));
           const layerScaleY = Math.max(0.01, Number(transform.scaleY || 1));
@@ -4155,8 +4192,13 @@
               // Crop the asset to the visible region ONLY for masked images (a frame clips
               // them). A non-masked bleed image keeps its full asset (no crop) so its
               // off-canvas part survives; fitDataUrlToDisplayedBox then only matches aspect.
+              // A reproducible frame crops to its FULL box, not the page-clipped one — its
+              // geometry is the full box too (see shouldUseVisibleGeometry), and the two must
+              // describe the same rectangle or the photo slides inside its frame.
               cropRegion: isMaskedImage
-                ? remapRegionForOrientation(buildDisplayedImageCropRegion(imageElement, viewportRect))
+                ? remapRegionForOrientation(
+                    buildDisplayedImageCropRegion(imageElement, frameRectForCrop)
+                  )
                 : null,
             };
           }
@@ -4174,12 +4216,7 @@
           // pixels — the editor's own stroke then drew a SECOND ring around it. Its twin on the
           // same page imported clean, so this is decided per layer by DOM heuristics that the
           // model can settle outright.
-          const modelFrameBorder = (fiberModelById[String(node.id || "")] || {}).border || null;
-          const isReproducibleModelFrame = Boolean(
-            kind === "image" &&
-              modelFrameBorder &&
-              (modelFrameBorder.rectFrame || modelFrameBorder.circleFrame)
-          );
+          // (isReproducibleModelFrame is computed with the geometry above — it decides both.)
           if (isReproducibleModelFrame) {
             preferSnapshot = false;
           }
@@ -4467,12 +4504,24 @@
             if (capturedIds.has(id)) continue;
             const el = fiberModelById[id];
             if (!el || !el.type) continue;
-            const w = Math.max(1, Math.round(el.width));
-            const h = Math.max(1, Math.round(el.height));
+            // The model's left/top/width/height are LOCAL to the element's GROUP. For a top-level
+            // element that IS page space, but for a nested one it isn't remotely: a bullet-list
+            // divider whose group rotates it 90° reads (-35,55) 93x2 in the model while actually
+            // rendering at (1029,956) 3x93 — so it imported as a horizontal bar parked at the page
+            // origin. When the element still has a DOM node, take its real page-space rect; the
+            // model box is only trustworthy for top-level elements and for genuinely off-screen
+            // timeline elements, which have no node at all.
+            // Caveat: the DOM rect is an AABB, so a DIAGONAL line supplemented this way comes in as
+            // its bounding box. Axis-aligned dividers (the case this path exists for) are exact.
+            const domNode = document.getElementById(id);
+            const domRect = domNode ? domNode.getBoundingClientRect() : null;
+            const useDomRect = Boolean(domRect && domRect.width > 0.5 && domRect.height > 0.5);
+            const w = Math.max(1, Math.round(useDomRect ? domRect.width * sx : el.width));
+            const h = Math.max(1, Math.round(useDomRect ? domRect.height * sy : el.height));
             // A hairline divider is legitimately 1px tall — don't drop lines on the thin-axis gate.
             if (w <= 1 || (h <= 1 && el.type !== "line")) continue;
-            const x = el.left;
-            const y = el.top;
+            const x = useDomRect ? (domRect.left - rect.x) * sx : el.left;
+            const y = useDomRect ? (domRect.top - rect.y) * sy : el.top;
             const base = {
               id,
               parentId: null,
@@ -4480,7 +4529,13 @@
               y,
               width: w,
               height: h,
-              angle: Number(el.rotation) || 0,
+              // A DOM-derived box is an axis-aligned bounding box — the rendered orientation is
+              // already baked into it, so re-applying the model's rotation would turn it twice.
+              // Model-only elements (no node) still need their own angle.
+              angle: useDomRect ? 0 : Number(el.rotation) || 0,
+              // Tells the later model-authoritative passes to leave this layer's rotation alone
+              // (see the `!layer.domGeometry` guard); the box already encodes the orientation.
+              domGeometry: useDomRect,
               flipX: false,
               flipY: false,
               viewportRect: { x: rect.x + x / sx, y: rect.y + y / sy, width: w / sx, height: h / sy },
@@ -4853,10 +4908,19 @@
             // every snapshot branch in the hybrid builder spreads angle:0 (correct for true screen
             // crops, wrong for upright assets) — preferSnapshot=false keeps rotated layers out of
             // all of them (also out of the isolation pass, so no angle-0 isolation object either).
-            if (Number.isFinite(Number(model.rotation))) layer.angle = Number(model.rotation);
+            // NOT for a layer whose box came from the DOM: that box is an axis-aligned bounding
+            // box with the rendered orientation already baked in, so applying the model's
+            // rotation on top turns it twice — a divider measured 3x93 (already vertical) was
+            // being rotated 90° back to horizontal, straight through the text beside it.
+            if (Number.isFinite(Number(model.rotation)) && !layer.domGeometry) {
+              layer.angle = Number(model.rotation);
+            }
             const modelRotationAbs = Math.abs(Number(model.rotation) || 0);
             if (
               modelRotationAbs > 0.5 &&
+              // Same reason as the rotation guard above: a DOM-derived box is already correct in
+              // page space, while model.left/top/width/height are LOCAL to the element's group.
+              !layer.domGeometry &&
               String(layer.kind || "") === "image" &&
               Number(model.width) >= 2 &&
               Number(model.height) >= 2

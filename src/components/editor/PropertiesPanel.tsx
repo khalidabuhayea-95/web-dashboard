@@ -547,7 +547,50 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
           {activeBorderElement ? (
             <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
               <Label className="m-0">Corners &amp; Border</Label>
-              {activeBorderSupportsRadius ? (
+              {activeMediaElement ? (
+                <div className="space-y-1.5">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Shape
+                  </Label>
+                  <div className="flex items-center gap-1.5">
+                    {(
+                      [
+                        { key: "rectangle" as const, title: "Rectangle", style: { borderRadius: 3 } },
+                        { key: "circle" as const, title: "Circle / ellipse", style: { borderRadius: "50%" } },
+                      ]
+                    ).map(({ key, title, style }) => {
+                      const active = (activeMediaElement.mediaShape || "rectangle") === key;
+                      return (
+                        <button
+                          key={key}
+                          type="button"
+                          title={title}
+                          aria-pressed={active}
+                          onClick={() =>
+                            updateElement(activeMediaElement.id, {
+                              // Absent, not "rectangle" — the default shape carries no field.
+                              mediaShape: key === "circle" ? "circle" : undefined,
+                            })
+                          }
+                          className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
+                            active
+                              ? "border-sky-500 bg-sky-50 text-sky-600 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300"
+                              : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500"
+                          }`}
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="block h-4 w-4 border-2 border-current"
+                            style={style}
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : null}
+              {/* A corner radius means nothing on an ellipse — the mask is the shape. */}
+              {activeBorderSupportsRadius && activeBorderElement.mediaShape !== "circle" ? (
                 <div className="space-y-2">
                   <div className="flex items-center gap-1.5">
                     {(

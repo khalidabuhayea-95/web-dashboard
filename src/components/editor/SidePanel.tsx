@@ -751,6 +751,14 @@ interface TaxonomyCategorySetting {
   subCategories: TaxonomySubCategorySetting[];
 }
 
+interface CustomFontVariantRecord {
+  weight: number;
+  style: string;
+  fileUrl: string;
+  fileName?: string;
+  mimeType?: string;
+}
+
 interface CustomFontRecord {
   id: string;
   family: string;
@@ -758,6 +766,8 @@ interface CustomFontRecord {
   mimeType: string;
   dataUrl?: string;
   fileUrl?: string;
+  /** Every weight/style this family has a real file for; empty for single-weight fonts. */
+  variants?: CustomFontVariantRecord[];
   categories?: string[];
   source?: string;
   removable?: boolean;
@@ -1259,13 +1269,21 @@ function toEditorDesignFromTemplate(
         Number.isFinite(explicitY) &&
         Number.isFinite(explicitWidth) &&
         Number.isFinite(explicitHeight);
+      // A circle's size comes from `radius` when the source carries one (fabric's own shape), but
+      // an imported Canva circle describes itself with width/height like every other layer — and
+      // falling through to the 100 default silently resized those to 200px.
+      const hasRadius = Number.isFinite(Number(item.radius));
       const widthValue =
         type === "circle"
-          ? toNumber(item.radius, 100) * 2
+          ? hasRadius
+            ? toNumber(item.radius, 100) * 2
+            : toNumber(item.width, 200)
           : toNumber(item.width, type === "line" ? Math.abs(toNumber(item.x2, 220) - toNumber(item.x1, 0)) : 240);
       const heightValue =
         type === "circle"
-          ? toNumber(item.radius, 100) * 2
+          ? hasRadius
+            ? toNumber(item.radius, 100) * 2
+            : toNumber(item.height, 200)
           : toNumber(item.height, type === "line" ? Math.abs(toNumber(item.y2, 0) - toNumber(item.y1, 0)) : 160);
       const renderedWidth = hasExplicitFrame
         ? Math.max(1, toNumber(item.width, 1))
@@ -1324,6 +1342,11 @@ function toEditorDesignFromTemplate(
         stroke: parseColor(item.stroke, "#1e293b"),
         strokeWidth: Math.max(0, toNumber(item.strokeWidth, 0)),
         cornerRadius: Math.max(0, toNumber(item.cornerRadius, 0)),
+        // Media mask. Only "circle" (an ellipse inscribed in the box) is distinct from the
+        // default — "rounded" is just a cornerRadius, so it needs no separate shape.
+        ...(String(item.mediaShape || "").toLowerCase() === "circle"
+          ? { mediaShape: "circle" as const }
+          : {}),
         // Drop shadow. The alpha rides in the colour (`rgba(...)`) — the element has no separate
         // shadow-opacity field, and Konva takes any CSS colour. Offsets can be negative (the
         // shadow falls up/left), so they are NOT clamped at 0 like the blur.
@@ -2006,16 +2029,35 @@ async function ensureCustomFontFaceInDocument(
     const familyParam = encodeURIComponent(String(font.family || "").trim()).replace(/%20/g, "+");
     style.textContent = `@import url("https://fonts.googleapis.com/css2?family=${familyParam}:wght@400&display=swap");`;
   } else {
-    const formatHint = guessFontFormat(font.mimeType);
-    const srcValue = formatHint
-      ? `url("${sourceUrl}") format("${formatHint}")`
-      : `url("${sourceUrl}")`;
-    style.textContent = `
+    // One @font-face per stored cut. A family that holds several weights (Canva designs
+    // routinely use two or three) gets each declared with its own font-weight/font-style, so the
+    // browser picks the REAL file instead of synthesizing bold from the default face — faux-bold
+    // is both heavier and differently shaped than the designer's actual bold.
+    const variants =
+      Array.isArray(font.variants) && font.variants.length > 0
+        ? font.variants
+        : [{ weight: 400, style: "normal", fileUrl: sourceUrl, mimeType: font.mimeType }];
+    style.textContent = variants
+      .map((variant) => {
+        const variantUrl = String(variant?.fileUrl || sourceUrl).trim();
+        if (!variantUrl) return "";
+        const formatHint = guessFontFormat(variant?.mimeType || font.mimeType);
+        const srcValue = formatHint
+          ? `url("${variantUrl}") format("${formatHint}")`
+          : `url("${variantUrl}")`;
+        const weight = Math.max(100, Math.min(900, Math.round(Number(variant?.weight)) || 400));
+        const italic = String(variant?.style || "").toLowerCase() === "italic";
+        return `
 @font-face {
   font-family: "${escapeCssText(font.family)}";
   src: ${srcValue};
+  font-weight: ${weight};
+  font-style: ${italic ? "italic" : "normal"};
   font-display: swap;
 }`;
+      })
+      .filter(Boolean)
+      .join("\n");
   }
 
   // Bulk preloads pass { load: false } to only DECLARE the face (cheap + lazy) so

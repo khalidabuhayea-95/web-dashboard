@@ -443,6 +443,48 @@ function CanvasBackgroundImageImpl({
   );
 }
 
+/** True when a media layer is masked to an ellipse rather than a (rounded) rectangle. */
+function isEllipseMedia(element: EditorElement) {
+  return element.mediaShape === "circle";
+}
+
+/**
+ * Builds the outline a media layer is clipped to and stroked along, in the layer's local space.
+ *
+ * `mediaShape: "circle"` draws the ELLIPSE inscribed in the box. That is a shape a corner radius
+ * fundamentally cannot express: maxing the radius on a non-square box yields a stadium — two caps
+ * with straight sides between them — while Canva's round photo frames are true ellipses whenever
+ * their box isn't square. Everything else keeps the rounded rect `cornerRadius` describes.
+ */
+function buildMediaShapePath(context: Konva.Context, element: EditorElement) {
+  const width = Math.max(0.01, Number(element.width) || 0.01);
+  const height = Math.max(0.01, Number(element.height) || 0.01);
+  context.beginPath();
+  if (isEllipseMedia(element)) {
+    context.ellipse(width / 2, height / 2, width / 2, height / 2, 0, 0, Math.PI * 2, false);
+    context.closePath();
+    return;
+  }
+  const resolved = resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners);
+  const [rTL, rTR, rBR, rBL] = Array.isArray(resolved)
+    ? resolved
+    : [resolved, resolved, resolved, resolved];
+  if (rTL > 0 || rTR > 0 || rBR > 0 || rBL > 0) {
+    context.moveTo(rTL, 0);
+    context.lineTo(width - rTR, 0);
+    context.quadraticCurveTo(width, 0, width, rTR);
+    context.lineTo(width, height - rBR);
+    context.quadraticCurveTo(width, height, width - rBR, height);
+    context.lineTo(rBL, height);
+    context.quadraticCurveTo(0, height, 0, height - rBL);
+    context.lineTo(0, rTL);
+    context.quadraticCurveTo(0, 0, rTL, 0);
+  } else {
+    context.rect(0, 0, width, height);
+  }
+  context.closePath();
+}
+
 function CanvasImageNodeImpl({
   element,
   pose,
@@ -652,7 +694,11 @@ function CanvasImageNodeImpl({
       draggable={canTransform}
       listening={interactive}
       globalCompositeOperation={element.blendMode}
-      cornerRadius={resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)}
+      cornerRadius={
+        isEllipseMedia(element)
+          ? Math.max(0.01, Math.min(element.width, element.height) / 2)
+          : resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)
+      }
       stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
       strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
       strokeScaleEnabled={false}
@@ -661,7 +707,50 @@ function CanvasImageNodeImpl({
       shadowOffsetX={element.shadowOffsetX}
       shadowOffsetY={element.shadowOffsetY}
       crop={crop}
+      // An ellipse mask is drawn by hand: Konva.Image can only round corners, and a maxed radius
+      // on a non-square box is a stadium, not an ellipse. The cornerRadius above stays at its
+      // maximum for such a layer so Konva's own shadow buffering still engages (it keys off
+      // cornerRadius + shadow) and so the fallback, if this sceneFunc ever went away, is the
+      // closest shape a rounded rect can make.
+      sceneFunc={
+        isEllipseMedia(element)
+          ? (context, shape) => {
+              // Border first on the ellipse, then clip and draw the media over it — the same
+              // ordering Konva.Image uses for cornerRadius + stroke, so a round frame's ring sits
+              // exactly like a rounded one's.
+              buildMediaShapePath(context, element);
+              context.fillStrokeShape(shape);
+              buildMediaShapePath(context, element);
+              context.clip();
+              if (image) {
+                const { cropX, cropY, cropWidth, cropHeight } = shape.attrs;
+                if (cropWidth && cropHeight) {
+                  context.drawImage(
+                    image,
+                    cropX || 0,
+                    cropY || 0,
+                    cropWidth,
+                    cropHeight,
+                    0,
+                    0,
+                    element.width,
+                    element.height
+                  );
+                } else {
+                  context.drawImage(image, 0, 0, element.width, element.height);
+                }
+              }
+            }
+          : undefined
+      }
       hitFunc={(context, shape) => {
+        // An ellipse-masked layer is only clickable inside its ellipse — the corners it no longer
+        // paints must fall through to whatever is behind them.
+        if (isEllipseMedia(element)) {
+          buildMediaShapePath(context, element);
+          context.fillStrokeShape(shape);
+          return;
+        }
         // Hit only the non-transparent pixels (alpha mask) so any visible part of
         // the layer is directly selectable, while clicks on genuinely transparent
         // gaps fall through to the layer visible behind. This holds whether or not
@@ -876,33 +965,12 @@ function CanvasVideoNodeImpl({
       strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
       strokeScaleEnabled={false}
       sceneFunc={(context, shape) => {
-        const resolved = resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners);
-        const [rTL, rTR, rBR, rBL] = Array.isArray(resolved)
-          ? resolved
-          : [resolved, resolved, resolved, resolved];
-        const hasRadius = rTL > 0 || rTR > 0 || rBR > 0 || rBL > 0;
-        const buildPath = () => {
-          context.beginPath();
-          if (hasRadius) {
-            context.moveTo(rTL, 0);
-            context.lineTo(element.width - rTR, 0);
-            context.quadraticCurveTo(element.width, 0, element.width, rTR);
-            context.lineTo(element.width, element.height - rBR);
-            context.quadraticCurveTo(element.width, element.height, element.width - rBR, element.height);
-            context.lineTo(rBL, element.height);
-            context.quadraticCurveTo(0, element.height, 0, element.height - rBL);
-            context.lineTo(0, rTL);
-            context.quadraticCurveTo(0, 0, rTL, 0);
-          } else {
-            context.rect(0, 0, element.width, element.height);
-          }
-          context.closePath();
-        };
-        // Border first (on the rounded-rect path), then clip + draw the media on top — matches
-        // Konva.Image's native cornerRadius+stroke ordering so image and video borders look identical.
-        buildPath();
+        // Border first (on the mask path — rounded rect, or an ellipse for `mediaShape: "circle"`),
+        // then clip + draw the media on top: matches Konva.Image's native cornerRadius+stroke
+        // ordering so image and video borders look identical.
+        buildMediaShapePath(context, element);
         context.fillStrokeShape(shape);
-        buildPath();
+        buildMediaShapePath(context, element);
         context.clip();
         if (video) {
           context.drawImage(video, 0, 0, element.width, element.height);
@@ -2156,6 +2224,14 @@ function CanvasPageSceneImpl({
               <Circle
                 key={element.id}
                 {...commonProps}
+                // Konva draws Circle/Star around their POSITION, but every other element type —
+                // and the store, snapping, alignment and the layers panel — treats x/y as the
+                // box's TOP-LEFT. Without this offset a circle paints half its width up and to
+                // the left of where its own box says it is (imported circles landed a radius off
+                // their labels). The offset moves the local origin, so rotation still pivots on
+                // the top-left like every other shape.
+                offsetX={-element.width / 2}
+                offsetY={-element.height / 2}
                 radius={Math.max(4, Math.min(element.width, element.height) / 2)}
                 fill={element.fill}
                 stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
@@ -2199,6 +2275,9 @@ function CanvasPageSceneImpl({
               <Star
                 key={element.id}
                 {...commonProps}
+                // Same centre-origin correction as Circle above.
+                offsetX={-element.width / 2}
+                offsetY={-element.height / 2}
                 numPoints={5}
                 innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
                 outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}

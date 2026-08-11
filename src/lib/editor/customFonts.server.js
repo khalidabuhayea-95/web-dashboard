@@ -2,6 +2,7 @@ import { normalizeFontFamilyName } from "@/lib/editor/fonts";
 import { extractFontFamilyName } from "@/lib/editor/fontName.server";
 import { isSyntheticFontFamily } from "@/lib/editor/customFontLabel";
 import {
+  buildFontFileKind,
   deleteFontFamily,
   FONT_FILE_KIND_MOBILE,
   FONT_SOURCE_CUSTOM,
@@ -12,6 +13,8 @@ import {
   findFontFamiliesByNames,
   listFontFamilies,
   normalizeFontStorageKey,
+  normalizeFontStyleValue,
+  normalizeFontWeightValue,
   toEditorFontRecord,
   upsertFontFamilyWithFiles,
 } from "@/lib/editor/fontStorage.server";
@@ -892,6 +895,11 @@ export async function upsertEditorCustomFont({
   // Canva names — the real family name embedded in the file). Set false to
   // force a replace/update.
   skipIfExists = true,
+  // Additional weights/styles of the SAME family, each { dataUrl, mimeType, fileName, weight,
+  // style }. Canva designs routinely use two or three cuts of one family; without these the
+  // family stores a single file and the browser fakes every other weight (faux-bold), which
+  // reads visibly heavier and differently shaped than the real cut.
+  extraVariants = [],
 }) {
   const normalizedFamily = normalizeFontFamilyName(family);
   if (!normalizedFamily) {
@@ -933,7 +941,27 @@ export async function upsertEditorCustomFont({
         break;
       }
     }
-    if (existingMatch) {
+    // An existing family that is MISSING a requested weight is not a duplicate to skip — it is a
+    // family to complete. Without this, a design that uses a second weight of an already-imported
+    // family would keep rendering that weight as faux-bold forever, because the first import
+    // stored only the default face.
+    const existingKinds = new Set(
+      (Array.isArray(existingMatch?.files) ? existingMatch.files : []).map((file) =>
+        String(file?.kind || "").toLowerCase()
+      )
+    );
+    const missingVariant = (Array.isArray(extraVariants) ? extraVariants : []).some(
+      (entry) =>
+        sanitizeDataUrl(entry?.dataUrl) &&
+        !existingKinds.has(
+          buildFontFileKind(
+            FONT_FILE_KIND_MOBILE,
+            normalizeFontWeightValue(entry?.weight),
+            normalizeFontStyleValue(entry?.style)
+          )
+        )
+    );
+    if (existingMatch && !missingVariant) {
       return {
         font: toEditorFontRecord(existingMatch),
         fonts: includeFontList ? await getEditorCustomFonts() : [],
@@ -1068,6 +1096,68 @@ export async function upsertEditorCustomFont({
     throw new Error("Mobile font file is unavailable.");
   }
 
+  // Extra weights/styles of the same family, each stored under a variant-suffixed kind. Best
+  // effort: a weight that fails to convert is skipped with the rest of the family intact — a
+  // missing bold still falls back to the default face, which is today's behavior anyway.
+  const extraFiles = [];
+  const seenExtraKinds = new Set([FONT_FILE_KIND_MOBILE]);
+  for (const entry of Array.isArray(extraVariants) ? extraVariants : []) {
+    const weight = normalizeFontWeightValue(entry?.weight);
+    const style = normalizeFontStyleValue(entry?.style);
+    const kind = buildFontFileKind(FONT_FILE_KIND_MOBILE, weight, style);
+    if (seenExtraKinds.has(kind)) continue;
+    const entryDataUrl = sanitizeDataUrl(entry?.dataUrl);
+    if (!entryDataUrl) continue;
+    const entryFileName = normalizeFileName(
+      entry?.fileName || `${normalizedFamily}-${weight}${style === "italic" ? "i" : ""}.ttf`
+    );
+    const entryVariant = normalizeFontVariant(
+      {
+        fileName: entryFileName,
+        mimeType: normalizeMimeType(entry?.mimeType || extractMimeTypeFromDataUrl(entryDataUrl)),
+        dataUrl: entryDataUrl,
+      },
+      entryFileName
+    );
+    if (!entryVariant) continue;
+    let usableVariant = entryVariant;
+    if (!isMobileCompatibleVariant(entryVariant)) {
+      // convertFontDataToMobileCompatible returns a FLAT {dataUrl, mimeType, fileName, fileUrl,
+      // converted} — not a wrapped variant. Canva serves WOFF2, which is never mobile-compatible,
+      // so EVERY extra weight comes through here; reading the wrong shape silently dropped all of
+      // them (the family row updated, but no variant files appeared).
+      const converted = await convertFontDataToMobileCompatible({
+        dataUrl: entryVariant.dataUrl,
+        mimeType: entryVariant.mimeType,
+        fileName: entryVariant.fileName,
+      });
+      const normalizedConverted = converted?.converted
+        ? normalizeFontVariant(
+            {
+              fileName: converted.fileName || entryFileName,
+              mimeType: converted.mimeType || "font/ttf",
+              dataUrl: converted.dataUrl,
+              fileUrl: converted.fileUrl,
+            },
+            entryFileName
+          )
+        : null;
+      usableVariant = isMobileCompatibleVariant(normalizedConverted) ? normalizedConverted : null;
+    }
+    if (!usableVariant) continue;
+    const file = await materializeFontVariant({
+      fontId,
+      family: normalizedFamily,
+      kind,
+      variant: usableVariant,
+      storageBucket,
+      storagePath,
+    });
+    if (!file) continue;
+    seenExtraKinds.add(kind);
+    extraFiles.push({ ...file, fontWeight: weight, fontStyle: style });
+  }
+
   // Canva-imported fonts are named by an opaque id (e.g. "YADkLzugzJU_0"); the
   // real family name (e.g. "Laftah") only exists inside the font file. Recover
   // it so the editor shows a readable label instead of the id / "font".
@@ -1101,7 +1191,7 @@ export async function upsertEditorCustomFont({
         : resolveFontCategories(categories, normalizedFamily),
     cssFontFamily: `'${normalizedFamily}'`,
     removable,
-    files: [mobileFile],
+    files: [mobileFile, ...extraFiles],
     aliases: [normalizedFamily, familyKey, ...extraAliases],
   });
   const editorFont = toEditorFontRecord({

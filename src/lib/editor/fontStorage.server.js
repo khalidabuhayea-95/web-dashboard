@@ -9,6 +9,53 @@ export const FONT_STATUS_FAILED = "failed";
 export const FONT_FILE_KIND_ORIGINAL = "original";
 export const FONT_FILE_KIND_MOBILE = "mobile";
 
+export const DEFAULT_FONT_WEIGHT = 400;
+export const DEFAULT_FONT_STYLE = "normal";
+
+export function normalizeFontWeightValue(value) {
+  const weight = Math.round(Number(value));
+  if (!Number.isFinite(weight)) return DEFAULT_FONT_WEIGHT;
+  return Math.max(100, Math.min(900, weight));
+}
+
+export function normalizeFontStyleValue(value) {
+  return String(value || "").trim().toLowerCase() === "italic" ? "italic" : DEFAULT_FONT_STYLE;
+}
+
+export function isDefaultFontVariant(weight, style) {
+  return (
+    normalizeFontWeightValue(weight) === DEFAULT_FONT_WEIGHT &&
+    normalizeFontStyleValue(style) === DEFAULT_FONT_STYLE
+  );
+}
+
+/**
+ * FontFile.kind carries BOTH the file's purpose and its variant, because the table is unique on
+ * (fontId, kind). The family's default face keeps the bare kind ("mobile") so every pre-existing
+ * row stays valid and every existing reader keeps finding it; any other weight/style is suffixed
+ * ("mobile@700", "mobile@400i"). One family can then hold every weight a design uses — Canva
+ * routinely ships two or three under a single family name.
+ */
+export function buildFontFileKind(baseKind, weight, style) {
+  const base = String(baseKind || FONT_FILE_KIND_MOBILE).trim().toLowerCase();
+  if (isDefaultFontVariant(weight, style)) return base;
+  const normalizedWeight = normalizeFontWeightValue(weight);
+  const suffix = normalizeFontStyleValue(style) === "italic" ? "i" : "";
+  return `${base}@${normalizedWeight}${suffix}`;
+}
+
+/** The weight/style a stored file represents (null columns = the default 400/normal face). */
+export function readFontFileVariant(file) {
+  return {
+    weight: normalizeFontWeightValue(
+      file?.fontWeight === null || typeof file?.fontWeight === "undefined"
+        ? DEFAULT_FONT_WEIGHT
+        : file.fontWeight
+    ),
+    style: normalizeFontStyleValue(file?.fontStyle || DEFAULT_FONT_STYLE),
+  };
+}
+
 const MOBILE_SUPPORTED_FONT_FORMATS = new Set(["ttf", "otf", "ttc"]);
 const FONT_CATEGORY_EXCLUSIVE = "EXCLUSIVE";
 const FONT_CATEGORY_ENGLISH = "ENGLISH";
@@ -77,9 +124,13 @@ function normalizeStatus(value) {
 }
 
 function normalizeFileKind(value) {
-  const kind = String(value || "").trim().toLowerCase();
-  if (kind === FONT_FILE_KIND_MOBILE) return FONT_FILE_KIND_MOBILE;
-  return FONT_FILE_KIND_ORIGINAL;
+  const raw = String(value || "").trim().toLowerCase();
+  // A kind may carry a variant suffix ("mobile@700", "original@400i") — keep it, it is what
+  // makes one family able to hold several weights under @@unique([fontId, kind]).
+  const [base, variant] = raw.split("@");
+  const normalizedBase = base === FONT_FILE_KIND_MOBILE ? FONT_FILE_KIND_MOBILE : FONT_FILE_KIND_ORIGINAL;
+  if (!variant || !/^\d{2,3}i?$/.test(variant)) return normalizedBase;
+  return `${normalizedBase}@${variant}`;
 }
 
 function normalizeFontFileInput(file) {
@@ -91,8 +142,13 @@ function normalizeFontFileInput(file) {
   const storageBucket = String(file.storageBucket || file.bucket || "").trim();
   const storagePath = String(file.storagePath || file.path || "").trim();
   if (!publicUrl && !storagePath) return null;
+  // Weight/style are stored explicitly so readers don't have to parse `kind`. The default face
+  // keeps them NULL, which every pre-existing row already is.
+  const isDefaultVariant = !kind.includes("@");
   return {
     kind,
+    fontWeight: isDefaultVariant ? null : normalizeFontWeightValue(file.fontWeight),
+    fontStyle: isDefaultVariant ? null : normalizeFontStyleValue(file.fontStyle),
     format,
     mimeType,
     fileName: String(file.fileName || "").trim() || null,
@@ -154,6 +210,44 @@ export function isMobileCompatibleFontFile(file) {
   return MOBILE_SUPPORTED_FONT_FORMATS.has(String(file?.format || "").trim().toLowerCase());
 }
 
+/**
+ * Every weight/style this family can actually render, newest-model first. The editor turns each
+ * into its own @font-face with matching descriptors, so a design using 400 + 700 of one family
+ * gets both REAL cuts instead of one file plus browser faux-bold.
+ *
+ * The default face is always first and always present (it is what `fileUrl` points at), so a
+ * consumer that ignores this list behaves exactly as before.
+ */
+export function listEditorFontVariants(font, routeUrl) {
+  const record = withFontIncludes(font);
+  if (!record || !routeUrl) return [];
+  const files = Array.isArray(record.files) ? record.files : [];
+  const byVariant = new Map();
+  for (const file of files) {
+    if (String(file?.status || FONT_STATUS_READY).toLowerCase() !== FONT_STATUS_READY) continue;
+    const baseKind = String(file?.kind || "").toLowerCase().split("@")[0];
+    if (baseKind !== FONT_FILE_KIND_MOBILE && baseKind !== FONT_FILE_KIND_ORIGINAL) continue;
+    const { weight, style } = readFontFileVariant(file);
+    const key = `${weight}|${style}`;
+    const existing = byVariant.get(key);
+    // Prefer the mobile-converted file, exactly like resolvePreferredFontFile.
+    if (existing && existing.baseKind === FONT_FILE_KIND_MOBILE) continue;
+    byVariant.set(key, {
+      baseKind,
+      weight,
+      style,
+      fileName: String(file?.fileName || "").trim(),
+      mimeType: String(file?.mimeType || "").trim(),
+      fileUrl: isDefaultFontVariant(weight, style)
+        ? routeUrl
+        : `${routeUrl}?variant=${weight}${style === "italic" ? "i" : ""}`,
+    });
+  }
+  return [...byVariant.values()]
+    .sort((a, b) => (a.style === b.style ? a.weight - b.weight : a.style === "normal" ? -1 : 1))
+    .map(({ baseKind: _baseKind, ...variant }) => variant);
+}
+
 export function toEditorFontRecord(font) {
   const record = withFontIncludes(font);
   if (!record) return null;
@@ -167,6 +261,8 @@ export function toEditorFontRecord(font) {
     fileName: String(preferredFile?.fileName || originalFile?.fileName || "").trim(),
     mimeType: String(preferredFile?.mimeType || originalFile?.mimeType || "").trim(),
     fileUrl: routeUrl || String(preferredFile?.publicUrl || originalFile?.publicUrl || "").trim(),
+    // Non-default weights/styles this family also has files for. Empty for single-weight fonts.
+    variants: listEditorFontVariants(record, routeUrl),
     dataUrl: undefined,
     displayName:
       String(record.displayName || "").trim() ||

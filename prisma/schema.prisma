@@ -14,19 +14,19 @@ datasource db {
 }
 
 model Template {
-  id                String             @id @default(uuid()) @db.Uuid
-  ownerId           String             @db.Uuid
+  id                String                   @id @default(uuid()) @db.Uuid
+  ownerId           String                   @db.Uuid
   name              String
-  slug              String             @unique
-  status            String             @default("draft")
-  version           Int                @default(1)
+  slug              String                   @unique
+  status            String                   @default("draft")
+  version           Int                      @default(1)
   canvasSize        Json
-  pageCount         Int                @default(1)
+  pageCount         Int                      @default(1)
   /// Per-page preview images for multi-page designs: { [pageId]: publicUrl }. Page 1 falls back
   /// to thumbnailDataUrl, so this is only populated for pages 2..N.
   pageThumbnails    Json?
-  category          String             @default("general")
-  subCategory       String             @default("general")
+  category          String                   @default("general")
+  subCategory       String                   @default("general")
   tags              Json
   thumbnailDataUrl  String?
   previewVideoUrl   String?
@@ -38,8 +38,8 @@ model Template {
   previewUpdatedAt  DateTime?
   data              Json
   publishedAt       DateTime?
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
   revisions         TemplateRevision[]
   favorites         MobileFavoriteTemplate[]
 
@@ -67,26 +67,26 @@ model TemplateRevision {
 }
 
 model FontFamily {
-  id               String      @id @default(uuid()) @db.Uuid
-  family           String
-  normalizedFamily String      @unique
-  displayName      String?
-  source           String      @default("custom")
-  sourceId         String?
-  status           String      @default("ready")
-  categories       Json
-  previewText      String?
-  previewWeight    Int?
-  cssFontFamily    String?
+  id                    String      @id @default(uuid()) @db.Uuid
+  family                String
+  normalizedFamily      String      @unique
+  displayName           String?
+  source                String      @default("custom")
+  sourceId              String?
+  status                String      @default("ready")
+  categories            Json
+  previewText           String?
+  previewWeight         Int?
+  cssFontFamily         String?
   previewImageUrl       String?
   previewImageDarkUrl   String?
   previewImageUpdatedAt DateTime?
-  sortOrder        Int         @default(0)
-  removable        Boolean     @default(true)
-  createdAt        DateTime    @default(now())
-  updatedAt        DateTime    @updatedAt
-  files            FontFile[]
-  aliases          FontAlias[]
+  sortOrder             Int         @default(0)
+  removable             Boolean     @default(true)
+  createdAt             DateTime    @default(now())
+  updatedAt             DateTime    @updatedAt
+  files                 FontFile[]
+  aliases               FontAlias[]
 
   @@index([source])
   @@index([status])
@@ -97,7 +97,14 @@ model FontFamily {
 model FontFile {
   id            String     @id @default(uuid()) @db.Uuid
   fontId        String     @db.Uuid
+  /// Purpose + variant: "original"/"mobile" for the family's default face, suffixed for any
+  /// other weight or style ("mobile@700", "mobile@400i"). Keeps @@unique([fontId, kind]) valid
+  /// while letting one family hold every weight a design uses — Canva regularly ships 2-3.
   kind          String
+  /// CSS weight this file IS (400/500/700…). Null = the default face, i.e. treat as 400.
+  fontWeight    Int?
+  /// "normal" | "italic". Null = normal.
+  fontStyle     String?
   format        String
   mimeType      String
   fileName      String?
@@ -170,19 +177,19 @@ model DashboardInviteToken {
 }
 
 model MobileUser {
-  id              String               @id @default(uuid()) @db.Uuid
+  id              String                   @id @default(uuid()) @db.Uuid
   name            String?
   email           String?
   normalizedEmail String?
-  emailVerified   Boolean              @default(false)
-  role            String               @default("user")
+  emailVerified   Boolean                  @default(false)
+  role            String                   @default("user")
   bannedUntil     DateTime?
   // Per-user monthly AI credit allowance. Null = use the global default from
   // mobile app settings; set a number to give this account its own balance.
   creditAllowance Int?
   lastLoginAt     DateTime?
-  createdAt       DateTime             @default(now())
-  updatedAt       DateTime             @updatedAt
+  createdAt       DateTime                 @default(now())
+  updatedAt       DateTime                 @updatedAt
   identities      MobileIdentity[]
   refreshTokens   MobileRefreshToken[]
   deviceTokens    MobileDeviceToken[]
@@ -283,24 +290,24 @@ model MobileFavoriteTemplate {
 }
 
 model ContactMessage {
-  id              String      @id @default(uuid()) @db.Uuid
-  source          String      @default("web")
+  id              String                @id @default(uuid()) @db.Uuid
+  source          String                @default("web")
   name            String
   email           String
-  topic           String      @default("general")
+  topic           String                @default("general")
   device          String?
   message         String
-  status          String      @default("new")
-  mobileUserId    String?     @db.Uuid
+  status          String                @default("new")
+  mobileUserId    String?               @db.Uuid
   appVersion      String?
   userAgent       String?
   ipAddress       String?
-  handledByUserId String?     @db.Uuid
+  handledByUserId String?               @db.Uuid
   handledAt       DateTime?
   lastRepliedAt   DateTime?
-  createdAt       DateTime    @default(now())
-  updatedAt       DateTime    @updatedAt
-  mobileUser      MobileUser? @relation(fields: [mobileUserId], references: [id], onDelete: SetNull)
+  createdAt       DateTime              @default(now())
+  updatedAt       DateTime              @updatedAt
+  mobileUser      MobileUser?           @relation(fields: [mobileUserId], references: [id], onDelete: SetNull)
   replies         ContactMessageReply[]
 
   @@index([createdAt(sort: Desc)])

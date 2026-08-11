@@ -81,6 +81,10 @@ const MAX_IMPORTED_FONTS_TOTAL_BYTES = Number(
   SHARED_CONSTANTS.MAX_IMPORTED_FONTS_TOTAL_BYTES || 12_000_000
 );
 const MAX_IMPORTED_FONTS_PER_IMPORT = Number(SHARED_CONSTANTS.MAX_IMPORTED_FONTS_PER_IMPORT || 6);
+// Real cuts kept per family: a regular and a bold, which is exactly what the editor's canvas can
+// ask for (Konva maps weight >= 600 to bold, everything else to normal).
+const FONT_BUCKET_REGULAR_WEIGHT = 400;
+const FONT_BUCKET_BOLD_WEIGHT = 700;
 const IMPORT_MULTIPART_MANIFEST_FIELD = String(
   SHARED_CONSTANTS.IMPORT_MULTIPART_MANIFEST_FIELD || "payload"
 );
@@ -747,6 +751,14 @@ function buildEditorAnimationFields(animation) {
   return fields;
 }
 
+// Can the editor redraw this Canva photo frame itself, from the fetched asset? A plain rect frame
+// via cornerRadius + stroke, and a ROUND frame at ANY aspect via `mediaShape: "circle"` — the
+// editor masks those to a true ellipse inscribed in the box (a corner radius could only ever make
+// a stadium, which is why this used to be restricted to square boxes).
+function isReproducibleFrameBorder(border) {
+  return Boolean(border && (border.rectFrame || border.circleFrame));
+}
+
 function annotateImportMetadata(object, layer, fallbackOverride) {
   const fallbackReason = String(
     fallbackOverride?.reason || layer?.fallbackReason || (layer?.preferSnapshot ? "masked-or-clipped" : "")
@@ -955,6 +967,16 @@ function buildUsedFontTargetsByFamily(layers = []) {
     result[family] = {
       fontWeight: selected?.weight || 400,
       fontStyle: selected?.style || "normal",
+      // EVERY (weight, style) this family's text is set in, not just the dominant one. The
+      // importer stores a real file per cut, and picking by "closest to the dominant weight"
+      // grabbed near-neighbours the design never uses (300/600) while missing the ones it does.
+      usedVariants: [...bucket.keys()].map((key) => {
+        const [weightText, styleText] = key.split("|");
+        return {
+          weight: parseNumericFontWeight(weightText, 400),
+          style: normalizeFontStyleValue(styleText),
+        };
+      }),
     };
   });
   return result;
@@ -1391,18 +1413,27 @@ async function layerToFabricObject(layer, index) {
   // Canva photo-frame outline + rounded corners → the editor reads stroke/strokeWidth/cornerRadius
   // on the image object and renders them around the display-sized element (strokeScaleEnabled off),
   // so both are the Canva design-px values directly. Renderers clamp radius to min(w,h)/2 (pills).
-  const border = layer?.modelBorder;
+  // ONLY for a reproducible frame. Anything else — a blob, an ellipse — keeps the rendered
+  // snapshot, which already has the frame's outline baked into its pixels; drawing the model's
+  // stroke on top of that would ring the layer TWICE.
+  const border = isReproducibleFrameBorder(layer?.modelBorder)
+    ? layer.modelBorder
+    : null;
   if (border) {
     if (typeof border.strokeColor === "string" && Number(border.strokeWidth) > 0) {
       imageObject.stroke = border.strokeColor;
       imageObject.strokeWidth = Math.max(1, Math.round(Number(border.strokeWidth)));
     }
     if (border.circleFrame) {
-      // Canva's round photo frame. Radius is measured against the DISPLAYED box (width/height
-      // here, not the intrinsic objectWidth/Height), matching how the editor and the mobile
-      // renderer read it; both clamp to min(w,h)/2, so half the short side IS the circle. The
-      // frame's stroke follows the same rounded path, which is what draws the white ring —
-      // previously it squared off around the element because the radius was 0.
+      // Canva's round photo frame is an ELLIPSE inscribed in its box — a circle only when that
+      // box happens to be square. `mediaShape` is the faithful channel for it: the editor masks
+      // to a true ellipse and the mobile renderer maps it to filters.shape CIRCLE.
+      imageObject.mediaShape = "circle";
+      // Keep the maxed corner radius alongside it as the graceful degradation: any renderer that
+      // doesn't know `mediaShape` still draws the closest thing a rounded rect can (a stadium,
+      // and an exact circle whenever the box IS square) rather than a bare rectangle. Measured on
+      // the DISPLAYED box (width/height here, not the intrinsic objectWidth/Height), which is the
+      // space both the editor and mobile read the radius in.
       imageObject.cornerRadius = Math.max(1, Math.round(Math.min(width, height) / 2));
     } else if (Number(border.cornerRadius) > 0) {
       imageObject.cornerRadius = Math.round(Number(border.cornerRadius));
@@ -1583,9 +1614,7 @@ async function buildHybridFabricObjects(
     // snapshot — a circle covers only ~79% of its box, so the asset reads 21% "more opaque",
     // over the baked-background threshold — and the snapshot has no alpha to mask with, which is
     // exactly how a circular photo ended up an opaque square.
-    const modelFrame = Boolean(
-      layer?.modelBorder && (layer.modelBorder.rectFrame || layer.modelBorder.circleFrame)
-    );
+    const modelFrame = isReproducibleFrameBorder(layer?.modelBorder);
     if (directAssetPreferredOverSnapshot && !modelFrame) {
       const snapshotDataUrl = String(layer?.isolatedImageDataUrl || "");
       const hadSnapshot = snapshotDataUrl.startsWith("data:image/");
@@ -2540,9 +2569,11 @@ function extractCanvaFiberModel() {
         // rectFrame: plain rect frame → editor reproduces frame+radius+stroke exactly;
         // rendered snapshot never needed.
         const rectFrame = /^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d);
-        // circleFrame: arc-only path = Canva's round photo frame. Equally reproducible — the
-        // editor clips with cornerRadius = half the short side and strokes that same rounded
-        // path. See the canonical copy in canva-fiber-main.js.
+        // circleFrame: an arc-only path is Canva's round photo frame — a true ELLIPSE inscribed
+        // in the box, a circle only when that box is square. The editor reproduces it via
+        // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
+        // instead of the isolation snapshot (which has no alpha outside the mask, and so
+        // came back as an opaque rectangle with the page baked into its corners).
         const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
         if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
         return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
@@ -3869,52 +3900,91 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
       continue;
     }
     const fontTarget = getFontTargetForFamily(fontTargetsByFamily, family);
-    const rankedCandidates = orderFontCandidatesForTarget(candidates, fontTarget);
+    // TWO BUCKETS PER FAMILY: regular and bold, each a REAL file.
+    //
+    // Canva ships a separate file per weight under one family name (400/500/700 are three
+    // distinct faces), but the editor only ever asks a canvas for "normal" or "bold" — Konva
+    // maps any weight >= 600 to bold and everything else to normal. So storing the exact set of
+    // authored weights buys nothing the renderer can use, and picking "nearest weight" quietly
+    // dragged in cuts the design never had (a 300 and a 600). Two buckets is what the renderer
+    // consumes, and it is deterministic: the closest real file to 400, and the closest to 700
+    // when the design sets anything bold. A 500 renders from the regular cut — very slightly
+    // lighter than Canva, and far closer than a synthesized bold.
+    const usedVariants = Array.isArray(fontTarget?.usedVariants) ? fontTarget.usedVariants : [];
+    const needsBold = usedVariants.some((variant) => Number(variant?.weight) >= 600);
+    const buckets = needsBold
+      ? [FONT_BUCKET_REGULAR_WEIGHT, FONT_BUCKET_BOLD_WEIGHT]
+      : [FONT_BUCKET_REGULAR_WEIGHT];
 
     let saved = null;
     let lastFailureReason = "";
-    for (let candidateIndex = 0; candidateIndex < rankedCandidates.length; candidateIndex += 1) {
-      const candidate = rankedCandidates[candidateIndex];
-      const sourceUrl = String(candidate?.dataUrl || candidate?.url || "").trim();
-      if (!sourceUrl) {
-        lastFailureReason = "missing-source-url";
-        continue;
-      }
-      const resolved = await fetchFontDataUrl(sourceUrl, candidate.mimeType || candidate.format || "");
-      if (!resolved?.dataUrl || !resolved?.mimeType) {
-        lastFailureReason = "unresolved-data-url";
-        continue;
-      }
-      if (!isAllowedFontMimeType(resolved.mimeType)) {
-        lastFailureReason = `unsupported-mime:${resolved.mimeType}`;
-        continue;
-      }
-      const bytes = estimateDataUrlBytes(resolved.dataUrl);
-      if (bytes <= 0 || bytes > MAX_IMPORTED_FONT_BYTES) {
-        lastFailureReason = bytes > MAX_IMPORTED_FONT_BYTES ? "font-too-large" : "empty-font";
-        continue;
-      }
-      if (totalBytes + bytes > MAX_IMPORTED_FONTS_TOTAL_BYTES) {
-        safeWarnings.push("Imported fonts exceeded size limit; some fonts were skipped.");
-        lastFailureReason = "total-size-limit";
+    const takenSourceUrls = new Set();
+    for (const bucketWeight of buckets) {
+      const ranked = orderFontCandidatesForTarget(candidates, {
+        fontWeight: bucketWeight,
+        fontStyle: "normal",
+      });
+      for (let candidateIndex = 0; candidateIndex < ranked.length; candidateIndex += 1) {
+        const candidate = ranked[candidateIndex];
+        const sourceUrl = String(candidate?.dataUrl || candidate?.url || "").trim();
+        if (!sourceUrl) {
+          lastFailureReason = "missing-source-url";
+          continue;
+        }
+        // The same file being best for both buckets means the family only ships one cut —
+        // storing it twice would be a lie. Leave bold to the renderer in that case.
+        if (takenSourceUrls.has(sourceUrl)) break;
+        const resolved = await fetchFontDataUrl(sourceUrl, candidate.mimeType || candidate.format || "");
+        if (!resolved?.dataUrl || !resolved?.mimeType) {
+          lastFailureReason = "unresolved-data-url";
+          continue;
+        }
+        if (!isAllowedFontMimeType(resolved.mimeType)) {
+          lastFailureReason = `unsupported-mime:${resolved.mimeType}`;
+          continue;
+        }
+        const bytes = estimateDataUrlBytes(resolved.dataUrl);
+        if (bytes <= 0 || bytes > MAX_IMPORTED_FONT_BYTES) {
+          lastFailureReason = bytes > MAX_IMPORTED_FONT_BYTES ? "font-too-large" : "empty-font";
+          continue;
+        }
+        if (totalBytes + bytes > MAX_IMPORTED_FONTS_TOTAL_BYTES) {
+          safeWarnings.push("Imported fonts exceeded size limit; some fonts were skipped.");
+          lastFailureReason = "total-size-limit";
+          break;
+        }
+        takenSourceUrls.add(sourceUrl);
+        const entry = {
+          family,
+          fileName:
+            sanitizeFontFileName(
+              resolved.fileName || candidate.fileName || candidate.url,
+              `${family}.ttf`
+            ) || `${family}.ttf`,
+          mimeType: resolved.mimeType,
+          dataUrl: resolved.dataUrl,
+          // Stored as the BUCKET weight, not the file's own: the editor declares @font-face at
+          // exactly 400/700, which is what its canvas asks for.
+          fontWeight: bucketWeight,
+          fontStyle: "normal",
+        };
+        saved = saved || entry;
+        importedFonts.push(entry);
+        totalBytes += bytes;
         break;
       }
-      saved = {
-        family,
-        fileName:
-          sanitizeFontFileName(
-            resolved.fileName || candidate.fileName || candidate.url,
-            `${family}.ttf`
-          ) || `${family}.ttf`,
-        mimeType: resolved.mimeType,
-        dataUrl: resolved.dataUrl,
-      };
-      totalBytes += bytes;
-      break;
     }
 
     if (saved) {
-      importedFonts.push(saved);
+      // Proof the fresh service worker ran (this string only exists in the bucketed build) plus
+      // what it actually collected. chrome.runtime.getManifest() reports the NEW version even
+      // from a cached worker, so the version number alone proves nothing.
+      safeWarnings.push(
+        `Font buckets: ${family} -> ${importedFonts
+          .filter((entry) => entry.family === family)
+          .map((entry) => entry.fontWeight)
+          .join(",")} (design used ${usedVariants.map((v) => v.weight).join("/") || "400"})`
+      );
     } else {
       const suffix = lastFailureReason ? ` (${lastFailureReason})` : "";
       safeWarnings.push(`Failed to import font file for "${family}"${suffix}.`);
@@ -4468,16 +4538,25 @@ async function importActiveCanvaTab(message, options = {}) {
     (merged, artifacts) => mergeUsedFontFamilies(merged, artifacts.usedFonts),
     []
   );
-  const importedCustomFontsByFamily = new Map();
+  // Deduped per (family, weight, style), NOT per family: the same family legitimately ships one
+  // file per cut the design uses, and collapsing on family alone silently threw every extra
+  // weight away right before the payload was built — the editor then faked them (faux-bold).
+  // Keying on family alone is still right for the thing this merge exists for: the same page
+  // font appearing across several pages.
+  const importedCustomFontsByVariant = new Map();
   capturedArtifacts.forEach((artifacts) => {
     (artifacts.importedCustomFonts || []).forEach((font) => {
       const familyKey = String(font?.family || "").trim().toLowerCase();
-      if (familyKey && !importedCustomFontsByFamily.has(familyKey)) {
-        importedCustomFontsByFamily.set(familyKey, font);
+      if (!familyKey) return;
+      const weight = Math.max(100, Math.min(900, Math.round(Number(font?.fontWeight)) || 400));
+      const style = String(font?.fontStyle || "").toLowerCase() === "italic" ? "italic" : "normal";
+      const variantKey = `${familyKey}|${weight}|${style}`;
+      if (!importedCustomFontsByVariant.has(variantKey)) {
+        importedCustomFontsByVariant.set(variantKey, font);
       }
     });
   });
-  const importedCustomFonts = [...importedCustomFontsByFamily.values()];
+  const importedCustomFonts = [...importedCustomFontsByVariant.values()];
   const hasExtractedLayers = capturedArtifacts.some((artifacts) => artifacts.hasExtractedLayers);
 
   // Per-page capture already degraded empty pages to their own snapshot objects; this outer
