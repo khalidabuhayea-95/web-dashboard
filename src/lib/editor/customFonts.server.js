@@ -941,27 +941,16 @@ export async function upsertEditorCustomFont({
         break;
       }
     }
-    // An existing family that is MISSING a requested weight is not a duplicate to skip — it is a
-    // family to complete. Without this, a design that uses a second weight of an already-imported
-    // family would keep rendering that weight as faux-bold forever, because the first import
-    // stored only the default face.
-    const existingKinds = new Set(
-      (Array.isArray(existingMatch?.files) ? existingMatch.files : []).map((file) =>
-        String(file?.kind || "").toLowerCase()
-      )
+    // A caller that sends explicit weight variants knows exactly which cuts this family should
+    // hold, so NEVER skip it as a duplicate — refresh the whole set instead. Skipping is what let
+    // a wrong file survive indefinitely: an early import stored the family's BOLD file in the
+    // default (400) slot, every later import saw "the 400 kind already exists" and left it there,
+    // and the design rendered bold everywhere. upsertFontFamilyWithFiles deletes any file whose
+    // kind isn't in the new set, so this converges the family on the payload.
+    const hasExplicitVariants = (Array.isArray(extraVariants) ? extraVariants : []).some((entry) =>
+      sanitizeDataUrl(entry?.dataUrl)
     );
-    const missingVariant = (Array.isArray(extraVariants) ? extraVariants : []).some(
-      (entry) =>
-        sanitizeDataUrl(entry?.dataUrl) &&
-        !existingKinds.has(
-          buildFontFileKind(
-            FONT_FILE_KIND_MOBILE,
-            normalizeFontWeightValue(entry?.weight),
-            normalizeFontStyleValue(entry?.style)
-          )
-        )
-    );
-    if (existingMatch && !missingVariant) {
+    if (existingMatch && !hasExplicitVariants) {
       return {
         font: toEditorFontRecord(existingMatch),
         fonts: includeFontList ? await getEditorCustomFonts() : [],

@@ -81,10 +81,11 @@ const MAX_IMPORTED_FONTS_TOTAL_BYTES = Number(
   SHARED_CONSTANTS.MAX_IMPORTED_FONTS_TOTAL_BYTES || 12_000_000
 );
 const MAX_IMPORTED_FONTS_PER_IMPORT = Number(SHARED_CONSTANTS.MAX_IMPORTED_FONTS_PER_IMPORT || 6);
-// Real cuts kept per family: a regular and a bold, which is exactly what the editor's canvas can
-// ask for (Konva maps weight >= 600 to bold, everything else to normal).
+// Real cuts kept per family — one per weight the design actually uses. Canva designs typically
+// use 2-3 (this one uses 400/500/700 of a single family); the scraper resolves at most 4
+// candidates per family, ordered by those same used weights.
+const MAX_FONT_VARIANTS_PER_FAMILY = 4;
 const FONT_BUCKET_REGULAR_WEIGHT = 400;
-const FONT_BUCKET_BOLD_WEIGHT = 700;
 const IMPORT_MULTIPART_MANIFEST_FIELD = String(
   SHARED_CONSTANTS.IMPORT_MULTIPART_MANIFEST_FIELD || "payload"
 );
@@ -983,28 +984,26 @@ function buildUsedFontTargetsByFamily(layers = []) {
 }
 
 function getFontTargetForFamily(fontTargetsByFamily, family) {
+  // NOTE: this rebuilds a clean {fontWeight, fontStyle} for the ranker, so anything else the
+  // usage scan computed must be carried across EXPLICITLY — `usedVariants` (every weight the
+  // design sets this family in) was silently dropped here, which made every family look like it
+  // only used 400 and so never got a bold bucket.
+  const empty = { fontWeight: 400, fontStyle: "normal", usedVariants: [] };
   const normalizedFamily = normalizeFontFamilyName(family);
-  if (!normalizedFamily) {
-    return { fontWeight: 400, fontStyle: "normal" };
-  }
+  if (!normalizedFamily) return empty;
   const source = fontTargetsByFamily && typeof fontTargetsByFamily === "object" ? fontTargetsByFamily : {};
-  if (source[normalizedFamily]) {
-    return {
-      fontWeight: parseNumericFontWeight(source[normalizedFamily].fontWeight, 400),
-      fontStyle: normalizeFontStyleValue(source[normalizedFamily].fontStyle),
-    };
-  }
+  const readTarget = (entry) => ({
+    fontWeight: parseNumericFontWeight(entry.fontWeight, 400),
+    fontStyle: normalizeFontStyleValue(entry.fontStyle),
+    usedVariants: Array.isArray(entry.usedVariants) ? entry.usedVariants : [],
+  });
+  if (source[normalizedFamily]) return readTarget(source[normalizedFamily]);
   const targetKey = normalizedFamily.toLowerCase();
   const matchedKey = Object.keys(source).find(
     (candidate) => normalizeFontFamilyName(candidate).toLowerCase() === targetKey
   );
-  if (!matchedKey || !source[matchedKey]) {
-    return { fontWeight: 400, fontStyle: "normal" };
-  }
-  return {
-    fontWeight: parseNumericFontWeight(source[matchedKey].fontWeight, 400),
-    fontStyle: normalizeFontStyleValue(source[matchedKey].fontStyle),
-  };
+  if (!matchedKey || !source[matchedKey]) return empty;
+  return readTarget(source[matchedKey]);
 }
 
 function getFontMimePreferenceRank(mimeType) {
@@ -3900,29 +3899,34 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
       continue;
     }
     const fontTarget = getFontTargetForFamily(fontTargetsByFamily, family);
-    // TWO BUCKETS PER FAMILY: regular and bold, each a REAL file.
+    // ONE REAL FILE PER WEIGHT THE DESIGN USES — full Canva parity.
     //
-    // Canva ships a separate file per weight under one family name (400/500/700 are three
-    // distinct faces), but the editor only ever asks a canvas for "normal" or "bold" — Konva
-    // maps any weight >= 600 to bold and everything else to normal. So storing the exact set of
-    // authored weights buys nothing the renderer can use, and picking "nearest weight" quietly
-    // dragged in cuts the design never had (a 300 and a 600). Two buckets is what the renderer
-    // consumes, and it is deterministic: the closest real file to 400, and the closest to 700
-    // when the design sets anything bold. A 500 renders from the regular cut — very slightly
-    // lighter than Canva, and far closer than a synthesized bold.
+    // Canva ships a separate file per weight under one family name (this design uses Avenir Next
+    // Arabic at 400, 500 and 700), and the editor now asks the canvas for the numeric weight, so
+    // each cut is actually reachable. Targets come from the design's own usage, never from
+    // "nearest weight" ranking, which used to drag in cuts the design never had (a 300, a 600).
     const usedVariants = Array.isArray(fontTarget?.usedVariants) ? fontTarget.usedVariants : [];
-    const needsBold = usedVariants.some((variant) => Number(variant?.weight) >= 600);
-    const buckets = needsBold
-      ? [FONT_BUCKET_REGULAR_WEIGHT, FONT_BUCKET_BOLD_WEIGHT]
-      : [FONT_BUCKET_REGULAR_WEIGHT];
+    const wantedTargets = (usedVariants.length > 0
+      ? usedVariants
+      : [{ weight: FONT_BUCKET_REGULAR_WEIGHT, style: "normal" }]
+    )
+      .map((variant) => ({
+        weight: Math.max(100, Math.min(900, Math.round(Number(variant?.weight)) || 400)),
+        style: String(variant?.style || "").toLowerCase() === "italic" ? "italic" : "normal",
+      }))
+      .filter((variant, index, all) =>
+        all.findIndex((other) => other.weight === variant.weight && other.style === variant.style) === index
+      )
+      .sort((a, b) => a.weight - b.weight)
+      .slice(0, MAX_FONT_VARIANTS_PER_FAMILY);
 
     let saved = null;
     let lastFailureReason = "";
     const takenSourceUrls = new Set();
-    for (const bucketWeight of buckets) {
+    for (const target of wantedTargets) {
       const ranked = orderFontCandidatesForTarget(candidates, {
-        fontWeight: bucketWeight,
-        fontStyle: "normal",
+        fontWeight: target.weight,
+        fontStyle: target.style,
       });
       for (let candidateIndex = 0; candidateIndex < ranked.length; candidateIndex += 1) {
         const candidate = ranked[candidateIndex];
@@ -3931,8 +3935,9 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
           lastFailureReason = "missing-source-url";
           continue;
         }
-        // The same file being best for both buckets means the family only ships one cut —
-        // storing it twice would be a lie. Leave bold to the renderer in that case.
+        // Two used weights resolving to the SAME file means the family doesn't really have both
+        // cuts (Roboto maps 600/700/800 to one Bold). Store it once — CSS weight matching picks
+        // it for the other weight anyway, with no synthesis.
         if (takenSourceUrls.has(sourceUrl)) break;
         const resolved = await fetchFontDataUrl(sourceUrl, candidate.mimeType || candidate.format || "");
         if (!resolved?.dataUrl || !resolved?.mimeType) {
@@ -3963,10 +3968,8 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
             ) || `${family}.ttf`,
           mimeType: resolved.mimeType,
           dataUrl: resolved.dataUrl,
-          // Stored as the BUCKET weight, not the file's own: the editor declares @font-face at
-          // exactly 400/700, which is what its canvas asks for.
-          fontWeight: bucketWeight,
-          fontStyle: "normal",
+          fontWeight: target.weight,
+          fontStyle: target.style,
         };
         saved = saved || entry;
         importedFonts.push(entry);
@@ -3980,10 +3983,10 @@ async function resolveImportedCustomFonts(usedFonts, fontAssetMap, fontTargetsBy
       // what it actually collected. chrome.runtime.getManifest() reports the NEW version even
       // from a cached worker, so the version number alone proves nothing.
       safeWarnings.push(
-        `Font buckets: ${family} -> ${importedFonts
+        `Font cuts: ${family} -> ${importedFonts
           .filter((entry) => entry.family === family)
-          .map((entry) => entry.fontWeight)
-          .join(",")} (design used ${usedVariants.map((v) => v.weight).join("/") || "400"})`
+          .map((entry) => `${entry.fontWeight}${entry.fontStyle === "italic" ? "i" : ""}`)
+          .join(",")} (design used ${wantedTargets.map((t) => t.weight).join("/")})`
       );
     } else {
       const suffix = lastFailureReason ? ` (${lastFailureReason})` : "";

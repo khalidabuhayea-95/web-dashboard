@@ -404,14 +404,24 @@ function mapBlendMode(value) {
   return mapping[String(value || "").toLowerCase()] || "NORMAL";
 }
 
+/**
+ * Fabric's `textAlign` is ABSOLUTE — `left` is the left edge whatever the script — so it must map
+ * to the app's absolute LEFT/RIGHT, never to START/END.
+ *
+ * START/END are LOGICAL on the app side: they resolve against the text's own direction, so START
+ * lands flush-RIGHT on Arabic. Mapping `left`->START therefore mirrored every Arabic template —
+ * a heading the dashboard shows flush-right rendered flush-left in the app, and the app's
+ * alignment row highlighted the opposite button. The fallback is `left` for the same reason:
+ * that is what fabric (and normalizeTextAlign in the editor) treats a missing value as.
+ */
 function mapTextAlignment(value) {
   const mapping = {
-    left: "START",
+    left: "LEFT",
     center: "CENTER",
-    right: "END",
+    right: "RIGHT",
     justify: "JUSTIFY",
   };
-  return mapping[String(value || "").toLowerCase()] || "START";
+  return mapping[String(value || "").toLowerCase()] || "LEFT";
 }
 
 function mapMediaShape(value) {

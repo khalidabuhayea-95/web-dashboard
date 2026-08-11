@@ -2372,14 +2372,26 @@ function resolveTextCurvePath(element: EditorElement) {
   return `M 0 ${middleY} Q ${width / 2} ${controlY} ${width} ${middleY}`;
 }
 
+/**
+ * Konva concatenates this into the canvas font shorthand (`${fontStyle} ${fontVariant}
+ * ${fontSize}px ${family}`), so emitting the NUMERIC weight — "500", "italic 700" — makes the
+ * canvas request that exact cut instead of collapsing everything to bold/normal.
+ *
+ * That collapse used to cost real fidelity: a family with real 400/500/700 files rendered its
+ * 500 (medium) text from the 400 face, because "normal" only ever matches 400. Weight keywords
+ * are just aliases (normal = 400, bold = 700), so nothing regresses for single-cut families —
+ * the browser still picks the nearest available face and synthesizes only when it must.
+ */
 function toKonvaFontStyle(fontStyle: EditorElement["fontStyle"], fontWeight: EditorElement["fontWeight"]) {
-  const numericWeight = Number.parseInt(String(fontWeight || "").replace(/[^\d]/g, ""), 10);
-  const isBold = Number.isFinite(numericWeight) ? numericWeight >= 600 : /bold/i.test(String(fontWeight || ""));
+  const parsed = Number.parseInt(String(fontWeight || "").replace(/[^\d]/g, ""), 10);
+  const numericWeight = Number.isFinite(parsed)
+    ? Math.max(100, Math.min(900, parsed))
+    : /bold/i.test(String(fontWeight || ""))
+      ? 700
+      : 400;
   const isItalic = fontStyle === "italic";
-  if (isBold && isItalic) return "bold italic";
-  if (isBold) return "bold";
-  if (isItalic) return "italic";
-  return "normal";
+  if (isItalic) return `italic ${numericWeight}`;
+  return String(numericWeight);
 }
 
 function rectsIntersect(

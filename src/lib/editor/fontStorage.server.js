@@ -189,6 +189,24 @@ function withFontIncludes(font) {
   return font && typeof font === "object" ? font : null;
 }
 
+/**
+ * Cache-busting token for a font FILE, so `/api/mobile/fonts/{id}/file` changes whenever its
+ * bytes do. The route is served `immutable` for a year and clients cache the download by font
+ * id forever, so without this a re-imported family keeps rendering from the OLD face on every
+ * device that already downloaded it — and since a replacement cut has different advance widths,
+ * text the dashboard fits on one line wraps in the app.
+ *
+ * Checksum first (it changes exactly when the bytes do); `updatedAt` covers rows imported before
+ * checksums were stored. Absent both, no token is emitted and clients keep their cached copy —
+ * the pre-existing behaviour, never a forced re-download.
+ */
+function fontFileVersionToken(file) {
+  const checksum = String(file?.checksum || "").trim();
+  if (checksum) return checksum.slice(0, 16);
+  const updatedAt = file?.updatedAt ? new Date(file.updatedAt).getTime() : NaN;
+  return Number.isFinite(updatedAt) && updatedAt > 0 ? String(updatedAt) : "";
+}
+
 export function resolvePreferredFontFile(font, preferredKind = FONT_FILE_KIND_MOBILE) {
   const files = Array.isArray(font?.files) ? font.files : [];
   const preferred = files.find(
@@ -240,7 +258,7 @@ export function listEditorFontVariants(font, routeUrl) {
       mimeType: String(file?.mimeType || "").trim(),
       fileUrl: isDefaultFontVariant(weight, style)
         ? routeUrl
-        : `${routeUrl}?variant=${weight}${style === "italic" ? "i" : ""}`,
+        : `${routeUrl}${routeUrl.includes("?") ? "&" : "?"}variant=${weight}${style === "italic" ? "i" : ""}`,
     });
   }
   return [...byVariant.values()]
@@ -254,7 +272,19 @@ export function toEditorFontRecord(font) {
   const source = normalizeSource(record.source);
   const preferredFile = resolvePreferredFontFile(record);
   const originalFile = resolvePreferredFontFile(record, FONT_FILE_KIND_ORIGINAL) || preferredFile;
-  const routeUrl = record.id ? `/api/mobile/fonts/${encodeURIComponent(record.id)}/file` : "";
+  // The file route sends `cache-control: immutable, max-age=1y`, but the URL is STABLE while its
+  // bytes change every time the family is re-imported — so a browser that has fetched a font
+  // keeps rendering the OLD one forever. Version the URL by the file's checksum so replacing a
+  // font actually reaches clients; the immutable header is then honest, because a given URL
+  // really never changes.
+  const cacheToken = String(
+    preferredFile?.checksum || originalFile?.checksum || record.updatedAt || ""
+  )
+    .replace(/[^a-zA-Z0-9]/g, "")
+    .slice(0, 16);
+  const routeUrl = record.id
+    ? `/api/mobile/fonts/${encodeURIComponent(record.id)}/file${cacheToken ? `?v=${cacheToken}` : ""}`
+    : "";
   return {
     id: String(record.id || ""),
     family: String(record.family || "").trim(),
@@ -289,12 +319,15 @@ export function toMobileFontRecord(request, font) {
   if (!record) return null;
   const preferredFile = resolvePreferredFontFile(record);
   const mobileCompatible = isMobileCompatibleFontFile(preferredFile);
+  // ?v=<file version> — see fontFileVersionToken. The token belongs on the URL, not just in a
+  // sibling field, so an HTTP cache busts with the client's own cache.
+  const versionToken = fontFileVersionToken(preferredFile);
+  const versionQuery = versionToken ? `?v=${encodeURIComponent(versionToken)}` : "";
+  const routePath = record.id
+    ? `/api/mobile/fonts/${encodeURIComponent(record.id)}/file${versionQuery}`
+    : "";
   const routeUrl =
-    record.id && request?.url
-      ? new URL(`/api/mobile/fonts/${encodeURIComponent(record.id)}/file`, request.url).toString()
-      : record.id
-        ? `/api/mobile/fonts/${encodeURIComponent(record.id)}/file`
-        : "";
+    routePath && request?.url ? new URL(routePath, request.url).toString() : routePath;
   const displayName =
     String(record.displayName || "").trim() ||
     deriveReadableFontLabel({ family: record.family });
