@@ -14,10 +14,17 @@
     "backfill:font-names": "node --env-file=.env --env-file=.env.local --import tsx scripts/backfill-font-names.ts",
     "dedupe:fonts": "node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-fonts.ts",
     "regenerate:font-previews": "node --env-file=.env --env-file=.env.local --import tsx scripts/regenerate-font-previews.ts",
+    "render:ai-templates": "node scripts/render-ai-templates.mjs",
+    "seed:ai-templates": "node --env-file=.env --env-file=.env.local scripts/seed-ai-templates.mjs",
     "sign:mobile": "node scripts/sign-mobile-request.mjs",
     "smoke:object-remove": "node scripts/smoke-object-remove.mjs",
     "smoke:upscale": "node scripts/smoke-upscale.mjs",
-    "smoke:credits": "node --env-file=.env --import tsx scripts/smoke-credits.ts"
+    "smoke:credits": "node --env-file=.env --import tsx scripts/smoke-credits.ts",
+    "render:magic-tools": "node scripts/render-magic-tools.mjs",
+    "seed:magic-tools": "node --env-file=.env --env-file=.env.local scripts/seed-magic-tools.mjs",
+    "smoke:ai-tools": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-ai-tools.ts",
+    "backfill:ai-tool-thumbs": "node --env-file=.env --env-file=.env.local scripts/backfill-ai-tool-thumbs.mjs",
+    "seed:text-effects": "node --env-file=.env --env-file=.env.local scripts/seed-text-effects.mjs"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1032.0",

@@ -345,6 +345,76 @@ model ContactMessageReply {
   @@index([status])
 }
 
+// The AI Tools catalog: admin-authored prompt templates the mobile app will list
+// and run by slug (the Andalusi toolSlug contract). The prompt column is the
+// product asset — it is served only through the dashboard admin API and the
+// server-side run route, never through any mobile-facing catalog endpoint.
+model AiTemplateCategory {
+  id        String   @id @default(uuid()) @db.Uuid
+  slug      String   @unique
+  titleEn   String
+  titleAr   String
+  sortOrder Int      @default(0)
+  published Boolean  @default(true)
+  isNew     Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  templates AiTemplate[]
+
+  @@index([sortOrder])
+}
+
+model AiTemplate {
+  id            String   @id @default(uuid()) @db.Uuid
+  slug          String   @unique
+  categoryId    String   @db.Uuid
+  titleEn       String
+  titleAr       String
+  /// Server-side edit instruction sent to the model. Never expose to clients.
+  prompt        String
+  model         String   @default("google/nano-banana")
+  /// Which reference input the template expects (portrait, product, food, …) —
+  /// drives the sample art pipeline and the picker hint in the app.
+  referenceKind String   @default("portrait")
+  beforeUrl     String?
+  afterUrl      String?
+  /// Grid-sized copy of afterUrl (400px). The full-size card art is ~140 KB
+  /// each, which is a 30 MB tab; the app lists thumbs and loads afterUrl only
+  /// when a tool is opened.
+  thumbUrl      String?
+  creditCost    Int      @default(8)
+  isPremium     Boolean  @default(false)
+  published     Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  category AiTemplateCategory @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([categoryId, sortOrder])
+  @@index([published, categoryId])
+}
+
+// Internal image library for the dashboard: uploaded once, reused anywhere an
+// admin needs a picture (first consumer: "before" inputs on AI templates).
+// storageKey is kept so deleting a row can also delete the R2 object.
+model GalleryImage {
+  id              String   @id @default(uuid()) @db.Uuid
+  name            String   @default("")
+  url             String
+  storageKey      String
+  width           Int?
+  height          Int?
+  sizeBytes       Int?
+  mimeType        String?
+  createdByUserId String?  @db.Uuid
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([createdAt(sort: Desc)])
+}
+
 model PushCampaign {
   id           String   @id @default(uuid()) @db.Uuid
   title        String
@@ -362,4 +432,170 @@ model PushCampaign {
   createdAt    DateTime @default(now())
 
   @@index([createdAt(sort: Desc)])
+}
+
+// ---------------------------------------------------------------------------
+// Raw-SQL infrastructure tables, adopted into the schema 2026-08-12.
+//
+// These three tables are created and queried exclusively through hand-written
+// SQL ($queryRaw stores in src/lib/tools/importJobsStore.server.js and
+// src/lib/editor/imported{Backgrounds,Elements}.server.js), which also
+// CREATE TABLE IF NOT EXISTS them at runtime. They are declared here with
+// @@ignore so `prisma migrate` knows they are wanted — without these blocks a
+// generated migration tries to DROP them — while @@ignore keeps them out of
+// the generated Prisma Client, so the raw-SQL stores remain the only API.
+// Shapes mirror the migrations exactly (introspected from a clean replay).
+// ---------------------------------------------------------------------------
+
+model editor_background_assets {
+  id                 String    @id @db.Uuid
+  source             String
+  source_asset_id    String
+  owner_id           String?   @db.Uuid
+  kind               String    @default("image")
+  title_en           String
+  title_ar           String
+  tags_en            Json      @default("[]")
+  tags_ar            Json      @default("[]")
+  labels_en          Json      @default("[]")
+  labels_ar          Json      @default("[]")
+  slug               String?
+  author_id          Int?
+  author_name        String?
+  category_value     String?
+  asset_url          String
+  thumbnail_url      String
+  width              Int?
+  height             Int?
+  source_payload     Json      @default("{}")
+  translation_status String    @default("fallback")
+  created_source_at  DateTime? @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([source, source_asset_id], map: "editor_background_assets_source_asset_unique")
+  @@index([category_value, updated_at(sort: Desc)], map: "editor_background_assets_category_updated_idx")
+  @@index([source, updated_at(sort: Desc)], map: "editor_background_assets_source_updated_idx")
+  @@ignore
+}
+
+model editor_element_assets {
+  id                 String    @id @db.Uuid
+  source             String
+  source_asset_id    String
+  owner_id           String?   @db.Uuid
+  kind               String    @default("icon")
+  title_en           String
+  title_ar           String
+  tags_en            Json      @default("[]")
+  tags_ar            Json      @default("[]")
+  labels_en          Json      @default("[]")
+  labels_ar          Json      @default("[]")
+  slug               String?
+  style_id           Int?
+  style_name         String?
+  family_id          Int?
+  family_name        String?
+  author_id          Int?
+  author_name        String?
+  asset_url          String
+  thumbnail_url      String
+  width              Int?
+  height             Int?
+  free_svg           Boolean   @default(false)
+  source_payload     Json      @default("{}")
+  translation_status String    @default("fallback")
+  created_source_at  DateTime? @db.Timestamptz(6)
+  created_at         DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+
+  @@unique([source, source_asset_id], map: "editor_element_assets_source_asset_unique")
+  @@index([source, kind, updated_at(sort: Desc)], map: "editor_element_assets_source_kind_updated_idx")
+  @@index([tags_ar], map: "editor_element_assets_tags_ar_gin_idx", type: Gin)
+  @@index([tags_en], map: "editor_element_assets_tags_en_gin_idx", type: Gin)
+  @@ignore
+}
+
+model import_jobs {
+  id                   String    @id @db.Uuid
+  owner_id             String    @db.Uuid
+  type                 String
+  status               String    @default("pending")
+  idempotency_key      String?
+  input                Json      @default("{}")
+  result               Json?
+  error                String?
+  progress             String    @default("")
+  attempts             Int       @default(0)
+  started_at           DateTime? @db.Timestamptz(6)
+  finished_at          DateTime? @db.Timestamptz(6)
+  created_at           DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime  @default(now()) @db.Timestamptz(6)
+  locked_at            DateTime? @db.Timestamptz(6)
+  locked_by            String?
+  produced_template_id String?   @db.Uuid
+
+  @@unique([owner_id, type, idempotency_key], map: "import_jobs_owner_type_idempotency_key_idx")
+  @@index([owner_id, created_at(sort: Desc)], map: "import_jobs_owner_idx")
+  @@index([status, created_at(sort: Desc)], map: "import_jobs_status_idx")
+  @@ignore
+}
+
+/// One-tap "Magic Tools" — image in, image out, no prompt from the user.
+/// Deliberately NOT an AiTemplate: these carry no category, several run on
+/// prompt-less specialist models (upscalers, face restorers, the self-hosted
+/// background remover), and each tool tunes its model through modelOptions
+/// rather than through wording.
+model MagicTool {
+  id            String   @id @default(uuid()) @db.Uuid
+  slug          String   @unique
+  titleEn       String
+  titleAr       String
+  /// Short Arabic line shown under the tool name in the app.
+  subtitleAr    String   @default("")
+  /// Server-side instruction for prompt-driven models; empty for the
+  /// specialist models that take an image and nothing else. Admin-only.
+  prompt        String   @default("")
+  model         String   @default("google/nano-banana")
+  /// Per-tool model knobs (upscale factor, colorizer variant, …) merged over
+  /// the registry defaults. Lets two tools share one model and behave apart.
+  modelOptions  Json?
+  beforeUrl     String?
+  afterUrl      String?
+  /// Grid-sized copy of afterUrl (400px) — see AiTemplate.thumbUrl.
+  thumbUrl      String?
+  creditCost    Int      @default(8)
+  isPremium     Boolean  @default(false)
+  published     Boolean  @default(true)
+  sortOrder     Int      @default(0)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([published, sortOrder])
+}
+
+/// A material style applied to a TEXT layer (gold, diamond, glitter, …) —
+/// Andalusi's "Effects" strip. Deliberately NOT a generated image: `spec`
+/// describes the fill declaratively so the web editor (Konva/canvas) and the
+/// mobile app (Compose) can each draw it natively. That keeps it free,
+/// instant, and — the whole point — the text stays editable afterwards.
+model TextEffect {
+  id         String   @id @default(uuid()) @db.Uuid
+  slug       String   @unique
+  titleEn    String
+  titleAr    String
+  /// Declarative fill/stroke/shadow description. See src/lib/textEffects/spec.js
+  /// — both platforms render from this, so changing its shape is a contract
+  /// change, not a local edit.
+  spec       Json
+  /// Sample rendering shown in the effects strip. Generated from `spec`, so it
+  /// can always be rebuilt and never drifts from what the effect actually does.
+  previewUrl String?
+  isPremium  Boolean  @default(false)
+  published  Boolean  @default(true)
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([published, sortOrder])
 }

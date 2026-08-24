@@ -1,6 +1,12 @@
 import Link from "next/link";
 
+import { NayrozLockup } from "@/components/brand/NayrozLogo";
+
 import LoginForm from "./LoginForm";
+
+export const metadata = {
+  title: "Sign in",
+};
 
 export default async function LoginPage({ searchParams }) {
   const resolvedParams = await searchParams;
@@ -10,19 +16,26 @@ export default async function LoginPage({ searchParams }) {
     String(resolvedParams?.registered || "").trim() === "1";
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background px-6 text-foreground">
-      <div className="w-full max-w-md rounded-xl border border-border bg-card p-6 shadow-sm">
-        <div className="space-y-2">
-          <h1 className="text-2xl font-semibold">Sign in</h1>
-          <p className="text-sm text-muted-foreground">
-            Access your template workspace.
-          </p>
+    <div className="flex min-h-screen items-center justify-center bg-background px-6 py-10 text-foreground">
+      <div className="w-full max-w-md">
+        {/* The lockup sits above the card with its own clear space, rather than
+            competing with the heading inside it. */}
+        <div className="mb-8 flex justify-center">
+          <NayrozLockup size={34} />
         </div>
 
-        <LoginForm initialEmail={email} initialError={error} registered={registered} />
+        <div className="card p-6">
+          <div className="space-y-2">
+            <h1 className="text-2xl font-semibold">Sign in</h1>
+            <p className="text-sm text-muted-foreground">Access your Nayroz Studio workspace.</p>
+          </div>
 
-        <div className="mt-3 rounded-md border border-border bg-muted/30 px-3 py-3 text-xs text-muted-foreground">
-          Dashboard access is invite-only. Use the registration link from an admin to create a designer account.
+          <LoginForm initialEmail={email} initialError={error} registered={registered} />
+
+          <div className="alert mt-4">
+            Dashboard access is invite-only. Use the registration link from an admin to create a
+            designer account.
+          </div>
         </div>
 
         <div className="mt-4 text-center text-xs text-muted-foreground">

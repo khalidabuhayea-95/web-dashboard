@@ -19,6 +19,12 @@ export const MEDIA_CREDIT_FEATURES = {
   AI_EXPAND: "ai-expand",
   UPSCALE: "upscale",
   OBJECT_REMOVAL: "object-removal",
+  // One bucket for the whole AI Tools tab (templates + magic tools). The
+  // per-run price is NOT this feature's configured cost — each tool carries its
+  // own creditCost, passed to the wallet as an override. This entry exists so
+  // the spend report can group the tab, and so a default exists if a tool ever
+  // reports no cost of its own.
+  AI_TOOLS: "ai-tools",
 };
 
 export const SUPPORTED_MEDIA_CREDIT_FEATURES = Object.values(MEDIA_CREDIT_FEATURES);
@@ -29,6 +35,7 @@ export const MEDIA_CREDIT_FEATURE_LABELS = {
   [MEDIA_CREDIT_FEATURES.AI_EXPAND]: "AI expand",
   [MEDIA_CREDIT_FEATURES.UPSCALE]: "Upscale",
   [MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL]: "Object removal",
+  [MEDIA_CREDIT_FEATURES.AI_TOOLS]: "AI tools (templates + magic tools)",
 };
 
 export const DEFAULT_MONTHLY_CREDIT_ALLOWANCE = 100;
@@ -39,6 +46,7 @@ export const DEFAULT_CREDIT_COSTS = {
   [MEDIA_CREDIT_FEATURES.AI_EXPAND]: 8, // ~$0.040
   [MEDIA_CREDIT_FEATURES.UPSCALE]: 1, // ~$0.002
   [MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL]: 1, // ~$0.0005
+  [MEDIA_CREDIT_FEATURES.AI_TOOLS]: 8, // fallback only — each tool prices itself
 };
 
 // Provider cost per run, in micro-dollars (1_000_000 = $1). Verified against the
@@ -60,6 +68,19 @@ export const DEFAULT_MODEL_PRICES_MICROS = {
   "bria/eraser": 40_000,
   "bria/expand-image": 40_000,
   "luma/reframe-image": 10_000,
+  // AI-templates catalog models (see src/lib/aiTemplates/models.js), added
+  // 2026-08-12 from vendor pricing pages — ESTIMATEs where the page shows a
+  // range rather than a flat per-image rate.
+  "qwen/qwen-image": 20_000, // ESTIMATE (~$0.02/image)
+  "ideogram-ai/ideogram-v4-turbo": 30_000,
+  "ideogram-ai/ideogram-v4-balanced": 60_000,
+  "bytedance/seedream-4.5": 40_000,
+  "google/nano-banana-pro": 134_000, // 1K/2K tier
+  // Magic Tools specialist models (see src/lib/magicTools/models.js).
+  "tencentarc/gfpgan": 3_200,
+  "flux-kontext-apps/restore-image": 40_000,
+  "arielreplicate/deoldify_image": 12_000, // ESTIMATE (per-second community model)
+  "local/background-remover": 0, // self-hosted, no provider cost
 };
 
 export const MAX_MONTHLY_CREDIT_ALLOWANCE = 1_000_000;

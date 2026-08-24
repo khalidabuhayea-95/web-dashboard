@@ -9,6 +9,11 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --color-brand-teal: var(--brand-teal);
+  --color-brand-coral: var(--brand-coral);
+  --color-brand-navy: var(--brand-navy);
+  --color-brand-ink: var(--brand-ink);
+  --color-brand-paper: var(--brand-paper);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -38,65 +43,123 @@
   --color-popover: var(--popover);
   --color-card-foreground: var(--card-foreground);
   --color-card: var(--card);
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --radius-2xl: calc(var(--radius) + 8px);
-  --radius-3xl: calc(var(--radius) + 12px);
-  --radius-4xl: calc(var(--radius) + 16px);
+  --color-surface-1: var(--ds-bg);
+  --color-surface-2: var(--ds-surface);
+  --color-surface-3: var(--ds-surface-2);
+  --color-t-primary: var(--ds-text);
+  --color-t-secondary: var(--ds-text-muted);
+  --color-t-tertiary: var(--ds-text-subtle);
+  --color-s-subtle: var(--ds-border);
+  --color-s-strong: var(--ds-border-strong);
+
+  /* Flat, generous radii — the reference leans on shape, not borders. */
+  --radius-sm: 0.5rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --radius-xl: 1.25rem;
+  --radius-2xl: 1.5rem;
+  --radius-3xl: 1.75rem;
+  --radius-4xl: 2rem;
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: #22828c; /* brand teal */
+  --radius: 0.75rem;
+
+  /* --- Nayroz brand kit ---------------------------------------------------
+     The canonical values from nayroz-brand-kit. Everything below derives from
+     these, so the palette has one source of truth. Coral is the drop colour in
+     the mark and nothing else — do not promote it to a UI accent. */
+  --brand-teal: #22828c;
+  --brand-coral: #e95e57;
+  --brand-navy: #104d6f;
+  --brand-ink: #17191c;
+  --brand-paper: #f4f4f5;
+  --brand-gradient-from: #2a97a2;
+  --brand-gradient-to: var(--brand-navy);
+  --brand-gradient: linear-gradient(135deg, var(--brand-gradient-from), var(--brand-gradient-to));
+  /* Teal lifted off the dark ground; the kit teal is too dim below #17191c. */
+  --brand-teal-light: #3db2bd;
+
+  /* Neutral shade ramp — surfaces and text derive from these. Anchored to the
+     brand: Ink is text-on-light (02), Paper is the light ground (09). The
+     remaining steps keep their original lightness and pick up Ink's cool cast
+     so dark surfaces sit with the teal/navy rather than against it. */
+  --shade-01: #101215;
+  --shade-02: var(--brand-ink);
+  --shade-03: #1e2126;
+  --shade-04: #272b31;
+  --shade-05: #4c4f55;
+  --shade-06: #71757c;
+  --shade-07: #7a7e85;
+  --shade-08: #e1e2e5;
+  --shade-09: var(--brand-paper);
+  --shade-10: #fdfdfe;
+
+  --background: var(--shade-09);
+  --foreground: var(--shade-02);
+  --card: var(--shade-10);
+  --card-foreground: var(--shade-02);
+  --popover: var(--shade-10);
+  --popover-foreground: var(--shade-02);
+  --primary: var(--brand-teal);
   --primary-foreground: #ffffff;
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: #22828c;
-  --chart-1: #22828c; /* brand teal (primary) */
-  --chart-2: #e95e57; /* brand coral (accent) */
-  --chart-3: #104d6f; /* brand navy */
+  --secondary: #f9f9f9;
+  --secondary-foreground: var(--shade-02);
+  --muted: #f9f9f9;
+  --muted-foreground: var(--shade-06);
+  --accent: #ededed;
+  --accent-foreground: var(--shade-02);
+  --destructive: #ff381c;
+  --success: #00a656;
+  --info: #2a85ff;
+  --warning: #ff9d34;
+  /* Borders are near-invisible by design; shape carries the hierarchy. */
+  --border: rgba(122, 126, 133, 0.1);
+  --input: var(--shade-08);
+  --ring: var(--brand-teal);
+  /* Charts are the one place the full brand palette reads as a set. */
+  --chart-1: var(--brand-teal);
+  --chart-2: var(--brand-coral);
+  --chart-3: var(--brand-navy);
   --chart-4: #e0a23b; /* support amber */
   --chart-5: #6fb3ba; /* light teal */
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: #22828c;
+  /* Sidebar sits directly on the page background — no panel, no divider. */
+  --sidebar: var(--shade-09);
+  --sidebar-foreground: var(--shade-02);
+  --sidebar-primary: var(--brand-teal);
   --sidebar-primary-foreground: #ffffff;
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: #22828c;
+  --sidebar-accent: var(--shade-10);
+  --sidebar-accent-foreground: var(--shade-02);
+  --sidebar-border: transparent;
+  --sidebar-ring: var(--brand-teal);
 
-  --ds-bg: #f5f6fa;
-  --ds-surface: #ffffff;
-  --ds-surface-2: #f1f3f7;
-  --ds-border: #e2e5ec;
-  --ds-text: #0f172a;
-  --ds-text-muted: #5b6475;
-  --ds-primary: #22828c;
+  --ds-bg: var(--shade-09);
+  --ds-surface: var(--shade-10);
+  --ds-surface-2: #f9f9fa;
+  --ds-surface-3: rgba(244, 244, 245, 0.5);
+  --ds-border: rgba(122, 126, 133, 0.1);
+  --ds-border-strong: var(--shade-08);
+  --ds-text: var(--shade-02);
+  --ds-text-muted: var(--shade-06);
+  --ds-text-subtle: var(--shade-07);
+  --ds-primary: var(--brand-teal);
   --ds-primary-foreground: #ffffff;
   --ds-accent: #d6ebec;
-  --ds-destructive: oklch(0.6 0.2 28);
-  --ds-shadow-sm: 0 1px 3px rgba(15, 23, 42, 0.08);
-  --ds-shadow-md: 0 12px 24px rgba(15, 23, 42, 0.12);
-  --ds-shadow-lg: 0 24px 48px rgba(15, 23, 42, 0.18);
+  --ds-destructive: #ff381c;
+  --ds-success: #00a656;
+  --ds-info: #2a85ff;
+  --ds-warning: #ff9d34;
+  /* Cards are flat. Shadows are reserved for things that actually float. */
+  --ds-shadow-none: none;
+  --ds-shadow-sm: 0 1px 2px -1px rgba(8, 8, 8, 0.06);
+  --ds-shadow-md: 0 5px 1.5px -4px rgba(8, 8, 8, 0.1), 0 6px 4px -4px rgba(8, 8, 8, 0.05);
+  --ds-shadow-lg: 0 16px 48px -4px rgba(0, 0, 0, 0.14), 0 6px 13px 0 rgba(8, 8, 8, 0.05);
   --ds-radius-sm: 10px;
-  --ds-radius-md: 14px;
-  --ds-radius-lg: 18px;
+  --ds-radius-md: 16px;
+  --ds-radius-lg: 24px;
+  --ds-radius-xl: 32px;
+  --ds-radius-pill: 999px;
+  --ds-ease: cubic-bezier(0, 0, 0.2, 1);
   --ds-space-1: 4px;
   --ds-space-2: 8px;
   --ds-space-3: 12px;
@@ -106,51 +169,62 @@
 }
 
 .dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: #3db2bd; /* brand teal, lightened for dark */
+  --background: var(--shade-02);
+  --foreground: var(--shade-09);
+  --card: var(--shade-03);
+  --card-foreground: var(--shade-09);
+  --popover: var(--shade-04);
+  --popover-foreground: var(--shade-09);
+  --primary: var(--brand-teal-light);
   --primary-foreground: #0f1116;
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: #3db2bd;
-  --chart-1: #3db2bd; /* brand teal, lightened for dark */
+  --secondary: var(--shade-03);
+  --secondary-foreground: var(--shade-09);
+  --muted: #212429;
+  --muted-foreground: var(--shade-07);
+  --accent: #353941;
+  --accent-foreground: #ffffff;
+  --destructive: #ff5b45;
+  --success: #22c55e;
+  --info: #4f9dff;
+  --warning: #ffb45c;
+  --border: rgba(255, 255, 255, 0.08);
+  --input: rgba(255, 255, 255, 0.1);
+  --ring: var(--brand-teal-light);
+  --chart-1: var(--brand-teal-light);
   --chart-2: #f26e66; /* brand coral, lightened for dark */
   --chart-3: #4f93b8; /* brand navy, lightened for dark */
   --chart-4: #e8b056; /* support amber */
   --chart-5: #7fc3c9; /* light teal */
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: #3db2bd;
+  /* Sidebar goes darker than the page in dark mode — the reference's one
+     deliberate inversion of the light theme, where it sits flush instead. */
+  --sidebar: var(--shade-01);
+  --sidebar-foreground: #ffffff;
+  --sidebar-primary: var(--brand-teal-light);
   --sidebar-primary-foreground: #0f1116;
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: #3db2bd;
+  --sidebar-accent: var(--shade-04);
+  --sidebar-accent-foreground: #ffffff;
+  --sidebar-border: transparent;
+  --sidebar-ring: var(--brand-teal-light);
 
-  --ds-bg: #0f1116;
-  --ds-surface: #151821;
-  --ds-surface-2: #1e2230;
-  --ds-border: #2a2f3d;
-  --ds-text: #f1f5f9;
-  --ds-text-muted: #9aa4b2;
-  --ds-primary: #3db2bd;
+  --ds-bg: var(--shade-02);
+  --ds-surface: var(--shade-03);
+  --ds-surface-2: #212429;
+  --ds-surface-3: rgba(16, 18, 21, 0.5);
+  --ds-border: rgba(255, 255, 255, 0.08);
+  --ds-border-strong: #2d3138;
+  --ds-text: var(--shade-09);
+  --ds-text-muted: var(--shade-07);
+  --ds-text-subtle: var(--shade-06);
+  --ds-primary: var(--brand-teal-light);
   --ds-primary-foreground: #0f1116;
   --ds-accent: #14333a;
-  --ds-destructive: oklch(0.7 0.2 28);
-  --ds-shadow-sm: 0 1px 2px oklch(0 0 0 / 0.4);
-  --ds-shadow-md: 0 12px 24px oklch(0 0 0 / 0.35);
-  --ds-shadow-lg: 0 24px 48px oklch(0 0 0 / 0.45);
+  --ds-destructive: #ff5b45;
+  --ds-success: #22c55e;
+  --ds-info: #4f9dff;
+  --ds-warning: #ffb45c;
+  --ds-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --ds-shadow-md: 0 5px 1.5px -4px rgba(8, 8, 8, 0.5), 0 6px 4px -4px rgba(8, 8, 8, 0.35);
+  --ds-shadow-lg: 0 16px 48px -4px rgba(0, 0, 0, 0.75), 0 0 10px 0 rgba(0, 0, 0, 0.5);
 }
 
 @layer base {
@@ -161,126 +235,144 @@
     @apply bg-background text-foreground;
     background-color: var(--ds-bg);
     color: var(--ds-text);
+    /* IBM Plex Sans Arabic is the brand typeface and covers both scripts, so
+       Arabic UI copy renders in the same family instead of a system fallback. */
+    font-family: var(--font-geist-sans), "IBM Plex Sans Arabic", ui-sans-serif, system-ui,
+      sans-serif;
+  }
+  h1,
+  h2,
+  h3 {
+    letter-spacing: -0.02em;
   }
 }
 
 .app-shell {
-  background: radial-gradient(
-      1200px 400px at 20% -10%,
-      oklch(0.9 0.05 195 / 0.38),
-      transparent
-    ),
-    radial-gradient(
-      900px 600px at 100% 0%,
-      oklch(0.86 0.06 230 / 0.22),
-      transparent
-    ),
-    var(--ds-bg);
+  background: var(--ds-bg);
   min-height: 100vh;
 }
 
+/* --- Brand marks ---------------------------------------------------------
+   Two of the kit's rules held in CSS so no caller can break them: the mark is
+   never stretched, and never renders below 24px. Clear space is the caller's
+   job — give it at least half the mark's width on every side. */
+.brand-mark {
+  display: block;
+  flex-shrink: 0;
+  min-width: 24px;
+  min-height: 24px;
+  object-fit: contain;
+}
+
+/* Surfaces are defined by fill and radius alone — no border, no shadow. */
 .surface {
   background: var(--ds-surface);
-  border: 1px solid var(--ds-border);
+  border: none;
   border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-sm);
+  box-shadow: none;
 }
 
 .surface-muted {
   background: var(--ds-surface-2);
-  border: 1px solid var(--ds-border);
+  border: none;
   border-radius: var(--ds-radius-lg);
 }
 
 .sidebar {
-  background: var(--ds-surface);
-  border-right: 1px solid var(--ds-border);
+  background: var(--sidebar);
+  border-right: none;
 }
 
+/* Reads as part of the page, but must stay opaque — it is sticky, so content
+   would otherwise scroll visibly underneath it. */
 .topbar {
-  background: var(--ds-surface);
-  border-bottom: 1px solid var(--ds-border);
-  box-shadow: var(--ds-shadow-sm);
+  background: var(--ds-bg);
+  border-bottom: none;
+  box-shadow: none;
 }
 
+/* Pill buttons, flat fills, no gradient or lift. */
 .btn {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: var(--ds-space-2);
-  border-radius: var(--ds-radius-sm);
-  padding: 9px 14px;
+  border-radius: var(--ds-radius-pill);
+  padding: 9px 18px;
   font-size: 0.85rem;
-  font-weight: 600;
-  transition: transform 160ms ease, box-shadow 160ms ease, background 160ms ease, color 160ms ease,
-    border-color 160ms ease;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 80%, transparent);
+  font-weight: 500;
+  transition: background 200ms var(--ds-ease, cubic-bezier(0, 0, 0.2, 1)), color 200ms ease,
+    border-color 200ms ease, opacity 200ms ease;
+  border: 1px solid transparent;
   min-height: 40px;
   white-space: nowrap;
 }
 
 .btn-primary {
-  background: linear-gradient(180deg, color-mix(in oklab, var(--ds-primary) 88%, white 12%), var(--ds-primary));
+  background: var(--ds-primary);
   color: var(--ds-primary-foreground);
-  box-shadow: 0 6px 16px color-mix(in oklab, var(--ds-primary) 24%, transparent);
-  border-color: color-mix(in oklab, var(--ds-primary) 68%, black 8%);
+  box-shadow: none;
 }
 
 .btn-primary:hover {
-  transform: translateY(-1px);
-  filter: brightness(0.97);
+  background: color-mix(in oklab, var(--ds-primary) 86%, black 14%);
 }
 
 .btn-secondary {
-  background: var(--ds-surface-2);
+  background: var(--ds-surface);
   color: var(--ds-text);
   border-color: var(--ds-border);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.28);
+  box-shadow: none;
+}
+
+.btn-secondary:hover {
+  background: var(--ds-surface-2);
 }
 
 .btn-ghost {
   background: transparent;
-  color: var(--ds-text);
+  color: var(--ds-text-muted);
   border-color: transparent;
 }
 
 .btn-ghost:hover {
-  background: var(--ds-surface-2);
-}
-
-.btn:hover {
-  box-shadow: var(--ds-shadow-sm);
+  background: var(--accent);
+  color: var(--ds-text);
 }
 
 .btn:focus-visible {
   outline: none;
-  border-color: color-mix(in oklab, var(--ds-primary) 64%, var(--ds-border) 36%);
   box-shadow: 0 0 0 3px color-mix(in oklab, var(--ds-primary) 22%, transparent);
 }
 
 .btn:disabled {
-  opacity: 0.6;
+  opacity: 0.45;
   cursor: not-allowed;
   transform: none;
   box-shadow: none;
 }
 
 .btn-destructive {
-  background: linear-gradient(180deg, color-mix(in oklab, var(--ds-destructive) 90%, white 10%), var(--ds-destructive));
+  background: var(--ds-destructive);
   color: #fff;
-  border-color: color-mix(in oklab, var(--ds-destructive) 70%, black 12%);
+  border-color: transparent;
+}
+
+.btn-destructive:hover {
+  background: color-mix(in oklab, var(--ds-destructive) 86%, black 14%);
 }
 
 .card {
   background: var(--ds-surface);
-  border: 1px solid var(--ds-border);
-  border-radius: var(--ds-radius-lg);
-  box-shadow: var(--ds-shadow-sm);
+  border: none;
+  border-radius: var(--ds-radius-xl);
+  box-shadow: none;
 }
 
+/* No rule between header and body — spacing separates them. */
 .card-header {
-  padding: var(--ds-space-5);
-  border-bottom: 1px solid var(--ds-border);
+  padding: 20px var(--ds-space-5) 0;
+  border-bottom: none;
 }
 
 .card-content {
@@ -288,8 +380,9 @@
 }
 
 .card-title {
-  font-size: 1.1rem;
+  font-size: 1.05rem;
   font-weight: 600;
+  letter-spacing: -0.01em;
 }
 
 .card-subtitle {
@@ -307,9 +400,10 @@
   text-align: left;
   padding: 12px 14px;
   color: var(--ds-text-muted);
-  font-weight: 600;
+  font-weight: 500;
+  font-size: 0.8rem;
   border-bottom: 1px solid var(--ds-border);
-  background: color-mix(in oklab, var(--ds-surface) 93%, #eef1fb 7%);
+  background: transparent;
   position: sticky;
   top: 0;
   z-index: 1;
@@ -320,33 +414,40 @@
   border-bottom: 1px solid var(--ds-border);
 }
 
-.table tbody tr:nth-child(even) {
-  background: color-mix(in oklab, var(--ds-surface-2) 58%, transparent);
-}
-
+/* Zebra striping removed — the reference separates rows with hairlines only. */
 .table tbody tr:hover {
   background: var(--ds-surface-2);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: none;
 }
 
 .input,
 .select,
 .textarea {
   width: 100%;
-  border-radius: var(--ds-radius-sm);
+  border-radius: var(--ds-radius-md);
   border: 1px solid var(--ds-border);
-  background: var(--ds-surface);
-  padding: 10px 12px;
+  background: var(--ds-surface-2);
+  padding: 10px 14px;
   font-size: 0.9rem;
   color: var(--ds-text);
-  transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
+  transition: border-color 200ms ease, box-shadow 200ms ease, background 200ms ease;
+}
+
+.input::placeholder,
+.textarea::placeholder {
+  color: var(--ds-text-subtle);
 }
 
 .input:focus,
 .select:focus,
 .textarea:focus {
   outline: none;
-  border-color: var(--ds-primary);
-  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ds-primary) 20%, transparent);
+  background: var(--ds-surface);
+  border-color: color-mix(in oklab, var(--ds-primary) 45%, transparent);
+  box-shadow: 0 0 0 3px color-mix(in oklab, var(--ds-primary) 15%, transparent);
 }
 
 .textarea {
@@ -354,12 +455,13 @@
   resize: vertical;
 }
 
+/* Sentence case, not shouty uppercase — matches the reference's quieter labels. */
 .label {
-  font-size: 0.75rem;
-  font-weight: 600;
+  font-size: 0.8rem;
+  font-weight: 500;
   color: var(--ds-text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  text-transform: none;
+  letter-spacing: 0;
 }
 
 .field-help {
@@ -368,40 +470,80 @@
   line-height: 1.4;
 }
 
+/* Borderless tinted pills — status reads from fill, not outline. */
 .badge {
   display: inline-flex;
   align-items: center;
   padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 0.7rem;
-  font-weight: 600;
-  border: 1px solid var(--ds-border);
-  background: var(--ds-surface-2);
-  color: var(--ds-text);
+  border-radius: var(--ds-radius-pill);
+  font-size: 0.72rem;
+  font-weight: 500;
+  border: none;
+  background: var(--accent);
+  color: var(--ds-text-muted);
 }
 
 .badge-success {
-  background: oklch(0.9 0.12 150 / 0.3);
-  color: oklch(0.35 0.16 150);
-  border-color: oklch(0.6 0.1 150 / 0.5);
+  background: color-mix(in oklab, var(--ds-success) 14%, transparent);
+  color: color-mix(in oklab, var(--ds-success) 82%, black 18%);
 }
 
 .badge-warning {
-  background: oklch(0.9 0.12 80 / 0.3);
-  color: oklch(0.45 0.12 80);
-  border-color: oklch(0.7 0.1 80 / 0.6);
+  background: color-mix(in oklab, var(--ds-warning) 16%, transparent);
+  color: color-mix(in oklab, var(--ds-warning) 72%, black 28%);
 }
 
 .badge-destructive {
-  background: oklch(0.9 0.12 25 / 0.3);
-  color: oklch(0.45 0.2 25);
-  border-color: oklch(0.7 0.2 25 / 0.6);
+  background: color-mix(in oklab, var(--ds-destructive) 12%, transparent);
+  color: color-mix(in oklab, var(--ds-destructive) 84%, black 16%);
+}
+
+.dark .badge-success {
+  color: color-mix(in oklab, var(--ds-success) 70%, white 30%);
+}
+
+.dark .badge-warning {
+  color: color-mix(in oklab, var(--ds-warning) 70%, white 30%);
+}
+
+.dark .badge-destructive {
+  color: color-mix(in oklab, var(--ds-destructive) 70%, white 30%);
+}
+
+/* Same borderless-tinted logic as the badges, sized for a line or two of prose. */
+.alert {
+  border-radius: var(--ds-radius-md);
+  border: none;
+  padding: 10px 12px;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  background: var(--ds-surface-2);
+  color: var(--ds-text-muted);
+}
+
+.alert-success {
+  background: color-mix(in oklab, var(--ds-success) 12%, transparent);
+  color: color-mix(in oklab, var(--ds-success) 82%, black 18%);
+}
+
+.alert-destructive {
+  background: color-mix(in oklab, var(--ds-destructive) 12%, transparent);
+  color: color-mix(in oklab, var(--ds-destructive) 84%, black 16%);
+}
+
+.dark .alert-success {
+  color: color-mix(in oklab, var(--ds-success) 70%, white 30%);
+}
+
+.dark .alert-destructive {
+  color: color-mix(in oklab, var(--ds-destructive) 70%, white 30%);
 }
 
 .modal-backdrop {
   position: fixed;
   inset: 0;
-  background: oklch(0.12 0.02 260 / 0.5);
+  background: rgba(8, 8, 8, 0.4);
+  backdrop-filter: blur(4px);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -412,17 +554,19 @@
   width: min(520px, 90vw);
   background: var(--ds-surface);
   border-radius: var(--ds-radius-lg);
-  border: 1px solid var(--ds-border);
+  border: none;
   box-shadow: var(--ds-shadow-lg);
   padding: var(--ds-space-6);
 }
 
+/* Flat near-black bar replaces the old blue→purple gradient; the white pills
+   inside it still read correctly against a solid dark fill. */
 .editor-canva-topbar {
-  border: 1px solid color-mix(in oklab, #5e8df4 35%, var(--ds-border) 65%);
-  border-radius: 16px;
-  background: linear-gradient(96deg, #0f8eb9 0%, #476ddb 44%, #6535d7 100%);
+  border: none;
+  border-radius: var(--ds-radius-md);
+  background: var(--shade-01);
   color: #ffffff;
-  box-shadow: 0 14px 32px rgba(48, 64, 140, 0.3);
+  box-shadow: none;
   position: sticky;
   top: 10px;
   z-index: 22;
@@ -430,17 +574,15 @@
 
 .editor-app-shell {
   min-height: 100vh;
-  background: #d7d9e0;
+  background: var(--ds-bg);
 }
 
 .dark .editor-app-shell {
-  background: #0a0d14;
+  background: var(--ds-bg);
 }
 
 .editor-canva-shell {
-  background:
-    radial-gradient(1200px 380px at 0% -14%, rgba(11, 166, 217, 0.12), transparent 60%),
-    radial-gradient(1100px 460px at 100% -8%, rgba(120, 58, 214, 0.1), transparent 62%);
+  background: none;
 }
 
 .editor-page {
@@ -449,11 +591,9 @@
 }
 
 .editor-shell-header {
-  border-radius: 16px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 70%, #c7d2fe 30%);
-  background:
-    radial-gradient(1200px 280px at 0% 0%, color-mix(in oklab, var(--ds-accent) 65%, transparent), transparent 58%),
-    var(--ds-surface);
+  border-radius: var(--ds-radius-lg);
+  border: none;
+  background: var(--ds-surface);
 }
 
 .editor-shell-header-content {
@@ -543,17 +683,17 @@
 
 .editor-drawer-card {
   overflow: hidden;
-  border-radius: 18px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 72%, #c7d2fe 28%);
-  box-shadow: 0 18px 36px color-mix(in oklab, #0f172a 14%, transparent);
+  border-radius: var(--ds-radius-lg);
+  border: none;
+  box-shadow: none;
   max-height: calc(100vh - 96px);
 }
 
 .editor-drawer-header {
   gap: 10px;
-  padding: 12px 14px 10px !important;
-  border-bottom: 1px solid var(--ds-border);
-  background: color-mix(in oklab, var(--ds-surface) 92%, #eef3ff 8%);
+  padding: 14px 16px 10px !important;
+  border-bottom: none;
+  background: transparent;
 }
 
 .editor-drawer-header-row {
@@ -587,7 +727,7 @@
   gap: 8px;
   width: fit-content;
   border: 1px solid color-mix(in oklab, var(--ds-primary) 32%, var(--ds-border) 68%);
-  background: color-mix(in oklab, var(--ds-surface) 92%, #e8ecff 8%);
+  background: color-mix(in oklab, var(--ds-surface) 92%, #ededed 8%);
   color: var(--ds-text);
   border-radius: 999px;
   padding: 7px 11px;
@@ -596,12 +736,12 @@
 }
 
 .editor-drawer-open-pill:hover {
-  background: color-mix(in oklab, var(--ds-surface) 86%, #dfe6ff 14%);
+  background: color-mix(in oklab, var(--ds-surface) 86%, #ededed 14%);
 }
 
 .editor-pane {
-  border: 1px solid color-mix(in oklab, var(--ds-border) 80%, #c9d2f9 20%);
-  box-shadow: 0 10px 24px color-mix(in oklab, #0f172a 7%, transparent);
+  border: none;
+  box-shadow: none;
 }
 
 .editor-pane-title {
@@ -645,7 +785,7 @@
   gap: 8px;
   padding: 7px;
   border-radius: 12px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 84%, #d7def6 16%);
+  border: 1px solid color-mix(in oklab, var(--ds-border) 84%, #e2e2e2 16%);
   background: color-mix(in oklab, var(--ds-surface-2) 65%, transparent);
   transition: border-color 160ms ease, box-shadow 160ms ease, background 160ms ease;
   cursor: grab;
@@ -657,12 +797,12 @@
 
 .editor-layer-row:hover {
   border-color: color-mix(in oklab, var(--ds-primary) 24%, var(--ds-border) 76%);
-  background: color-mix(in oklab, var(--ds-surface) 93%, #eef3ff 7%);
+  background: color-mix(in oklab, var(--ds-surface) 93%, #f1f1f1 7%);
 }
 
 .editor-layer-row.is-active {
   border-color: color-mix(in oklab, var(--ds-primary) 45%, var(--ds-border) 55%);
-  background: color-mix(in oklab, var(--ds-surface) 88%, #e5edff 12%);
+  background: color-mix(in oklab, var(--ds-surface) 88%, #ededed 12%);
   box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--ds-primary) 22%, transparent);
 }
 
@@ -718,8 +858,8 @@
   border-radius: 8px;
   overflow: hidden;
   position: relative;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 72%, #d8deee 28%);
-  background: color-mix(in oklab, var(--ds-surface) 88%, #e7edf8 12%);
+  border: 1px solid color-mix(in oklab, var(--ds-border) 72%, #e2e2e2 28%);
+  background: color-mix(in oklab, var(--ds-surface) 88%, #ededed 12%);
   flex-shrink: 0;
   display: grid;
   place-items: center;
@@ -745,8 +885,8 @@
 
 .editor-layer-preview-text {
   background:
-    linear-gradient(150deg, color-mix(in oklab, #3b5bdb 12%, #ffffff 88%), transparent 68%),
-    color-mix(in oklab, var(--ds-surface) 85%, #eef2ff 15%);
+    linear-gradient(150deg, color-mix(in oklab, #2a85ff 12%, #ffffff 88%), transparent 68%),
+    color-mix(in oklab, var(--ds-surface) 85%, #f1f1f1 15%);
 }
 
 .editor-layer-type-dot {
@@ -757,28 +897,30 @@
   position: absolute;
   inset-inline-end: 3px;
   bottom: 3px;
-  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ds-surface) 90%, #f2f5fb 10%);
+  box-shadow: 0 0 0 1px color-mix(in oklab, var(--ds-surface) 90%, #f1f1f1 10%);
   pointer-events: none;
 }
 
+/* Layer-kind dots stay colour-coded — the reference reserves saturation for
+   exactly this kind of small categorical marker. */
 .editor-layer-type-shape {
-  background: #5b6475;
+  background: var(--shade-07);
 }
 
 .editor-layer-type-text {
-  background: #3b5bdb;
+  background: #2a85ff;
 }
 
 .editor-layer-type-image {
-  background: #0f8eb9;
+  background: #00a656;
 }
 
 .editor-layer-type-video {
-  background: #7345d6;
+  background: #7f5fff;
 }
 
 .editor-layer-type-sticker {
-  background: #e67e22;
+  background: #ff9d34;
 }
 
 .editor-layer-text {
@@ -824,8 +966,8 @@
 .editor-layers-empty {
   min-height: 120px;
   border-radius: 12px;
-  border: 1px dashed color-mix(in oklab, var(--ds-border) 80%, #c7d2fe 20%);
-  background: color-mix(in oklab, var(--ds-surface) 95%, #eef2ff 5%);
+  border: 1px dashed color-mix(in oklab, var(--ds-border) 80%, #e2e2e2 20%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f1f1f1 5%);
   color: var(--ds-text-muted);
   display: flex;
   align-items: center;
@@ -840,7 +982,7 @@
   border: 1px solid var(--ds-border);
   border-radius: 12px;
   padding: 3px;
-  background: color-mix(in oklab, var(--ds-surface-2) 86%, #e8ecfb 14%);
+  background: color-mix(in oklab, var(--ds-surface-2) 86%, #f1f1f1 14%);
 }
 
 .editor-drawer-mode-btn {
@@ -854,7 +996,7 @@
   border: 1px solid var(--ds-border);
   border-radius: 12px;
   padding: 6px;
-  background: color-mix(in oklab, var(--ds-surface) 95%, #f1f4ff 5%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f9f9f9 5%);
 }
 
 .editor-font-filter-grid {
@@ -864,8 +1006,9 @@
 }
 
 .editor-font-panel-card {
-  border-radius: 14px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 74%, #ccd5f8 26%);
+  border-radius: var(--ds-radius-md);
+  border: none;
+  background: var(--ds-surface-2);
 }
 
 .editor-font-panel-head {
@@ -899,7 +1042,7 @@
 .editor-font-option-row:hover {
   transform: translateY(-1px);
   border-color: color-mix(in oklab, var(--ds-primary) 30%, var(--ds-border) 70%);
-  background: color-mix(in oklab, var(--ds-surface) 93%, #f5f7ff 7%);
+  background: color-mix(in oklab, var(--ds-surface) 93%, #f9f9f9 7%);
 }
 
 .editor-font-option-row.is-active {
@@ -940,15 +1083,11 @@
 }
 
 .editor-context-toolbar {
-  border-radius: 14px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 76%, #cfd8f7 24%);
+  border-radius: var(--ds-radius-md);
+  border: none;
   padding: 8px 10px;
-  background: linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--ds-surface) 97%, #ffffff 3%),
-      color-mix(in oklab, var(--ds-surface) 90%, #eaf0ff 10%)
-    );
-  box-shadow: 0 8px 20px color-mix(in oklab, #0f172a 10%, transparent);
+  background: var(--ds-surface);
+  box-shadow: none;
   position: sticky;
   top: 74px;
   z-index: 18;
@@ -1024,7 +1163,7 @@
 }
 
 .editor-side-panel {
-  border-radius: 14px;
+  border-radius: var(--ds-radius-lg);
 }
 
 .editor-side-panel .card-header {
@@ -1036,13 +1175,13 @@
 }
 
 .editor-stage-card {
-  border-radius: 18px;
+  border-radius: var(--ds-radius-lg);
   overflow: clip;
 }
 
 .editor-stage-toolbar {
   border-bottom: 1px solid var(--ds-border);
-  background: color-mix(in oklab, var(--ds-surface) 95%, #eef2ff 5%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f1f1f1 5%);
   padding: 10px 12px;
   display: flex;
   align-items: center;
@@ -1060,11 +1199,7 @@
 
 .editor-text-actions-wrap {
   border-bottom: 1px solid var(--ds-border);
-  background: linear-gradient(
-      180deg,
-      color-mix(in oklab, var(--ds-surface) 90%, #eef3ff 10%),
-      color-mix(in oklab, var(--ds-surface) 97%, #f3f4f6 3%)
-    );
+  background: var(--ds-surface);
   padding: 12px;
 }
 
@@ -1076,15 +1211,15 @@
   overflow-x: auto;
   scrollbar-width: thin;
   overscroll-behavior-x: contain;
-  border: 1px solid color-mix(in oklab, #a7afc2 18%, var(--ds-border) 82%);
+  border: 1px solid color-mix(in oklab, #cfcfcf 18%, var(--ds-border) 82%);
   background: color-mix(in oklab, var(--ds-surface) 98%, #ffffff 2%);
   border-radius: 16px;
   padding: 6px 8px;
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.09);
+  box-shadow: 0 6px 18px rgba(8, 8, 8, 0.09);
 }
 
 .dark .editor-text-actions {
-  background: color-mix(in oklab, var(--ds-surface) 95%, #10131a 5%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #101010 5%);
 }
 
 .editor-text-action {
@@ -1108,9 +1243,9 @@
 }
 
 .editor-text-action.is-active {
-  background: color-mix(in oklab, var(--ds-primary) 16%, #ede9fe 84%);
+  background: color-mix(in oklab, var(--ds-primary) 16%, #ededed 84%);
   border-color: color-mix(in oklab, var(--ds-primary) 35%, var(--ds-border) 65%);
-  color: color-mix(in oklab, var(--ds-primary) 80%, #1f1f3d 20%);
+  color: color-mix(in oklab, var(--ds-primary) 80%, #141414 20%);
 }
 
 .editor-text-color {
@@ -1183,7 +1318,7 @@
   gap: 12px;
   align-items: stretch;
   min-height: 780px;
-  background: linear-gradient(180deg, #d7dbe5 0%, #cfd3df 100%);
+  background: var(--ds-surface-2);
   padding: 14px;
 }
 
@@ -1195,8 +1330,8 @@
 }
 
 .editor-stage-canvas-wrap {
-  background: #f9fafc;
-  box-shadow: inset 0 0 0 1px rgba(142, 154, 177, 0.22), 0 16px 32px rgba(15, 23, 42, 0.14);
+  background: #fdfdfd;
+  box-shadow: inset 0 0 0 1px rgba(123, 123, 123, 0.22), 0 16px 32px rgba(8, 8, 8, 0.14);
 }
 
 .editor-canvas-guides {
@@ -1210,7 +1345,7 @@
   position: absolute;
   width: 34px;
   height: 34px;
-  border-color: #a8b7f1;
+  border-color: #b4b4b4;
   border-style: solid;
   opacity: 0.92;
 }
@@ -1240,7 +1375,7 @@
 }
 
 .editor-aspect-panel {
-  background: color-mix(in oklab, var(--ds-surface) 95%, #eef3ff 5%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f1f1f1 5%);
 }
 
 .editor-aspect-grid {
@@ -1261,7 +1396,7 @@
 
 .editor-aspect-chip.is-active {
   border-color: color-mix(in oklab, var(--ds-primary) 40%, var(--ds-border) 60%);
-  background: color-mix(in oklab, var(--ds-surface) 88%, #e8ecff 12%);
+  background: color-mix(in oklab, var(--ds-surface) 88%, #ededed 12%);
 }
 
 .editor-aspect-chip-ratio {
@@ -1295,9 +1430,9 @@
   gap: 4px;
   border-radius: 999px;
   padding: 4px;
-  border: 1px solid color-mix(in oklab, var(--ds-border) 70%, #d4d9ea 30%);
-  background: color-mix(in oklab, var(--ds-surface) 95%, #f7f8ff 5%);
-  box-shadow: 0 10px 22px rgba(15, 23, 42, 0.16);
+  border: 1px solid color-mix(in oklab, var(--ds-border) 70%, #e2e2e2 30%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f9f9f9 5%);
+  box-shadow: 0 10px 22px rgba(8, 8, 8, 0.16);
 }
 
 .editor-selection-pill-btn {
@@ -1324,7 +1459,7 @@
 }
 
 .editor-selection-pill-btn.is-danger {
-  color: color-mix(in oklab, var(--ds-destructive) 82%, #7f1d1d 18%);
+  color: color-mix(in oklab, var(--ds-destructive) 82%, #141414 18%);
 }
 
 .editor-stage-floating-tools {
@@ -1352,15 +1487,15 @@
 }
 
 .editor-stage-rail {
-  border: 1px solid color-mix(in oklab, #9ca3af 20%, var(--ds-border) 80%);
-  border-radius: 14px;
-  background: color-mix(in oklab, #ffffff 93%, #eef2ff 7%);
+  border: none;
+  border-radius: var(--ds-radius-md);
+  background: var(--ds-surface);
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
   padding: 10px 6px;
-  box-shadow: 0 6px 16px rgba(15, 23, 42, 0.08);
+  box-shadow: 0 6px 16px rgba(8, 8, 8, 0.08);
 }
 
 .editor-stage-rail-tools {
@@ -1373,7 +1508,7 @@
   position: absolute;
   inset: 0;
   z-index: 12;
-  background: rgba(15, 23, 42, 0.36);
+  background: rgba(8, 8, 8, 0.36);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1383,9 +1518,9 @@
 .editor-crop-window {
   width: min(70%, 560px);
   aspect-ratio: 4 / 5;
-  border: 2px solid #8b5cf6;
+  border: 2px solid #141414;
   border-radius: 6px;
-  box-shadow: 0 0 0 9999px rgba(15, 23, 42, 0.42);
+  box-shadow: 0 0 0 9999px rgba(8, 8, 8, 0.42);
 }
 
 .editor-crop-flyout {
@@ -1437,7 +1572,7 @@
 
 .editor-stage-footer {
   border-top: 1px solid var(--ds-border);
-  background: color-mix(in oklab, var(--ds-surface) 95%, #eef1f9 5%);
+  background: color-mix(in oklab, var(--ds-surface) 95%, #f1f1f1 5%);
   padding: 10px 12px;
   display: grid;
   grid-template-columns: 1fr auto 1fr;
@@ -1512,9 +1647,9 @@
 .editor-skeleton {
   background: linear-gradient(
     110deg,
-    color-mix(in oklab, var(--ds-surface-2) 90%, #dbeafe 10%) 8%,
+    color-mix(in oklab, var(--ds-surface-2) 90%, #f1f1f1 10%) 8%,
     color-mix(in oklab, var(--ds-surface) 92%, white 8%) 18%,
-    color-mix(in oklab, var(--ds-surface-2) 90%, #dbeafe 10%) 33%
+    color-mix(in oklab, var(--ds-surface-2) 90%, #f1f1f1 10%) 33%
   );
   background-size: 200% 100%;
   animation: editor-shimmer 1.4s linear infinite;
@@ -1528,7 +1663,7 @@
   max-width: min(460px, calc(100vw - 24px));
   border: 1px solid color-mix(in oklab, var(--ds-primary) 35%, var(--ds-border) 65%);
   border-radius: 12px;
-  background: color-mix(in oklab, var(--ds-surface) 90%, #dbe8ff 10%);
+  background: color-mix(in oklab, var(--ds-surface) 90%, #ededed 10%);
   color: var(--ds-text);
   box-shadow: var(--ds-shadow-md);
   padding: 10px 12px;

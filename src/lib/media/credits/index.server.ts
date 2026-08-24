@@ -31,6 +31,8 @@ type EnforceOptions = {
   mobileUserId: string;
   feature: string;
   message?: string;
+  /** See checkMediaCredits — per-run price for catalogue-priced features. */
+  costOverride?: number | null;
 };
 
 type RecordOptions = {
@@ -84,9 +86,16 @@ async function sumCreditsUsed(mobileUserId: string, periodKey: string): Promise<
 export async function checkMediaCredits({
   mobileUserId,
   feature,
+  costOverride = null,
 }: {
   mobileUserId: string;
   feature: string;
+  /**
+   * Price for THIS run, overriding the feature's configured cost. The AI Tools
+   * tab needs it: every template and magic tool carries its own creditCost, so
+   * one feature bucket covers runs priced anywhere from 2 to 8 credits.
+   */
+  costOverride?: number | null;
 }): Promise<MediaCreditBalance> {
   const now = new Date();
   const periodKey = resolvePeriodKey(now);
@@ -122,7 +131,12 @@ export async function checkMediaCredits({
       sumCreditsUsed(mobileUserId, periodKey),
     ]);
 
-    const cost = resolveCreditCost(settings, normalizedFeature);
+    // Number(null) === 0 passes Number.isFinite, so test for an explicit value.
+    const hasOverride =
+      costOverride !== null && costOverride !== undefined && Number.isFinite(Number(costOverride));
+    const cost = hasOverride
+      ? Math.max(0, Math.floor(Number(costOverride)))
+      : resolveCreditCost(settings, normalizedFeature);
     const allowance = resolveMonthlyAllowance(settings, {
       userAllowance: user?.creditAllowance ?? null,
     });
@@ -176,8 +190,9 @@ export async function enforceMediaCredits({
   mobileUserId,
   feature,
   message,
+  costOverride = null,
 }: EnforceOptions): Promise<NextResponse | null> {
-  const balance = await checkMediaCredits({ mobileUserId, feature });
+  const balance = await checkMediaCredits({ mobileUserId, feature, costOverride });
   if (balance.allowed) return null;
 
   return NextResponse.json(

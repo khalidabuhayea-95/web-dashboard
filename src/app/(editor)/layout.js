@@ -1,45 +1,32 @@
+import Link from "next/link";
+
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
+import { NayrozIcon } from "@/components/brand/NayrozLogo";
 import { requireRole, Roles } from "@/lib/auth/roles";
+import { buildDashboardNavItems } from "@/lib/dashboard/navItems.server";
 
 // Auth-gated editor pages (layout calls requireRole → DB). Render on demand.
 export const dynamic = "force-dynamic";
 
 export default async function EditorLayout({ children }) {
   const session = await requireRole([Roles.ADMIN, Roles.DESIGNER]);
-  const role = session.role;
-
-  // Keep in sync with the dashboard-group nav: designers see content
-  // management only, admins additionally get configuration and people.
-  const navItems = [
-    { href: "/", label: "Overview", icon: "overview" },
-    { href: "/templates", label: "Templates", icon: "templates" },
-    { href: "/categories", label: "Categories", icon: "categories" },
-    { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
-    { href: "/psd-import", label: "PSD Import", icon: "psdImport" },
-    { href: "/editor-pro", label: "Editor", icon: "editor" },
-  ];
-
-  if (role === Roles.ADMIN) {
-    navItems.push(
-      { href: "/settings", label: "Settings", icon: "settings" },
-      { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
-      { href: "/fonts", label: "Fonts", icon: "fonts" },
-      { href: "/users", label: "Users", icon: "users" },
-      { href: "/analytics", label: "Analytics", icon: "analytics" },
-      { href: "/notifications", label: "Push", icon: "push" }
-    );
-  }
+  const navItems = await buildDashboardNavItems(session.role);
 
   return (
     <div className="app-shell editor-app-shell">
       <div className="flex min-h-screen">
         <aside className="sidebar hidden w-72 md:block">
-          <div className="px-6 py-6">
-            <div className="text-lg font-semibold">Studio Console</div>
-            <div className="text-xs text-muted-foreground">
-              Template operations hub
+          {/* Same identity block as the dashboard group — one brand, one place. */}
+          <Link
+            href="/"
+            className="flex items-center gap-3 px-6 py-5 transition-opacity hover:opacity-80"
+          >
+            <NayrozIcon size={36} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">Nayroz</div>
+              <div className="truncate text-xs text-muted-foreground">Studio console</div>
             </div>
-          </div>
+          </Link>
           <DashboardNav navItems={navItems} />
         </aside>
 

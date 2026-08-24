@@ -12,11 +12,15 @@ import {
   BarChart3,
   Files,
   Home,
+  Images,
+  Wand2,
+  Palette,
   Inbox,
   Layers,
   Pencil,
   SlidersHorizontal,
   Smartphone,
+  Sparkles,
   Tags,
   Type,
   Users,
@@ -37,6 +41,10 @@ const ICONS = {
   fonts: Type,
   categories: Tags,
   contactMessages: Inbox,
+  aiTemplates: Sparkles,
+  gallery: Images,
+  magicTools: Wand2,
+  textEffects: Palette,
 };
 
 // How often the sidebar re-checks counts while the tab is visible. Slow enough
@@ -142,7 +150,8 @@ export default function DashboardNav({ navItems }) {
 
   return (
     <nav className="px-3 pb-6" aria-label="Dashboard navigation">
-      <ul className="space-y-1.5">
+      <div className="px-3.5 pb-2 text-xs font-medium text-muted-foreground">General</div>
+      <ul className="space-y-0.5">
         {navItems.map((item) => {
           const active = isActivePath(pathname, item.href);
           const Icon = ICONS[item.icon] || Home;
@@ -151,27 +160,30 @@ export default function DashboardNav({ navItems }) {
 
           return (
             <li key={item.href}>
+              {/* Active row lifts off the sidebar as a white pill — the reference
+                  marks selection with a surface, not a tint or a rule. */}
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
                 className={clsx(
-                  "group flex items-center gap-2.5 rounded-xl px-3.5 py-2.5 text-sm font-semibold transition-colors",
+                  "group flex items-center gap-3 rounded-2xl px-3.5 py-2.5 text-sm transition-colors",
                   active
-                    ? "bg-primary/10 text-primary ring-1 ring-primary/20"
-                    : "text-foreground/75 hover:bg-accent hover:text-foreground"
+                    ? "bg-[var(--ds-surface)] font-medium text-[var(--ds-text)] shadow-[var(--ds-shadow-sm)]"
+                    : "font-normal text-muted-foreground hover:bg-accent hover:text-foreground"
                 )}
               >
                 <Icon
                   aria-hidden="true"
+                  strokeWidth={active ? 2.25 : 2}
                   className={clsx(
-                    "h-4 w-4 shrink-0 transition-transform",
+                    "h-[18px] w-[18px] shrink-0",
                     active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
                   )}
                 />
                 <span className="truncate">{item.label}</span>
                 {showBadge ? (
                   <span
-                    className="ml-auto inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[0.68rem] font-bold leading-none text-primary-foreground tabular-nums"
+                    className="ml-auto inline-flex min-w-[1.35rem] shrink-0 items-center justify-center rounded-full bg-primary px-1.5 py-0.5 text-[0.68rem] font-semibold leading-none text-primary-foreground tabular-nums"
                     aria-label={`${count} ${item.badgeLabel || "new"}`}
                   >
                     {count > 99 ? "99+" : count}

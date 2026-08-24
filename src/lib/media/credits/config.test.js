@@ -25,6 +25,7 @@ test("image-to-layers is no longer a supported feature", () => {
     "ai-expand",
     "upscale",
     "object-removal",
+    "ai-tools",
   ]);
   assert.equal(normalizeMediaCreditFeature("image-to-layers"), "");
 });

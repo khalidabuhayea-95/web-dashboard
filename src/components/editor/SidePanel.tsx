@@ -2167,7 +2167,6 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const fontListSentinelRef = useRef<HTMLDivElement | null>(null);
   const loadedFontPreviewIdsRef = useRef<Set<string>>(new Set());
   const [uploadingCustomFont, setUploadingCustomFont] = useState(false);
-  const [deletingCustomFontId, setDeletingCustomFontId] = useState("");
   const [taxonomySettings, setTaxonomySettings] = useState<TaxonomyCategorySetting[]>([]);
   const [taxonomyLoading, setTaxonomyLoading] = useState(false);
   const templateQueryKey = useMemo(() => searchParams.toString(), [searchParams]);
@@ -3694,31 +3693,6 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     }
   };
 
-  const handleDeleteCustomFont = async (font: CustomFontRecord) => {
-    if (!font?.id) return;
-    setDeletingCustomFontId(font.id);
-    try {
-      const response = await fetch("/api/editor/fonts", {
-        method: "DELETE",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ id: font.id }),
-      });
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) {
-        throw new Error(payload?.error || "Failed to delete custom font.");
-      }
-      const fonts = Array.isArray(payload?.fonts) ? (payload.fonts as CustomFontRecord[]) : [];
-      setCustomFonts(fonts);
-      if (typeof document !== "undefined") {
-        const styleId = `editor-custom-font-face-${font.id}`;
-        document.getElementById(styleId)?.remove();
-      }
-    } catch {
-    } finally {
-      setDeletingCustomFontId("");
-    }
-  };
-
   const activeFontList =
     fontLanguageTab === "arabic"
       ? filteredGroupedCustomFonts.arabic
@@ -3760,10 +3734,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const renderFontCard = (font: CustomFontRecord) => {
     const fontDisplay = deriveReadableFontLabel(font);
     const fontSource = String(font.source || "custom").trim().toLowerCase();
-    const removable = font.removable !== false && fontSource === "custom";
     const isSelected =
       Boolean(selectedTextFontFamily) &&
       font.family.toLowerCase() === selectedTextFontFamily.toLowerCase();
+    // Font management (add/remove) lives in the Fonts admin tab, not here — this
+    // panel only picks a font for the selected text layer.
+    const showMeta = fontSource !== "custom" || isSelected;
 
     return (
       <div
@@ -3792,31 +3768,22 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         >
           {fontDisplay}
         </button>
-        <div className="mt-2 flex min-w-0 items-center justify-end gap-2 text-[11px] text-[#64748b]">
-          <div className="flex shrink-0 items-center gap-2">
-            {fontSource !== "custom" ? (
-              <span className="rounded-full bg-[#eef2f7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#4b5563]">
-                {fontSource}
-              </span>
-            ) : null}
-            {isSelected ? (
-              <span className="rounded-full bg-[#e7f0ff] px-2 py-0.5 text-[10px] font-semibold text-[#2c68be]">
-                Selected
-              </span>
-            ) : null}
-            {removable ? (
-              <Button
-                type="button"
-                variant="destructive"
-                className="!h-7 !px-2 !text-[11px]"
-                onClick={() => void handleDeleteCustomFont(font)}
-                disabled={deletingCustomFontId === font.id}
-              >
-                {deletingCustomFontId === font.id ? "Removing..." : "Remove"}
-              </Button>
-            ) : null}
+        {showMeta ? (
+          <div className="mt-2 flex min-w-0 items-center justify-end gap-2 text-[11px] text-[#64748b]">
+            <div className="flex shrink-0 items-center gap-2">
+              {fontSource !== "custom" ? (
+                <span className="rounded-full bg-[#eef2f7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#4b5563]">
+                  {fontSource}
+                </span>
+              ) : null}
+              {isSelected ? (
+                <span className="rounded-full bg-[#e7f0ff] px-2 py-0.5 text-[10px] font-semibold text-[#2c68be]">
+                  Selected
+                </span>
+              ) : null}
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
     );
   };

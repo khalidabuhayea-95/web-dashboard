@@ -1,9 +1,11 @@
+import Link from "next/link";
 import { BellRing } from "lucide-react";
 
 import Button from "@/components/ui/button";
+import { NayrozIcon } from "@/components/brand/NayrozLogo";
 import SignOutButton from "@/app/login/SignOutButton";
 import { requireRole, Roles } from "@/lib/auth/roles";
-import { countContactMessagesByStatus } from "@/lib/support/contactMessages.server";
+import { buildDashboardNavItems } from "@/lib/dashboard/navItems.server";
 import DashboardNav from "@/app/(dashboard)/DashboardNav";
 
 // Auth-gated, per-user pages (the layout calls requireRole → DB). They must be
@@ -12,7 +14,7 @@ export const dynamic = "force-dynamic";
 
 export const metadata = {
   title: "Dashboard",
-  description: "Template editor dashboard",
+  description: "Nayroz Studio — templates, fonts, and mobile app operations.",
 };
 
 export default async function DashboardLayout({ children }) {
@@ -28,59 +30,24 @@ export default async function DashboardLayout({ children }) {
       .slice(0, 2)
       .join("")
       .toUpperCase() || "U";
-  // Content management — everything a designer needs to produce templates.
-  // Configuration, credentials, and people-management live behind the admin
-  // block below; see the page-level requireRole calls for the real gate.
-  const navItems = [
-    { href: "/", label: "Overview", icon: "overview" },
-    { href: "/templates", label: "Templates", icon: "templates" },
-    { href: "/categories", label: "Categories", icon: "categories" },
-    { href: "/freepik-import", label: "Freepik Import", icon: "freepikImport" },
-    { href: "/psd-import", label: "PSD Import", icon: "psdImport" },
-    { href: "/editor-pro", label: "Editor", icon: "editor" },
-  ];
-
-  if (role === Roles.ADMIN) {
-    // Server-rendered seed for the unread badge so it is correct on first paint;
-    // DashboardNav then polls `countHref` to keep it live. Cosmetic only — a DB
-    // hiccup here must not take down the whole dashboard shell.
-    let unreadContactMessages = 0;
-    try {
-      const counts = await countContactMessagesByStatus();
-      unreadContactMessages = counts.new;
-    } catch {
-      unreadContactMessages = 0;
-    }
-
-    navItems.push(
-      { href: "/settings", label: "Settings", icon: "settings" },
-      { href: "/mobile-settings", label: "Mobile settings", icon: "mobileSettings" },
-      { href: "/fonts", label: "Fonts", icon: "fonts" },
-      { href: "/users", label: "Users", icon: "users" },
-      { href: "/analytics", label: "Analytics", icon: "analytics" },
-      { href: "/notifications", label: "Push", icon: "push" },
-      {
-        href: "/contact-messages",
-        label: "Contact messages",
-        icon: "contactMessages",
-        badge: unreadContactMessages,
-        badgeLabel: "unread messages",
-        countHref: "/api/admin/contact-messages/count",
-        countKey: "new",
-      }
-    );
-  }
+  const navItems = await buildDashboardNavItems(role);
 
   return (
     <div className="app-shell">
       <div className="flex min-h-screen">
         <aside className="sidebar hidden w-72 md:sticky md:top-0 md:block md:h-screen md:self-start md:overflow-y-auto">
-          <div className="px-6 py-6">
-            <div className="text-lg font-semibold">Studio Console</div>
-            <div className="text-xs text-muted-foreground">
-              Template operations hub
+          {/* Workspace identity block, styled like the reference's switcher —
+              now carrying the Nayroz app icon rather than a letter tile. */}
+          <Link
+            href="/"
+            className="flex items-center gap-3 px-6 py-5 transition-opacity hover:opacity-80"
+          >
+            <NayrozIcon size={36} />
+            <div className="min-w-0">
+              <div className="truncate text-sm font-semibold">Nayroz</div>
+              <div className="truncate text-xs text-muted-foreground">Studio console</div>
             </div>
-          </div>
+          </Link>
           <DashboardNav navItems={navItems} />
         </aside>
 
@@ -89,8 +56,7 @@ export default async function DashboardLayout({ children }) {
             <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-4 px-6 py-4 lg:px-8">
               <div className="flex min-w-0 items-center gap-3">
                 <div
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-semibold text-white shadow-sm"
-                  style={{ background: "linear-gradient(135deg, var(--chart-1), var(--chart-3))" }}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--ds-surface)] text-sm font-semibold text-[var(--ds-text)]"
                   aria-hidden="true"
                 >
                   {initials}

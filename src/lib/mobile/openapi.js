@@ -528,6 +528,184 @@ const reusableParameters = {
 };
 
 const schemas = {
+  TextEffectSpec: {
+    type: "object",
+    description:
+      "How to paint a text layer. Declarative on purpose: the app draws it natively, so it is free, instant, and the text stays editable afterwards. All sizes are FRACTIONS of the font size, never pixels, so one effect holds up at 40px on a phone and 400px on a poster.\n\nPaint order, bottom to top: shadow → stroke → fill → sheen. Draw them in that order or the outline lands on top of the material.",
+    properties: {
+      version: { type: "integer", example: 1, description: "Spec version. Ignore fields you do not know." },
+      fill: {
+        type: "object",
+        description: "The material itself.",
+        properties: {
+          kind: {
+            type: "string",
+            enum: ["gradient", "solid", "pattern"],
+            description: "`gradient` for metals and gems, `solid` for plain colour, `pattern` for a tiled texture image.",
+          },
+          angle: { type: "number", description: "Gradient direction in degrees; 90 = top to bottom.", example: 90 },
+          color: { type: "string", description: "Used for `solid`, and as the fallback if a pattern image fails to load.", example: "#ffffff" },
+          stops: {
+            type: "array",
+            description: "Gradient bands as [offset 0–1, colour]. Metals carry 7–9 narrow alternating light/dark bands — that banding is what reads as foil rather than coloured plastic, so do not simplify it.",
+            items: { type: "array", items: {} },
+            example: [[0, "#5c3d0c"], [0.26, "#fdf3c9"], [1, "#4a3009"]],
+          },
+          patternUrl: { type: "string", description: "Tileable texture for `pattern` fills. Empty otherwise." },
+          patternScale: { type: "number", description: "Texture scale relative to font size." },
+        },
+      },
+      stroke: {
+        type: "object",
+        description: "Outline drawn UNDER the fill so it reads as a border.",
+        properties: {
+          width: { type: "number", description: "Fraction of font size. 0 = no outline." },
+          color: { type: "string" },
+        },
+      },
+      shadow: {
+        type: "object",
+        properties: {
+          enabled: { type: "boolean" },
+          color: { type: "string" },
+          blur: { type: "number", description: "Fraction of font size." },
+          offsetX: { type: "number", description: "Fraction of font size." },
+          offsetY: { type: "number", description: "Fraction of font size." },
+        },
+      },
+      sheen: {
+        type: "object",
+        description: "Thin bright rim along the top edge, clipped to the glyphs.",
+        properties: {
+          enabled: { type: "boolean" },
+          color: { type: "string" },
+          width: { type: "number", description: "Fraction of font size." },
+          offsetY: { type: "number", description: "Fraction of font size; negative lifts the rim." },
+        },
+      },
+    },
+    required: ["version", "fill", "stroke", "shadow", "sheen"],
+  },
+  TextEffectItem: {
+    type: "object",
+    properties: {
+      id: { type: "string", description: "Stable slug. Store THIS on the text layer, not the spec — an admin can retune a material later and every design picks the change up.", example: "gold" },
+      titleEn: { type: "string", example: "Gold" },
+      titleAr: { type: "string", example: "ذهبي" },
+      isPremium: { type: "boolean", description: "Show locked for free users." },
+      previewUrl: { type: "string", nullable: true, description: "Optional sample image for the strip. Null means render your own preview from `spec` — that is cheaper and always current." },
+      spec: { $ref: "#/components/schemas/TextEffectSpec" },
+    },
+    required: ["id", "titleEn", "titleAr", "isPremium", "spec"],
+  },
+  TextEffectsResponse: {
+    type: "object",
+    properties: { effects: { type: "array", items: { $ref: "#/components/schemas/TextEffectItem" } } },
+    required: ["effects"],
+  },
+
+  AiToolItem: {
+    type: "object",
+    description:
+      "One runnable AI tool. `id` is what POST /api/mobile/ai-tools/run expects. The server-side prompt and model are never included.",
+    properties: {
+      id: {
+        type: "string",
+        description:
+          'Stable tool id, "<kind>:<slug>". Pass this verbatim as `toolId` when running the tool.',
+        example: "magic:enhance-photo",
+      },
+      kind: {
+        type: "string",
+        enum: ["magic", "template"],
+        description:
+          "`magic` = one-tap fix (enhance, restore, remove background). `template` = a styled scene. The app can render both the same way; the distinction is only useful for analytics or copy.",
+      },
+      slug: { type: "string", example: "enhance-photo" },
+      titleEn: { type: "string", example: "Enhance Photo" },
+      titleAr: { type: "string", example: "تحسين الصورة" },
+      subtitleAr: {
+        type: "string",
+        description: "Short Arabic line for under the title. Empty string when the tool has none.",
+        example: "وضوح وتفاصيل أعلى بضغطة",
+      },
+      inputKind: {
+        type: "string",
+        description:
+          'What photo to ask the user for. "photo" for any picture; template tools name their subject ("man", "woman", "product", "food", "jewelry", "apparel", …) so the picker can prompt correctly. "none" means the tool needs no photo.',
+        example: "photo",
+      },
+      requiresImage: {
+        type: "boolean",
+        description: "False only for tools that generate a design from nothing. Send no `image` for those.",
+      },
+      creditCost: {
+        type: "integer",
+        description:
+          "Credits deducted on success. Varies per tool (cheap specialist models cost less), so show this number on the card rather than a single tab-wide price.",
+        example: 4,
+      },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Pro-only tool. Returned even for free users so the app can show it locked; the run endpoint is the enforcement point.",
+      },
+      beforeUrl: {
+        type: "string",
+        nullable: true,
+        description: "Sample input for the card. Null when the tool takes no photo.",
+      },
+      afterUrl: {
+        type: "string",
+        description:
+          "Full-size sample result (1024px, ~140 KB). Load this when the user OPENS a tool — not in the grid. Always present: tools without artwork are omitted from the catalogue. May be a transparent PNG (background removal), so composite it over a checkerboard rather than assuming an opaque image.",
+      },
+      thumbUrl: {
+        type: "string",
+        description:
+          "Grid-sized copy of `afterUrl` (400px, ~15 KB). **Use this in list and grid views.** Listing `afterUrl` for the whole catalogue is roughly 30 MB; the thumbnails are about a tenth of that. Always present — it falls back to `afterUrl` for any row that predates the thumbnails. Transparency is preserved, so the same checkerboard note applies.",
+      },
+    },
+    required: [
+      "id",
+      "kind",
+      "slug",
+      "titleEn",
+      "titleAr",
+      "subtitleAr",
+      "inputKind",
+      "requiresImage",
+      "creditCost",
+      "isPremium",
+      "afterUrl",
+      "thumbUrl",
+    ],
+  },
+  AiToolSection: {
+    type: "object",
+    description: "A row/group in the AI Tools tab, already in display order.",
+    properties: {
+      id: { type: "string", example: "template:food-drink" },
+      kind: { type: "string", enum: ["magic", "template"] },
+      titleEn: { type: "string", example: "Food & Drink" },
+      titleAr: { type: "string", example: "المأكولات والمشروبات" },
+      tools: { type: "array", items: { $ref: "#/components/schemas/AiToolItem" } },
+    },
+    required: ["id", "kind", "titleEn", "titleAr", "tools"],
+  },
+  AiToolsCatalogResponse: {
+    type: "object",
+    properties: {
+      sections: {
+        type: "array",
+        description:
+          "Sections in the order they should appear. The Magic Tools section comes first when present, then one section per template category. Empty sections are omitted.",
+        items: { $ref: "#/components/schemas/AiToolSection" },
+      },
+    },
+    required: ["sections"],
+  },
+
   ErrorResponse: {
     type: "object",
     required: ["error"],
@@ -1979,6 +2157,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile Fonts" },
       { name: "Mobile Elements" },
       { name: "Mobile Shapes" },
+      { name: "Mobile AI Tools" },
+      { name: "Mobile Text Effects" },
       { name: "Mobile Media" },
       { name: "Mobile Support" },
       { name: "Website" },
@@ -2783,6 +2963,156 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                     $ref: "#/components/schemas/ErrorResponse",
                   },
                 },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/text-effects": {
+        get: {
+          tags: ["Mobile Text Effects"],
+          summary: "Material styles for text layers",
+          description:
+            "The effects strip: gold, diamond, glitter, emerald and so on, applied to a TEXT layer in the editor.\n\n**These are not generated images.** Each effect is a declarative paint description the app renders natively, which is why applying one is free, instant, and leaves the text editable — the user can still change the words, size and position afterwards. Nothing here spends a credit.\n\nStore the effect's `id` on the layer, not a copy of its `spec`: an admin can retune a material from the dashboard and every existing design picks the change up. Unknown spec fields should be ignored so older builds keep working.\n\nPublic — no bearer token, because the editor is usable before sign-in. Cache for a few minutes; the list only changes when an admin edits it.",
+          responses: {
+            200: {
+              description: "Published effects in display order",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/TextEffectsResponse" } },
+              },
+            },
+            500: {
+              description: "Failed to load the effects",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/ai-tools": {
+        get: {
+          tags: ["Mobile AI Tools"],
+          summary: "AI Tools catalogue (magic tools + templates)",
+          description:
+            "The whole AI Tools tab in one call, as an ordered list of sections. Two admin systems feed it — one-tap **magic tools** (enhance, restore, colorize, remove background) and styled **templates** grouped by category — but they are merged here because they are the same gesture to a user: pick a tool, give a photo, get a picture back. Render every item the same way and pass its `id` to `/api/mobile/ai-tools/run`.\n\n**Never returns prompts or model ids** — those are the product and stay server-side.\n\nOnly published tools that have sample artwork appear. Premium tools ARE listed with `isPremium: true` so the app can show them locked rather than hiding what an upgrade buys. Prices differ per tool, so read `creditCost` from each item instead of assuming one tab-wide price.\n\nRequires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`. Cacheable privately for 60s.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: "Ordered catalogue of AI tool sections",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/AiToolsCatalogResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            403: ACCOUNT_DISABLED_RESPONSE,
+            500: {
+              description: "Failed to load the catalogue",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/ai-tools/run": {
+        post: {
+          tags: ["Mobile AI Tools"],
+          summary: "Run an AI tool on a photo",
+          description:
+            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "multipart/form-data": {
+                schema: {
+                  type: "object",
+                  required: ["toolId"],
+                  properties: {
+                    toolId: {
+                      type: "string",
+                      description:
+                        'Tool id from the catalogue, e.g. "magic:remove-background" or "template:skin-oud-smoke".',
+                      example: "magic:enhance-photo",
+                    },
+                    image: {
+                      type: "string",
+                      format: "binary",
+                      description:
+                        "The user's photo. Required unless the chosen tool reports `requiresImage: false`. Max 15 MB.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description:
+                "The finished image. Check Content-Type: background removal returns a transparent PNG.",
+              content: {
+                "image/png": { schema: { type: "string", format: "binary" } },
+                "image/jpeg": { schema: { type: "string", format: "binary" } },
+                "image/webp": { schema: { type: "string", format: "binary" } },
+              },
+              headers: {
+                "X-Ai-Tool-Id": { schema: { type: "string" }, description: "Echoes the tool that ran." },
+                "X-Ai-Tool-Kind": {
+                  schema: { type: "string", enum: ["magic", "template"] },
+                  description: "Which catalogue the tool came from.",
+                },
+                "X-Credits-Charged": {
+                  schema: { type: "integer" },
+                  description: "Credits deducted for this run.",
+                },
+              },
+            },
+            400: {
+              description:
+                "Invalid multipart payload, missing toolId, unreadable image, or a photo is required (`code: \"image_required\"`)",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            403: ACCOUNT_DISABLED_RESPONSE,
+            404: {
+              description:
+                'Unknown or unpublished tool (`code: "tool_not_found"`). Refresh the catalogue — an admin may have removed it.',
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            413: {
+              description: "Image upload is too large (max 15 MB)",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            429: {
+              description:
+                'Out of credits (`code: "insufficient_credits"`, with the wallet in `credits`) or too many requests (burst limiter, no code)',
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+            500: {
+              description: "The tool failed to run",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
               },
             },
           },
