@@ -89,7 +89,7 @@ const MOBILE_AUTH_INITIAL_FORM = {
   accessTokenSecret: "",
   accessTokenSecretMasked: "",
   accessTokenSecretConfigured: false,
-  accessTokenTtlMinutes: "60",
+  accessTokenTtlMinutes: "10080",
   refreshTokenSecret: "",
   refreshTokenSecretMasked: "",
   refreshTokenSecretConfigured: false,
@@ -223,7 +223,7 @@ function mapMobileAuthSettings(settings) {
     accessTokenSecret: "",
     accessTokenSecretMasked: String(settings?.bearer?.accessTokenSecretMasked || ""),
     accessTokenSecretConfigured: Boolean(settings?.bearer?.accessTokenSecretConfigured),
-    accessTokenTtlMinutes: String(settings?.bearer?.accessTokenTtlMinutes || "60"),
+    accessTokenTtlMinutes: String(settings?.bearer?.accessTokenTtlMinutes || "10080"),
     refreshTokenSecret: "",
     refreshTokenSecretMasked: String(settings?.bearer?.refreshTokenSecretMasked || ""),
     refreshTokenSecretConfigured: Boolean(settings?.bearer?.refreshTokenSecretConfigured),
@@ -1314,7 +1314,11 @@ function MobileSettingsClient() {
                     }
                   />
                 </FieldBlock>
-                <FieldBlock id="mobile-access-token-ttl" label="Access token TTL (min)">
+                <FieldBlock
+                  id="mobile-access-token-ttl"
+                  label="Access token TTL (min)"
+                  hint="10080 = 7 days."
+                >
                   <Input
                     id="mobile-access-token-ttl"
                     type="number"

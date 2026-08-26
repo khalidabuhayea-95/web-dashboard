@@ -377,7 +377,7 @@ export function MobileAuthSettingsCard() {
     accessTokenSecret: "",
     accessTokenSecretMasked: "",
     accessTokenSecretConfigured: false,
-    accessTokenTtlMinutes: "60",
+    accessTokenTtlMinutes: "10080",
     refreshTokenSecret: "",
     refreshTokenSecretMasked: "",
     refreshTokenSecretConfigured: false,
@@ -413,7 +413,7 @@ export function MobileAuthSettingsCard() {
           accessTokenSecret: "",
           accessTokenSecretMasked: String(settings?.bearer?.accessTokenSecretMasked || ""),
           accessTokenSecretConfigured: Boolean(settings?.bearer?.accessTokenSecretConfigured),
-          accessTokenTtlMinutes: String(settings?.bearer?.accessTokenTtlMinutes || "60"),
+          accessTokenTtlMinutes: String(settings?.bearer?.accessTokenTtlMinutes || "10080"),
           refreshTokenSecret: "",
           refreshTokenSecretMasked: String(settings?.bearer?.refreshTokenSecretMasked || ""),
           refreshTokenSecretConfigured: Boolean(settings?.bearer?.refreshTokenSecretConfigured),
@@ -638,6 +638,7 @@ export function MobileAuthSettingsCard() {
                 }
                 disabled={disabled}
               />
+              <p className="text-xs text-muted-foreground">10080 = 7 days.</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="settings-mobile-refresh-secret">Refresh token secret</Label>

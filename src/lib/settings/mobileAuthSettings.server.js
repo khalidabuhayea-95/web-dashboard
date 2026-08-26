@@ -60,7 +60,7 @@ function normalizeStoredSettings(value = {}) {
     },
     bearer: {
       accessTokenSecret: sanitizeString(bearer.accessTokenSecret),
-      accessTokenTtlMinutes: sanitizePositiveInt(bearer.accessTokenTtlMinutes, 60),
+      accessTokenTtlMinutes: sanitizePositiveInt(bearer.accessTokenTtlMinutes, 10080),
       refreshTokenSecret: sanitizeString(bearer.refreshTokenSecret),
       refreshTokenTtlDays: sanitizePositiveInt(bearer.refreshTokenTtlDays, 30),
     },

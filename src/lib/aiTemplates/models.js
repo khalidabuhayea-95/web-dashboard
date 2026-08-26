@@ -9,7 +9,10 @@
 //
 // `supportsImageInput`  — can take a reference photo (identity-locked edits).
 // `supportsTextToImage` — can run from a prompt alone (reference "none").
-// `extraInput`          — static extras for edit runs.
+// `extraInput`          — static extras for edit runs. Every edit-capable model
+//                         pins aspect_ratio to the INPUT frame: an AI tool must
+//                         hand back the user's photo at its own size, never
+//                         reframed to a poster ratio.
 // `t2iExtraInput`       — static extras for prompt-only runs (card aspect 3:4).
 // `priceMicros`         — per-image cost estimate for spend maths, from vendor
 //                         pricing pages 2026-08-12; the model page is canonical.
@@ -24,7 +27,7 @@ export const AI_TEMPLATE_MODEL_DEFINITIONS = [
     imageIsArray: true,
     supportsImageInput: true,
     supportsTextToImage: true,
-    extraInput: { output_format: "png" },
+    extraInput: { output_format: "png", aspect_ratio: "match_input_image" },
     t2iExtraInput: { output_format: "png", aspect_ratio: "3:4" },
     priceMicros: 39_000,
     notes: "Current default. Best face identity in edits; weak Arabic lettering.",
@@ -133,7 +136,7 @@ export const AI_TEMPLATE_MODEL_DEFINITIONS = [
     imageIsArray: true,
     supportsImageInput: true,
     supportsTextToImage: true,
-    extraInput: { output_format: "png" },
+    extraInput: { output_format: "png", aspect_ratio: "match_input_image" },
     t2iExtraInput: { output_format: "png", aspect_ratio: "3:4" },
     priceMicros: 134_000,
     notes:

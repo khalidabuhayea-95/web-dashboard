@@ -24,7 +24,8 @@ export const MAGIC_TOOL_MODEL_DEFINITIONS = [
     inputImageKey: "image_input",
     imageIsArray: true,
     requiresPrompt: true,
-    extraInput: { output_format: "png" },
+    // The user's photo must come back at its own size, not reframed.
+    extraInput: { output_format: "png", aspect_ratio: "match_input_image" },
     optionFields: [],
     priceMicros: 39_000,
     notes: "Understands the picture. For tools that need judgement, not just pixels.",

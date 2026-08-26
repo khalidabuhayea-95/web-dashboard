@@ -61,7 +61,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the hands and rings exactly as in the reference. Close-up detail of interlocked hands with wedding rings, soft warm window light, blurred neutral background, delicate romantic mood, macro shallow depth of field, square 1:1. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the hands and rings exactly identical to the reference — the same skin tone, hand shapes and ring designs. Close-up detail of interlocked hands with wedding rings, soft warm window light, blurred neutral background, delicate romantic mood, macro shallow depth of field. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "weddings-white-rose-arch",
@@ -72,7 +72,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical to the reference photo. Elegant Arabic wedding portrait, subject wearing a luxurious ivory embroidered gown with delicate pearl beading, standing under a floral arch of white roses and baby's breath, warm golden bokeh lights behind, soft cinematic rim light, shot on 85mm f/1.4, shallow depth of field, ultra realistic, 4K, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical to the reference photo. Elegant Arabic wedding portrait, subject wearing a luxurious ivory embroidered gown with delicate pearl beading, standing under a floral arch of white roses and baby's breath, warm golden bokeh lights behind, soft cinematic rim light, shot on 85mm f/1.4, shallow depth of field, ultra realistic, 4K. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "weddings-royal-groom",
@@ -83,7 +83,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Cinematic groom portrait in a tailored midnight-black tuxedo with a white boutonnière, standing in a marble ballroom with crystal chandeliers, dramatic side lighting, moody elegant atmosphere, 50mm lens, photorealistic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Cinematic groom portrait in a tailored midnight-black tuxedo with a white boutonnière, standing in a marble ballroom with crystal chandeliers, dramatic side lighting, moody elegant atmosphere, 50mm lens, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "weddings-arabic-zaffa",
@@ -94,7 +94,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Traditional Arabic wedding zaffa scene, subject in an ornate gold-embroidered bisht/kaftan, surrounded by warm sparkler light and drummers softly blurred in the background, rich burgundy and gold palette, dramatic warm cinematic lighting, motion energy, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Traditional Arabic wedding zaffa scene, subject in an ornate gold-embroidered bisht/kaftan, surrounded by warm sparkler light and drummers softly blurred in the background, rich burgundy and gold palette, dramatic warm cinematic lighting, motion energy. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "weddings-elegant-nikah",
@@ -105,7 +105,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Refined nikah ceremony portrait, subject seated at an ornate table with a gilded Quran, white orchids and gold candlesticks, soft window daylight mixed with warm candle glow, elegant restrained composition, editorial photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Refined nikah ceremony portrait, subject seated at an ornate table with a gilded Quran, white orchids and gold candlesticks, soft window daylight mixed with warm candle glow, elegant restrained composition, editorial photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "weddings-garden-gown",
@@ -116,7 +116,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Outdoor bridal portrait in a lush garden at golden hour, flowing tulle gown catching the breeze, sun flare through green leaves, soft pastel palette, romantic dreamy atmosphere, 85mm shallow depth of field, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Outdoor bridal portrait in a lush garden at golden hour, flowing tulle gown catching the breeze, sun flare through green leaves, soft pastel palette, romantic dreamy atmosphere, 85mm shallow depth of field. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "life-journey-me-and-younger-me",
@@ -127,7 +127,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical for the adult. Heartwarming scene of the adult subject sitting beside a child version of the same person with clearly matching features, soft warm window light, muted nostalgic palette, gentle emotional mood, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical for the adult. Heartwarming scene of the adult subject sitting beside a child version of the same person with clearly matching features, soft warm window light, muted nostalgic palette, gentle emotional mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "life-journey-30-years-from-now",
@@ -138,7 +138,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's core facial structure and identity clearly recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Age the subject naturally by about 30 years: realistic grey hair, natural skin texture and lines, dignified warm expression, soft neutral studio lighting, respectful photorealistic result, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's core facial structure and identity clearly recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Age the subject naturally by about 30 years: realistic grey hair, natural skin texture and lines, dignified warm expression, soft neutral studio lighting, respectful photorealistic result. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "life-journey-childhood-era",
@@ -149,7 +149,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's core facial features clearly recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Transform the subject into a child version of themselves, natural proportions and skin, wearing simple period-appropriate clothing, warm nostalgic film grading with subtle grain, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's core facial features clearly recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Transform the subject into a child version of themselves, natural proportions and skin, wearing simple period-appropriate clothing, warm nostalgic film grading with subtle grain. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "life-journey-90s-photo",
@@ -160,7 +160,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. 1990s family-photo aesthetic: soft flash lighting, slightly washed colors, mottled studio backdrop, period clothing and hairstyle, authentic film grain and date-stamp corner space, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. 1990s family-photo aesthetic: soft flash lighting, slightly washed colors, mottled studio backdrop, period clothing and hairstyle, authentic film grain and date-stamp corner space. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "life-journey-wisdom-and-grey",
@@ -171,7 +171,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity clearly recognizable. Dignified elder portrait, natural aged features with expressive detail, soft directional light sculpting the face, dark neutral background, warm respectful documentary style, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% recognizable — the same face shape, eyes, nose, mouth and distinctive features, aged naturally but unmistakably the same person. Dignified elder portrait, natural aged features with expressive detail, soft directional light sculpting the face, dark neutral background, warm respectful documentary style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-colour-avatar",
@@ -182,7 +182,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Bold social profile picture: subject centered on a solid vivid color background, crisp studio lighting, subtle rim light separating the subject, clean modern minimal composition, sharp and punchy, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Bold social profile picture: subject centered on a solid vivid color background, crisp studio lighting, subtle rim light separating the subject, clean modern minimal composition, sharp and punchy. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-neon-gradient",
@@ -193,7 +193,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Modern avatar with dual-tone neon lighting, magenta from one side and cyan from the other, dark gradient background with soft glow, glossy contemporary look, high contrast, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Modern avatar with dual-tone neon lighting, magenta from one side and cyan from the other, dark gradient background with soft glow, glossy contemporary look, high contrast. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-whatsapp-sticker",
@@ -204,7 +204,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Cute sticker-style character with a thick white outline, exaggerated friendly expression, simple flat body, plain transparent-style background, bright cheerful colors, messaging app sticker aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Cute sticker-style character with a thick white outline, exaggerated friendly expression, simple flat body, plain transparent-style background, bright cheerful colors, messaging app sticker aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-black-and-white",
@@ -215,7 +215,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Timeless monochrome profile portrait, strong directional light sculpting the face, deep blacks and clean highlights, subtle film grain, minimal dark background, classic editorial feel, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Timeless monochrome profile portrait, strong directional light sculpting the face, deep blacks and clean highlights, subtle film grain, minimal dark background, classic editorial feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-3d-avatar",
@@ -226,7 +226,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Polished 3D avatar bust: smooth stylized modeling, soft studio HDRI lighting, subtle subsurface skin shading, plain pastel gradient backdrop, modern app-avatar aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Polished 3D avatar bust: smooth stylized modeling, soft studio HDRI lighting, subtle subsurface skin shading, plain pastel gradient backdrop, modern app-avatar aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "social-avatars-patterned-backdrop",
@@ -237,7 +237,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Profile portrait against a subtle arabesque pattern backdrop in muted gold on deep teal, warm soft key light, elegant refined composition, cultural modern aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Profile portrait against a subtle arabesque pattern backdrop in muted gold on deep teal, warm soft key light, elegant refined composition, cultural modern aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-esports-avatar",
@@ -248,7 +248,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Transform into a high-detail esports avatar: neon cyan and magenta rim lighting, dark background with subtle circuit patterns, wearing a modern gaming jersey and headset, confident pose, digital illustration, sharp stylized rendering, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Transform into a high-detail esports avatar: neon cyan and magenta rim lighting, dark background with subtle circuit patterns, wearing a modern gaming jersey and headset, confident pose, digital illustration, sharp stylized rendering. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-anime-transform",
@@ -259,7 +259,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Anime style transformation: clean cel-shaded anime illustration, expressive eyes, dynamic hair, vibrant background with soft light rays and bokeh, modern Japanese anime aesthetic, high quality key visual, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Anime style transformation: clean cel-shaded anime illustration, expressive eyes, dynamic hair, vibrant background with soft light rays and bokeh, modern Japanese anime aesthetic, high quality key visual. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-player-card",
@@ -270,7 +270,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Football player card design: subject in a football kit, dramatic stadium lighting, dynamic action pose, energetic particle effects in team colors, glossy trading- card aesthetic with clean space for stats overlay, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Football player card design: subject in a football kit, dramatic stadium lighting, dynamic action pose, energetic particle effects in team colors, glossy trading- card aesthetic with clean space for stats overlay. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-3d-sticker",
@@ -281,7 +281,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Cute 3D chibi character sticker: big head proportions, soft rounded shapes, glossy Pixar-style rendering, clean white outline, plain transparent-style background, playful and friendly, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Cute 3D chibi character sticker: big head proportions, soft rounded shapes, glossy Pixar-style rendering, clean white outline, plain transparent-style background, playful and friendly. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-superhero",
@@ -292,7 +292,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Original superhero transformation: custom armored suit with a bold color scheme, dramatic low-angle heroic pose, city skyline at dusk behind, energy glow effects, cinematic comic-inspired rendering, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Original superhero transformation: custom armored suit with a bold color scheme, dramatic low-angle heroic pose, city skyline at dusk behind, energy glow effects, cinematic comic-inspired rendering. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-pixel-world",
@@ -303,7 +303,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Retro pixel-art character portrait: 32-bit style, limited color palette, clean chunky pixels, simple scenic pixel background with a sunset gradient, nostalgic arcade aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Retro pixel-art character portrait: 32-bit style, limited color palette, clean chunky pixels, simple scenic pixel background with a sunset gradient, nostalgic arcade aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gaming-anime-legendary-knight",
@@ -314,7 +314,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Fantasy RPG character portrait: ornate engraved armor and a flowing cloak, standing in a misty stone hall lit by torches, dramatic volumetric light, painterly game key-art rendering, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Fantasy RPG character portrait: ornate engraved armor and a flowing cloak, standing in a misty stone hall lit by torches, dramatic volumetric light, painterly game key-art rendering. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-classical-oil",
@@ -325,7 +325,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Classical oil painting portrait in the style of old master works, rich impasto brushwork, deep chiaroscuro lighting from one side, dark umber background, ornate period clothing, museum-quality painterly rendering, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Classical oil painting portrait in the style of old master works, rich impasto brushwork, deep chiaroscuro lighting from one side, dark umber background, ornate period clothing, museum-quality painterly rendering. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-watercolour",
@@ -336,7 +336,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Delicate watercolor portrait, soft bleeding edges and visible paper texture, muted pastel washes with a few bold accent strokes, white negative space around the subject, artistic and airy, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Delicate watercolor portrait, soft bleeding edges and visible paper texture, muted pastel washes with a few bold accent strokes, white negative space around the subject, artistic and airy. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-charcoal-and-graphite",
@@ -347,7 +347,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Detailed charcoal and graphite sketch portrait, expressive hatching, smudged shading, warm off-white sketch paper texture, unfinished edges, hand-drawn fine-art feel, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Detailed charcoal and graphite sketch portrait, expressive hatching, smudged shading, warm off-white sketch paper texture, unfinished edges, hand-drawn fine-art feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-pop-art",
@@ -358,7 +358,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Bold pop-art portrait: high-contrast posterized shapes, four-color halftone dot texture, vivid red, yellow and cyan palette, thick black outlines, screen-print aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Bold pop-art portrait: high-contrast posterized shapes, four-color halftone dot texture, vivid red, yellow and cyan palette, thick black outlines, screen-print aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-arabesque-mosaic",
@@ -369,7 +369,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Portrait rendered as an intricate Middle Eastern mosaic, small tessellated tiles in turquoise, gold and terracotta, subtle grout lines and stone texture, warm ambient light, artisanal craft aesthetic, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Portrait rendered as an intricate Middle Eastern mosaic, small tessellated tiles in turquoise, gold and terracotta, subtle grout lines and stone texture, warm ambient light, artisanal craft aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-digital-painting",
@@ -380,7 +380,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Polished digital painting portrait, smooth blended rendering with visible brush strokes in the background, dramatic cinematic lighting, rich saturated palette, concept-art quality, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Polished digital painting portrait, smooth blended rendering with visible brush strokes in the background, dramatic cinematic lighting, rich saturated palette, concept-art quality. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-lithograph",
@@ -391,7 +391,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Vintage lithograph-style portrait, fine engraved crosshatch lines, sepia ink on aged paper, subtle print imperfections, classical 19th-century illustration aesthetic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Vintage lithograph-style portrait, fine engraved crosshatch lines, sepia ink on aged paper, subtle print imperfections, classical 19th-century illustration aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fine-art-colour-abstract",
@@ -402,7 +402,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Abstract expressive portrait, bold palette-knife strokes in teal, ochre and crimson partially dissolving the form, textured canvas, gallery contemporary art feel, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's facial features recognizable, preserving the exact same face shape, eyes, nose, mouth and distinctive features so they are unmistakably the same person. Abstract expressive portrait, bold palette-knife strokes in teal, ochre and crimson partially dissolving the form, textured canvas, gallery contemporary art feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "beauty-makeup-clear-skin",
@@ -413,7 +413,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, no reshaping of features. Clean beauty portrait with natural dewy skin, soft beauty-dish lighting with a reflector under the chin, minimal makeup, neutral cream background, fresh luminous editorial look, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, no reshaping of features. Clean beauty portrait with natural dewy skin, soft beauty-dish lighting with a reflector under the chin, minimal makeup, neutral cream background, fresh luminous editorial look. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "beauty-makeup-hair-care",
@@ -424,7 +424,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Hair campaign portrait with healthy glossy hair in motion, strong rim light creating shine, clean gradient background, dynamic flowing movement frozen sharply, premium haircare advertising, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Hair campaign portrait with healthy glossy hair in motion, strong rim light creating shine, clean gradient background, dynamic flowing movement frozen sharply, premium haircare advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "beauty-makeup-golden-layer",
@@ -435,7 +435,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Artistic beauty portrait with subtle gold accents on the skin and warm bronze lighting, deep bronze and cream palette, sculpted shadows, luxury editorial fine- art beauty, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Artistic beauty portrait with subtle gold accents on the skin and warm bronze lighting, deep bronze and cream palette, sculpted shadows, luxury editorial fine- art beauty. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-haircut",
@@ -446,7 +446,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Sharp barbershop portrait after a fresh fade haircut, crisp detail on the hairline and beard, moody dark background with a warm rim light, confident expression, premium grooming photography, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Sharp barbershop portrait after a fresh fade haircut, crisp detail on the hairline and beard, moody dark background with a warm rim light, confident expression, premium grooming photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-groomed-beard",
@@ -457,7 +457,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Close-up grooming portrait highlighting a well-trimmed beard, textured detail and healthy skin, dramatic side lighting, dark neutral background, masculine premium mood, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Close-up grooming portrait highlighting a well-trimmed beard, textured detail and healthy skin, dramatic side lighting, dark neutral background, masculine premium mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-sharp-suit",
@@ -468,7 +468,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Editorial menswear portrait in a tailored three-piece suit, adjusting the cuff, classic architecture background softly blurred, warm late afternoon light, confident refined posture, 85mm, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Editorial menswear portrait in a tailored three-piece suit, adjusting the cuff, classic architecture background softly blurred, warm late afternoon light, confident refined posture, 85mm. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-casual-style",
@@ -479,7 +479,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Modern street style portrait in a relaxed oversized jacket and sneakers, leaning against a concrete wall, overcast diffused daylight, muted urban palette, contemporary fashion editorial, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Modern street style portrait in a relaxed oversized jacket and sneakers, leaning against a concrete wall, overcast diffused daylight, muted urban palette, contemporary fashion editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-thobe-and-shemagh",
@@ -490,7 +490,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Refined portrait in a crisp white thobe with a traditional headdress, standing against a minimal sandstone wall, warm directional daylight, dignified confident posture, premium regional editorial style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Refined portrait in a crisp white thobe with a traditional headdress, standing against a minimal sandstone wall, warm directional daylight, dignified confident posture, premium regional editorial style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "mens-style-sporty-look",
@@ -501,7 +501,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Athletic street portrait in modern sportswear, standing in an urban basketball court at dusk, cool blue ambient light with a warm street lamp accent, dynamic confident stance, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Athletic street portrait in modern sportswear, standing in an urban basketball court at dusk, cool blue ambient light with a warm street lamp accent, dynamic confident stance. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-yacht-and-sea",
@@ -512,7 +512,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Luxury lifestyle portrait on a white yacht deck, deep blue open sea behind, bright midday sun, crisp white and navy palette, relaxed confident posture, aspirational travel editorial, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Luxury lifestyle portrait on a white yacht deck, deep blue open sea behind, bright midday sun, crisp white and navy palette, relaxed confident posture, aspirational travel editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-hotel-suite",
@@ -523,7 +523,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait in a luxury hotel suite with floor-to-ceiling windows and a city skyline at dusk, warm interior lighting mixed with blue exterior light, elegant modern interior, cinematic mood, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait in a luxury hotel suite with floor-to-ceiling windows and a city skyline at dusk, warm interior lighting mixed with blue exterior light, elegant modern interior, cinematic mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-red-carpet",
@@ -534,7 +534,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Red carpet event portrait in formal evening wear, flash-lit against a step-and-repeat style backdrop with soft bokeh, glamorous confident pose, high-end event photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Red carpet event portrait in formal evening wear, flash-lit against a step-and-repeat style backdrop with soft bokeh, glamorous confident pose, high-end event photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-private-jet",
@@ -545,7 +545,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Private jet lifestyle scene, subject at the aircraft stairs on a tarmac at golden hour, warm backlight and long shadows, sleek luxury aviation setting, editorial fashion photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Private jet lifestyle scene, subject at the aircraft stairs on a tarmac at golden hour, warm backlight and long shadows, sleek luxury aviation setting, editorial fashion photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-executive-office",
@@ -556,7 +556,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Powerful executive portrait in a dark wood-panelled office, leather chair and city view behind, dramatic warm lamp light with deep shadows, authoritative composed presence, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Powerful executive portrait in a dark wood-panelled office, leather chair and city view behind, dramatic warm lamp light with deep shadows, authoritative composed presence. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-fine-dining",
@@ -567,7 +567,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Fine dining lifestyle scene, subject seated at an elegantly set table with crystal glassware, warm candlelight and blurred restaurant bokeh, rich moody color grading, cinematic depth, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Fine dining lifestyle scene, subject seated at an elegantly set table with crystal glassware, warm candlelight and blurred restaurant bokeh, rich moody color grading, cinematic depth. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "luxury-lifestyle-city-from-above",
@@ -578,7 +578,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Rooftop portrait overlooking an illuminated skyline at blue hour, subject in elegant attire, cool ambient light with warm city glow, wide cinematic framing, aspirational urban editorial, 16:9. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Rooftop portrait overlooking an illuminated skyline at blue hour, subject in elegant attire, cool ambient light with warm city glow, wide cinematic framing, aspirational urban editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-formal-headshot",
@@ -589,7 +589,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Professional corporate headshot, subject in a well- tailored navy blazer and crisp white shirt, clean confident expression, soft neutral grey studio backdrop, three-point studio lighting with subtle rim light, sharp detail on eyes, LinkedIn profile quality, square. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Professional corporate headshot, subject in a well- tailored navy blazer and crisp white shirt, clean confident expression, soft neutral grey studio backdrop, three-point studio lighting with subtle rim light, sharp detail on eyes, LinkedIn profile quality, square. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-glass-office",
@@ -600,7 +600,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Modern executive portrait, subject standing in a glass-walled office with a blurred city skyline behind, natural daylight mixed with warm interior light, arms crossed confident stance, editorial business photography, 50mm, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Modern executive portrait, subject standing in a glass-walled office with a blurred city skyline behind, natural daylight mixed with warm interior light, arms crossed confident stance, editorial business photography, 50mm. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-young-founder",
@@ -611,7 +611,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Approachable startup founder portrait, casual smart look (fitted shirt, no tie), seated on a modern chair in a bright minimal workspace with plants, soft window light, friendly natural smile, clean and airy, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Approachable startup founder portrait, casual smart look (fitted shirt, no tie), seated on a modern chair in a bright minimal workspace with plants, soft window light, friendly natural smile, clean and airy. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-dark-backdrop",
@@ -622,7 +622,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Dramatic executive portrait on a deep charcoal backdrop, low-key lighting with a strong rim light along the jawline, subject in a dark suit, serious confident gaze, high contrast, premium editorial retouching, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Dramatic executive portrait on a deep charcoal backdrop, low-key lighting with a strong rim light along the jawline, subject in a dark suit, serious confident gaze, high contrast, premium editorial retouching. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-team-meeting",
@@ -633,7 +633,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Candid workplace scene, subject presenting at a bright modern meeting room with softly blurred colleagues listening, natural daylight, authentic engaged expression, documentary business photography, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Candid workplace scene, subject presenting at a bright modern meeting room with softly blurred colleagues listening, natural daylight, authentic engaged expression, documentary business photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professional-stage-speaker",
@@ -644,7 +644,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Conference speaker portrait, subject on a stage with a handheld mic, dramatic stage lighting and soft blue backdrop, blurred audience silhouettes in the foreground, confident presenting posture, cinematic, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Conference speaker portrait, subject on a stage with a handheld mic, dramatic stage lighting and soft blue backdrop, blurred audience silhouettes in the foreground, confident presenting posture, cinematic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "official-id-passport-photo",
@@ -655,7 +655,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, no retouching of features. Standard passport photo: neutral expression, eyes open and facing forward, plain white background, flat even lighting with no shadows on the face or background, head centered and fully visible, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, no retouching of features. Standard passport photo: neutral expression, eyes open and facing forward, plain white background, flat even lighting with no shadows on the face or background, head centered and fully visible. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "official-id-uniform",
@@ -666,7 +666,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Formal uniform portrait, subject in a neat institutional uniform, plain neutral background, even balanced lighting, upright posture, official documentation style, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Formal uniform portrait, subject in a neat institutional uniform, plain neutral background, even balanced lighting, upright posture, official documentation style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-pilot",
@@ -677,7 +677,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as an airline pilot in full uniform with cap, standing in front of an aircraft on the tarmac at golden hour, confident posture, cinematic warm light, photorealistic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as an airline pilot in full uniform with cap, standing in front of an aircraft on the tarmac at golden hour, confident posture, cinematic warm light, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-doctor",
@@ -688,7 +688,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as a doctor in a white coat with a stethoscope, standing in a bright modern hospital corridor, soft clean lighting, professional and trustworthy expression, shallow depth of field, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as a doctor in a white coat with a stethoscope, standing in a bright modern hospital corridor, soft clean lighting, professional and trustworthy expression, shallow depth of field. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-chef",
@@ -699,7 +699,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as a chef in a crisp white jacket inside a professional kitchen, steam and warm overhead lights, focused expression, dramatic contrast, editorial food-industry photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as a chef in a crisp white jacket inside a professional kitchen, steam and warm overhead lights, focused expression, dramatic contrast, editorial food-industry photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-engineer",
@@ -710,7 +710,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as an engineer in a hard hat and hi-vis vest on a construction site at sunrise, cranes and steel structures behind, dusty warm light, documentary style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as an engineer in a hard hat and hi-vis vest on a construction site at sunrise, cranes and steel structures behind, dusty warm light, documentary style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-lawyer",
@@ -721,7 +721,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as a lawyer in a formal dark suit, standing in a classic law library with wooden shelves and leather-bound books, warm lamp light, authoritative composed expression, 85mm, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as a lawyer in a formal dark suit, standing in a classic law library with wooden shelves and leather-bound books, warm lamp light, authoritative composed expression, 85mm. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-teacher",
@@ -732,7 +732,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as a teacher in a bright classroom beside a board, warm natural daylight, approachable encouraging expression, softly blurred educational environment behind, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as a teacher in a bright classroom beside a board, warm natural daylight, approachable encouraging expression, softly blurred educational environment behind. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-developer",
@@ -743,7 +743,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Portrait as a software developer at a modern desk with multiple monitors showing code, cool blue screen glow mixed with a warm desk lamp, focused expression, dark contemporary workspace, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Portrait as a software developer at a modern desk with multiple monitors showing code, cool blue screen glow mixed with a warm desk lamp, focused expression, dark contemporary workspace. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "professions-astronaut",
@@ -754,7 +754,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, clearly visible through the helmet visor. Portrait as an astronaut in a detailed white spacesuit, Earth and stars reflected in the visor, dramatic rim lighting, epic cinematic sci-fi quality, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, clearly visible through the helmet visor. Portrait as an astronaut in a detailed white spacesuit, Earth and stars reflected in the visor, dramatic rim lighting, epic cinematic sci-fi quality. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-strength-training",
@@ -765,7 +765,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Athletic gym portrait, subject in modern activewear mid-workout, dramatic low-key lighting with strong rim light, chalk dust and sweat detail, dark industrial gym background with blurred equipment, high contrast, motivational sports photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Athletic gym portrait, subject in modern activewear mid-workout, dramatic low-key lighting with strong rim light, chalk dust and sweat detail, dark industrial gym background with blurred equipment, high contrast, motivational sports photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-morning-run",
@@ -776,7 +776,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Outdoor running shot at sunrise, subject in motion on a coastal road, backlit golden light with lens flare, dynamic panning motion blur in the background, sharp on subject, athletic editorial style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Outdoor running shot at sunrise, subject in motion on a coastal road, backlit golden light with lens flare, dynamic panning motion blur in the background, sharp on subject, athletic editorial style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-before-and-after",
@@ -787,7 +787,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical in both halves. Split-frame fitness transformation layout, same subject on both sides with consistent lighting and pose, neutral grey studio backdrop, clean even lighting, honest documentary style, clear vertical divider, 3:2. If any person in the reference photo wears a hijab, keep their hijab on in the result — never remove it or show their hair — styled tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical in both halves. Split-frame fitness transformation layout, same subject on both sides with consistent lighting and pose, neutral grey studio backdrop, clean even lighting, honest documentary style, clear vertical divider. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If any person in the reference photo wears a hijab, keep their hijab on in the result — never remove it or show their hair — styled tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-boxing",
@@ -798,7 +798,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Intense boxing portrait, subject with wrapped hands and gloves, sweat detail, dark gym with a single hard overhead light, dust particles in the beam, gritty high-contrast black and orange grading, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Intense boxing portrait, subject with wrapped hands and gloves, sweat detail, dark gym with a single hard overhead light, dust particles in the beam, gritty high-contrast black and orange grading. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-calm-yoga",
@@ -809,7 +809,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Calm yoga scene, subject holding a graceful pose on a mat in a bright minimal studio, soft morning light through sheer curtains, muted sage and cream palette, serene balanced composition, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Calm yoga scene, subject holding a graceful pose on a mat in a bright minimal studio, soft morning light through sheer curtains, muted sage and cream palette, serene balanced composition. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "gym-fitness-crossfit",
@@ -820,7 +820,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Dynamic functional training shot, subject mid-movement with a barbell or kettlebell, industrial gym with exposed concrete, dramatic side lighting and airborne chalk, freeze-motion sports photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Dynamic functional training shot, subject mid-movement with a barbell or kettlebell, industrial gym with exposed concrete, dramatic side lighting and airborne chalk, freeze-motion sports photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-golden-istanbul",
@@ -831,7 +831,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Travel portrait in Istanbul, subject standing on a rooftop with the Bosphorus and mosque domes behind, golden hour light, seagulls in the sky, warm cinematic color grading, travel magazine style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Travel portrait in Istanbul, subject standing on a rooftop with the Bosphorus and mosque domes behind, golden hour light, seagulls in the sky, warm cinematic color grading, travel magazine style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-maldives",
@@ -842,7 +842,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Luxury Maldives scene, subject on a wooden overwater deck, turquoise water and villas behind, bright midday sun, vibrant blue and white palette, aspirational travel photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Luxury Maldives scene, subject on a wooden overwater deck, turquoise water and villas behind, bright midday sun, vibrant blue and white palette, aspirational travel photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-desert-adventure",
@@ -853,7 +853,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Desert adventure portrait, subject beside a 4x4 on golden dunes at sunset, long shadows, dust in the light, warm amber tones, epic wide cinematic framing, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Desert adventure portrait, subject beside a 4x4 on golden dunes at sunset, long shadows, dust in the light, warm amber tones, epic wide cinematic framing. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-european-winter",
@@ -864,7 +864,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Snowy European street in winter, subject in a wool coat and scarf, warm café lights and falling snow, cozy moody atmosphere, shallow depth of field, film photography look, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Snowy European street in winter, subject in a wool coat and scarf, warm café lights and falling snow, cozy moody atmosphere, shallow depth of field, film photography look. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-petra",
@@ -875,7 +875,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Subject standing in the narrow Siq canyon with the rose-red carved facade revealed ahead, warm reflected sandstone light, dramatic scale contrast, epic travel photography, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Subject standing in the narrow Siq canyon with the rose-red carved facade revealed ahead, warm reflected sandstone light, dramatic scale contrast, epic travel photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-tokyo-nights",
@@ -886,7 +886,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Night portrait in a neon-lit Tokyo street, colorful signage bokeh behind, rain-slick pavement reflections, cyan and magenta color grading, cinematic urban mood, shallow depth of field, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Night portrait in a neon-lit Tokyo street, colorful signage bokeh behind, rain-slick pavement reflections, cyan and magenta color grading, cinematic urban mood, shallow depth of field. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-santorini",
@@ -897,7 +897,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Subject on a white-washed terrace overlooking the blue Aegean sea, blue domes and bougainvillea around, bright Mediterranean sunlight, crisp white and cobalt palette, airy vacation feel, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Subject on a white-washed terrace overlooking the blue Aegean sea, blue domes and bougainvillea around, bright Mediterranean sunlight, crisp white and cobalt palette, airy vacation feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "travel-airport-departure",
@@ -908,7 +908,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Stylish airport travel scene, subject walking with a suitcase through a bright modern terminal, large windows with an aircraft visible outside, soft daylight, motion blur around a sharp subject, editorial lifestyle, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Stylish airport travel scene, subject walking with a suitcase through a bright modern terminal, large windows with an aircraft visible outside, soft daylight, motion blur around a sharp subject, editorial lifestyle. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-andalusia",
@@ -919,7 +919,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Andalusian era portrait, subject in richly embroidered period robes, standing in an Alhambra-style courtyard with arabesque arches, tiled fountains and orange trees, warm filtered sunlight, painterly cinematic quality, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Andalusian era portrait, subject in richly embroidered period robes, standing in an Alhambra-style courtyard with arabesque arches, tiled fountains and orange trees, warm filtered sunlight, painterly cinematic quality. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-bedouin-firelight",
@@ -930,7 +930,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Bedouin heritage portrait, subject in a traditional bisht and headwear beside a campfire in the desert at night, firelight on the face, starry sky above, dramatic warm-cool contrast, National Geographic style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Bedouin heritage portrait, subject in a traditional bisht and headwear beside a campfire in the desert at night, firelight on the face, starry sky above, dramatic warm-cool contrast, National Geographic style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-damascus-souk",
@@ -941,7 +941,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Old Levantine market portrait, subject in early 1900s clothing in a Damascus-style souk, hanging lanterns and copper wares, sepia-toned vintage film look, soft grain, nostalgic mood, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Old Levantine market portrait, subject in early 1900s clothing in a Damascus-style souk, hanging lanterns and copper wares, sepia-toned vintage film look, soft grain, nostalgic mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-old-jerusalem",
@@ -952,7 +952,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Historical portrait in the old city stone alleys, subject in traditional embroidered clothing, warm light falling through arched passageways, weathered limestone textures, muted earth palette, documentary cinematic style, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Historical portrait in the old city stone alleys, subject in traditional embroidered clothing, warm light falling through arched passageways, weathered limestone textures, muted earth palette, documentary cinematic style. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-baghdad-library",
@@ -963,7 +963,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Golden-age scholar portrait, subject in period scholarly robes surrounded by manuscripts, astrolabes and ink pots in a candlelit study, warm amber light, rich painterly detail, classical composition, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Golden-age scholar portrait, subject in period scholarly robes surrounded by manuscripts, astrolabes and ink pots in a candlelit study, warm amber light, rich painterly detail, classical composition. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-silk-caravan",
@@ -974,7 +974,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Caravan traveler portrait, subject in layered desert travel clothing beside camels at dusk, dust in the warm backlight, distant dunes, epic historical cinematic atmosphere, wide framing, 16:9. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Caravan traveler portrait, subject in layered desert travel clothing beside camels at dusk, dust in the warm backlight, distant dunes, epic historical cinematic atmosphere, wide framing. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-ancestors-portrait",
@@ -985,7 +985,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Vintage studio portrait in the style of the 1950s Middle East: formal period clothing, painted studio backdrop, soft directional light, warm sepia tones, authentic film grain, slight vignette, square 1:1. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Vintage studio portrait in the style of the 1950s Middle East: formal period clothing, painted studio backdrop, soft directional light, warm sepia tones, authentic film grain, slight vignette. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "heritage-mountain-village",
@@ -996,7 +996,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Rural heritage scene, subject in traditional village clothing standing among old stone houses and olive terraces, soft morning mist, muted green and sand palette, warm documentary photography, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Rural heritage scene, subject in traditional village clothing standing among old stone houses and olive terraces, soft morning mist, muted green and sand palette, warm documentary photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "ramadan-eid-suhoor-lantern",
@@ -1007,7 +1007,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Warm Ramadan portrait, subject wearing an elegant embroidered thobe/abaya, seated at a table set with dates, Arabic coffee and a traditional brass fanous lantern, warm amber candlelight, dark moody background with crescent moon visible through an arched window, cinematic, photorealistic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Warm Ramadan portrait, subject wearing an elegant embroidered thobe/abaya, seated at a table set with dates, Arabic coffee and a traditional brass fanous lantern, warm amber candlelight, dark moody background with crescent moon visible through an arched window, cinematic, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "ramadan-eid-childrens-eidiya",
@@ -1018,7 +1018,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the child's face 100% identical. Joyful Eid portrait, child in bright new festive clothes holding a small gift box and colorful balloons, warm confetti in the air, soft pastel and gold palette, cheerful natural expression, bright airy lighting, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the child's face 100% identical. Joyful Eid portrait, child in bright new festive clothes holding a small gift box and colorful balloons, warm confetti in the air, soft pastel and gold palette, cheerful natural expression, bright airy lighting. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "hajj-umrah-white-ihram",
@@ -1029,7 +1029,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, respectful and dignified. Portrait of the subject in white ihram garments, standing calmly with a serene expression, softly blurred Grand Mosque courtyard at blue hour in the background, warm lantern light, reverent peaceful atmosphere, cinematic depth of field, photorealistic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, respectful and dignified. Portrait of the subject in white ihram garments, standing calmly with a serene expression, softly blurred Grand Mosque courtyard at blue hour in the background, warm lantern light, reverent peaceful atmosphere, cinematic depth of field, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "hajj-umrah-under-the-canopies",
@@ -1040,7 +1040,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, respectful. Subject standing under the large white mosque canopies at dawn, soft diffused morning light, calm and spacious composition, muted marble and cream tones, wide architectural framing, photorealistic, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, respectful. Subject standing under the large white mosque canopies at dawn, soft diffused morning light, calm and spacious composition, muted marble and cream tones, wide architectural framing, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "hajj-umrah-supplication",
@@ -1051,7 +1051,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, respectful and dignified. Close portrait with hands raised in supplication, eyes gently closed, warm soft light from one side, dark uncluttered background, intimate reverent mood, shallow depth of field, muted warm grading, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, respectful and dignified. Close portrait with hands raised in supplication, eyes gently closed, warm soft light from one side, dark uncluttered background, intimate reverent mood, shallow depth of field, muted warm grading. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "hajj-umrah-hajj-mabrour",
@@ -1063,7 +1063,7 @@ export const PRESETS = [
     model: "google/nano-banana-pro",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Warm homecoming portrait of a pilgrim returning from Hajj: the subject in clean white ihram or a simple elegant white thobe, standing at the decorated entrance of a traditional Arabic home framed with fresh flowers and gold accents, warm evening light, serene grateful expression, soft golden bokeh behind. At the top centre, render the Arabic greeting «حج مبرور وسعي مشكور» in elegant golden Arabic thuluth calligraphy, spelled exactly as written with every letter correctly shaped and connected, neatly composed and clearly legible against the scene. Do not add any new text, numbers or logos beyond this one greeting. Photorealistic festive portrait, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene.",
+    prompt: "Keep the person's face and identity 100% identical. Warm homecoming portrait of a pilgrim returning from Hajj: the subject in clean white ihram or a simple elegant white thobe, standing at the decorated entrance of a traditional Arabic home framed with fresh flowers and gold accents, warm evening light, serene grateful expression, soft golden bokeh behind. At the top centre, render the Arabic greeting «حج مبرور وسعي مشكور» in elegant golden Arabic thuluth calligraphy, spelled exactly as written with every letter correctly shaped and connected, neatly composed and clearly legible against the scene. Do not add any new text, numbers or logos beyond this one greeting. Photorealistic festive portrait. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene.",
   },
   {
     slug: "hajj-umrah-night-devotion",
@@ -1074,7 +1074,7 @@ export const PRESETS = [
     referenceTag: "dramatic",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. The subject standing in reverent supplication with hands gently raised, in an ornate mosque courtyard at night with reflective wet marble, hanging lanterns glowing warm gold and lit minarets behind, deep blue night sky, serene spiritual mood, cinematic depth, clean space at the bottom for a caption. Photorealistic devotional portrait, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. The subject standing in reverent supplication with hands gently raised, in an ornate mosque courtyard at night with reflective wet marble, hanging lanterns glowing warm gold and lit minarets behind, deep blue night sky, serene spiritual mood, cinematic depth, clean space at the bottom for a caption. Photorealistic devotional portrait. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-action-poster",
@@ -1085,7 +1085,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Cinematic movie poster: dramatic low-key lighting on the subject, teal and orange color grading, epic dramatic city skyline at dusk with glowing embers and haze in the background, heavy atmosphere and smoke, film poster composition with clean space at the bottom for the title, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Cinematic movie poster: dramatic low-key lighting on the subject, teal and orange color grading, epic dramatic city skyline at dusk with glowing embers and haze in the background, heavy atmosphere and smoke, film poster composition with clean space at the bottom for the title. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-magazine-cover",
@@ -1096,7 +1096,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Fashion magazine cover portrait: high-fashion styling, bold studio lighting with a colored gel background, direct confident gaze, sharp editorial retouching, clean margins for masthead and cover lines, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Fashion magazine cover portrait: high-fashion styling, bold studio lighting with a colored gel background, direct confident gaze, sharp editorial retouching, clean margins for masthead and cover lines. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-the-seventies",
@@ -1107,7 +1107,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Retro 1970s film poster style: warm faded color palette, halftone print texture, bold graphic composition, vintage grain and slight print misregistration, nostalgic aesthetic, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Retro 1970s film poster style: warm faded color palette, halftone print texture, bold graphic composition, vintage grain and slight print misregistration, nostalgic aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-arabic-drama",
@@ -1118,7 +1118,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Arabic drama series poster: moody portrait with warm amber and deep teal grading, old city architecture softly blurred behind, emotional intense expression, subtle film grain, clean bottom third for title text, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Arabic drama series poster: moody portrait with warm amber and deep teal grading, old city architecture softly blurred behind, emotional intense expression, subtle film grain, clean bottom third for title text. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-business-cover",
@@ -1129,7 +1129,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Business magazine cover: subject in sharp formal attire against a solid bold color background, clean confident pose, crisp studio lighting, generous margins for masthead and headline text, premium corporate editorial, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Business magazine cover: subject in sharp formal attire against a solid bold color background, clean confident pose, crisp studio lighting, generous margins for masthead and headline text, premium corporate editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "posters-sports-poster",
@@ -1140,7 +1140,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Sports hype poster: dramatic stadium floodlights, dust and particle effects, bold saturated team colors, low-angle heroic framing, energetic dynamic composition, clean band for text at the bottom, vertical 2:3. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Sports hype poster: dramatic stadium floodlights, dust and particle effects, bold saturated team colors, low-angle heroic framing, energetic dynamic composition, clean band for text at the bottom. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-rainy-day",
@@ -1151,7 +1151,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face, clothing and pose 100% identical. Change the environment to a heavy rainy day: wet reflective ground, rain streaks in the air, dark moody sky, cool blue-grey color grading, soft diffused light, cinematic atmosphere, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face, clothing and pose 100% identical. Change the environment to a heavy rainy day: wet reflective ground, rain streaks in the air, dark moody sky, cool blue-grey color grading, soft diffused light, cinematic atmosphere. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-golden-autumn",
@@ -1162,7 +1162,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Transform the scene into autumn: warm orange and amber foliage, golden low sun with long shadows, falling leaves in the air, cozy nostalgic tones, film photography look, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Transform the scene into autumn: warm orange and amber foliage, golden low sun with long shadows, falling leaves in the air, cozy nostalgic tones, film photography look. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-snow",
@@ -1173,7 +1173,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Transform into a snowy winter scene: fresh snow on surfaces, falling snowflakes, cold blue ambient light with a warm light source in the background, crisp clean atmosphere, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Transform into a snowy winter scene: fresh snow on surfaces, falling snowflakes, cold blue ambient light with a warm light source in the background, crisp clean atmosphere. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-golden-hour",
@@ -1184,7 +1184,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject, pose and composition identical. Relight the scene as golden hour: warm low sun from behind creating rim light and long soft shadows, gentle lens flare, amber and honey color grading, dreamy summer evening mood, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject, pose and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the relighting. Relight the scene as golden hour: warm low sun from behind creating rim light and long soft shadows, gentle lens flare, amber and honey color grading, dreamy summer evening mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-morning-fog",
@@ -1195,7 +1195,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Transform into a misty early morning: thick low fog reducing background detail, cool desaturated palette with a soft warm light source, layered atmospheric depth, calm quiet mood, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Transform into a misty early morning: thick low fog reducing background detail, cool desaturated palette with a soft warm light source, layered atmospheric depth, calm quiet mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-sandstorm",
@@ -1206,7 +1206,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Transform into a desert dust storm: heavy amber haze, wind- blown sand particles, low visibility with dramatic silhouettes, warm monochrome ochre grading, intense cinematic atmosphere, 16:9. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Transform into a desert dust storm: heavy amber haze, wind- blown sand particles, low visibility with dramatic silhouettes, warm monochrome ochre grading, intense cinematic atmosphere. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-neon-night",
@@ -1217,7 +1217,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Convert to a night scene lit by neon signage: cyan and magenta reflections on wet surfaces, deep shadows, colorful bokeh in the background, moody cyberpunk-inspired grading, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Convert to a night scene lit by neon signage: cyan and magenta reflections on wet surfaces, deep shadows, colorful bokeh in the background, moody cyberpunk-inspired grading. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "seasons-spring-bloom",
@@ -1228,7 +1228,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the subject and composition identical. Transform into spring: blooming trees with soft pink and white blossoms, fresh green grass, bright diffused daylight, petals drifting in the air, cheerful pastel palette, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the subject and composition identical, and keep the person's face and identity 100% identical — the same face shape, eyes, nose, mouth and distinctive features, never altered by the transformation. Transform into spring: blooming trees with soft pink and white blossoms, fresh green grass, bright diffused daylight, petals drifting in the air, cheerful pastel palette. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-unboxing-reveal",
@@ -1239,7 +1239,7 @@ export const PRESETS = [
     referenceTag: "phone",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical — same shape, label and colours. Premium unboxing moment: the product emerging from an open matte gift box lined with tissue paper, a ribbon and a blank card beside it, soft overhead light, warm neutral palette, shallow depth of field. Photorealistic e-commerce photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical — same shape, label and colours. Premium unboxing moment: the product emerging from an open matte gift box lined with tissue paper, a ribbon and a blank card beside it, soft overhead light, warm neutral palette, shallow depth of field. Photorealistic e-commerce photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-water-splash",
@@ -1250,7 +1250,7 @@ export const PRESETS = [
     referenceTag: "perfume-eclat",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Dynamic splash shot: crystal-clear water bursting around the product frozen mid-air, suspended droplets, cool blue-to-white gradient backdrop, crisp high-speed studio flash. Photorealistic commercial photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Dynamic splash shot: crystal-clear water bursting around the product frozen mid-air, suspended droplets, cool blue-to-white gradient backdrop, crisp high-speed studio flash. Photorealistic commercial photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-marble-gold",
@@ -1261,7 +1261,7 @@ export const PRESETS = [
     referenceTag: "perfume-oriental",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Luxury still life: the product on polished black marble with brushed-gold geometric risers, soft mirror reflection, dramatic side light, deep shadows, opulent palette. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Luxury still life: the product on polished black marble with brushed-gold geometric risers, soft mirror reflection, dramatic side light, deep shadows, opulent palette. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-pure-nature",
@@ -1272,7 +1272,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Organic staging: the product on a rough stone slab surrounded by fresh green leaves, moss and scattered water droplets, dappled morning sunlight, fresh natural palette. Photorealistic clean-beauty photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Organic staging: the product on a rough stone slab surrounded by fresh green leaves, moss and scattered water droplets, dappled morning sunlight, fresh natural palette. Photorealistic clean-beauty photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-levitation",
@@ -1283,7 +1283,7 @@ export const PRESETS = [
     referenceTag: "speaker",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product levitating in mid-air above a soft matte surface with a crisp shadow directly beneath, minimal pastel gradient backdrop, soft even studio light, weightless calm composition. Photorealistic minimal product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product levitating in mid-air above a soft matte surface with a crisp shadow directly beneath, minimal pastel gradient backdrop, soft even studio light, weightless calm composition. Photorealistic minimal product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-neon-night",
@@ -1294,7 +1294,7 @@ export const PRESETS = [
     referenceTag: "keyboard",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a dark reflective surface lit by magenta and cyan neon rim lights, subtle haze in the air, deep black background, glossy reflection below. Cinematic photorealistic hero shot, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a dark reflective surface lit by magenta and cyan neon rim lights, subtle haze in the air, deep black background, glossy reflection below. Cinematic photorealistic hero shot. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-silk-drape",
@@ -1305,7 +1305,7 @@ export const PRESETS = [
     referenceTag: "perfume-eclat",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product resting on softly draped ivory silk with sculpted folds catching the light and a few blossoms nearby, diffused soft-box lighting from the upper left, refined editorial palette. Photorealistic luxury still life, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product resting on softly draped ivory silk with sculpted folds catching the light and a few blossoms nearby, diffused soft-box lighting from the upper left, refined editorial palette. Photorealistic luxury still life. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-ramadan-offer",
@@ -1316,7 +1316,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Festive Ramadan staging: the product on an ornate brass tray with lit lanterns, dates and a crescent ornament nearby, warm candle-lit glow, deep teal and gold palette, generous clean space above. Photorealistic festive advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Festive Ramadan staging: the product on an ornate brass tray with lit lanterns, dates and a crescent ornament nearby, warm candle-lit glow, deep teal and gold palette, generous clean space above. Photorealistic festive advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-eco-craft",
@@ -1327,7 +1327,7 @@ export const PRESETS = [
     referenceTag: "kids-backpack",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Sustainable staging: the product on recycled kraft paper and raw linen with dried botanicals, warm diffused daylight, muted earthy palette, honest artisanal mood. Photorealistic eco-brand photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Sustainable staging: the product on recycled kraft paper and raw linen with dried botanicals, warm diffused daylight, muted earthy palette, honest artisanal mood. Photorealistic eco-brand photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "shop-frozen-fresh",
@@ -1338,7 +1338,7 @@ export const PRESETS = [
     referenceTag: "blender",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product surrounded by crushed ice cubes with frost and condensation on its surface, cool blue backlight, crisp icy highlights, refreshing palette. Photorealistic beverage-and-cosmetics photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product surrounded by crushed ice cubes with frost and condensation on its surface, cool blue backlight, crisp icy highlights, refreshing palette. Photorealistic beverage-and-cosmetics photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "offers-big-discount",
@@ -1349,7 +1349,7 @@ export const PRESETS = [
     referenceTag: "vacuum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical — same shape, label and colours. Bold sale poster: the product as the hero in the centre, dynamic 3D percentage symbols, geometric shapes and confetti bursting outward behind it, vivid red and gold palette, punchy studio lighting, clean space around the product. Photorealistic promotional design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical — same shape, label and colours. Bold sale poster: the product as the hero in the centre, dynamic 3D percentage symbols, geometric shapes and confetti bursting outward behind it, vivid red and gold palette, punchy studio lighting, clean space around the product. Photorealistic promotional design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "offers-black-friday",
@@ -1360,7 +1360,7 @@ export const PRESETS = [
     referenceTag: "keyboard",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Premium Black Friday poster: the product on a matte black surface with sharp gold metallic accent lines and geometric shards around it, dramatic rim lighting, luxurious dark palette, generous clean space above. Photorealistic premium promotional design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Premium Black Friday poster: the product on a matte black surface with sharp gold metallic accent lines and geometric shards around it, dramatic rim lighting, luxurious dark palette, generous clean space above. Photorealistic premium promotional design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "offers-countdown",
@@ -1371,7 +1371,7 @@ export const PRESETS = [
     referenceTag: "mouse",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Urgency promo: the product beside a stylized 3D alarm clock with floating countdown blocks swirling around, energetic purple-to-magenta gradient, dynamic motion, clean empty band for a headline. Photorealistic promotional 3D design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Urgency promo: the product beside a stylized 3D alarm clock with floating countdown blocks swirling around, energetic purple-to-magenta gradient, dynamic motion, clean empty band for a headline. Photorealistic promotional 3D design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "offers-buy-and-get",
@@ -1382,7 +1382,7 @@ export const PRESETS = [
     referenceTag: "perfume-oriental",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Bundle offer layout: two copies of the product side by side with a bold 3D plus symbol between them, wrapped gift ribbons and confetti around, bright playful palette, soft studio lighting, clean space below. Photorealistic promotional design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Bundle offer layout: two copies of the product side by side with a bold 3D plus symbol between them, wrapped gift ribbons and confetti around, bright playful palette, soft studio lighting, clean space below. Photorealistic promotional design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "offers-discounted-product",
@@ -1393,7 +1393,7 @@ export const PRESETS = [
     referenceTag: "air-fryer",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Promotional product shot: the item on a bold color podium with a dynamic burst shape behind it, crisp studio lighting with a clean shadow, vibrant contrasting palette, clear empty space for price text, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Promotional product shot: the item on a bold color podium with a dynamic burst shape behind it, crisp studio lighting with a clean shadow, vibrant contrasting palette, clear empty space for price text. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-cloche-reveal",
@@ -1404,7 +1404,7 @@ export const PRESETS = [
     referenceTag: "shawarma",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. Dramatic reveal: a hand lifting a black metal cloche off a white plate holding the dish, thick steam swirling upward, deep royal-purple studio backdrop with a soft radial glow, glossy reflective surface, single dramatic top light, high contrast. Photorealistic commercial food photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. Dramatic reveal: a hand lifting a black metal cloche off a white plate holding the dish, thick steam swirling upward, deep royal-purple studio backdrop with a soft radial glow, glossy reflective surface, single dramatic top light, high contrast. Photorealistic commercial food photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-sky-float",
@@ -1415,7 +1415,7 @@ export const PRESETS = [
     referenceTag: "hotdog",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. The dish resting on an open palm against a bright blue sky with soft clouds, its key ingredients frozen mid-air around it, natural daylight, airy and clean, shallow depth of field. Photorealistic advertising shot, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. The dish resting on an open palm against a bright blue sky with soft clouds, its key ingredients frozen mid-air around it, natural daylight, airy and clean, shallow depth of field. Photorealistic advertising shot. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-winter-cup",
@@ -1426,7 +1426,7 @@ export const PRESETS = [
     referenceTag: "juice",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the drink from the reference photo exactly identical, packaging unchanged. Two hands in chunky cream knit mittens holding the drink, blurred snowy pine forest behind, falling snowflakes, soft overcast light, cozy winter mood. Photorealistic lifestyle photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the drink from the reference photo exactly identical, packaging unchanged. Two hands in chunky cream knit mittens holding the drink, blurred snowy pine forest behind, falling snowflakes, soft overcast light, cozy winter mood. Photorealistic lifestyle photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-cozy-flat-lay",
@@ -1437,7 +1437,7 @@ export const PRESETS = [
     referenceTag: "orange-juice",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the drink from the reference photo exactly identical. Top-down flat lay: the drink on a white saucer placed on a grey knit blanket with sage-green knit cushions and folded linen, soft natural window light, muted autumn palette, hygge mood. Photorealistic overhead lifestyle shot, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the drink from the reference photo exactly identical. Top-down flat lay: the drink on a white saucer placed on a grey knit blanket with sage-green knit cushions and folded linen, soft natural window light, muted autumn palette, hygge mood. Photorealistic overhead lifestyle shot. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-balloon-ride",
@@ -1448,7 +1448,7 @@ export const PRESETS = [
     referenceTag: "burger",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. Surreal scene: the dish suspended beneath a large red-and-white striped hot-air balloon flying above a European old town with historic rooftops at golden hour, smaller copies drifting in the distance, warm sunset light. Cinematic wide aerial, photorealistic, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. Surreal scene: the dish suspended beneath a large red-and-white striped hot-air balloon flying above a European old town with historic rooftops at golden hour, smaller copies drifting in the distance, warm sunset light. Cinematic wide aerial, photorealistic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-takeout-box",
@@ -1459,7 +1459,7 @@ export const PRESETS = [
     referenceTag: "burger",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. Two hands in a mustard-yellow knit sweater holding an open plain white takeout box containing the dish, solid saturated yellow background, even soft studio light, centered minimal composition. Photorealistic packaging mockup, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. Two hands in a mustard-yellow knit sweater holding an open plain white takeout box containing the dish, solid saturated yellow background, even soft studio light, centered minimal composition. Photorealistic packaging mockup. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-city-lights",
@@ -1470,7 +1470,7 @@ export const PRESETS = [
     referenceTag: "pizza",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. Double-exposure composite: the dish viewed from directly above, blended into a top-down aerial night view of a dense city, glowing car light trails circling it like a ring, neon glow, orange and teal palette, dramatic depth. Cinematic photorealistic composite, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. Double-exposure composite: the dish viewed from directly above, blended into a top-down aerial night view of a dense city, glowing car light trails circling it like a ring, neon glow, orange and teal palette, dramatic depth. Cinematic photorealistic composite. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-fine-dining",
@@ -1481,7 +1481,7 @@ export const PRESETS = [
     referenceTag: "shawarma",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. Elegant plating on a dark ceramic plate on a polished wood table, a tall garnished cocktail beside it, deep green velvet curtain behind, single warm side beam of light, deep shadows, shallow depth of field. Moody fine-dining photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. Elegant plating on a dark ceramic plate on a polished wood table, a tall garnished cocktail beside it, deep green velvet curtain behind, single warm side beam of light, deep shadows, shallow depth of field. Moody fine-dining photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "food-golden-smoke",
@@ -1492,7 +1492,7 @@ export const PRESETS = [
     referenceTag: "burger",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the dish from the reference photo exactly identical. The dish on a dark reflective surface, wrapped in swirling golden glowing smoke trails and light streaks, black-to-crimson background, strong rim lighting, floating embers. Hyper-detailed cinematic hero shot, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the dish from the reference photo exactly identical. The dish on a dark reflective surface, wrapped in swirling golden glowing smoke trails and light streaks, black-to-crimson background, strong rim lighting, floating embers. Hyper-detailed cinematic hero shot. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-black-marble",
@@ -1503,7 +1503,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical to the reference image — same shape, label and colors. Luxury dessert product shot: the item on a dark marble slab, crushed pistachios and gold leaf scattered around, warm honey drizzle mid-pour frozen in motion, dramatic side lighting with deep shadows, macro detail, commercial food photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical to the reference image — same shape, label and colors. Luxury dessert product shot: the item on a dark marble slab, crushed pistachios and gold leaf scattered around, warm honey drizzle mid-pour frozen in motion, dramatic side lighting with deep shadows, macro detail, commercial food photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-arabic-coffee",
@@ -1514,7 +1514,7 @@ export const PRESETS = [
     referenceTag: "arabic-cup",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product identical. Specialty coffee hero shot: the product on a rustic wooden counter, steam rising, roasted coffee beans and a brass dallah beside it, warm morning light through a window, shallow depth of field, cozy Arabic café atmosphere, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product identical. Specialty coffee hero shot: the product on a rustic wooden counter, steam rising, roasted coffee beans and a brass dallah beside it, warm morning light through a window, shallow depth of field, cozy Arabic café atmosphere. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-hot-kunafa",
@@ -1525,7 +1525,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product identical. Levantine bakery display: the dessert from the reference photo presented on a copper tray beside pieces of baklava, powdered sugar dust in the air, warm golden overhead light, dark rustic background, appetizing steam, ultra sharp macro, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product identical. Levantine bakery display: the dessert from the reference photo presented on a copper tray beside pieces of baklava, powdered sugar dust in the air, warm golden overhead light, dark rustic background, appetizing steam, ultra sharp macro. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-molten-chocolate",
@@ -1536,7 +1536,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Dynamic dessert shot: melted chocolate splashing around the product frozen mid-air, cocoa powder cloud, dark moody background with a single warm spotlight, high-speed commercial photography, glossy rich texture, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Dynamic dessert shot: melted chocolate splashing around the product frozen mid-air, cocoa powder cloud, dark moody background with a single warm spotlight, high-speed commercial photography, glossy rich texture. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-caf-corner",
@@ -1547,7 +1547,7 @@ export const PRESETS = [
     referenceTag: "orange-juice",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product identical. Lifestyle café scene: the cup on a small marble table beside an open book and sunglasses, soft window light with plant shadows on the surface, warm neutral tones, blurred café interior behind, authentic and inviting, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product identical. Lifestyle café scene: the cup on a small marble table beside an open book and sunglasses, soft window light with plant shadows on the surface, warm neutral tones, blurred café interior behind, authentic and inviting. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "sweets-coffee-iced-drink",
@@ -1558,7 +1558,7 @@ export const PRESETS = [
     referenceTag: "orange-juice",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product identical. Iced beverage hero shot: condensation droplets on the cup, ice cubes and a fruit garnish, splashing liquid frozen mid-motion, bright vibrant background in the brand color, crisp refreshing summer feel, studio lighting, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product identical. Iced beverage hero shot: condensation droplets on the cup, ice cubes and a fruit garnish, splashing liquid frozen mid-motion, bright vibrant background in the brand color, crisp refreshing summer feel, studio lighting. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-premium-dates",
@@ -1569,7 +1569,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical — same jar, label and colors. Premium farm product shot: the product on a rustic wooden table with fresh medjool dates, palm fronds and burlap fabric, warm golden side light, earthy rich palette, artisanal food photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical — same jar, label and colors. Premium farm product shot: the product on a rustic wooden table with fresh medjool dates, palm fronds and burlap fabric, warm golden side light, earthy rich palette, artisanal food photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-golden-honey",
@@ -1580,7 +1580,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Honey jar hero shot: jar on a stone surface with honeycomb pieces, a wooden dipper with honey dripping mid-air, warm amber backlight glowing through the jar, macro detail, natural organic styling, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Honey jar hero shot: jar on a stone surface with honeycomb pieces, a wooden dipper with honey dripping mid-air, warm amber backlight glowing through the jar, macro detail, natural organic styling. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-olive-oil",
@@ -1591,7 +1591,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Farm product in an olive grove: the product on a weathered stone wall, olive branches and fruits around, soft Mediterranean morning light, muted green and gold palette, rustic premium feel, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Farm product in an olive grove: the product on a weathered stone wall, olive branches and fruits around, soft Mediterranean morning light, muted green and gold palette, rustic premium feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-herbs-and-zaatar",
@@ -1602,7 +1602,7 @@ export const PRESETS = [
     referenceTag: "mezze",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Herb and spice product shot: the package on a dark textured surface with scattered dried thyme, sesame and sumac, small wooden spoons, moody directional lighting, rich earthy tones, appetizing macro detail, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Herb and spice product shot: the package on a dark textured surface with scattered dried thyme, sesame and sumac, small wooden spoons, moody directional lighting, rich earthy tones, appetizing macro detail. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-organic-product",
@@ -1613,7 +1613,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Clean organic branding shot: the package on a pale stone podium with a single green leaf and soft natural shadow, minimal neutral background, bright even lighting, calm premium wellness aesthetic, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Clean organic branding shot: the package on a pale stone podium with a single green leaf and soft natural shadow, minimal neutral background, bright even lighting, calm premium wellness aesthetic. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "farm-natural-artisan-packaging",
@@ -1624,7 +1624,7 @@ export const PRESETS = [
     referenceTag: "honey",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Artisanal packaging scene: the item wrapped with kraft paper and twine on a wooden workbench, dried flowers and a handwritten-look tag beside, warm cozy light, handmade rustic feel, 3:2. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Artisanal packaging scene: the item wrapped with kraft paper and twine on a wooden workbench, dried flowers and a handwritten-look tag beside, warm cozy light, handmade rustic feel. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-meadow-float",
@@ -1635,7 +1635,7 @@ export const PRESETS = [
     referenceTag: "cardigan-blue",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant hijab styled to complement it, standing in a meadow of white daisies at golden sunrise, soft sun flare and drifting petals, natural relaxed pose. Photorealistic modest-fashion catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant hijab styled to complement it, standing in a meadow of white daisies at golden sunrise, soft sun flare and drifting petals, natural relaxed pose. Photorealistic modest-fashion catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-marble-podium",
@@ -1646,7 +1646,7 @@ export const PRESETS = [
     referenceTag: "suit-gray",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A well-groomed young male model wearing the exact garment, standing confidently on a round marble podium under a warm spotlight beam with floating dust motes, dark elegant backdrop. Photorealistic premium retail hero, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A well-groomed young male model wearing the exact garment, standing confidently on a round marble podium under a warm spotlight beam with floating dust motes, dark elegant backdrop. Photorealistic premium retail hero. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-street-rack",
@@ -1657,7 +1657,7 @@ export const PRESETS = [
     referenceTag: "hoodie-navy",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. The garment hanging on a matte-black clothing rack in a dark concrete studio, hard side light and faint haze, bold streetwear energy. Photorealistic streetwear campaign, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. The garment hanging on a matte-black clothing rack in a dark concrete studio, hard side light and faint haze, bold streetwear energy. Photorealistic streetwear campaign. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-forest-hanger",
@@ -1668,7 +1668,7 @@ export const PRESETS = [
     referenceTag: "sweat-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. The garment on a wooden hanger hung from a pine branch, misty mountain morning behind, fresh cool light. Photorealistic outdoor apparel photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. The garment on a wooden hanger hung from a pine branch, misty mountain morning behind, fresh cool light. Photorealistic outdoor apparel photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-eid-collection",
@@ -1679,7 +1679,7 @@ export const PRESETS = [
     referenceTag: "suit-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A well-groomed young male model wearing the exact garment, standing at the centre of a festive backdrop of deep emerald and gold with glowing lanterns, gold confetti and crescent ornaments, generous clean space above for the offer title. Photorealistic festive retail advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A well-groomed young male model wearing the exact garment, standing at the centre of a festive backdrop of deep emerald and gold with glowing lanterns, gold confetti and crescent ornaments, generous clean space above for the offer title. Photorealistic festive retail advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-wheat-field",
@@ -1690,7 +1690,7 @@ export const PRESETS = [
     referenceTag: "abaya-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant hijab styled to complement it, standing in a golden wheat field in late-afternoon haze, natural relaxed pose. Photorealistic modest-fashion catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant hijab styled to complement it, standing in a golden wheat field in late-afternoon haze, natural relaxed pose. Photorealistic modest-fashion catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-bougainvillea",
@@ -1701,7 +1701,7 @@ export const PRESETS = [
     referenceTag: "lounge-velour",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, in a whitewashed courtyard beneath cascading magenta bougainvillea, soft midday shade. Photorealistic lifestyle editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, in a whitewashed courtyard beneath cascading magenta bougainvillea, soft midday shade. Photorealistic lifestyle editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-reading-nook",
@@ -1712,7 +1712,7 @@ export const PRESETS = [
     referenceTag: "sweater-olive",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, seated in a warm reading corner with a glowing floor lamp, bookshelves and a soft knit throw, homely autumn mood. Photorealistic cozy fashion catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, seated in a warm reading corner with a glowing floor lamp, bookshelves and a soft knit throw, homely autumn mood. Photorealistic cozy fashion catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-home-morning",
@@ -1723,7 +1723,7 @@ export const PRESETS = [
     referenceTag: "pajama-green",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, standing in a bright morning living room by sheer curtains, soft window light, relaxed natural pose. Photorealistic comfortable homewear catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, standing in a bright morning living room by sheer curtains, soft window light, relaxed natural pose. Photorealistic comfortable homewear catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-sea-terrace",
@@ -1734,7 +1734,7 @@ export const PRESETS = [
     referenceTag: "robe-floral",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, on a whitewashed coastal terrace overlooking a calm sea, breezy golden-hour light. Photorealistic resort-wear editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with a complementing hijab, on a whitewashed coastal terrace overlooking a calm sea, breezy golden-hour light. Photorealistic resort-wear editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-eid-garden",
@@ -1745,7 +1745,7 @@ export const PRESETS = [
     referenceTag: "abaya-cape",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant complementing hijab, in a festive garden with hanging paper lanterns and warm string lights at dusk, joyful celebratory mood. Photorealistic festive fashion editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, fabric, pattern and details. A modest female model wearing the exact garment with an elegant complementing hijab, in a festive garden with hanging paper lanterns and warm string lights at dusk, joyful celebratory mood. Photorealistic festive fashion editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-man-promenade",
@@ -1756,7 +1756,7 @@ export const PRESETS = [
     referenceTag: "polo-green",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A male model wearing the exact garment, walking along a palm-lined seaside promenade at golden hour, relaxed confident stride. Photorealistic summer menswear catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A male model wearing the exact garment, walking along a palm-lined seaside promenade at golden hour, relaxed confident stride. Photorealistic summer menswear catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-classic-car",
@@ -1767,7 +1767,7 @@ export const PRESETS = [
     referenceTag: "sweater-vneck",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A male model wearing the exact garment, leaning against a vintage cream classic car on an old-town cobblestone street, warm evening light. Photorealistic heritage menswear editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A male model wearing the exact garment, leaning against a vintage cream classic car on an old-town cobblestone street, warm evening light. Photorealistic heritage menswear editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-blossom-path",
@@ -1778,7 +1778,7 @@ export const PRESETS = [
     referenceTag: "kids-set-peach",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A cheerful child model wearing the exact garment, on a spring garden path with blossom petals drifting down, soft daylight. Photorealistic kids-fashion catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A cheerful child model wearing the exact garment, on a spring garden path with blossom petals drifting down, soft daylight. Photorealistic kids-fashion catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-bedtime-story",
@@ -1789,7 +1789,7 @@ export const PRESETS = [
     referenceTag: "kids-pajama-pink",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A happy child model wearing the exact garment, in a cozy pastel bedroom with warm fairy lights at bedtime, soft evening glow. Photorealistic kids sleepwear catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A happy child model wearing the exact garment, in a cozy pastel bedroom with warm fairy lights at bedtime, soft evening glow. Photorealistic kids sleepwear catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-seaside-kids",
@@ -1800,7 +1800,7 @@ export const PRESETS = [
     referenceTag: "kids-set-stripes",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A smiling child model wearing the exact garment, standing on soft sand at golden hour with gentle waves behind. Photorealistic summer kids catalog, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, colour, pattern and prints. A smiling child model wearing the exact garment, standing on soft sand at golden hour with gentle waves behind. Photorealistic summer kids catalog. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-midnight-bust",
@@ -1811,7 +1811,7 @@ export const PRESETS = [
     referenceTag: "necklace-solitaire",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical — same metal, stones and design. The piece displayed on a matte black velvet bust beside flowing folds of midnight-blue silk, a single soft spotlight, faint sparkle bokeh deep in the dark background. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical — same metal, stones and design. The piece displayed on a matte black velvet bust beside flowing folds of midnight-blue silk, a single soft spotlight, faint sparkle bokeh deep in the dark background. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-olive-branch",
@@ -1822,7 +1822,7 @@ export const PRESETS = [
     referenceTag: "earrings-malachite",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. The piece hanging from a fresh olive branch with silvery-green leaves, soft cream background, gentle morning light and delicate shadows. Photorealistic fine-jewelry photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. The piece hanging from a fresh olive branch with silvery-green leaves, soft cream background, gentle morning light and delicate shadows. Photorealistic fine-jewelry photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-velvet-blossom",
@@ -1833,7 +1833,7 @@ export const PRESETS = [
     referenceTag: "necklace-chain",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. The piece resting on sage-green velvet scattered with white ranunculus petals, soft diffused daylight, airy romantic palette. Photorealistic jewelry still life, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. The piece resting on sage-green velvet scattered with white ranunculus petals, soft diffused daylight, airy romantic palette. Photorealistic jewelry still life. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-brass-arch",
@@ -1844,7 +1844,7 @@ export const PRESETS = [
     referenceTag: "earrings-hoops",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. The piece displayed on a sculptural brass arch stand set on a travertine pedestal, warm beige seamless backdrop, soft side light, minimalist gallery composition. Photorealistic display photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. The piece displayed on a sculptural brass arch stand set on a travertine pedestal, warm beige seamless backdrop, soft side light, minimalist gallery composition. Photorealistic display photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-morning-window",
@@ -1855,7 +1855,7 @@ export const PRESETS = [
     referenceTag: "sunglasses-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece on a white marble ledge by a sunlit window, a sheer linen curtain casting soft shadows across it, a ceramic vase of dried pampas behind. Photorealistic lifestyle product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece on a white marble ledge by a sunlit window, a sheer linen curtain casting soft shadows across it, a ceramic vase of dried pampas behind. Photorealistic lifestyle product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-stone-terrace",
@@ -1866,7 +1866,7 @@ export const PRESETS = [
     referenceTag: "watch-versace",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece draped over stacked blocks of cut limestone, architectural minimalism, cool clear daylight, precise shadow geometry. Photorealistic modern accessory photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece draped over stacked blocks of cut limestone, architectural minimalism, cool clear daylight, precise shadow geometry. Photorealistic modern accessory photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-burgundy-podium",
@@ -1877,7 +1877,7 @@ export const PRESETS = [
     referenceTag: "watch-serpent",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece presented on a round burgundy suede pedestal under a focused warm spotlight, deep charcoal room fading to black around it. Photorealistic dark luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece presented on a round burgundy suede pedestal under a focused warm spotlight, deep charcoal room fading to black around it. Photorealistic dark luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-silk-petal",
@@ -1888,7 +1888,7 @@ export const PRESETS = [
     referenceTag: "ring-diamond",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece resting in soft folds of ivory silk beside a single white rose petal, airy high-key light, romantic minimal styling. Photorealistic bridal jewelry photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece resting in soft folds of ivory silk beside a single white rose petal, airy high-key light, romantic minimal styling. Photorealistic bridal jewelry photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-model-portrait",
@@ -1899,7 +1899,7 @@ export const PRESETS = [
     referenceTag: "necklace-heart",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical in every detail. An elegant female model wearing the piece, dressed in a luxurious satin hijab in a deep jewel tone that complements it, soft beauty lighting, dark neutral backdrop, refined campaign portrait. Photorealistic luxury editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical in every detail. An elegant female model wearing the piece, dressed in a luxurious satin hijab in a deep jewel tone that complements it, soft beauty lighting, dark neutral backdrop, refined campaign portrait. Photorealistic luxury editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-wrist-glow",
@@ -1910,7 +1910,7 @@ export const PRESETS = [
     referenceTag: "watch-diamond",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. Close-up of a model's gracefully raised hand and wrist wearing the piece, an elegant satin sleeve in a rich complementary tone, soft window light, softly blurred warm interior behind. Photorealistic beauty detail shot, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. Close-up of a model's gracefully raised hand and wrist wearing the piece, an elegant satin sleeve in a rich complementary tone, soft window light, softly blurred warm interior behind. Photorealistic beauty detail shot. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-pearl-shell",
@@ -1921,7 +1921,7 @@ export const PRESETS = [
     referenceTag: "ring-solitaire",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece nestled inside an open oyster shell lined with mother-of-pearl, resting on wet sand at blue hour with soft tide reflections. Photorealistic coastal luxury photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece nestled inside an open oyster shell lined with mother-of-pearl, resting on wet sand at blue hour with soft tide reflections. Photorealistic coastal luxury photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-desert-vitrine",
@@ -1932,7 +1932,7 @@ export const PRESETS = [
     referenceTag: "watch-twotone",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. The piece inside a minimal glass display cube standing on a smooth desert dune at golden hour, long soft shadows, warm empty sky. Photorealistic surreal retail photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. The piece inside a minimal glass display cube standing on a smooth desert dune at golden hour, long soft shadows, warm empty sky. Photorealistic surreal retail photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-rose-wreath",
@@ -1943,7 +1943,7 @@ export const PRESETS = [
     referenceTag: "ring-gold",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. Close-up macro composition: the piece shown large and prominent, filling the centre of the frame, encircled by a wreath of twisted dry vine and deep crimson roses that frames it tightly, dark moody backdrop, one warm accent light on the piece. Photorealistic dramatic still life, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. Close-up macro composition: the piece shown large and prominent, filling the centre of the frame, encircled by a wreath of twisted dry vine and deep crimson roses that frames it tightly, dark moody backdrop, one warm accent light on the piece. Photorealistic dramatic still life. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-studio-model",
@@ -1954,7 +1954,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, and keep the garment exactly identical in cut, color and print. Fashion editorial shot on a seamless warm grey backdrop, strong directional studio lighting, confident posture, sharp fabric texture detail, high-end lookbook quality, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, and keep the garment exactly identical in cut, color and print. Fashion editorial shot on a seamless warm grey backdrop, strong directional studio lighting, confident posture, sharp fabric texture detail, high-end lookbook quality. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-hanging-product",
@@ -1965,7 +1965,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical — same cut, color, print and details. Ghost mannequin product shot: garment shaped as if worn but with no visible body, clean white background, soft even lighting with a subtle contact shadow, crisp e-commerce presentation, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical — same cut, color, print and details. Ghost mannequin product shot: garment shaped as if worn but with no visible body, clean white background, soft even lighting with a subtle contact shadow, crisp e-commerce presentation. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-luxury-abaya",
@@ -1976,7 +1976,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the garment exactly identical. Elegant modest-fashion campaign shot: the garment worn by a model, flowing fabric caught in gentle motion, minimal sandstone architectural background, warm directional daylight, refined muted palette, luxury modest fashion editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the garment exactly identical. Elegant modest-fashion campaign shot: the garment worn by a model, flowing fabric caught in gentle motion, minimal sandstone architectural background, warm directional daylight, refined muted palette, luxury modest fashion editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-street-style",
@@ -1987,7 +1987,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and the outfit exactly identical. Street style fashion shot, subject walking across an urban crosswalk, overcast diffused light, blurred city background with motion, candid editorial energy, muted contemporary palette, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and the outfit exactly identical. Street style fashion shot, subject walking across an urban crosswalk, overcast diffused light, blurred city background with motion, candid editorial energy, muted contemporary palette. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-flat-lay",
@@ -1998,7 +1998,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep every garment exactly identical. Styled flat lay built around the garment from the reference photo, with complementary accessories arranged neatly on a light textured surface, soft even overhead light, clean minimal composition, subtle natural shadows, top-down, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep every garment exactly identical. Styled flat lay built around the garment from the reference photo, with complementary accessories arranged neatly on a light textured surface, soft even overhead light, clean minimal composition, subtle natural shadows, top-down. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-fabric-detail",
@@ -2009,7 +2009,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the fabric texture, color and pattern exactly identical. Macro detail shot of the material, raking side light revealing the weave and stitching, shallow depth of field, rich tactile quality, premium textile photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the fabric texture, color and pattern exactly identical. Macro detail shot of the material, raking side light revealing the weave and stitching, shallow depth of field, rich tactile quality, premium textile photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "fashion-virtual-try-on",
@@ -2020,7 +2020,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face, body and pose 100% identical, and keep the garment exactly identical in cut, color and print. Realistically dress the subject in the provided garment, natural fabric drape and shadows matching the original lighting, seamless integration, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face, body and pose 100% identical, and keep the garment exactly identical in cut, color and print. Realistically dress the subject in the provided garment, natural fabric drape and shadows matching the original lighting, seamless integration. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-red-velvet",
@@ -2031,7 +2031,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical — same metal, stones and shape. Luxury display shot on deep red velvet, controlled sparkle highlights on every facet, soft gradient falloff around, dark elegant background, high-end jewelry advertising macro, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical — same metal, stones and shape. Luxury display shot on deep red velvet, controlled sparkle highlights on every facet, soft gradient falloff around, dark elegant background, high-end jewelry advertising macro. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-gold-on-marble",
@@ -2042,7 +2042,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. Gold jewelry on a white marble surface with soft gold veining, bright clean lighting with crisp reflections, minimal luxury styling, subtle shadow detail, premium product photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. Gold jewelry on a white marble surface with soft gold veining, bright clean lighting with crisp reflections, minimal luxury styling, subtle shadow detail, premium product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-ring-close-up",
@@ -2053,7 +2053,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the piece exactly identical. Extreme macro shot of the piece, razor-sharp detail on the gemstones and metal texture, controlled specular highlights, dark blurred background with a single warm accent light, jewelry campaign quality, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the piece exactly identical. Extreme macro shot of the piece, razor-sharp detail on the gemstones and metal texture, controlled specular highlights, dark blurred background with a single warm accent light, jewelry campaign quality. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-on-the-model",
@@ -2064,7 +2064,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical, and keep the jewelry exactly identical. Elegant model shot showcasing the piece on the neck or wrist, soft flattering beauty light, muted background in a complementary tone, refined luxury editorial, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical, and keep the jewelry exactly identical. Elegant model shot showcasing the piece on the neck or wrist, soft flattering beauty light, muted background in a complementary tone, refined luxury editorial. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-gift-box",
@@ -2075,7 +2075,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. Gift presentation shot: the piece inside an open premium box on a satin surface, warm directional light with soft reflections, rose petals scattered nearby, romantic luxury styling, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. Gift presentation shot: the piece inside an open premium box on a satin surface, warm directional light with soft reflections, rose petals scattered nearby, romantic luxury styling. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-diamonds-and-light",
@@ -2086,7 +2086,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. Dramatic dark-field shot: the piece isolated on black with precise edge lighting creating brilliant sparkle, deep shadows, moody high-contrast presentation, luxury advertising macro, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. Dramatic dark-field shot: the piece isolated on black with precise edge lighting creating brilliant sparkle, deep shadows, moody high-contrast presentation, luxury advertising macro. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "jewellery-heritage-gold",
@@ -2097,7 +2097,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the jewelry piece exactly identical. Cultural styling shot: the piece resting on richly embroidered traditional fabric with subtle arabesque patterns, warm amber lighting, rich jewel-tone palette, heritage luxury mood, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the jewelry piece exactly identical. Cultural styling shot: the piece resting on richly embroidered traditional fabric with subtle arabesque patterns, warm amber lighting, rich jewel-tone palette, heritage luxury mood. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "ecommerce-homepage-banner",
@@ -2108,7 +2108,7 @@ export const PRESETS = [
     referenceTag: "blender-set",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Wide hero banner: the product positioned on one side over a soft brand-color gradient with abstract geometric shapes, clean studio lighting, generous empty area on the opposite side for headline and button, 16:9. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Wide hero banner: the product positioned on one side over a soft brand-color gradient with abstract geometric shapes, clean studio lighting, generous empty area on the opposite side for headline and button. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "ecommerce-story-banner",
@@ -2119,7 +2119,7 @@ export const PRESETS = [
     referenceTag: "phone",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Vertical story banner: the product centered with a dynamic burst shape behind, bold contrasting colors, crisp shadow, clean empty zones at the top and bottom for text and a call-to-action, 9:16. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Vertical story banner: the product centered with a dynamic burst shape behind, bold contrasting colors, crisp shadow, clean empty zones at the top and bottom for text and a call-to-action. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "ecommerce-product-in-context",
@@ -2130,7 +2130,7 @@ export const PRESETS = [
     referenceTag: "vacuum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Contextual lifestyle banner: the product naturally placed in a real- use environment, soft natural lighting, blurred authentic background, warm inviting palette, clean space on one side for text, 16:9. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Contextual lifestyle banner: the product naturally placed in a real- use environment, soft natural lighting, blurred authentic background, warm inviting palette, clean space on one side for text. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-bubble-hold",
@@ -2141,7 +2141,7 @@ export const PRESETS = [
     referenceTag: "tube-white",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical — same shape, label and colours. A hand holding the product upright with translucent soap bubbles drifting around it, eucalyptus sprigs and white jasmine behind, soft mint-and-cream palette, bright morning window light. Photorealistic clean-beauty photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical — same shape, label and colours. A hand holding the product upright with translucent soap bubbles drifting around it, eucalyptus sprigs and white jasmine behind, soft mint-and-cream palette, bright morning window light. Photorealistic clean-beauty photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-oud-smoke",
@@ -2152,7 +2152,7 @@ export const PRESETS = [
     referenceTag: "attar-ornate",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a rough volcanic stone plinth with fragrant oud smoke curling upward in thin ribbons, dark charcoal backdrop, warm amber rim light catching the smoke. Photorealistic atmospheric product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a rough volcanic stone plinth with fragrant oud smoke curling upward in thin ribbons, dark charcoal backdrop, warm amber rim light catching the smoke. Photorealistic atmospheric product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-dune-dawn",
@@ -2163,7 +2163,7 @@ export const PRESETS = [
     referenceTag: "arabic-parfum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product half-nestled in fine rippled sand at first light, a lone camel silhouette far on the horizon, cool blue-to-apricot dawn sky, long soft shadow, minimal composition. Photorealistic desert editorial photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product half-nestled in fine rippled sand at first light, a lone camel silhouette far on the horizon, cool blue-to-apricot dawn sky, long soft shadow, minimal composition. Photorealistic desert editorial photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-rain-glass",
@@ -2174,7 +2174,7 @@ export const PRESETS = [
     referenceTag: "serum-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. A hand pressing the product against the far side of a rain-streaked glass pane, water running down the surface, cool teal light from behind, soft focus falloff, moody minimal palette. Photorealistic conceptual product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. A hand pressing the product against the far side of a rain-streaked glass pane, water running down the surface, cool teal light from behind, soft focus falloff, moody minimal palette. Photorealistic conceptual product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-jasmine-halo",
@@ -2185,7 +2185,7 @@ export const PRESETS = [
     referenceTag: "lotion-pump",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product floating at the centre of a circular wreath of white jasmine and green leaves, soft ivory backdrop, gentle even light, symmetrical calm composition. Photorealistic floral product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product floating at the centre of a circular wreath of white jasmine and green leaves, soft ivory backdrop, gentle even light, symmetrical calm composition. Photorealistic floral product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-andalusian-arch",
@@ -2196,7 +2196,7 @@ export const PRESETS = [
     referenceTag: "attar-navy",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a carved stone ledge before a row of scalloped Andalusian arches opening onto a courtyard fountain, warm late-afternoon sun, honey and terracotta palette, architectural depth. Photorealistic heritage advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a carved stone ledge before a row of scalloped Andalusian arches opening onto a courtyard fountain, warm late-afternoon sun, honey and terracotta palette, architectural depth. Photorealistic heritage advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-garden-swing",
@@ -2207,7 +2207,7 @@ export const PRESETS = [
     referenceTag: "serum-clear",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product resting on a small wooden plank swing hung by rope, surrounded by mint sprigs and white blossom, pale sage sky with soft clouds behind, dreamy pastel palette. Photorealistic whimsical product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product resting on a small wooden plank swing hung by rope, surrounded by mint sprigs and white blossom, pale sage sky with soft clouds behind, dreamy pastel palette. Photorealistic whimsical product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-aloe-fresh",
@@ -2218,7 +2218,7 @@ export const PRESETS = [
     referenceTag: "cream-teal",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product beside cut aloe vera leaves and cucumber slices with fresh water droplets on every surface, cool white-and-green palette, crisp clean studio light. Photorealistic fresh-skincare photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product beside cut aloe vera leaves and cucumber slices with fresh water droplets on every surface, cool white-and-green palette, crisp clean studio light. Photorealistic fresh-skincare photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-silk-blossom",
@@ -2229,7 +2229,7 @@ export const PRESETS = [
     referenceTag: "rose-parfum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product lying on rumpled blush silk scattered with peach blossom petals, soft diffused light, warm rose-and-cream palette, intimate close framing. Photorealistic romantic still life, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product lying on rumpled blush silk scattered with peach blossom petals, soft diffused light, warm rose-and-cream palette, intimate close framing. Photorealistic romantic still life. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-saffron-splash",
@@ -2240,7 +2240,7 @@ export const PRESETS = [
     referenceTag: "cream-jar-gold",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product at the centre of a swirling almond-milk splash frozen mid-air with saffron threads, cardamom pods and cinnamon bark suspended around it, warm caramel backdrop, high-speed capture. Photorealistic commercial photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product at the centre of a swirling almond-milk splash frozen mid-air with saffron threads, cardamom pods and cinnamon bark suspended around it, warm caramel backdrop, high-speed capture. Photorealistic commercial photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-water-ribbon",
@@ -2251,7 +2251,7 @@ export const PRESETS = [
     referenceTag: "serum-prolong",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product standing on a dark mirrored surface with a single ribbon of emerald water curling around it and droplets suspended, deep teal background, dramatic rim lighting. Photorealistic dynamic product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product standing on a dark mirrored surface with a single ribbon of emerald water curling around it and droplets suspended, deep teal background, dramatic rim lighting. Photorealistic dynamic product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-majlis-rug",
@@ -2262,7 +2262,7 @@ export const PRESETS = [
     referenceTag: "parfum-gold-a",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a richly patterned Persian rug spread over desert sand, a brass lantern and small coffee cups nearby, warm sunset glow, deep burgundy and gold palette. Photorealistic cultural lifestyle photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a richly patterned Persian rug spread over desert sand, a brass lantern and small coffee cups nearby, warm sunset glow, deep burgundy and gold palette. Photorealistic cultural lifestyle photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-pearl-inlay",
@@ -2273,7 +2273,7 @@ export const PRESETS = [
     referenceTag: "attar-ornate",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a mother-of-pearl inlaid wooden table beside a lit brass candle and folded silk, dark interior with a single warm side beam, deep shadows, antique luxury mood. Photorealistic fine-art still life, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a mother-of-pearl inlaid wooden table beside a lit brass candle and folded silk, dark interior with a single warm side beam, deep shadows, antique luxury mood. Photorealistic fine-art still life. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-lily-pond",
@@ -2284,7 +2284,7 @@ export const PRESETS = [
     referenceTag: "cream-set",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product standing on a still pond surface with concentric ripples spreading outward, white water lilies and floating leaves around it, soft dawn light, serene blue-green palette. Photorealistic serene product photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product standing on a still pond surface with concentric ripples spreading outward, white water lilies and floating leaves around it, soft dawn light, serene blue-green palette. Photorealistic serene product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-glass-capsule",
@@ -2295,7 +2295,7 @@ export const PRESETS = [
     referenceTag: "oil-amber",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Macro shot of fingers holding a clear glass capsule with the product suspended inside it, softly blurred bokeh lights behind, cool cinematic palette, shallow depth of field. Photorealistic conceptual macro photography, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Macro shot of fingers holding a clear glass capsule with the product suspended inside it, softly blurred bokeh lights behind, cool cinematic palette, shallow depth of field. Photorealistic conceptual macro photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "skin-eid-offer",
@@ -2306,7 +2306,7 @@ export const PRESETS = [
     referenceTag: "parfum-gold-b",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Festive Eid staging: the product on a hanging wooden shelf with trailing green vines and a small blank gift tag beside it, deep sage and gold palette, warm soft light, generous clean space above for a greeting. Photorealistic festive advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Festive Eid staging: the product on a hanging wooden shelf with trailing green vines and a small blank gift tag beside it, deep sage and gold palette, warm soft light, generous clean space above for a greeting. Photorealistic festive advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-glacier-lake",
@@ -2317,7 +2317,7 @@ export const PRESETS = [
     referenceTag: "attar-navy",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a pale marble podium at the edge of a mirror-still glacial lake, snow-capped mountains behind, cold blue mist and soft dawn light, serene icy palette. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a pale marble podium at the edge of a mirror-still glacial lake, snow-capped mountains behind, cold blue mist and soft dawn light, serene icy palette. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-carved-rock",
@@ -2328,7 +2328,7 @@ export const PRESETS = [
     referenceTag: "arabic-parfum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a smooth stone ledge before a towering rose-red sandstone cliff carved with tall columns, warm dusty light, peach and terracotta palette, ancient desert atmosphere. Photorealistic heritage advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a smooth stone ledge before a towering rose-red sandstone cliff carved with tall columns, warm dusty light, peach and terracotta palette, ancient desert atmosphere. Photorealistic heritage advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-spice-smoke",
@@ -2339,7 +2339,7 @@ export const PRESETS = [
     referenceTag: "attar-ornate",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on dark polished wood surrounded by cinnamon sticks, cardamom pods and dried roots, thin smoke drifting across, deep golden bokeh behind, rich amber palette. Photorealistic atmospheric advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on dark polished wood surrounded by cinnamon sticks, cardamom pods and dried roots, thin smoke drifting across, deep golden bokeh behind, rich amber palette. Photorealistic atmospheric advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-navy-fur",
@@ -2350,7 +2350,7 @@ export const PRESETS = [
     referenceTag: "parfum-gold-a",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a white marble cylinder against a deep navy fur backdrop, icy blue mist curling low, cool dramatic lighting, midnight blue palette. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a white marble cylinder against a deep navy fur backdrop, icy blue mist curling low, cool dramatic lighting, midnight blue palette. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-orchard-arch",
@@ -2361,7 +2361,7 @@ export const PRESETS = [
     referenceTag: "perfume-oriental",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product inside a carved dark stone arch on a black reflective surface, green apples, grapes, lime and white jasmine arranged around its base, moody low light. Photorealistic still life advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product inside a carved dark stone arch on a black reflective surface, green apples, grapes, lime and white jasmine arranged around its base, moody low light. Photorealistic still life advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-leopard-silk",
@@ -2372,7 +2372,7 @@ export const PRESETS = [
     referenceTag: "attar-ornate",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product resting on leopard-print fur beside flowing gold silk, frankincense resin, oud wood chips and jasmine blossoms nearby, warm brown interior, opulent mood. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product resting on leopard-print fur beside flowing gold silk, frankincense resin, oud wood chips and jasmine blossoms nearby, warm brown interior, opulent mood. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-sea-terrace",
@@ -2383,7 +2383,7 @@ export const PRESETS = [
     referenceTag: "serum-clear",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a travertine ledge overlooking a turquoise sea with palm fronds, white pebbles, fresh mint and pale pink roses beside it, bright airy daylight. Photorealistic resort advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a travertine ledge overlooking a turquoise sea with palm fronds, white pebbles, fresh mint and pale pink roses beside it, bright airy daylight. Photorealistic resort advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-citrus-colonnade",
@@ -2394,7 +2394,7 @@ export const PRESETS = [
     referenceTag: "perfume-eclat",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on pale stone in a sunlit colonnade, halved limes and orange slices with white vanilla flowers around it, warm backlight flaring between the columns. Photorealistic bright advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on pale stone in a sunlit colonnade, halved limes and orange slices with white vanilla flowers around it, warm backlight flaring between the columns. Photorealistic bright advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-ruby-gloss",
@@ -2405,7 +2405,7 @@ export const PRESETS = [
     referenceTag: "cream-red",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a glossy deep red surface with grapefruit slices, purple iris blooms and glistening amber droplets around it, warm crimson glow and sharp highlights. Photorealistic vivid advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a glossy deep red surface with grapefruit slices, purple iris blooms and glistening amber droplets around it, warm crimson glow and sharp highlights. Photorealistic vivid advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-mashrabiya",
@@ -2416,7 +2416,7 @@ export const PRESETS = [
     referenceTag: "parfum-gold-b",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product standing on a polished wooden table before a golden mashrabiya lattice screen, warm honey light filtering through the geometry, soft reflection below. Photorealistic heritage advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product standing on a polished wooden table before a golden mashrabiya lattice screen, warm honey light filtering through the geometry, soft reflection below. Photorealistic heritage advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-dates-sandalwood",
@@ -2427,7 +2427,7 @@ export const PRESETS = [
     referenceTag: "oil-amber",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on dark stone with fresh dates, sandalwood chips, sage leaves and amber resin arranged around it, warm directional light, deep earthy palette. Photorealistic still life advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on dark stone with fresh dates, sandalwood chips, sage leaves and amber resin arranged around it, warm directional light, deep earthy palette. Photorealistic still life advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-crimson-stage",
@@ -2438,7 +2438,7 @@ export const PRESETS = [
     referenceTag: "rose-parfum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product centred on a glossy red podium against billowing deep red smoke, dramatic backlight, saturated crimson palette, bold advertising composition. Photorealistic promotional design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product centred on a glossy red podium against billowing deep red smoke, dramatic backlight, saturated crimson palette, bold advertising composition. Photorealistic promotional design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-black-disc",
@@ -2449,7 +2449,7 @@ export const PRESETS = [
     referenceTag: "serum-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a matte black disc podium against a pure black background, a single orange half and a white frangipani flower beside it, one precise spotlight, minimal luxury. Photorealistic dark advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a matte black disc podium against a pure black background, a single orange half and a white frangipani flower beside it, one precise spotlight, minimal luxury. Photorealistic dark advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-violet-stage",
@@ -2460,7 +2460,7 @@ export const PRESETS = [
     referenceTag: "serum-prolong",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a glossy podium against swirling violet smoke, cool purple rim light, reflective floor, bold saturated palette. Photorealistic promotional design, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a glossy podium against swirling violet smoke, cool purple rim light, reflective floor, bold saturated palette. Photorealistic promotional design. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-spotlight-slab",
@@ -2471,7 +2471,7 @@ export const PRESETS = [
     referenceTag: "parfum-trio",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a round wooden slab in a dark industrial hall, two hard spotlights crossing above, a lemon and white jasmine at its base, dramatic contrast. Photorealistic editorial advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a round wooden slab in a dark industrial hall, two hard spotlights crossing above, a lemon and white jasmine at its base, dramatic contrast. Photorealistic editorial advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-bright-arches",
@@ -2482,7 +2482,7 @@ export const PRESETS = [
     referenceTag: "lotion-pump",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a marble ledge in a bright airy room with soft arches behind, white pebbles, pale pink roses and fresh ginger root beside it, clean daylight, calm neutral palette. Photorealistic lifestyle advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a marble ledge in a bright airy room with soft arches behind, white pebbles, pale pink roses and fresh ginger root beside it, clean daylight, calm neutral palette. Photorealistic lifestyle advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-vanilla-honey",
@@ -2493,7 +2493,7 @@ export const PRESETS = [
     referenceTag: "serum-botanics",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on dark wood with white vanilla orchids, a slow drizzle of honey and cinnamon bark around it, warm golden bokeh behind, glossy amber highlights. Photorealistic gourmand advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on dark wood with white vanilla orchids, a slow drizzle of honey and cinnamon bark around it, warm golden bokeh behind, glossy amber highlights. Photorealistic gourmand advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-silk-ribbon",
@@ -2504,7 +2504,7 @@ export const PRESETS = [
     referenceTag: "serum-dermastir",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product against a sweeping ribbon of cream and navy silk curling through the frame, saffron threads and juniper berries suspended nearby, soft studio light. Photorealistic elegant advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product against a sweeping ribbon of cream and navy silk curling through the frame, saffron threads and juniper berries suspended nearby, soft studio light. Photorealistic elegant advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-crimson-fur",
@@ -2515,7 +2515,7 @@ export const PRESETS = [
     referenceTag: "perfume-oriental",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product nestled in deep red fur with a small gold medallion charm resting against it, warm amber background, white blossoms at the base, plush luxurious mood. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product nestled in deep red fur with a small gold medallion charm resting against it, warm amber background, white blossoms at the base, plush luxurious mood. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-gradient-stripes",
@@ -2526,7 +2526,7 @@ export const PRESETS = [
     referenceTag: "cream-teal",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a mirrored disc against tall vertical stripes fading from teal to violet, clean graphic composition, soft even light, modern minimal palette. Photorealistic modern advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a mirrored disc against tall vertical stripes fading from teal to violet, clean graphic composition, soft even light, modern minimal palette. Photorealistic modern advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-scarlet-mist",
@@ -2537,7 +2537,7 @@ export const PRESETS = [
     referenceTag: "cream-red",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a dark surface wrapped in drifting scarlet mist, purple iris and white jasmine blooms with amber resin clustered at its base, deep red glow. Photorealistic dramatic advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a dark surface wrapped in drifting scarlet mist, purple iris and white jasmine blooms with amber resin clustered at its base, deep red glow. Photorealistic dramatic advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-herb-garden",
@@ -2548,7 +2548,7 @@ export const PRESETS = [
     referenceTag: "serum-hair",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product surrounded by lavender sprigs and fresh herbs with pink petals falling through the air, warm golden interior light behind, lush green palette. Photorealistic botanical advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product surrounded by lavender sprigs and fresh herbs with pink petals falling through the air, warm golden interior light behind, lush green palette. Photorealistic botanical advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-turquoise-mist",
@@ -2559,7 +2559,7 @@ export const PRESETS = [
     referenceTag: "cream-teal",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a wet reflective floor with turquoise mist swirling around it, pale flowers floating in the air, warm lamps glowing far behind, dreamlike atmosphere. Photorealistic surreal advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a wet reflective floor with turquoise mist swirling around it, pale flowers floating in the air, warm lamps glowing far behind, dreamlike atmosphere. Photorealistic surreal advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-rose-and-pear",
@@ -2570,7 +2570,7 @@ export const PRESETS = [
     referenceTag: "perfume-eclat",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a marble ledge in a sunlit stone colonnade, a deep red rose, a ripe pear and a bergamot beside it, soft warm daylight, refined palette. Photorealistic elegant advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a marble ledge in a sunlit stone colonnade, a deep red rose, a ripe pear and a bergamot beside it, soft warm daylight, refined palette. Photorealistic elegant advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-tile-wall",
@@ -2581,7 +2581,7 @@ export const PRESETS = [
     referenceTag: "parfum-gold-b",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a white marble surface against a blue-and-white patterned ceramic tile wall, soft daylight, crisp reflection, cool porcelain palette. Photorealistic heritage advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a white marble surface against a blue-and-white patterned ceramic tile wall, soft daylight, crisp reflection, cool porcelain palette. Photorealistic heritage advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-golden-screen",
@@ -2592,7 +2592,7 @@ export const PRESETS = [
     referenceTag: "attar-navy",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product before a golden geometric lattice screen with a cream curtain drawn to one side, saffron threads scattered on the surface, warm dim light, refined dark palette. Photorealistic luxury advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product before a golden geometric lattice screen with a cream curtain drawn to one side, saffron threads scattered on the surface, warm dim light, refined dark palette. Photorealistic luxury advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-blush-silk",
@@ -2603,7 +2603,7 @@ export const PRESETS = [
     referenceTag: "rose-parfum",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on rumpled blush pink silk with a ripe peach, cherry blossom sprigs and dried roses around it, soft diffused light, tender pastel palette. Photorealistic romantic advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on rumpled blush pink silk with a ripe peach, cherry blossom sprigs and dried roses around it, soft diffused light, tender pastel palette. Photorealistic romantic advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-moonlit-sea",
@@ -2614,7 +2614,7 @@ export const PRESETS = [
     referenceTag: "serum-clear",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a gold-rimmed podium rising from a calm night sea, a large glowing moon and distant icebergs behind, starry sky, cool blue palette. Photorealistic cinematic advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a gold-rimmed podium rising from a calm night sea, a large glowing moon and distant icebergs behind, starry sky, cool blue palette. Photorealistic cinematic advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-midnight-table",
@@ -2625,7 +2625,7 @@ export const PRESETS = [
     referenceTag: "serum-black",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a dark reflective tabletop in near darkness, one dramatic beam picking out its edges, deep black background, restrained masculine palette. Photorealistic dark advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a dark reflective tabletop in near darkness, one dramatic beam picking out its edges, deep black background, restrained masculine palette. Photorealistic dark advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "scent-golden-berries",
@@ -2636,7 +2636,7 @@ export const PRESETS = [
     referenceTag: "cream-jar-gold",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. The product on a dark surface with vanilla pods, dark berries and a white blossom beside it, warm golden bokeh filling the background, rich glowing palette. Photorealistic gourmand advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. The product on a dark surface with vanilla pods, dark berries and a white blossom beside it, warm golden bokeh filling the background, rich glowing palette. Photorealistic gourmand advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "clinics-care-product",
@@ -2647,7 +2647,7 @@ export const PRESETS = [
     referenceTag: "serum-botanics",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product identical. Skincare product hero shot: the product on a wet stone podium, water droplets and green leaves around, soft misty atmosphere, clean cool lighting, spa-like luxury feel, high-end cosmetics advertising, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product identical. Skincare product hero shot: the product on a wet stone podium, water droplets and green leaves around, soft misty atmosphere, clean cool lighting, spa-like luxury feel, high-end cosmetics advertising. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "pharmacy-clean-packaging",
@@ -2658,7 +2658,7 @@ export const PRESETS = [
     referenceTag: "cream-red",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical — same packaging, label and colors. Clean pharmaceutical product shot on a white podium, bright even clinical lighting, soft contact shadow, minimal cool-toned background, trustworthy medical presentation, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical — same packaging, label and colors. Clean pharmaceutical product shot on a white podium, bright even clinical lighting, soft contact shadow, minimal cool-toned background, trustworthy medical presentation. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "pharmacy-vitamins-and-nature",
@@ -2669,7 +2669,7 @@ export const PRESETS = [
     referenceTag: "serum-dermastir",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Natural supplement shot: the bottle on a light stone surface surrounded by fresh citrus slices, green leaves and scattered capsules, bright fresh lighting, vibrant healthy palette, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Natural supplement shot: the bottle on a light stone surface surrounded by fresh citrus slices, green leaves and scattered capsules, bright fresh lighting, vibrant healthy palette. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "pharmacy-daily-care",
@@ -2680,7 +2680,7 @@ export const PRESETS = [
     referenceTag: "tube-white",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Lifestyle pharmacy scene: the product on a bathroom shelf with a folded towel and a glass of water, soft daylight, clean white and mint palette, calm everyday care mood,. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Lifestyle pharmacy scene: the product on a bathroom shelf with a folded towel and a glass of water, soft daylight, clean white and mint palette, calm everyday care mood,. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "pharmacy-protein-and-energy",
@@ -2691,7 +2691,7 @@ export const PRESETS = [
     referenceTag: "lotion-pump",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Dynamic supplement shot: the container on dark stone with powder bursting around it and a strong blue-orange rim light, aggressive energetic composition, high-contrast commercial render, vertical 4:5. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Dynamic supplement shot: the container on dark stone with powder bursting around it and a strong blue-orange rim light, aggressive energetic composition, high-contrast commercial render. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "pharmacy-baby-care",
@@ -2702,7 +2702,7 @@ export const PRESETS = [
     referenceTag: "cream-teal",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Gentle baby-care product shot: the item on a soft folded muslin cloth with a small wooden toy nearby, warm diffused window light, pastel neutral palette, tender safe feeling, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Gentle baby-care product shot: the item on a soft folded muslin cloth with a small wooden toy nearby, warm diffused window light, pastel neutral palette, tender safe feeling. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "salons-spa-salon-products",
@@ -2713,7 +2713,7 @@ export const PRESETS = [
     referenceTag: "serum-hair",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep every product exactly identical. Salon retail lineup: bottles arranged in a row on a marble shelf, soft even lighting with clean reflections, minimal spa palette, subtle greenery accent, generous space for text, 16:9. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep every product exactly identical. Salon retail lineup: bottles arranged in a row on a marble shelf, soft even lighting with clean reflections, minimal spa palette, subtle greenery accent, generous space for text. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "recruitment-employee-story",
@@ -2724,7 +2724,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the person's face and identity 100% identical. Employee spotlight portrait, subject in workplace attire against a softly blurred office background, warm natural lighting, approachable confident expression, clean space beside them for quote text, 3:2. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the person's face and identity 100% identical. Employee spotlight portrait, subject in workplace attire against a softly blurred office background, warm natural lighting, approachable confident expression, clean space beside them for quote text. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "back-to-school-first-day-of-school",
@@ -2735,7 +2735,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the child's face 100% identical to the reference. Cheerful back-to-school portrait, child wearing a neat school uniform with a colorful backpack, standing in front of a bright classroom or school gate, warm morning light, joyful natural expression, clean cheerful colors, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the child's face 100% identical to the reference. Cheerful back-to-school portrait, child wearing a neat school uniform with a colorful backpack, standing in front of a bright classroom or school gate, warm morning light, joyful natural expression, clean cheerful colors. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "back-to-school-school-supplies",
@@ -2746,7 +2746,7 @@ export const PRESETS = [
     referenceTag: "pencil-case",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. Back-to-school flat lay: the product arranged from directly above among notebooks, coloured pencils and a lunchbox on a soft pastel surface, even overhead light, crisp playful palette, tidy composition. Photorealistic overhead product photography, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. Back-to-school flat lay: the product arranged from directly above among notebooks, coloured pencils and a lunchbox on a soft pastel surface, even overhead light, crisp playful palette, tidy composition. Photorealistic overhead product photography. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "back-to-school-new-backpack",
@@ -2757,7 +2757,7 @@ export const PRESETS = [
     referenceTag: "kids-backpack",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the product exactly identical. School gear product shot: the product standing on a clean pastel gradient background, soft studio lighting with a gentle contact shadow, playful floating pencils and notebooks around, crisp e-commerce presentation, square 1:1. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the product exactly identical. School gear product shot: the product standing on a clean pastel gradient background, soft studio lighting with a gentle contact shadow, playful floating pencils and notebooks around, crisp e-commerce presentation. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. Present exactly the item shown in the reference photo, whatever it is — adapt the props, surfaces and scale naturally to suit it. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
   {
     slug: "back-to-school-achievement-reward",
@@ -2768,7 +2768,7 @@ export const PRESETS = [
     referenceTag: "",
     creditCost: 8,
     isPremium: false,
-    prompt: "Keep the child's face 100% identical. Proud student portrait holding a certificate and a small trophy, bright classroom background softly blurred, warm celebratory lighting, confetti in the air, joyful genuine expression, vertical 4:5. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
+    prompt: "Keep the child's face 100% identical. Proud student portrait holding a certificate and a small trophy, bright classroom background softly blurred, warm celebratory lighting, confetti in the air, joyful genuine expression. Keep the output at exactly the same dimensions and aspect ratio as the input photo — never crop, pad, rotate, zoom or reframe it. If the person in the reference photo wears a hijab, keep the hijab on in the result — never remove it or show her hair — and style it tastefully to match the scene. Do not add any new text, lettering, numbers or logos to the scene, and leave background areas clean for the app to overlay copy — but keep every word, label, logo and marking already printed on the product itself exactly as it appears in the reference photo, fully legible and unaltered.",
   },
 ];
 

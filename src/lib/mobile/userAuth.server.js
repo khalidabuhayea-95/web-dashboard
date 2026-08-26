@@ -76,7 +76,7 @@ export async function issueMobileSession({
     throw new Error("Mobile bearer token settings are not configured.");
   }
 
-  const accessTokenTtlMinutes = Number(settings.bearer.accessTokenTtlMinutes || 60);
+  const accessTokenTtlMinutes = Number(settings.bearer.accessTokenTtlMinutes || 10080);
   const refreshTokenTtlDays = Number(settings.bearer.refreshTokenTtlDays || 30);
   const nowSeconds = Math.floor(Date.now() / 1000);
   const accessTokenExpiresAt = nowSeconds + Math.max(accessTokenTtlMinutes, 1) * 60;

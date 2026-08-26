@@ -832,7 +832,7 @@ const schemas = {
       tokenType: { type: "string", example: "Bearer" },
       accessToken: { type: "string" },
       refreshToken: { type: "string" },
-      expiresInSeconds: { type: "integer", minimum: 1, example: 3600 },
+      expiresInSeconds: { type: "integer", minimum: 1, example: 604800 },
       user: {
         $ref: "#/components/schemas/MobileAuthUser",
       },
