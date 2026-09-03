@@ -309,6 +309,7 @@ export function toEditorFontRecord(font) {
     previewImageUrl: String(record.previewImageUrl || "").trim() || null,
     previewImageDarkUrl: String(record.previewImageDarkUrl || "").trim() || null,
     previewImageUpdatedAt: record.previewImageUpdatedAt || null,
+    isPremium: Boolean(record.isPremium),
     createdAt: record.createdAt,
     updatedAt: record.updatedAt,
   };
@@ -359,6 +360,9 @@ export function toMobileFontRecord(request, font) {
     fontFormat: String(preferredFile?.format || "unknown").trim().toLowerCase(),
     sourceMimeType: String(preferredFile?.mimeType || "").trim().toLowerCase() || null,
     source: String(record.source || FONT_SOURCE_CUSTOM).trim() || FONT_SOURCE_CUSTOM,
+    // Pro-only font. The catalog stays public and complete — the picker shows a
+    // crown and the app walls when the font is applied to a text layer.
+    isPremium: Boolean(record.isPremium),
     isNew: false,
   };
 }

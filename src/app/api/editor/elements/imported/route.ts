@@ -55,6 +55,7 @@ export async function GET(request: NextRequest) {
     const kind = searchParams.get("kind") || "all";
     const categoryValue = searchParams.get("category") || searchParams.get("categoryValue") || "";
     const query = searchParams.get("query") || "";
+    const premiumOnly = searchParams.get("premiumOnly") === "1";
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), 40);
     const locale = searchParams.get("lang") || "en";
@@ -72,6 +73,7 @@ export async function GET(request: NextRequest) {
       kind,
       categoryValue,
       query,
+      premiumOnly,
       page,
       pageSize,
       locale,

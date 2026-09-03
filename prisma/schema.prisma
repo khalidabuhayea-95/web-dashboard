@@ -37,6 +37,9 @@ model Template {
   previewError      String?
   previewUpdatedAt  DateTime?
   data              Json
+  /// Pro-only template. Included in the catalog for everyone (the app shows a
+  /// crown badge and walls at the point of use), like AiTemplate.isPremium.
+  isPremium         Boolean                  @default(false)
   publishedAt       DateTime?
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
@@ -74,6 +77,10 @@ model FontFamily {
   source                String      @default("custom")
   sourceId              String?
   status                String      @default("ready")
+  /// Pro-only font. Listed for everyone (the picker shows a crown); the paywall
+  /// rises when it is APPLIED to a text layer. Toggling this MUST bump the font
+  /// catalog version — the app caches the whole catalog until that number changes.
+  isPremium             Boolean     @default(false)
   categories            Json
   previewText           String?
   previewWeight         Int?
@@ -187,6 +194,13 @@ model MobileUser {
   // Per-user monthly AI credit allowance. Null = use the global default from
   // mobile app settings; set a number to give this account its own balance.
   creditAllowance Int?
+  // Denormalized entitlement written by the billing webhook/verify pipeline
+  // (src/lib/billing). "free" | "plus" | "pro". Read-fast copy for the request path —
+  // Subscription rows hold the full store state. A paid row past
+  // subscriptionExpiresAt is treated as free (webhook retries can run out),
+  // see resolveUserTier in src/lib/billing/subscriptionTier.server.ts.
+  subscriptionTier      String    @default("free")
+  subscriptionExpiresAt DateTime?
   lastLoginAt     DateTime?
   createdAt       DateTime                 @default(now())
   updatedAt       DateTime                 @updatedAt
@@ -196,11 +210,13 @@ model MobileUser {
   favorites       MobileFavoriteTemplate[]
   contactMessages ContactMessage[]
   mediaUsage      MediaUsage[]
+  subscriptions   Subscription[]
 
   @@index([normalizedEmail])
   @@index([createdAt])
   @@index([bannedUntil])
   @@index([role])
+  @@index([subscriptionTier])
 }
 
 // One row per successful paid AI media run. Backs the monthly per-user credit
@@ -383,7 +399,7 @@ model AiTemplate {
   /// each, which is a 30 MB tab; the app lists thumbs and loads afterUrl only
   /// when a tool is opened.
   thumbUrl      String?
-  creditCost    Int      @default(8)
+  creditCost    Int      @default(100)
   isPremium     Boolean  @default(false)
   published     Boolean  @default(true)
   sortOrder     Int      @default(0)
@@ -469,6 +485,8 @@ model editor_background_assets {
   height             Int?
   source_payload     Json      @default("{}")
   translation_status String    @default("fallback")
+  /// Pro-only background (see FontFamily.isPremium for the same concept).
+  is_premium         Boolean   @default(false)
   created_source_at  DateTime? @db.Timestamptz(6)
   created_at         DateTime  @default(now()) @db.Timestamptz(6)
   updated_at         DateTime  @default(now()) @db.Timestamptz(6)
@@ -503,6 +521,8 @@ model editor_element_assets {
   width              Int?
   height             Int?
   free_svg           Boolean   @default(false)
+  /// Pro-only element (see FontFamily.isPremium for the same concept).
+  is_premium         Boolean   @default(false)
   source_payload     Json      @default("{}")
   translation_status String    @default("fallback")
   created_source_at  DateTime? @db.Timestamptz(6)
@@ -564,7 +584,7 @@ model MagicTool {
   afterUrl      String?
   /// Grid-sized copy of afterUrl (400px) — see AiTemplate.thumbUrl.
   thumbUrl      String?
-  creditCost    Int      @default(8)
+  creditCost    Int      @default(100)
   isPremium     Boolean  @default(false)
   published     Boolean  @default(true)
   sortOrder     Int      @default(0)
@@ -598,4 +618,73 @@ model TextEffect {
   updatedAt  DateTime @updatedAt
 
   @@index([published, sortOrder])
+}
+
+// One row per store subscription (Nayroz Pro). Written only by the billing
+// pipeline (src/lib/billing): the mobile /subscriptions/verify endpoint and the
+// App Store / Play webhooks, both of which re-check state with the store before
+// touching this table. MobileUser.subscriptionTier/subscriptionExpiresAt are the
+// denormalized read-fast copy of the latest active row.
+model Subscription {
+  id           String     @id @default(uuid()) @db.Uuid
+  mobileUserId String     @db.Uuid
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+  /// "apple" | "google"
+  platform     String
+  /// Store product: App Store product id (nayroz_plus_monthly) or Play
+  /// "subscriptionId:basePlanId" (nayroz_plus:monthly).
+  productId    String
+  /// "monthly" | "yearly" — parsed from productId so the app/admin never has to.
+  planKey      String
+  /// The store's stable identity for the subscription: Apple
+  /// originalTransactionId, Google the LATEST purchaseToken. This is the
+  /// idempotency key and the guard against one receipt unlocking two accounts.
+  storeKey     String     @unique
+  /// Google resubscribe/upgrade issues a fresh token that voids the previous
+  /// one (carried here) — applyStoreState expires the row it points at.
+  linkedPurchaseToken String?
+  /// "active" | "trialing" | "cancelled" (auto-renew off, entitled until
+  /// expiry) | "grace" | "hold" | "paused" | "expired" | "revoked"
+  status       String
+  /// "trial" | "normal"
+  periodType   String     @default("normal")
+  currentPeriodEnd DateTime?
+  autoRenewing Boolean    @default(true)
+  /// "production" | "sandbox" | "xcode-test" — sandbox rows never flip the
+  /// user tier unless ALLOW_SANDBOX_ENTITLEMENTS is set.
+  environment  String     @default("production")
+  lastNotificationType String?
+  lastNotificationAt   DateTime?
+  /// Latest raw store state (SubscriptionPurchaseV2 / decoded transaction) for
+  /// debugging; never read by application logic.
+  raw          Json?
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([mobileUserId])
+  @@index([status, currentPeriodEnd])
+}
+
+// Dedupe + audit ledger for store server notifications (App Store Server
+// Notifications V2, Play RTDN). The webhook inserts first (unique id = the
+// store's own notification id, so retries collapse), processes inline, then
+// stamps the outcome. Failed rows stay queryable for manual replay — Apple
+// retries a few times and Pub/Sub retries on 5xx, but neither retries forever.
+model StoreNotification {
+  /// Apple notificationUUID / Pub/Sub messageId.
+  id          String    @id
+  /// "apple" | "google"
+  platform    String
+  /// Store notification type (e.g. DID_RENEW, SUBSCRIPTION_PURCHASED).
+  type        String
+  /// Decoded notification body (NOT the raw JWS — that never needs replaying).
+  payload     Json
+  /// "processing" (in flight) | "processed" | "failed" | "skipped"
+  status      String
+  error       String?
+  attempts    Int       @default(1)
+  receivedAt  DateTime  @default(now())
+  processedAt DateTime?
+
+  @@index([platform, status, receivedAt])
 }

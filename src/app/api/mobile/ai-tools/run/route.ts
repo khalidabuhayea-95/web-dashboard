@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 
+import { resolveUserTier, SUBSCRIPTION_TIERS } from "@/lib/billing/subscriptionTier.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -8,6 +9,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
+import prisma from "@/lib/prisma";
 import { checkRateLimit, createRateLimitResponse } from "@/lib/security/rateLimit.server";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
 import { enforceMediaCredits, recordMediaUsage } from "@/lib/media/credits/index.server";
@@ -83,6 +85,40 @@ export async function POST(request: NextRequest) {
         { error: "That tool is not available.", code: "tool_not_found" },
         404
       );
+    }
+
+    // ★EVERY tool requires a paid subscription (2026-09-01 direction — the gate
+    // used to apply only to isPremium tools). The catalogue stays public so the
+    // shop window works signed-out; the app walls at tool-open client-side, and
+    // this is the enforcement behind it. isPremium remains on the wire purely
+    // as catalogue metadata.
+    //
+    // ★Gate on "not free", NOT on equality with a single tier. This read
+    // `tier !== "pro"` while "pro" meant the ENTRY tier, so a top-tier
+    // subscriber — whose tier string was "pro_max" — was rejected from the very
+    // tools they paid the most for. Any future tier is entitled by default,
+    // which is the safe direction for a paying customer.
+    {
+      const tierUser = await prisma.mobileUser.findUnique({
+        where: { id: mobileUser.id },
+        select: { subscriptionTier: true, subscriptionExpiresAt: true },
+      });
+      const tier = resolveUserTier(tierUser);
+      if (tier === SUBSCRIPTION_TIERS.FREE) {
+        requestLogger.info("AI tool run rejected: subscription required", {
+          mobileUserId: mobileUser.id,
+          toolSlug: tool.slug,
+        });
+        return jsonResponse(
+          requestId,
+          {
+            error: "This tool is part of Nayroz Pro.",
+            code: "subscription_required",
+            subscription: { tier, required: "plus" },
+          },
+          403
+        );
+      }
     }
 
     const imageEntry = formData.get("image");

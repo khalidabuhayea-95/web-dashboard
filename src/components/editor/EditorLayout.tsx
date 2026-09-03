@@ -59,7 +59,12 @@ function isLikelyImageUrl(value: string) {
   return /^https?:\/\/\S+\.(png|jpe?g|gif|webp|avif|bmp)(\?.*)?$/i.test(safe);
 }
 
-export default function EditorLayout() {
+interface EditorLayoutProps {
+  /** Admins only: pricing a template is a monetization decision, not authoring. */
+  canManagePremium?: boolean;
+}
+
+export default function EditorLayout({ canManagePremium = false }: EditorLayoutProps) {
   const showLeftSidebar = useEditorStore((state) => state.showLeftSidebar);
   const showRightSidebar = useEditorStore((state) => state.showRightSidebar);
   const pages = useEditorStore((state) => state.pages);
@@ -311,6 +316,7 @@ export default function EditorLayout() {
       <Toolbar
         onToggleLeft={() => setShowLeftSidebar(!showLeftSidebar)}
         onToggleRight={() => setShowRightSidebar(!showRightSidebar)}
+        canManagePremium={canManagePremium}
       />
 
       <div className="flex min-h-0 flex-1">

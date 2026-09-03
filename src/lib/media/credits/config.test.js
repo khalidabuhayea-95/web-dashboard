@@ -95,7 +95,7 @@ test("resolveCreditCost reads the configured cost", () => {
     DEFAULT_CREDIT_COSTS.upscale
   );
   assert.equal(resolveCreditCost(settings, "not-a-feature"), 0);
-  assert.equal(resolveCreditCost(undefined, MEDIA_CREDIT_FEATURES.EDIT_IMAGE), 8);
+  assert.equal(resolveCreditCost(undefined, MEDIA_CREDIT_FEATURES.EDIT_IMAGE), 100);
 });
 
 test("resolveMonthlyAllowance lets a per-user override win", () => {
@@ -107,6 +107,31 @@ test("resolveMonthlyAllowance lets a per-user override win", () => {
   // Null means "no override" and must fall through to the global default.
   assert.equal(resolveMonthlyAllowance(settings, { userAllowance: null }), 100);
   assert.equal(resolveMonthlyAllowance(settings, { userAllowance: -5 }), 100);
+});
+
+test("resolveMonthlyAllowance picks the pro allowance for pro-tier users", () => {
+  const settings = { mediaCredits: { monthlyAllowance: 100, plusMonthlyAllowance: 2_000 } };
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "plus" }), 2_000);
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "free" }), 100);
+  // Unknown tiers behave as free — the resolver never invents an allowance.
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "vip" }), 100);
+  // The admin's per-user override beats the subscription in BOTH directions,
+  // so support can cap or boost an account without touching billing.
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "plus", userAllowance: 50 }), 50);
+  // Pro default applies when settings never configured the field.
+  assert.equal(
+    resolveMonthlyAllowance({ mediaCredits: { monthlyAllowance: 100 } }, { tier: "plus" }),
+    10_000
+  );
+});
+
+test("resolveMonthlyAllowance picks the top-tier allowance for pro users", () => {
+  const settings = { mediaCredits: { proMonthlyAllowance: 70_000 } };
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "pro" }), 70_000);
+  // Falls back to the 5x default when the admin has not saved a value.
+  assert.equal(resolveMonthlyAllowance({}, { tier: "pro" }), 50_000);
+  // Personal override still beats the tier.
+  assert.equal(resolveMonthlyAllowance(settings, { tier: "pro", userAllowance: 5 }), 5);
 });
 
 test("resolveModelPriceMicros reads the configured price table", () => {

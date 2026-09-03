@@ -57,6 +57,7 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url);
     const source = searchParams.get("source") || "all";
     const categoryValue = searchParams.get("category") || searchParams.get("categoryValue") || "";
+    const premiumOnly = searchParams.get("premiumOnly") === "1";
     const page = parsePositiveInt(searchParams.get("page"), 1);
     const pageSize = parsePositiveInt(searchParams.get("pageSize"), 40);
     const locale = searchParams.get("lang") || "en";
@@ -71,6 +72,7 @@ export async function GET(request: NextRequest) {
     const result = await listImportedBackgroundAssets({
       source,
       categoryValue,
+      premiumOnly,
       page,
       pageSize,
       locale,

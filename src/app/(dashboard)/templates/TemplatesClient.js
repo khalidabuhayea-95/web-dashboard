@@ -6,6 +6,7 @@ import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import { Input, Label, Select } from "@/components/ui/form";
+import PremiumMark from "@/components/ui/premium-mark";
 import { Table, TableBody, TableCell, TableHead, TableHeaderCell, TableRow } from "@/components/ui/table";
 import { buildTemplateShareUrl } from "@/lib/shareLink";
 import {
@@ -628,7 +629,6 @@ export default function TemplatesClient() {
                     />
                   </TableHeaderCell>
                   <TableHeaderCell className="w-20 whitespace-nowrap">Preview</TableHeaderCell>
-                  <TableHeaderCell className="w-44 whitespace-nowrap">Name</TableHeaderCell>
                   <TableHeaderCell className="w-24 whitespace-nowrap">Category</TableHeaderCell>
                   <TableHeaderCell className="w-28 whitespace-nowrap">Sub Category</TableHeaderCell>
                   <TableHeaderCell className="w-24 whitespace-nowrap">Tags</TableHeaderCell>
@@ -659,7 +659,8 @@ export default function TemplatesClient() {
                       {previewSrc ? (
                         <button
                           type="button"
-                          className="rounded-md border border-transparent transition hover:border-[#93b5ee]"
+                          title={template.name}
+                          className="relative rounded-md border border-transparent transition hover:border-[#93b5ee]"
                           onClick={() =>
                             setPreviewPopup({
                               name: template.name,
@@ -692,20 +693,24 @@ export default function TemplatesClient() {
                               loading="lazy"
                             />
                           )}
+                          {template.isPremium ? (
+                            <PremiumMark
+                              className="absolute -left-1 -top-1"
+                              label={`${template.name} needs Nayroz Pro`}
+                            />
+                          ) : null}
+                          {Number(template.pageCount) > 1 ? (
+                            <span className="absolute -bottom-1 -right-1 rounded-full border border-border bg-background px-1.5 text-[10px] font-semibold text-muted-foreground">
+                              {Number(template.pageCount)}p
+                            </span>
+                          ) : null}
                         </button>
                       ) : (
-                        <div className="h-12 w-12 rounded-md border border-border bg-muted" />
+                        <div
+                          title={template.name}
+                          className="h-12 w-12 rounded-md border border-border bg-muted"
+                        />
                       )}
-                    </TableCell>
-                    <TableCell className="font-semibold">
-                      <div className="flex items-center gap-2">
-                        <div className="truncate">{template.name}</div>
-                        {Number(template.pageCount) > 1 ? (
-                          <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                            {Number(template.pageCount)} pages
-                          </span>
-                        ) : null}
-                      </div>
                     </TableCell>
                     <TableCell className="whitespace-nowrap">{template.category || "general"}</TableCell>
                     <TableCell className="whitespace-nowrap">{template.subCategory || "general"}</TableCell>

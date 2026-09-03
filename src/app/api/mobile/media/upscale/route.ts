@@ -8,6 +8,7 @@ import {
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { upscaleImageWithAi } from "@/lib/media/imageUpscale/index.server";
+import { getImageUpscaleModelDefinition } from "@/lib/media/imageUpscale/models.js";
 import {
   createFileTooLargeError,
   isImageUpscaleError,
@@ -108,7 +109,10 @@ export async function POST(request: NextRequest) {
       defaultUpscaleModel: defaultModelId,
     });
 
-    assertReplicateImageUpscaleConfigured(configuredModel);
+    const modelDefinition = getImageUpscaleModelDefinition(configuredModel);
+    if (modelDefinition?.provider !== "selfhost") {
+      assertReplicateImageUpscaleConfigured(configuredModel);
+    }
 
     const imageFile = formData.get("image");
     if (!(imageFile instanceof File)) {

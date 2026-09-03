@@ -2,7 +2,12 @@ import { randomUUID } from "node:crypto";
 
 import { createLogger } from "@/lib/logging/logger";
 
+import { getObjectRemovalModelDefinition } from "./models.js";
 import { normalizeObjectRemovalInput } from "./normalize.server";
+import {
+  getSelfhostObjectRemovalMetadata,
+  removeObjectViaSelfhost,
+} from "./providers/selfhost.server";
 import {
   createReplicateObjectRemovalPrediction,
   downloadReplicateOutput,
@@ -165,6 +170,34 @@ export async function removeObjectFromImage({
     typeof globalThis.crypto !== "undefined" && typeof globalThis.crypto.randomUUID === "function"
       ? globalThis.crypto.randomUUID()
       : randomUUID();
+
+  // Self-hosted models skip the staging/signed-URL dance entirely: bytes go
+  // straight to our worker and come straight back. They also get the FULL
+  // frame, not the padded crop the hosted providers receive: the crop exists
+  // to shrink per-image upload/cost on Replicate, but LaMa fills a hole from
+  // whatever context it can see, and inside a tight crop that context is
+  // mostly the hole itself — the result was a washed-out smear where the
+  // object used to be. Our worker charges nothing per pixel, so it sees the
+  // whole picture and returns the whole picture (no re-composite needed).
+  const selfhostDefinition = getObjectRemovalModelDefinition(String(modelId || "").trim());
+  if (selfhostDefinition?.provider === "selfhost") {
+    const providerMeta = getSelfhostObjectRemovalMetadata();
+    const removed = await removeObjectViaSelfhost({
+      imageBytes: normalized.image.bytes,
+      maskBytes: normalized.mask.bytes,
+    });
+    return {
+      bytes: removed.bytes,
+      mimeType: removed.mimeType,
+      fileName: normalized.outputFileName,
+      width: normalized.image.width,
+      height: normalized.image.height,
+      provider: providerMeta.provider,
+      model: providerMeta.model,
+      version: providerMeta.version,
+      predictionId: requestId,
+    };
+  }
 
   const stagedInputs: Array<{ bucket: string; path: string }> = [];
   try {

@@ -1,0 +1,11 @@
+# Mac/dev slice — the CPU/MPS ops only (remove-object, upscale, face-restore).
+torch
+torchvision
+pillow
+numpy
+fastapi>=0.110
+uvicorn[standard]
+simple-lama-inpainting
+spandrel
+requests
+safetensors

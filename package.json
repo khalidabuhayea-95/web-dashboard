@@ -20,13 +20,18 @@
     "smoke:object-remove": "node scripts/smoke-object-remove.mjs",
     "smoke:upscale": "node scripts/smoke-upscale.mjs",
     "smoke:credits": "node --env-file=.env --import tsx scripts/smoke-credits.ts",
+    "smoke:subscriptions": "node --env-file=.env --import tsx scripts/smoke-subscriptions.ts",
+    "dev:subscription": "node --env-file=.env --import tsx scripts/dev-subscription-state.ts",
     "render:magic-tools": "node scripts/render-magic-tools.mjs",
     "seed:magic-tools": "node --env-file=.env --env-file=.env.local scripts/seed-magic-tools.mjs",
     "smoke:ai-tools": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-ai-tools.ts",
     "backfill:ai-tool-thumbs": "node --env-file=.env --env-file=.env.local scripts/backfill-ai-tool-thumbs.mjs",
-    "seed:text-effects": "node --env-file=.env --env-file=.env.local scripts/seed-text-effects.mjs"
+    "seed:text-effects": "node --env-file=.env --env-file=.env.local scripts/seed-text-effects.mjs",
+    "ai:worker": "ai-worker/.venv/bin/python ai-worker/local_server.py",
+    "smoke:ai-worker": "ai-worker/.venv/bin/python ai-worker/scripts/smoke_test.py"
   },
   "dependencies": {
+    "@apple/app-store-server-library": "^3.1.0",
     "@aws-sdk/client-s3": "^3.1032.0",
     "@google-analytics/data": "^6.1.0",
     "@neplex/vectorizer": "^0.0.5",
@@ -43,6 +48,7 @@
     "fonteditor-core": "^2.6.3",
     "gifenc": "^1.0.3",
     "gifuct-js": "^2.1.2",
+    "google-auth-library": "^11.0.2",
     "imagetracerjs": "^1.2.6",
     "jose": "^6.2.2",
     "konva": "^10.2.0",

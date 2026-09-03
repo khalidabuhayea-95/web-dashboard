@@ -41,6 +41,7 @@ import {
 
 import Button from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/form";
+import PremiumMark from "@/components/ui/premium-mark";
 import {
   DEFAULT_EDITOR_FONT_FAMILIES,
   normalizeFontFamilyList,
@@ -797,6 +798,8 @@ interface ImportedElementRecord {
   width?: number | null;
   height?: number | null;
   freeSvg?: boolean;
+  /** Nayroz Pro-only asset; the grid marks it with a crown. */
+  isPremium?: boolean;
   sourcePayload?: Record<string, unknown>;
 }
 
@@ -3214,6 +3217,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             width: Number.isFinite(Number(item?.width)) ? Number(item.width) : null,
             height: Number.isFinite(Number(item?.height)) ? Number(item.height) : null,
             freeSvg: Boolean(item?.freeSvg),
+            isPremium: Boolean(item?.isPremium),
             sourcePayload:
               item?.sourcePayload && typeof item.sourcePayload === "object" && !Array.isArray(item.sourcePayload)
                 ? item.sourcePayload
@@ -3338,6 +3342,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
             width: Number.isFinite(Number(item?.width)) ? Number(item.width) : null,
             height: Number.isFinite(Number(item?.height)) ? Number(item.height) : null,
             freeSvg: Boolean(item?.freeSvg),
+            isPremium: Boolean(item?.isPremium),
             sourcePayload:
               item?.sourcePayload && typeof item.sourcePayload === "object" && !Array.isArray(item.sourcePayload)
                 ? item.sourcePayload
@@ -3553,6 +3558,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       category: String(template.category || "general"),
       subCategory: String(template.subCategory || "general"),
       tags: Array.isArray(template.tags) ? template.tags : [],
+      isPremium: Boolean((template as { isPremium?: boolean }).isPremium),
     });
     loadedTemplateSignatureRef.current = buildTemplateLoadSignature(
       String(options?.requestedTemplateId || template.id || ""),
@@ -3737,9 +3743,11 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     const isSelected =
       Boolean(selectedTextFontFamily) &&
       font.family.toLowerCase() === selectedTextFontFamily.toLowerCase();
-    // Font management (add/remove) lives in the Fonts admin tab, not here — this
-    // panel only picks a font for the selected text layer.
-    const showMeta = fontSource !== "custom" || isSelected;
+    const isPremium = Boolean((font as { isPremium?: boolean }).isPremium);
+    // Font management (add/remove, and pricing) lives in the Fonts admin tab —
+    // this panel picks a font for the selected text layer and only SHOWS which
+    // ones are Pro.
+    const showMeta = fontSource !== "custom" || isSelected || isPremium;
 
     return (
       <div
@@ -3781,6 +3789,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   Selected
                 </span>
               ) : null}
+              {isPremium ? <PremiumMark label="Pro font" /> : null}
             </div>
           </div>
         ) : null}
@@ -4433,6 +4442,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       alt={item.title || "Imported element"}
                                       className="h-20 w-full rounded object-contain"
                                     />
+                                    {item.isPremium ? (
+                                      <PremiumMark
+                                        className="absolute left-1 top-1 z-10"
+                                        label="Pro element"
+                                      />
+                                    ) : null}
                                     {showingInfo ? (
                                       <div className="absolute inset-x-1 top-1 z-20 rounded-md border border-[#dbe3ee] bg-white/98 p-2 shadow-lg">
                                         <div className="mb-1 flex items-start justify-between gap-2">
@@ -5033,6 +5048,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       alt={item.title || "Background image"}
                                       className="h-full w-full object-cover"
                                     />
+                                    {item.isPremium ? (
+                                      <PremiumMark
+                                        className="absolute left-1 top-1 z-10"
+                                        label="Pro background"
+                                      />
+                                    ) : null}
                                   </div>
                                 </button>
                               );

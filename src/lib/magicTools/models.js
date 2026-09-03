@@ -47,6 +47,22 @@ export const MAGIC_TOOL_MODEL_DEFINITIONS = [
     notes: "97M runs. Pennies per hundred images — the margin case for cheap tools.",
   },
   {
+    // GFPGAN v1.4 on our own worker (ai-worker/pipelines/face_restore.py) —
+    // the same weights the Replicate entry below runs, at no per-image cost.
+    id: "selfhost/gfpgan",
+    label: "GFPGAN (خادمنا)",
+    provider: "selfhost",
+    op: "face-restore",
+    promptKey: null,
+    inputImageKey: "image",
+    imageIsArray: false,
+    requiresPrompt: false,
+    extraInput: {},
+    optionFields: [],
+    priceMicros: 1_500,
+    notes: "Self-hosted face restoration. Same GFPGAN v1.4 weights as the Replicate entry.",
+  },
+  {
     id: "tencentarc/gfpgan",
     label: "GFPGAN (face restoration)",
     provider: "replicate",

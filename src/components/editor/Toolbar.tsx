@@ -27,6 +27,7 @@ import {
 } from "lucide-react";
 
 import Button from "@/components/ui/button";
+import Switch from "@/components/ui/switch";
 import { FilmstripFrames, FilmstripOverlay } from "@/components/editor/TimelineFilmstrip";
 import { useTimelineScrubber } from "@/components/editor/useTimelineScrubber";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
@@ -55,6 +56,8 @@ import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/e
 interface ToolbarProps {
   onToggleLeft: () => void;
   onToggleRight: () => void;
+  /** Admins only: pricing a template is a monetization decision, not authoring. */
+  canManagePremium?: boolean;
 }
 
 type TextDecorationValue =
@@ -128,12 +131,17 @@ function buildCanceledPreviewPayload(fallbackPosterDataUrl: string, templateVers
   };
 }
 
-export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
+export default function Toolbar({
+  onToggleLeft,
+  onToggleRight,
+  canManagePremium = false,
+}: ToolbarProps) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const [isSavingTemplate, setIsSavingTemplate] = useState(false);
   const [isPublishingTemplate, setIsPublishingTemplate] = useState(false);
   const [isUnpublishingTemplate, setIsUnpublishingTemplate] = useState(false);
+  const [isTogglingPremium, setIsTogglingPremium] = useState(false);
   const [isPublishingElements, setIsPublishingElements] = useState(false);
   const [isDeletingTemplate, setIsDeletingTemplate] = useState(false);
   const [isShareLinkOpen, setIsShareLinkOpen] = useState(false);
@@ -174,6 +182,7 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
   const activeTemplateCategory = useEditorStore((state) => state.activeTemplateCategory);
   const activeTemplateSubCategory = useEditorStore((state) => state.activeTemplateSubCategory);
   const activeTemplateTags = useEditorStore((state) => state.activeTemplateTags);
+  const activeTemplateIsPremium = useEditorStore((state) => state.activeTemplateIsPremium);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const publishCandidateIds = useEditorStore((state) => state.publishCandidateIds);
   const historyIndex = useEditorStore((state) => state.historyIndex);
@@ -1379,6 +1388,50 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
     setTemplateMeta,
   ]);
 
+  /**
+   * Flips the open template between free and Nayroz Pro.
+   *
+   * Saves first, exactly like publish does, so an admin can flag a brand-new
+   * design without a save-then-flag two-step. Admin-only on the server; the
+   * button is hidden for designers rather than failing on click.
+   */
+  const toggleTemplatePremium = useCallback(async () => {
+    if (isTogglingPremium) return;
+    setIsTogglingPremium(true);
+    try {
+      const saved = await saveTemplate();
+      const templateId = String(saved?.id || activeTemplateId || "");
+      if (!templateId) return;
+
+      const nextValue = !activeTemplateIsPremium;
+      const response = await fetch("/api/templates", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          id: templateId,
+          action: "setPremium",
+          isPremium: nextValue,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload?.error || "Failed to update the Pro flag.");
+      }
+      setTemplateMeta({ isPremium: Boolean(payload?.template?.isPremium ?? nextValue) });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : "Failed to update the Pro flag.";
+      window.alert(message);
+    } finally {
+      setIsTogglingPremium(false);
+    }
+  }, [
+    activeTemplateId,
+    activeTemplateIsPremium,
+    isTogglingPremium,
+    saveTemplate,
+    setTemplateMeta,
+  ]);
+
   const unpublishTemplate = useCallback(async () => {
     if (isUnpublishingTemplate || activeTemplateStatus !== "published") return;
     if (!activeTemplateId) {
@@ -2072,6 +2125,22 @@ export default function Toolbar({ onToggleLeft, onToggleRight }: ToolbarProps) {
                 ? "Publishing..."
                 : "Publish"}
           </Button>
+          {canManagePremium ? (
+            <Switch
+              className="mx-1"
+              checked={activeTemplateIsPremium}
+              disabled={isTogglingPremium || isSavingTemplate || isDeletingTemplate}
+              label={isTogglingPremium ? "Saving..." : "Pro"}
+              labelClassName="!text-sm !font-medium !text-[#1b2738]"
+              onChange={() => void toggleTemplatePremium()}
+              aria-label="Require a Nayroz Pro subscription to use this template"
+              title={
+                activeTemplateIsPremium
+                  ? "This template needs a Nayroz Pro subscription — switch off to make it free"
+                  : "Require a Nayroz Pro subscription to use this template"
+              }
+            />
+          ) : null}
           <Button
             type="button"
             variant="ghost"

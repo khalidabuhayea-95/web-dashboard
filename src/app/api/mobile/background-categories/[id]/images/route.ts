@@ -50,11 +50,16 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const images = result.items
+      // normalizeRow can yield null for an unusable row, so drop those before mapping
+      // rather than reaching through them field by field.
+      .filter((item): item is NonNullable<typeof item> => Boolean(item))
       .map((item) => ({
         previewUrl: mediaUrlResolver(item.thumbnailUrl || item.assetUrl),
         url: mediaUrlResolver(item.assetUrl || item.thumbnailUrl),
+        // Pro-only background; the app badges it and walls when it is applied.
+        isPremium: item.isPremium,
       }))
-      .filter((item) => item.url && item.previewUrl);
+      .filter((image) => image.url && image.previewUrl);
 
     return NextResponse.json(
       images,

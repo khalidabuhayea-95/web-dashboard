@@ -1,5 +1,15 @@
 export const IMAGE_UPSCALE_MODEL_DEFINITIONS = [
   {
+    // Real-ESRGAN x4plus on our own worker (ai-worker/pipelines/upscale.py) —
+    // the very weights the Replicate entries below wrap, so this is a cost
+    // change, not a quality one.
+    id: "selfhost/real-esrgan",
+    label: "Real-ESRGAN (خادمنا)",
+    provider: "selfhost",
+    defaultVersion: "real-esrgan-x4plus",
+    kind: "real-esrgan-scale",
+  },
+  {
     id: "prunaai/p-image-upscale",
     label: "Pruna Image Upscale",
     provider: "replicate",

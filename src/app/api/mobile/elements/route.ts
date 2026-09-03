@@ -81,6 +81,9 @@ export async function GET(request: NextRequest) {
       width: item.width,
       height: item.height,
       freeSvg: item.freeSvg,
+      // Pro-only element. The catalog stays public and complete — the app badges
+      // this and walls when the element is added to a design.
+      isPremium: item.isPremium,
       createdAt: item.createdAt,
       updatedAt: item.updatedAt,
     }));

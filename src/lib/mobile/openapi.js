@@ -713,6 +713,60 @@ const schemas = {
       error: { type: "string" },
     },
   },
+  // Shared by GET /api/mobile/subscriptions/status and the success body of
+  // POST /api/mobile/subscriptions/verify — the app renders both identically.
+  SubscriptionStatus: {
+    type: "object",
+    required: ["tier", "isSubscribed"],
+    properties: {
+      tier: { type: "string", enum: ["free", "plus", "pro"], example: "plus" },
+      isSubscribed: { type: "boolean", example: true },
+      expiresAt: {
+        type: "string",
+        format: "date-time",
+        nullable: true,
+        description:
+          "When the current entitlement runs out. For a cancelled subscription this is the paid-through date; null for an open-ended manual grant or a free user.",
+        example: "2026-09-26T12:00:00.000Z",
+      },
+      store: {
+        type: "string",
+        enum: ["apple", "google"],
+        nullable: true,
+        description: "Store the active subscription was bought on; null when free.",
+      },
+      productId: {
+        type: "string",
+        nullable: true,
+        description:
+          'Store product: App Store product id (e.g. "nayroz_plus_yearly", "nayroz_pro_yearly") or Play "subscriptionId:basePlanId" (e.g. "nayroz_plus:yearly", "nayroz_pro:monthly"). Products under nayroz_pro grant the "pro" tier (5x the Plus AI credit allowance).',
+        example: "nayroz_plus_yearly",
+      },
+      planKey: {
+        type: "string",
+        enum: ["monthly", "yearly", "unknown"],
+        nullable: true,
+        example: "yearly",
+      },
+      willRenew: {
+        type: "boolean",
+        description: "False once auto-renew is switched off, even while still entitled.",
+        example: true,
+      },
+      periodType: {
+        type: "string",
+        enum: ["trial", "normal"],
+        nullable: true,
+        description: '"trial" while the yearly plan\'s 3-day free trial is running.',
+      },
+      environment: {
+        type: "string",
+        enum: ["production", "sandbox", "xcode-test"],
+        nullable: true,
+        description: "Which store environment produced the active subscription.",
+      },
+    },
+  },
   // Shared by POST /api/contact (website form) and POST /api/mobile/support/contact
   // (app), so both stay in sync — the two endpoints accept an identical body.
   ContactMessageSubmission: {
@@ -1323,6 +1377,12 @@ const schemas = {
         format: "int32",
         description: "Number of design pages in the template (1 for single-page).",
       },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
+        example: false,
+      },
       category: { type: "string", description: "Localized category label." },
       subCategory: { type: "string", description: "Localized sub category label." },
       categoryId: { type: "string", format: "uuid" },
@@ -1376,6 +1436,12 @@ const schemas = {
         type: "integer",
         format: "int32",
         description: "Number of design pages in the template (1 for single-page).",
+      },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
+        example: false,
       },
       thumbnailUrl: { type: "string" },
       previewVideoUrl: {
@@ -1445,6 +1511,12 @@ const schemas = {
         format: "int32",
         description:
           "Number of design pages. Mirrors `project.pageCount`; 1 for single-page templates.",
+      },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
+        example: false,
       },
       project: {
         type: "object",
@@ -1724,6 +1796,12 @@ const schemas = {
         type: "string",
         description: "Font source bucket (`custom`, `google`, `fontsource`, `openfontlibrary`, or `synced`).",
       },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only font. Premium fonts ARE listed for everyone so the picker can badge them; the app walls when the font is applied to a text layer. Note the app caches the whole catalog until `version` changes, so flipping this server-side must bump the catalog version.",
+        example: false,
+      },
     },
   },
   MobileFontsResponse: {
@@ -1831,6 +1909,12 @@ const schemas = {
       width: { type: "integer", nullable: true },
       height: { type: "integer", nullable: true },
       freeSvg: { type: "boolean" },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only element. Premium items ARE listed for everyone so the app can badge them; the app walls when the element is added to a design.",
+        example: false,
+      },
       createdAt: { type: "string", format: "date-time" },
       updatedAt: { type: "string", format: "date-time" },
     },
@@ -1931,6 +2015,12 @@ const schemas = {
     properties: {
       previewUrl: { type: "string", format: "uri" },
       url: { type: "string", format: "uri" },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only background. Premium items ARE listed for everyone so the app can badge them; the app walls when the background is applied.",
+        example: false,
+      },
     },
   },
   MobileShape: {
@@ -2047,6 +2137,12 @@ const schemas = {
         type: "string",
         description: "URL to the template thumbnail asset.",
       },
+      isPremium: {
+        type: "boolean",
+        description:
+          "Nayroz Pro-only template. Carried on the favorite summary so the app can badge a favorited Pro template the same way it does in the feed.",
+        example: false,
+      },
       updatedAt: {
         type: "integer",
         format: "int64",
@@ -2160,6 +2256,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile AI Tools" },
       { name: "Mobile Text Effects" },
       { name: "Mobile Media" },
+      { name: "Mobile Subscriptions" },
       { name: "Mobile Support" },
       { name: "Website" },
     ],
@@ -2995,7 +3092,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile AI Tools"],
           summary: "AI Tools catalogue (magic tools + templates)",
           description:
-            "The whole AI Tools tab in one call, as an ordered list of sections. Two admin systems feed it — one-tap **magic tools** (enhance, restore, colorize, remove background) and styled **templates** grouped by category — but they are merged here because they are the same gesture to a user: pick a tool, give a photo, get a picture back. Render every item the same way and pass its `id` to `/api/mobile/ai-tools/run`.\n\n**Never returns prompts or model ids** — those are the product and stay server-side.\n\nOnly published tools that have sample artwork appear. Premium tools ARE listed with `isPremium: true` so the app can show them locked rather than hiding what an upgrade buys. Prices differ per tool, so read `creditCost` from each item instead of assuming one tab-wide price.\n\nRequires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`. Cacheable privately for 60s.",
+            "The whole AI Tools tab in one call, as an ordered list of sections. Two admin systems feed it — one-tap **magic tools** (enhance, restore, colorize, remove background) and styled **templates** grouped by category — but they are merged here because they are the same gesture to a user: pick a tool, give a photo, get a picture back. Render every item the same way and pass its `id` to `/api/mobile/ai-tools/run`.\n\n**Never returns prompts or model ids** — those are the product and stay server-side.\n\nOnly published tools that have sample artwork appear. ALL tools require a paid subscription to RUN (403 `subscription_required` otherwise); the catalogue itself stays visible to everyone so the shop window still works, and `isPremium` remains as per-tool metadata. Prices differ per tool, so read `creditCost` from each item instead of assuming one tab-wide price.\n\nRequires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`. Cacheable privately for 60s.",
           security: [{ bearerAuth: [] }],
           responses: {
             200: {
@@ -3027,7 +3124,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile AI Tools"],
           summary: "Run an AI tool on a photo",
           description:
-            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
+            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Subscription:** every tool requires an active paid subscription (Plus or Pro) — a free account answers 403 with `code: \"subscription_required\"`.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -3242,7 +3339,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Media"],
           summary: "Get the caller's AI credit balance",
           description:
-            "Returns the signed-in user's AI credit wallet for the current month, plus the credit cost of each AI action.\n\nEvery AI media endpoint (edit-image, ai-expand, upscale, object-remove) deducts credits from this one balance when it succeeds; failed runs are never charged. Call this before showing the AI tools so the app can display the remaining balance and label each action with its price, and refresh it after a successful run.\n\nThe balance resets to the full allowance at the start of each month (UTC) — `resetAt` is that moment. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+            "Returns the signed-in user's AI credit wallet for the current month, plus the credit cost of each AI action.\n\nEvery AI media endpoint (edit-image, ai-expand, upscale, object-remove) deducts credits from this one balance when it succeeds; failed runs are never charged. Call this before showing the AI tools so the app can display the remaining balance and label each action with its price, and refresh it after a successful run.\n\nPaid tiers reset to the full allowance at the start of each month (UTC) — `resetAt` is that moment. The FREE tier is a ONE-TIME grant: `renews` is false, `resetAt` is null, and its `used` figure is lifetime rather than per-month, so the balance never returns. Show the paywall rather than a wait-for-reset message when `renews` is false. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
           security: [{ bearerAuth: [] }],
           responses: {
             200: {
@@ -3265,6 +3362,12 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                         example: "2026-08",
                         description: "UTC month the balance applies to.",
                       },
+                      renews: {
+                        type: "boolean",
+                        example: true,
+                        description:
+                          "False on a one-time grant (free tier) — the balance will not refill and resetAt is null.",
+                      },
                       resetAt: {
                         type: "string",
                         format: "date-time",
@@ -3281,6 +3384,13 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                           "object-removal": 1,
                         },
                       },
+                      tier: {
+                        type: "string",
+                        enum: ["free", "plus", "pro"],
+                        example: "free",
+                        description:
+                          "Subscription tier the allowance was resolved for (free | plus | pro). Paid tiers get the larger, monthly-refilling allowance (see /api/mobile/subscriptions/status).",
+                      },
                     },
                   },
                 },
@@ -3294,6 +3404,207 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 },
               },
             },
+          },
+        },
+      },
+      "/api/mobile/subscriptions/catalog": {
+        get: {
+          tags: ["Mobile Subscriptions"],
+          summary: "Public subscription catalog: packages, allowances, dashboard prices",
+          description:
+            "Packages with their monthly AI-credit allowances and the dashboard's reference prices (USD cents). The paywall uses these prices ONLY when the store returns no products (simulator, dev builds, storefront outage) — whenever Apple/Google answer, their localized price is shown and charged, so the admin must keep the dashboard mirroring the consoles. Public: identical for every caller and the paywall must render before sign-in.",
+          responses: {
+            200: {
+              description: "The catalog.",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["packages"],
+                    properties: {
+                      packages: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          required: ["package", "monthlyAllowance", "plans"],
+                          properties: {
+                            package: { type: "string", enum: ["plus", "pro"] },
+                            monthlyAllowance: { type: "integer", example: 10000 },
+                            plans: {
+                              type: "array",
+                              items: {
+                                type: "object",
+                                required: ["productId", "planKey", "priceCents", "currency", "hasFreeTrial"],
+                                properties: {
+                                  productId: { type: "string", example: "nayroz_plus_yearly" },
+                                  planKey: { type: "string", enum: ["monthly", "yearly"] },
+                                  priceCents: { type: "integer", example: 3999 },
+                                  currency: { type: "string", example: "USD" },
+                                  hasFreeTrial: { type: "boolean" },
+                                },
+                              },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/subscriptions/status": {
+        get: {
+          tags: ["Mobile Subscriptions"],
+          summary: "Get the caller's Nayroz Pro entitlement",
+          description:
+            "The server-side truth for whether this account has Nayroz Pro. The app refreshes it on sign-in, on foreground, after purchases, and when a silent `subscription_updated` push arrives; server endpoints enforce the same state themselves (e.g. premium AI tools answer 403 `subscription_required`).\n\nRequires a logged-in mobile user: send the access token as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: "Current subscription status",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/SubscriptionStatus" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid access token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/subscriptions/verify": {
+        post: {
+          tags: ["Mobile Subscriptions"],
+          summary: "Register a store purchase with the backend",
+          description:
+            "Called right after a StoreKit/Play purchase or restore. The client posts the store's proof of purchase; the server re-verifies it with the store (Apple JWS signature chain / Play Developer API lookup), links the subscription to the calling account, updates the entitlement, and returns the same body as `GET /api/mobile/subscriptions/status`.\n\n**Payload per platform:** Apple sends the transaction's `jwsRepresentation`; Google sends the purchase token.\n\n**Identity binding:** purchases are made with the account id attached (`appAccountToken` on iOS, `obfuscatedExternalAccountId` on Android, both = the mobile user id). A receipt minted for another account answers 409 `receipt_conflict`; an unverifiable payload answers 422 `invalid_receipt`.\n\nRate limited to 12 calls per 5 minutes per user. Requires a logged-in mobile user.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["platform", "payload"],
+                  properties: {
+                    platform: { type: "string", enum: ["apple", "google"] },
+                    payload: {
+                      type: "string",
+                      description:
+                        "Apple: the signed transaction JWS. Google: the purchase token.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Purchase verified; updated subscription status",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/SubscriptionStatus" },
+                },
+              },
+            },
+            400: {
+              description: "Malformed body",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid access token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            409: {
+              description: "Receipt already belongs to a different account (`code: \"receipt_conflict\"`)",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            422: {
+              description: "Store rejected the proof of purchase (`code: \"invalid_receipt\"`)",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Too many verification attempts",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/text/tashkeel": {
+        post: {
+          tags: ["Mobile Text"],
+          summary: "Add Arabic diacritics (تشكيل)",
+          description:
+            "Takes a line of Arabic text and returns it with the diacritics restored, run on Nayroz's own model — the words themselves never change, and a result that altered them is rejected rather than returned. Meant for a design's text: names, greetings, verses, up to 600 characters. Costs the `tashkeel` credit price from the same wallet as the AI media tools; failed runs are not charged. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["text"],
+                  properties: {
+                    text: {
+                      type: "string",
+                      maxLength: 600,
+                      description: "Arabic text to diacritize. Existing marks are re-derived.",
+                      example: "كل عام وأنتم بخير",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "Diacritized text",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      text: { type: "string", example: "كُلَّ عَامٍ وَأَنْتُمْ بِخَيْرٍ" },
+                    },
+                  },
+                },
+              },
+            },
+            400: { description: "Missing, too long, or non-Arabic text" },
+            401: { description: "Missing or invalid bearer token" },
+            402: { description: "Not enough AI credits" },
+            429: { description: "Rate limited" },
+            502: { description: "The model failed or changed the words" },
           },
         },
       },
@@ -3401,7 +3712,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             429: {
               description:
-                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade screen\" (or wait-for-reset when `resetAt` is present — it is null on the free tier's one-time grant), not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3525,7 +3836,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             429: {
               description:
-                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade screen\" (or wait-for-reset when `resetAt` is present — it is null on the free tier's one-time grant), not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3647,7 +3958,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             429: {
               description:
-                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade screen\" (or wait-for-reset when `resetAt` is present — it is null on the free tier's one-time grant), not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {
@@ -3789,7 +4100,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             },
             429: {
               description:
-                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade or wait-for-reset screen\", not \"retry shortly\".",
+                "Rate limited, or not enough AI credits. A credit failure carries `code: \"insufficient_credits\"` plus a `credits` object ({ feature, cost, allowance, used, remaining, resetAt }) and the `X-Credits-Remaining` / `X-Credits-Reset` headers; a burst rate-limit response has neither. Treat the credit case as \"show the upgrade screen\" (or wait-for-reset when `resetAt` is present — it is null on the free tier's one-time grant), not \"retry shortly\".",
               content: {
                 "application/json": {
                   schema: {

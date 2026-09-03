@@ -56,6 +56,7 @@ function slimFont(record: any) {
     previewImageDarkUrl: record.previewImageDarkUrl || null,
     previewImageUpdatedAt: record.previewImageUpdatedAt || null,
     removable: record.removable !== false,
+    isPremium: Boolean(record.isPremium),
     updatedAt: record.updatedAt,
   };
 }

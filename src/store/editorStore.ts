@@ -331,6 +331,7 @@ interface TemplateMetaPatch {
   category?: string;
   subCategory?: string;
   tags?: string[];
+  isPremium?: boolean;
 }
 
 interface EditorStore {
@@ -353,6 +354,8 @@ interface EditorStore {
   activeTemplateCategory: string;
   activeTemplateSubCategory: string;
   activeTemplateTags: string[];
+  /** Nayroz Pro-only template. Admin-set; see PATCH /api/templates action "setPremium". */
+  activeTemplateIsPremium: boolean;
   sidebarTab: SidebarTab;
   toolMode: ToolMode;
   zoomPercent: number;
@@ -1028,6 +1031,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   activeTemplateCategory: DEFAULT_TEMPLATE_CATEGORY,
   activeTemplateSubCategory: DEFAULT_TEMPLATE_SUBCATEGORY,
   activeTemplateTags: [],
+  activeTemplateIsPremium: false,
   sidebarTab: "templates",
   toolMode: "select",
   zoomPercent: 100,
@@ -1143,6 +1147,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         typeof meta.tags !== "undefined"
           ? normalizeTemplateTags(meta.tags)
           : state.activeTemplateTags,
+      activeTemplateIsPremium:
+        typeof meta.isPremium === "boolean" ? meta.isPremium : state.activeTemplateIsPremium,
     })),
   clearTemplateMeta: () =>
     set({
@@ -1152,6 +1158,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       activeTemplateCategory: DEFAULT_TEMPLATE_CATEGORY,
       activeTemplateSubCategory: DEFAULT_TEMPLATE_SUBCATEGORY,
       activeTemplateTags: [],
+      activeTemplateIsPremium: false,
     }),
 
   addTextElement: (text, partial = {}) => {

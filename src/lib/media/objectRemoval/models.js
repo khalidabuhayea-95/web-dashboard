@@ -1,5 +1,16 @@
 export const OBJECT_REMOVAL_MODEL_DEFINITIONS = [
   {
+    // Our own worker (ai-worker/) running big-LaMa — same weights as
+    // allenhooo/lama but on hardware we control. Selectable from the admin
+    // model order once SELFHOST_AI_URL is set.
+    id: "selfhost/lama",
+    label: "LaMa (خادمنا)",
+    provider: "selfhost",
+    defaultVersion: "big-lama",
+    inputImageKey: "image",
+    inputMaskKey: "mask",
+  },
+  {
     id: "allenhooo/lama",
     label: "LaMa",
     provider: "replicate",

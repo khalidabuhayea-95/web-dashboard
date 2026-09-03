@@ -121,6 +121,7 @@ export async function GET(request) {
           updatedAt: true,
           canvasSize: true,
           pageCount: true,
+          isPremium: true,
           thumbnailDataUrl: true,
           previewVideoUrl: true,
           previewPosterUrl: true,
@@ -168,6 +169,9 @@ export async function GET(request) {
         canvasHeight: mobileTemplate.canvasHeight,
         pageCount: mobileTemplate.pageCount,
         thumbnailUrl: mobileTemplate.thumbnailUrl,
+        // The home rails render from this slim shape, so the crown depends on it
+        // being listed here — toMobileTemplate carrying the field is not enough.
+        isPremium: Boolean(mobileTemplate.isPremium),
         status: String(template.status || ""),
         ...(preview ? { preview } : {}),
         ...(preview?.url ? { previewVideoUrl: preview.url } : {}),

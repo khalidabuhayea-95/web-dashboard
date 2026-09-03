@@ -1,0 +1,6 @@
+.venv/
+weights/
+hf-cache/
+__pycache__/
+scripts/smoke_*.png
+scripts/smoke_*.jpg

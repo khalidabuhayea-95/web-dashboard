@@ -1,0 +1,18 @@
+# Production container (CUDA). Nunchaku INT4 is installed in the Dockerfile
+# from its prebuilt wheel because the build is torch/cuda-version specific.
+runpod>=1.7
+torch
+torchvision
+pillow
+numpy
+simple-lama-inpainting
+spandrel
+requests
+safetensors
+diffusers>=0.36
+transformers>=4.46
+accelerate
+sentencepiece
+timm
+einops
+kornia

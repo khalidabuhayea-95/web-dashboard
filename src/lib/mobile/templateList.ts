@@ -200,6 +200,7 @@ export async function buildMobileTemplatesListResponse(
       tags: true,
       canvasSize: true,
       pageCount: true,
+      isPremium: true,
       thumbnailDataUrl: true,
       previewVideoUrl: true,
       previewPosterUrl: true,

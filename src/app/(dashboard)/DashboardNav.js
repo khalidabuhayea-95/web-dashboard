@@ -7,9 +7,11 @@ import clsx from "clsx";
 
 import { NAV_BADGE_EVENT } from "@/lib/dashboard/navBadges";
 import {
+  CreditCard,
   Download,
   BellRing,
   BarChart3,
+  Crown,
   Files,
   Home,
   Images,
@@ -45,6 +47,8 @@ const ICONS = {
   gallery: Images,
   magicTools: Wand2,
   textEffects: Palette,
+  proAssets: Crown,
+  subscriptions: CreditCard,
 };
 
 // How often the sidebar re-checks counts while the tab is visible. Slow enough

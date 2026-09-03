@@ -2442,6 +2442,9 @@ function isCurvedText(element: EditorElement) {
 
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 4;
+// How far past the page edge panning may go, so the border is never flush with
+// the viewport edge when zoomed in.
+const PAN_MARGIN = 80;
 // Page thumbnails ship to mobile as page-strip tiles — small on purpose so a many-page save
 // stays a light payload. Matches the width PageBar downscales its own captures to.
 const PAGE_THUMBNAIL_MAX_WIDTH_PX = 168;
@@ -3092,24 +3095,88 @@ export default function CanvasEditor() {
     [activePage, containerSize.height, containerSize.width]
   );
 
+  // Keeps the page reachable while panning: when it fits the viewport it stays
+  // fully visible, and when it is zoomed past the viewport you cannot scroll
+  // beyond its edges (bar a small margin, so the border is never flush).
+  const clampViewportToBounds = useCallback(
+    (next: { x: number; y: number; scale: number }) => {
+      if (!activePage) return next;
+      const { width: containerWidth, height: containerHeight } = containerSize;
+      if (!containerWidth || !containerHeight) return next;
+
+      const clampAxis = (value: number, pageSize: number, containerLength: number) =>
+        pageSize <= containerLength
+          ? clamp(value, 0, containerLength - pageSize)
+          : clamp(value, containerLength - pageSize - PAN_MARGIN, PAN_MARGIN);
+
+      return {
+        scale: next.scale,
+        x: clampAxis(next.x, activePage.width * next.scale, containerWidth),
+        y: clampAxis(next.y, activePage.height * next.scale, containerHeight),
+      };
+    },
+    [activePage, containerSize]
+  );
+
+  // Rescales about a fixed point so the content under `anchor` stays put. Used
+  // for wheel zoom (anchor = cursor) and the zoom controls (anchor = viewport
+  // centre), so zooming never throws away where the user has scrolled to.
+  const getViewportForScaleAnchoredAt = useCallback(
+    (scaleInput: number, anchorX: number, anchorY: number) => {
+      const scale = clamp(scaleInput, MIN_SCALE, MAX_SCALE);
+      const ratio = scale / viewport.scale;
+      return {
+        x: anchorX - (anchorX - viewport.x) * ratio,
+        y: anchorY - (anchorY - viewport.y) * ratio,
+        scale,
+      };
+    },
+    [viewport]
+  );
+
   const zoomBy = useCallback(
     (factor: number) => {
       autoFitActiveRef.current = false;
-      const next = getCenteredViewportForScale(viewport.scale * factor);
-      if (!next) return;
-      updateViewport(next);
+      updateViewport(
+        clampViewportToBounds(
+          getViewportForScaleAnchoredAt(
+            viewport.scale * factor,
+            containerSize.width / 2,
+            containerSize.height / 2
+          )
+        )
+      );
     },
-    [getCenteredViewportForScale, updateViewport, viewport.scale]
+    [
+      clampViewportToBounds,
+      containerSize.height,
+      containerSize.width,
+      getViewportForScaleAnchoredAt,
+      updateViewport,
+      viewport.scale,
+    ]
   );
 
   const setZoomScale = useCallback(
     (scaleInput: number) => {
       autoFitActiveRef.current = false;
-      const next = getCenteredViewportForScale(scaleInput);
-      if (!next) return;
-      updateViewport(next);
+      updateViewport(
+        clampViewportToBounds(
+          getViewportForScaleAnchoredAt(
+            scaleInput,
+            containerSize.width / 2,
+            containerSize.height / 2
+          )
+        )
+      );
     },
-    [getCenteredViewportForScale, updateViewport]
+    [
+      clampViewportToBounds,
+      containerSize.height,
+      containerSize.width,
+      getViewportForScaleAnchoredAt,
+      updateViewport,
+    ]
   );
 
   const exportPng = useCallback(() => {
@@ -4244,13 +4311,40 @@ export default function CanvasEditor() {
       event.evt.preventDefault();
       autoFitActiveRef.current = false;
 
-      const direction = event.evt.deltaY > 0 ? -1 : 1;
-      const factor = direction > 0 ? 1.08 : 1 / 1.08;
-      const next = getCenteredViewportForScale(viewport.scale * factor);
-      if (!next) return;
-      updateViewport(next);
+      // Ctrl/Cmd + wheel zooms: that is the conventional modifier on a mouse, and
+      // it is also how browsers report a trackpad pinch. A plain wheel or a
+      // two-finger trackpad swipe scrolls the canvas instead.
+      if (event.evt.ctrlKey || event.evt.metaKey) {
+        const factor = event.evt.deltaY > 0 ? 1 / 1.08 : 1.08;
+        const pointer = stageRef.current?.getPointerPosition();
+        const next = pointer
+          ? getViewportForScaleAnchoredAt(viewport.scale * factor, pointer.x, pointer.y)
+          : getCenteredViewportForScale(viewport.scale * factor);
+        if (!next) return;
+        updateViewport(clampViewportToBounds(next));
+        return;
+      }
+
+      // Shift maps a vertical-only mouse wheel onto the horizontal axis; a
+      // trackpad already reports deltaX, so leave it alone when it does.
+      const { deltaX, deltaY, shiftKey } = event.evt;
+      const useDeltaYAsHorizontal = shiftKey && deltaX === 0;
+
+      updateViewport(
+        clampViewportToBounds({
+          x: viewport.x - (useDeltaYAsHorizontal ? deltaY : deltaX),
+          y: viewport.y - (useDeltaYAsHorizontal ? 0 : deltaY),
+          scale: viewport.scale,
+        })
+      );
     },
-    [getCenteredViewportForScale, updateViewport, viewport.scale]
+    [
+      clampViewportToBounds,
+      getCenteredViewportForScale,
+      getViewportForScaleAnchoredAt,
+      updateViewport,
+      viewport,
+    ]
   );
 
   const applySnapping = useCallback(
@@ -5222,10 +5316,20 @@ export default function CanvasEditor() {
         scaleX={viewport.scale}
         scaleY={viewport.scale}
         draggable={toolMode === "pan"}
+        dragBoundFunc={(pos) => {
+          const bounded = clampViewportToBounds({ ...pos, scale: viewport.scale });
+          return { x: bounded.x, y: bounded.y };
+        }}
         onDragEnd={(event) => {
           if (toolMode !== "pan") return;
           autoFitActiveRef.current = false;
-          updateViewport({ x: event.target.x(), y: event.target.y(), scale: viewport.scale });
+          updateViewport(
+            clampViewportToBounds({
+              x: event.target.x(),
+              y: event.target.y(),
+              scale: viewport.scale,
+            })
+          );
         }}
         onWheel={handleWheel}
         onMouseDown={handleStageMouseDown}

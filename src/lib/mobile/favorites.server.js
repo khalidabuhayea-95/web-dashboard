@@ -21,6 +21,7 @@ const FAVORITE_TEMPLATE_SELECT = {
   subCategory: true,
   canvasSize: true,
   pageCount: true,
+  isPremium: true,
   updatedAt: true,
 };
 
@@ -63,6 +64,9 @@ function serializeFavoriteTemplate(template, origin) {
     canvasHeight: Math.max(numberOr(canvasSize.height, 1080), 1),
     pageCount: Math.max(1, Math.round(numberOr(template.pageCount, 1))),
     thumbnailUrl: buildThumbnailUrl(template.id, origin),
+    // Favorited Pro templates must still wear a crown here, or the paywall at
+    // open would come out of nowhere.
+    isPremium: Boolean(template.isPremium),
     updatedAt: new Date(template.updatedAt || Date.now()).getTime(),
   };
 }

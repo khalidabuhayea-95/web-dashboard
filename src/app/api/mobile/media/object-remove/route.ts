@@ -8,6 +8,7 @@ import {
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { removeObjectFromImage } from "@/lib/media/objectRemoval/index.server";
+import { getObjectRemovalModelDefinition } from "@/lib/media/objectRemoval/models.js";
 import {
   createFileTooLargeError,
   isObjectRemovalError,
@@ -109,7 +110,10 @@ export async function POST(request: NextRequest) {
       defaultObjectRemovalModel: defaultModelId,
     });
 
-    assertReplicateObjectRemovalConfigured(configuredModel);
+    const modelDefinition = getObjectRemovalModelDefinition(configuredModel);
+    if (modelDefinition?.provider !== "selfhost") {
+      assertReplicateObjectRemovalConfigured(configuredModel);
+    }
 
     const imageFile = formData.get("image");
     const maskFile = formData.get("mask");

@@ -49,6 +49,12 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
     ALTER TABLE editor_element_assets
     ADD COLUMN IF NOT EXISTS category_value TEXT
   `,
+  // Nayroz Pro flag. Also in prisma/migrations/20260827090000_add_catalog_premium_flags
+  // and the @@ignore'd model in schema.prisma — all three must stay in sync.
+  `
+    ALTER TABLE editor_element_assets
+    ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE
+  `,
   `
     CREATE INDEX IF NOT EXISTS editor_element_assets_source_kind_updated_idx
       ON editor_element_assets(source, kind, updated_at DESC)
@@ -341,6 +347,7 @@ function normalizeRow(row, locale = "en") {
     width: Number.isFinite(Number(row.width)) ? Number(row.width) : null,
     height: Number.isFinite(Number(row.height)) ? Number(row.height) : null,
     freeSvg: Boolean(row.free_svg),
+    isPremium: Boolean(row.is_premium),
     sourcePayload,
     translationStatus: sanitizeText(row.translation_status) || "fallback",
     createdSourceAt: row.created_source_at ? new Date(row.created_source_at).toISOString() : "",
@@ -542,6 +549,9 @@ export async function listImportedElementAssets(options = {}) {
   const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
   const kindSql = kind ? `AND kind = ${nextParam(kind)}` : "";
   const searchSql = buildSearchCondition(options.query, nextParam);
+  // Lets the Pro-assets dashboard review exactly what has been flagged, instead of
+  // hunting for crowns page by page.
+  const premiumSql = options.premiumOnly ? "AND is_premium = TRUE" : "";
 
   const countSql = `
     SELECT COUNT(*)::int AS total
@@ -549,6 +559,7 @@ export async function listImportedElementAssets(options = {}) {
     WHERE ${sourceSql}
     ${categorySql}
     ${kindSql}
+    ${premiumSql}
     ${searchSql}
   `;
 
@@ -566,6 +577,7 @@ export async function listImportedElementAssets(options = {}) {
     WHERE ${sourceSql}
     ${categorySql}
     ${kindSql}
+    ${premiumSql}
     ${searchSql}
     ORDER BY updated_at DESC
     LIMIT ${limitParam}
@@ -626,5 +638,41 @@ export async function deleteImportedElementAsset(options = {}) {
   return {
     deleted: true,
     id: String(rows[0]?.id || id),
+  };
+}
+
+/**
+ * Marks one element Pro-only (or free again). Admin-only by design: this is a
+ * monetization decision, not asset authoring, so unlike delete there is no
+ * owner-scoped variant. Deliberately NOT part of upsertImportedElementAsset —
+ * re-importing an asset from Freepik must never silently un-Pro it.
+ */
+export async function setImportedElementPremium({ id, isPremium } = {}) {
+  await ensureImportedElementsSchema();
+
+  const assetId = sanitizeText(id);
+  if (!assetId) {
+    throw new Error("Imported element id is required.");
+  }
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      UPDATE editor_element_assets
+      SET is_premium = $2, updated_at = NOW()
+      WHERE id = $1::uuid
+      RETURNING id, is_premium
+    `,
+    assetId,
+    Boolean(isPremium)
+  );
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { updated: false };
+  }
+
+  return {
+    updated: true,
+    id: String(rows[0]?.id || assetId),
+    isPremium: Boolean(rows[0]?.is_premium),
   };
 }

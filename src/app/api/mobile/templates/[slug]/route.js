@@ -113,6 +113,7 @@ export async function GET(request, { params }) {
         canvasSize: true,
         pageCount: true,
         pageThumbnails: true,
+        isPremium: true,
         thumbnailDataUrl: true,
         previewVideoUrl: true,
         previewPosterUrl: true,

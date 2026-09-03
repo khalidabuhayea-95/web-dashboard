@@ -97,6 +97,7 @@ const MOBILE_AUTH_INITIAL_FORM = {
 };
 
 const OBJECT_REMOVAL_MODEL_OPTIONS = [
+  { value: "selfhost/lama", label: "LaMa (خادمنا)", detail: "Self-hosted · recommended" },
   { value: "allenhooo/lama", label: "allenhooo/lama", detail: "Fast baseline" },
   { value: "zylim0702/remove-object", label: "zylim0702/remove-object", detail: "Best value" },
   { value: "bria/eraser", label: "bria/eraser", detail: "Highest quality" },
@@ -109,6 +110,11 @@ const AI_EXPAND_MODEL_OPTIONS = [
 ];
 
 const IMAGE_UPSCALE_MODEL_OPTIONS = [
+  {
+    value: "selfhost/real-esrgan",
+    label: "Real-ESRGAN (خادمنا)",
+    detail: "Self-hosted · same weights, no per-image cost",
+  },
   { value: "prunaai/p-image-upscale", label: "prunaai/p-image-upscale", detail: "Fast · default" },
   { value: "recraft-ai/recraft-crisp-upscale", label: "recraft-ai/recraft-crisp-upscale", detail: "Crisp" },
   { value: "cjwbw/real-esrgan", label: "cjwbw/real-esrgan", detail: "ESRGAN" },

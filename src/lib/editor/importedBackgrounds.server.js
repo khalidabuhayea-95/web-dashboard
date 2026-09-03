@@ -37,6 +37,12 @@ const IMPORTED_BACKGROUNDS_SCHEMA_STATEMENTS = [
       CONSTRAINT editor_background_assets_source_asset_unique UNIQUE (source, source_asset_id)
     )
   `,
+  // Nayroz Pro flag. Also in prisma/migrations/20260827090000_add_catalog_premium_flags
+  // and the @@ignore'd model in schema.prisma — all three must stay in sync.
+  `
+    ALTER TABLE editor_background_assets
+    ADD COLUMN IF NOT EXISTS is_premium BOOLEAN NOT NULL DEFAULT FALSE
+  `,
   `
     CREATE INDEX IF NOT EXISTS editor_background_assets_source_updated_idx
       ON editor_background_assets(source, updated_at DESC)
@@ -248,6 +254,7 @@ function normalizeRow(row, locale = "en") {
     width: Number.isFinite(Number(row.width)) ? Number(row.width) : null,
     height: Number.isFinite(Number(row.height)) ? Number(row.height) : null,
     freeSvg: false,
+    isPremium: Boolean(row.is_premium),
     sourcePayload,
     translationStatus: sanitizeText(row.translation_status) || "fallback",
     createdSourceAt: row.created_source_at ? new Date(row.created_source_at).toISOString() : "",
@@ -389,11 +396,15 @@ export async function listImportedBackgroundAssets(options = {}) {
 
   const sourceSql = source ? `source = ${nextParam(source)}` : "1=1";
   const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
+  // Lets the Pro-assets dashboard review exactly what has been flagged, instead of
+  // hunting for crowns page by page.
+  const premiumSql = options.premiumOnly ? "AND is_premium = TRUE" : "";
   const countSql = `
     SELECT COUNT(*)::int AS total
     FROM editor_background_assets
     WHERE ${sourceSql}
     ${categorySql}
+    ${premiumSql}
   `;
 
   const totalRows = await prisma.$queryRawUnsafe(countSql, ...params);
@@ -409,6 +420,7 @@ export async function listImportedBackgroundAssets(options = {}) {
     FROM editor_background_assets
     WHERE ${sourceSql}
     ${categorySql}
+    ${premiumSql}
     ORDER BY updated_at DESC
     LIMIT ${limitParam}
     OFFSET ${offsetParam}
@@ -535,5 +547,41 @@ export async function deleteImportedBackgroundAsset(options = {}) {
   return {
     deleted: true,
     id: String(rows[0]?.id || id),
+  };
+}
+
+/**
+ * Marks one background Pro-only (or free again). Admin-only by design: this is a
+ * monetization decision, not asset authoring, so unlike delete there is no
+ * owner-scoped variant. Deliberately NOT part of upsertImportedBackgroundAsset —
+ * re-importing an asset from Freepik must never silently un-Pro it.
+ */
+export async function setImportedBackgroundPremium({ id, isPremium } = {}) {
+  await ensureImportedBackgroundsSchema();
+
+  const assetId = sanitizeText(id);
+  if (!assetId) {
+    throw new Error("Imported background id is required.");
+  }
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      UPDATE editor_background_assets
+      SET is_premium = $2, updated_at = NOW()
+      WHERE id = $1::uuid
+      RETURNING id, is_premium
+    `,
+    assetId,
+    Boolean(isPremium)
+  );
+
+  if (!Array.isArray(rows) || rows.length === 0) {
+    return { updated: false };
+  }
+
+  return {
+    updated: true,
+    id: String(rows[0]?.id || assetId),
+    isPremium: Boolean(rows[0]?.is_premium),
   };
 }

@@ -13,6 +13,7 @@ import {
   Label,
   Modal,
   Select,
+  Switch,
 } from "@/components/ui";
 import { normalizeTextEffectSpec, TEXT_EFFECT_FILL_KINDS } from "@/lib/textEffects/spec";
 import EffectPreview from "./EffectPreview";
@@ -500,10 +501,11 @@ export default function TextEffectsClient() {
                 <input type="checkbox" checked={form.published} onChange={(e) => setForm({ ...form, published: e.target.checked })} />
                 Published
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input type="checkbox" checked={form.isPremium} onChange={(e) => setForm({ ...form, isPremium: e.target.checked })} />
-                Pro only
-              </label>
+              <Switch
+                checked={form.isPremium}
+                label="Pro only"
+                onChange={(next) => setForm({ ...form, isPremium: next })}
+              />
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t pt-3">

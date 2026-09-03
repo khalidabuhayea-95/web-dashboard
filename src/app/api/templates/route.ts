@@ -61,6 +61,7 @@ const TEMPLATE_LIST_SELECT: any = {
   category: true,
   subCategory: true,
   tags: true,
+  isPremium: true,
   thumbnailDataUrl: true,
   previewVideoUrl: true,
   previewPosterUrl: true,
@@ -941,7 +942,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const id = typeof body?.id === "string" ? body.id : "";
     const action = typeof body?.action === "string" ? body.action : "";
 
-    if (!id || !["publish", "unpublish", "updatePreview"].includes(action)) {
+    if (!id || !["publish", "unpublish", "updatePreview", "setPremium"].includes(action)) {
       return handleBadRequest("Invalid template update request");
     }
 
@@ -951,6 +952,20 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
     if (!canAccessTemplate(session, existing)) {
       return handleForbidden("Cannot publish this template");
+    }
+
+    // Marking a template Pro is a monetization decision, not authoring — a
+    // designer who owns the template still cannot price it.
+    if (action === "setPremium") {
+      if (session.role !== "admin") {
+        return handleForbidden("Only admins can change the Pro flag");
+      }
+      const template = await prisma.template.update({
+        where: { id },
+        data: { isPremium: Boolean(body?.isPremium) },
+        select: TEMPLATE_LIST_SELECT,
+      });
+      return jsonForEditorClient({ ok: true, template });
     }
 
     if (action === "updatePreview") {

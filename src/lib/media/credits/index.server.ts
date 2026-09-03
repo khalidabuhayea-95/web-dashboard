@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { resolveUserTier } from "@/lib/billing/subscriptionTier.server";
 import { createLogger } from "@/lib/logging/logger";
 import prisma from "@/lib/prisma";
 import { getMobileAppSettings } from "@/lib/settings/mobileAppSettings.server";
@@ -23,7 +24,8 @@ export type MediaCreditBalance = {
   remaining: number;
   allowed: boolean;
   periodKey: string;
-  resetAtIso: string;
+  /** Null when the tier's grant is one-time — nothing is going to reset. */
+  resetAtIso: string | null;
   retryAfterSeconds: number;
 };
 
@@ -65,13 +67,33 @@ type UsageGroupRow = {
   _sum: { costMicros: number | null; credits: number | null };
 };
 
-/** Credits already spent by a user in the current period. */
-async function sumCreditsUsed(mobileUserId: string, periodKey: string): Promise<number> {
+/**
+ * Credits already spent, over the window the user's tier is billed on.
+ *
+ * ★The free allowance is ONE TIME, not monthly: a free account gets its credits
+ * once and they do not come back, so its usage is summed over ALL time. Paid
+ * tiers refill every month, so theirs is summed within the current period only.
+ *
+ * Consequence worth knowing: a lapsed subscriber's paid spending counts against
+ * the free grant, so they do not land back on a fresh 1,000 credits each time a
+ * subscription ends. That is the point of a one-time grant — it is per account,
+ * not per visit to the free tier.
+ */
+async function sumCreditsUsed(
+  mobileUserId: string,
+  periodKey: string,
+  { lifetime = false }: { lifetime?: boolean } = {},
+): Promise<number> {
   const aggregate = await prisma.mediaUsage.aggregate({
-    where: { mobileUserId, periodKey },
+    where: lifetime ? { mobileUserId } : { mobileUserId, periodKey },
     _sum: { credits: true },
   });
   return Number(aggregate._sum.credits || 0);
+}
+
+/** Free accounts are granted once; paid tiers refill monthly. */
+export function isOneTimeAllowanceTier(tier: string): boolean {
+  return tier !== "plus" && tier !== "pro";
 }
 
 /**
@@ -122,14 +144,19 @@ export async function checkMediaCredits({
   }
 
   try {
-    const [settings, user, used] = await Promise.all([
+    const [settings, user] = await Promise.all([
       getMobileAppSettings(),
       prisma.mobileUser.findUnique({
         where: { id: mobileUserId },
-        select: { creditAllowance: true },
+        select: { creditAllowance: true, subscriptionTier: true, subscriptionExpiresAt: true },
       }),
-      sumCreditsUsed(mobileUserId, periodKey),
     ]);
+    // The usage window depends on the tier, so it cannot join the parallel
+    // fetch above — a free account is summed over all time, a paid one over
+    // the current month.
+    const tier = resolveUserTier(user);
+    const oneTime = isOneTimeAllowanceTier(tier);
+    const used = await sumCreditsUsed(mobileUserId, periodKey, { lifetime: oneTime });
 
     // Number(null) === 0 passes Number.isFinite, so test for an explicit value.
     const hasOverride =
@@ -139,6 +166,7 @@ export async function checkMediaCredits({
       : resolveCreditCost(settings, normalizedFeature);
     const allowance = resolveMonthlyAllowance(settings, {
       userAllowance: user?.creditAllowance ?? null,
+      tier,
     });
     const remaining = Math.max(0, allowance - used);
 
@@ -152,8 +180,10 @@ export async function checkMediaCredits({
       // what is left, so a user is never charged into a negative balance.
       allowed: cost === 0 || remaining >= cost,
       periodKey,
-      resetAtIso: resetAt.toISOString(),
-      retryAfterSeconds,
+      // Null / no retry advice on a one-time grant: waiting for the month to
+      // turn will not give a free account more credits.
+      resetAtIso: oneTime ? null : resetAt.toISOString(),
+      retryAfterSeconds: oneTime ? 0 : retryAfterSeconds,
     };
   } catch (error) {
     logger.error("Credit lookup failed; allowing the request", error, {
@@ -171,7 +201,9 @@ export function createCreditHeaders(balance: MediaCreditBalance): Record<string,
     "X-Credits-Cost": String(balance.cost),
     "X-Credits-Allowance": String(balance.allowance),
     "X-Credits-Remaining": String(balance.remaining),
-    "X-Credits-Reset": balance.resetAtIso,
+    // Omitted entirely on a one-time grant rather than sent empty: an absent
+    // header reads as "no reset", an empty one reads as a bug.
+    ...(balance.resetAtIso ? { "X-Credits-Reset": balance.resetAtIso } : {}),
   };
 }
 
@@ -284,25 +316,33 @@ export async function getUserCreditSummary(mobileUserId: string) {
   const periodKey = resolvePeriodKey(now);
   const resetAt = resolvePeriodResetAt(now);
 
-  const [settings, user, used] = await Promise.all([
+  const [settings, user] = await Promise.all([
     getMobileAppSettings(),
     prisma.mobileUser.findUnique({
       where: { id: mobileUserId },
-      select: { creditAllowance: true },
+      select: { creditAllowance: true, subscriptionTier: true, subscriptionExpiresAt: true },
     }),
-    sumCreditsUsed(mobileUserId, periodKey),
   ]);
 
+  const tier = resolveUserTier(user);
+  const oneTime = isOneTimeAllowanceTier(tier);
+  const used = await sumCreditsUsed(mobileUserId, periodKey, { lifetime: oneTime });
   const allowance = resolveMonthlyAllowance(settings, {
     userAllowance: user?.creditAllowance ?? null,
+    tier,
   });
 
   return {
     allowance,
     used,
     remaining: Math.max(0, allowance - used),
+    tier,
+    /** False for the free tier: its credits are granted once and never refill. */
+    renews: !oneTime,
     periodKey,
-    resetAt: resetAt.toISOString(),
+    // Null when nothing will refill — the app must not promise a reset that
+    // is never going to happen.
+    resetAt: oneTime ? null : resetAt.toISOString(),
     // Settings come from an untyped JS module — restate the shape so callers get
     // a usable index signature instead of `{}`.
     costs: (settings.mediaCredits?.costs || {}) as Record<string, number>,

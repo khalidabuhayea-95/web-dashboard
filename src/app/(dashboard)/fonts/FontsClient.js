@@ -26,6 +26,7 @@ import {
   Input,
   Label,
   Select,
+  Switch,
   Table,
   TableBody,
   TableCell,
@@ -80,6 +81,8 @@ export default function FontsClient() {
 
   // Preview-image generation state.
   const [rowGenerating, setRowGenerating] = useState({});
+  // In-flight Pro toggles, keyed by font id.
+  const [rowPremiumSaving, setRowPremiumSaving] = useState({});
   const [bulkGenerating, setBulkGenerating] = useState(false);
   const [bulkProgress, setBulkProgress] = useState(null); // { done, total, failed }
   const [previewNotice, setPreviewNotice] = useState("");
@@ -230,6 +233,41 @@ export default function FontsClient() {
       }
     },
     [rowGenerating, patchFontRow]
+  );
+
+  // Flips a font between free and Nayroz Pro. Optimistic: the row updates
+  // immediately and reverts if the server rejects it. The endpoint also bumps the
+  // mobile font-catalog version, without which apps keep serving the cached
+  // (still-free) catalog.
+  const togglePremium = useCallback(
+    async (font) => {
+      if (!font?.id || rowPremiumSaving[font.id]) return;
+      const nextValue = !font.isPremium;
+      setRowPremiumSaving((prev) => ({ ...prev, [font.id]: true }));
+      setError("");
+      patchFontRow(font.id, { isPremium: nextValue });
+      try {
+        const response = await fetch(`/api/admin/fonts/${encodeURIComponent(font.id)}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ isPremium: nextValue }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload?.error || `Update failed (${response.status}).`);
+        }
+      } catch (err) {
+        patchFontRow(font.id, { isPremium: !nextValue });
+        setError(err instanceof Error ? err.message : "Could not update the font.");
+      } finally {
+        setRowPremiumSaving((prev) => {
+          const next = { ...prev };
+          delete next[font.id];
+          return next;
+        });
+      }
+    },
+    [rowPremiumSaving, patchFontRow]
   );
 
   const generateAllPreviews = useCallback(
@@ -480,6 +518,7 @@ export default function FontsClient() {
                   <TableHeaderCell>Language</TableHeaderCell>
                   <TableHeaderCell>Source</TableHeaderCell>
                   <TableHeaderCell>Mobile</TableHeaderCell>
+                  <TableHeaderCell>Pro</TableHeaderCell>
                   <TableHeaderCell>Image</TableHeaderCell>
                   <TableHeaderCell></TableHeaderCell>
                 </TableRow>
@@ -519,6 +558,14 @@ export default function FontsClient() {
                         ) : (
                           <X className="h-4 w-4 text-muted-foreground" aria-hidden="true" />
                         )}
+                      </TableCell>
+                      <TableCell>
+                        <Switch
+                          checked={Boolean(font.isPremium)}
+                          disabled={Boolean(rowPremiumSaving[font.id])}
+                          onChange={() => togglePremium(font)}
+                          aria-label={`Require Nayroz Pro for ${font.family}`}
+                        />
                       </TableCell>
                       <TableCell>
                         <div className="flex items-center gap-2">

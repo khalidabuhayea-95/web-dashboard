@@ -66,6 +66,9 @@ function toEditorSyncedFont(font: any) {
     source: String(font?.source || "synced").trim() || "synced",
     sourceLabel: String(font?.sourceLabel || "").trim(),
     removable: false,
+    // Whitelisted explicitly (unlike toEditorCustomFont, which spreads the row) —
+    // without this the editor's Pro switch reads false for every synced font.
+    isPremium: Boolean(font?.isPremium),
     createdAt: font?.createdAt,
     updatedAt: font?.updatedAt,
   };

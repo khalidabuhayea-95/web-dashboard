@@ -61,6 +61,24 @@ export async function runMagicTool({ modelId, prompt, modelOptions, imageBuffer,
     };
   }
 
+  // Our own worker: hand it the bytes and the op, nothing else to arrange.
+  if (definition.provider === "selfhost") {
+    const { decodeSelfhostImage, selfhostRunSync } = await import(
+      "@/lib/media/selfhost/client.server"
+    );
+    const output = await selfhostRunSync({
+      op: definition.op,
+      image_b64: imageBuffer.toString("base64"),
+    });
+    const decoded = decodeSelfhostImage(output);
+    return {
+      buffer: decoded.bytes,
+      mimeType: decoded.mimeType,
+      model: definition.id,
+      predictionId: null,
+    };
+  }
+
   const token = String(process.env.REPLICATE_API_TOKEN || "").trim();
   if (!token) throw new Error("REPLICATE_API_TOKEN is not configured.");
 

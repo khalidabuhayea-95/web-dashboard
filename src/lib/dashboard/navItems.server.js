@@ -46,6 +46,8 @@ export async function buildDashboardNavItems(role) {
     { href: "/text-effects", label: "Text Effects", icon: "textEffects" },
     { href: "/gallery", label: "Gallery", icon: "gallery" },
     { href: "/fonts", label: "Fonts", icon: "fonts" },
+    { href: "/pro-assets", label: "Pro assets", icon: "proAssets" },
+    { href: "/subscriptions", label: "Subscriptions", icon: "subscriptions" },
     { href: "/users", label: "Users", icon: "users" },
     { href: "/analytics", label: "Analytics", icon: "analytics" },
     { href: "/notifications", label: "Push", icon: "push" },

@@ -14,6 +14,7 @@ import {
   Label,
   Modal,
   Select,
+  Switch,
   Textarea,
 } from "@/components/ui";
 import {
@@ -692,14 +693,11 @@ export default function MagicToolsClient() {
                 />
                 Published
               </label>
-              <label className="flex items-center gap-2 text-sm">
-                <input
-                  type="checkbox"
-                  checked={form.isPremium}
-                  onChange={(event) => setForm({ ...form, isPremium: event.target.checked })}
-                />
-                Pro only
-              </label>
+              <Switch
+                checked={form.isPremium}
+                label="Pro only"
+                onChange={(next) => setForm({ ...form, isPremium: next })}
+              />
             </div>
 
             {!creating && editing.id ? (
