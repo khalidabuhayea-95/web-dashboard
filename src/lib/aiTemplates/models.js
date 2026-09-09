@@ -16,6 +16,16 @@
 // `t2iExtraInput`       — static extras for prompt-only runs (card aspect 3:4).
 // `priceMicros`         — per-image cost estimate for spend maths, from vendor
 //                         pricing pages 2026-08-12; the model page is canonical.
+//
+// ★THE CATALOG RUNS ON EXACTLY TWO MODELS, and a template picks one by a single
+// question: does its IMAGE have to contain Arabic text?
+//   no  → google/nano-banana    $0.039 → 100 credits
+//   yes → google/nano-banana-2  $0.067 → 175 credits
+// There is no "premium" tier. 175 is a floor, not a suggestion: nano-banana-2
+// breaks even at 134 credits ($0.0005/credit anchor), so an Arabic template
+// left at 100 sells every render at a loss — a Plus subscriber burning their
+// whole 10,000-credit allowance that way costs $6.70 against $4.24 of net
+// revenue. The models below this line stay registered for bake-offs only.
 
 export const AI_TEMPLATE_MODEL_DEFINITIONS = [
   {
@@ -128,6 +138,49 @@ export const AI_TEMPLATE_MODEL_DEFINITIONS = [
       "Strong spatial/world knowledge; EN/ZH text focus (Arabic tested 2026-08-13: gibberish). Outputs 2K.",
   },
   {
+    // ★The Arabic default. On 2026-09-03 this rendered «حج مبرور وسعي مشكور»
+    // correctly on 5/5 runs of the real Hajj template, held the reference face,
+    // and did it in 8.5–10.9s — against seedream-5-pro's 57–100s, one run of
+    // which hung for 571s. It costs $0.022 more per image and is worth it.
+    // `resolution: "1K"` is pinned even though 1K is today's default: the 2K
+    // tier costs $0.101, and a vendor-side default flip must not silently
+    // inflate our bill — which is exactly what seedream-5-pro's 2K default did.
+    id: "google/nano-banana-2",
+    label: "Nano Banana 2 (نص عربي — الأسرع)",
+    provider: "replicate",
+    promptKey: "prompt",
+    inputImageKey: "image_input",
+    imageIsArray: true,
+    supportsImageInput: true,
+    supportsTextToImage: true,
+    extraInput: { output_format: "png", resolution: "1K", aspect_ratio: "match_input_image" },
+    t2iExtraInput: { output_format: "png", resolution: "1K", aspect_ratio: "3:4" },
+    priceMicros: 67_000,
+    notes:
+      "Use for every template whose IMAGE must contain Arabic text. Spells Arabic correctly, ~10s, holds identity as well as nano-banana. Keep resolution at 1K ($0.067; 2K $0.101, 4K $0.151) and upscale with our own worker.",
+  },
+  {
+    // The only model that officially trains on Arabic text (RTL + joined
+    // letters), and the one that got "عيد مبارك" right in the 2026-09-02
+    // bake-off where nano-banana wrote "عصيناك" and seedream-4.5 "الهْ عطان".
+    // `size: "1K"` is pinned deliberately: the model DEFAULTS to 2K, which
+    // Replicate bills at $0.09 instead of $0.05 for output our own upscaler
+    // can produce for free.
+    id: "bytedance/seedream-5-pro",
+    label: "Seedream 5.0 Pro (نص عربي)",
+    provider: "replicate",
+    promptKey: "prompt",
+    inputImageKey: "image_input",
+    imageIsArray: true,
+    supportsImageInput: true,
+    supportsTextToImage: true,
+    extraInput: { size: "1K", aspect_ratio: "match_input_image" },
+    t2iExtraInput: { size: "1K", aspect_ratio: "3:4" },
+    priceMicros: 50_000,
+    notes:
+      "SUPERSEDED by google/nano-banana-2 for Arabic — kept as the fallback if that ever regresses. Spells Arabic correctly but is SLOW and erratic: measured 57s/58s/58s/75s/95s/100s and one run that hung 571s on an input that had just finished in 58s. The wait is upstream (ByteDance), not resolution: 4.0MP took 57.4s while 2.0MP took 74.6s. Keep size at 1K.",
+  },
+  {
     id: "google/nano-banana-pro",
     label: "Nano Banana Pro (Gemini 3 Pro Image)",
     provider: "replicate",
@@ -140,7 +193,7 @@ export const AI_TEMPLATE_MODEL_DEFINITIONS = [
     t2iExtraInput: { output_format: "png", aspect_ratio: "3:4" },
     priceMicros: 134_000,
     notes:
-      "Only fully reliable Arabic model (flawless on every 2026-08-13 test, calligraphy and fine print) and it takes image input — premium price, for Arabic-text and hero templates.",
+      "Arabic-correct and takes image input, but $0.15 at BOTH 1K and 2K — pinning resolution saves nothing here — and its latency spread is wide: 21s to 110s over 8 measured runs. nano-banana-2 matches its Arabic accuracy while being faster and cheaper; keep this only for hero art that needs Pro-grade rendering.",
   },
 ];
 

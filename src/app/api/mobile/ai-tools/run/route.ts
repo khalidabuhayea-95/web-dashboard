@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 
-import { resolveUserTier, SUBSCRIPTION_TIERS } from "@/lib/billing/subscriptionTier.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -12,7 +11,7 @@ import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import prisma from "@/lib/prisma";
 import { checkRateLimit, createRateLimitResponse } from "@/lib/security/rateLimit.server";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage } from "@/lib/media/credits/index.server";
+import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
 import { resolveAiTool, runAiTool } from "@/lib/mobile/aiTools.server";
 
 export const runtime = "nodejs";
@@ -87,39 +86,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // ★EVERY tool requires a paid subscription (2026-09-01 direction — the gate
-    // used to apply only to isPremium tools). The catalogue stays public so the
-    // shop window works signed-out; the app walls at tool-open client-side, and
-    // this is the enforcement behind it. isPremium remains on the wire purely
-    // as catalogue metadata.
+    // ★CREDITS are the entitlement, not the subscription (2026-09-08 direction). A free
+    // account that still has AI credits may run any tool; the charge below is the whole
+    // gate, and an empty wallet answers 429 insufficient_credits — which the app turns into
+    // the out-of-credits dialog that offers a plan. This route briefly (2026-09-01 →
+    // 2026-09-08) rejected every free account with 403 subscription_required; that wall is
+    // gone, and `isPremium` stays on the wire purely as catalogue metadata.
     //
-    // ★Gate on "not free", NOT on equality with a single tier. This read
-    // `tier !== "pro"` while "pro" meant the ENTRY tier, so a top-tier
-    // subscriber — whose tier string was "pro_max" — was rejected from the very
-    // tools they paid the most for. Any future tier is entitled by default,
-    // which is the safe direction for a paying customer.
-    {
-      const tierUser = await prisma.mobileUser.findUnique({
-        where: { id: mobileUser.id },
-        select: { subscriptionTier: true, subscriptionExpiresAt: true },
-      });
-      const tier = resolveUserTier(tierUser);
-      if (tier === SUBSCRIPTION_TIERS.FREE) {
-        requestLogger.info("AI tool run rejected: subscription required", {
-          mobileUserId: mobileUser.id,
-          toolSlug: tool.slug,
-        });
-        return jsonResponse(
-          requestId,
-          {
-            error: "This tool is part of Nayroz Pro.",
-            code: "subscription_required",
-            subscription: { tier, required: "plus" },
-          },
-          403
-        );
-      }
-    }
+    // The editor's own AI routes (edit-image, upscale, ai-expand, object-remove,
+    // remove-background, generate-image) never had a subscription gate, so this is also what
+    // makes the whole app answer the same way.
 
     const imageEntry = formData.get("image");
     let imageBuffer: Buffer | null = null;
@@ -185,6 +161,13 @@ export async function POST(request: NextRequest) {
       credits: tool.creditCost,
     });
 
+    // The wallet AFTER this run, so the app updates its shared balance from this very
+    // response instead of asking again (2026-09-08 direction).
+    const creditHeaders = await creditBalanceHeaders({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.AI_TOOLS,
+    });
+
     requestLogger.info("AI tool run completed", {
       mobileUserId: mobileUser.id,
       toolId,
@@ -199,6 +182,8 @@ export async function POST(request: NextRequest) {
       new NextResponse(new Uint8Array(result.buffer), {
         status: 200,
         headers: {
+          ...creditHeaders,
+
           "Content-Type": result.mimeType || "image/png",
           "Content-Disposition": `inline; filename="${tool.slug}.png"`,
           "Cache-Control": "no-store",

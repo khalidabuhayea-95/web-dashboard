@@ -1,7 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Sparkles, ImageOff, Plus, ChevronLeft, ChevronRight, GripVertical } from "lucide-react";
+import {
+  Sparkles,
+  ImageOff,
+  Plus,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  GripVertical,
+} from "lucide-react";
 import {
   Badge,
   Button,
@@ -62,6 +70,9 @@ export default function AiTemplatesClient() {
   const [search, setSearch] = useState("");
   const [editing, setEditing] = useState(null);
   const [creating, setCreating] = useState(false);
+  // Category ids the user has collapsed. Tracking the collapsed set (rather than
+  // the expanded one) keeps every category open by default, including new ones.
+  const [collapsedCategoryIds, setCollapsedCategoryIds] = useState(() => new Set());
   // null = closed, { category: null } = new, { category } = rename
   const [categoryEditor, setCategoryEditor] = useState(null);
   const [categoryForm, setCategoryForm] = useState(EMPTY_CATEGORY_FORM);
@@ -306,6 +317,24 @@ export default function AiTemplatesClient() {
     setCategoryEditor({ category: null });
     setCategoryForm(EMPTY_CATEGORY_FORM);
     setNotice("");
+  };
+
+  const toggleCategory = (categoryId) => {
+    setCollapsedCategoryIds((current) => {
+      const next = new Set(current);
+      if (!next.delete(categoryId)) next.add(categoryId);
+      return next;
+    });
+  };
+
+  const allCollapsed =
+    visibleCategories.length > 0 &&
+    visibleCategories.every((category) => collapsedCategoryIds.has(category.id));
+
+  const toggleAllCategories = () => {
+    setCollapsedCategoryIds(
+      allCollapsed ? new Set() : new Set(visibleCategories.map((category) => category.id))
+    );
   };
 
   const openCategoryEditor = (category) => {
@@ -559,6 +588,21 @@ export default function AiTemplatesClient() {
             className="w-56"
           />
           <Button
+            variant="ghost"
+            onClick={toggleAllCategories}
+            disabled={Boolean(search) || !visibleCategories.length}
+            title={search ? "Clear the search to collapse categories" : undefined}
+            className="inline-flex items-center gap-1.5 whitespace-nowrap"
+          >
+            <ChevronDown
+              aria-hidden="true"
+              className={`h-4 w-4 transition-transform duration-200 ${
+                allCollapsed ? "-rotate-90" : ""
+              }`}
+            />
+            {allCollapsed ? "Expand all" : "Collapse all"}
+          </Button>
+          <Button
             variant="secondary"
             onClick={openCategoryCreator}
             className="inline-flex items-center gap-1.5 whitespace-nowrap"
@@ -591,14 +635,37 @@ export default function AiTemplatesClient() {
         </Card>
       ) : null}
 
-      {visibleCategories.map((category) => (
+      {visibleCategories.map((category) => {
+        // A search hides non-matching templates, so force every surviving
+        // category open — otherwise a hit inside a collapsed one looks like
+        // no result at all.
+        const collapsed = !search && collapsedCategoryIds.has(category.id);
+        const panelId = `ai-template-category-${category.id}`;
+
+        return (
         <Card key={category.id}>
-          <CardHeader>
+          <CardHeader className={collapsed ? "card-header-collapsed" : undefined}>
             <CardTitle className="flex items-center gap-3">
-              {category.titleEn}
-              <span dir="rtl" className="text-base font-medium text-primary">
-                {category.titleAr}
-              </span>
+              {/* The title doubles as the disclosure control; Rename/Delete stay
+                  separate so they are never hit while toggling. */}
+              <button
+                type="button"
+                onClick={() => toggleCategory(category.id)}
+                aria-expanded={!collapsed}
+                aria-controls={collapsed ? undefined : panelId}
+                className="-my-1 flex min-w-0 items-center gap-3 rounded-xl px-1 py-1 text-left transition-colors hover:bg-accent"
+              >
+                <ChevronDown
+                  aria-hidden="true"
+                  className={`h-4 w-4 shrink-0 text-muted-foreground transition-transform duration-200 ${
+                    collapsed ? "-rotate-90" : ""
+                  }`}
+                />
+                <span className="truncate">{category.titleEn}</span>
+                <span dir="rtl" className="truncate text-base font-medium text-primary">
+                  {category.titleAr}
+                </span>
+              </button>
               {category.isNew ? <Badge variant="success">New</Badge> : null}
               <span className="ml-auto text-xs font-normal text-muted-foreground">
                 {category.templates.length} template{category.templates.length === 1 ? "" : "s"}
@@ -622,7 +689,8 @@ export default function AiTemplatesClient() {
             </CardTitle>
             <CardSubtitle>{category.slug}</CardSubtitle>
           </CardHeader>
-          <CardContent>
+          {collapsed ? null : (
+          <CardContent id={panelId}>
             <div className="grid grid-cols-2 gap-2.5 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7">
               {category.templates.map((template, templateIndex) => {
                 const isDragging =
@@ -797,8 +865,10 @@ export default function AiTemplatesClient() {
               })}
             </div>
           </CardContent>
+          )}
         </Card>
-      ))}
+        );
+      })}
 
       <Modal
         open={Boolean(categoryEditor)}

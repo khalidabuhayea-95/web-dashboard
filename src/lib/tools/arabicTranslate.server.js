@@ -8,18 +8,14 @@ function containsArabic(value) {
   return /[\u0600-\u06FF]/.test(String(value || ""));
 }
 
-async function translateOneToArabic(text) {
-  const source = sanitizeText(text);
-  if (!source) return "";
-  if (containsArabic(source)) return source;
-
+async function translate(source, { from, to }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), TRANSLATE_TIMEOUT_MS);
   try {
     const url = new URL("https://translate.googleapis.com/translate_a/single");
     url.searchParams.set("client", "gtx");
-    url.searchParams.set("sl", "auto");
-    url.searchParams.set("tl", "ar");
+    url.searchParams.set("sl", from);
+    url.searchParams.set("tl", to);
     url.searchParams.set("dt", "t");
     url.searchParams.set("q", source);
 
@@ -47,6 +43,30 @@ async function translateOneToArabic(text) {
     return sanitizeText(translated);
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function translateOneToArabic(text) {
+  const source = sanitizeText(text);
+  if (!source) return "";
+  if (containsArabic(source)) return source;
+  return translate(source, { from: "auto", to: "ar" });
+}
+
+/**
+ * Arabic prompt in, English prompt out — for the image generators, whose text
+ * encoders are English-only. Returns the input unchanged when it holds no
+ * Arabic, so an English prompt costs no round trip, and on any failure so a
+ * translator outage degrades to "the model sees the original" rather than to a
+ * dead feature.
+ */
+export async function translatePromptToEnglish(text) {
+  const source = sanitizeText(text);
+  if (!source || !containsArabic(source)) return source;
+  try {
+    return (await translate(source, { from: "ar", to: "en" })) || source;
+  } catch {
+    return source;
   }
 }
 

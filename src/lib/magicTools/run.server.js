@@ -8,7 +8,11 @@
 
 import { removeBackground } from "@/lib/media/backgroundRemoval/index.server";
 import { removeRasterBackgroundWithRembg } from "@/lib/media/backgroundRemoval/providers/rembg.server";
-import { buildMagicToolModelInput, getMagicToolModelDefinition } from "./models";
+import {
+  buildMagicToolModelInput,
+  getMagicToolModelDefinition,
+  resolveMagicToolOptions,
+} from "./models";
 import { createPrediction, downloadPredictionOutput, waitForPrediction } from "./predict";
 
 // Background removal, best engine first.
@@ -61,12 +65,16 @@ export async function runMagicTool({ modelId, prompt, modelOptions, imageBuffer,
     };
   }
 
-  // Our own worker: hand it the bytes and the op, nothing else to arrange.
+  // Our own worker: the op, the bytes, and whatever knobs that op reads.
   if (definition.provider === "selfhost") {
     const { decodeSelfhostImage, selfhostRunSync } = await import(
       "@/lib/media/selfhost/client.server"
     );
+    // The worker's ops take knobs too (upscale reads `scale`), so send the same
+    // resolved options the Replicate path would — registry defaults with the
+    // tool's own modelOptions layered on top.
     const output = await selfhostRunSync({
+      ...resolveMagicToolOptions(definition, modelOptions),
       op: definition.op,
       image_b64: imageBuffer.toString("base64"),
     });

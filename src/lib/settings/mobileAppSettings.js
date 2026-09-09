@@ -7,6 +7,10 @@ import {
   normalizeEditImageModelId,
 } from "../media/editImageByPrompt/models.js";
 import {
+  DEFAULT_IMAGE_GENERATION_MODEL_ID,
+  normalizeImageGenerationModelId,
+} from "../media/imageGeneration/models.js";
+import {
   DEFAULT_IMAGE_UPSCALE_MODEL_ID,
   normalizeImageUpscaleModelId,
 } from "../media/imageUpscale/models.js";
@@ -32,6 +36,7 @@ const ROOT_SETTING_KEYS = new Set([
   "aiExpandModel",
   "upscaleModel",
   "editImageModel",
+  "imageGenerationModel",
   "mediaCredits",
   "updatedAt",
 ]);
@@ -73,6 +78,11 @@ function sanitizeUpscaleModel(value) {
 
 function sanitizeEditImageModel(value) {
   const normalized = normalizeEditImageModelId(value);
+  return normalized || null;
+}
+
+function sanitizeImageGenerationModel(value) {
+  const normalized = normalizeImageGenerationModelId(value);
   return normalized || null;
 }
 
@@ -192,6 +202,7 @@ export function normalizeStoredMobileAppSettings(value = {}) {
   const aiExpandModel = sanitizeAiExpandModel(source.aiExpandModel);
   const upscaleModel = sanitizeUpscaleModel(source.upscaleModel);
   const editImageModel = sanitizeEditImageModel(source.editImageModel);
+  const imageGenerationModel = sanitizeImageGenerationModel(source.imageGenerationModel);
   return {
     android: normalizeStoredPlatformSettings(source.android),
     ios: normalizeStoredPlatformSettings(source.ios),
@@ -199,6 +210,7 @@ export function normalizeStoredMobileAppSettings(value = {}) {
     aiExpandModel,
     upscaleModel,
     editImageModel,
+    imageGenerationModel,
     // Always fully populated (allowance + every feature cost + every model price),
     // so callers never have to null-check a partially-saved blob.
     mediaCredits: normalizeMediaCreditSettings(source.mediaCredits),
@@ -230,6 +242,10 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
       "editImageModel" in input
         ? sanitizeEditImageModel(input.editImageModel)
         : current.editImageModel,
+    imageGenerationModel:
+      "imageGenerationModel" in input
+        ? sanitizeImageGenerationModel(input.imageGenerationModel)
+        : current.imageGenerationModel,
     // Merge over the current values so a partial payload (e.g. only the allowance)
     // does not reset the costs and prices back to their defaults.
     mediaCredits:
@@ -335,6 +351,18 @@ export function resolveMobileUpscaleModel(
     sanitizeUpscaleModel(normalizedSettings.upscaleModel) ||
     sanitizeUpscaleModel(defaultUpscaleModel) ||
     DEFAULT_IMAGE_UPSCALE_MODEL_ID
+  );
+}
+
+export function resolveMobileImageGenerationModel(
+  settings,
+  { defaultImageGenerationModel = DEFAULT_IMAGE_GENERATION_MODEL_ID } = {}
+) {
+  const normalizedSettings = normalizeStoredMobileAppSettings(settings);
+  return (
+    sanitizeImageGenerationModel(normalizedSettings.imageGenerationModel) ||
+    sanitizeImageGenerationModel(defaultImageGenerationModel) ||
+    DEFAULT_IMAGE_GENERATION_MODEL_ID
   );
 }
 

@@ -57,10 +57,34 @@ export const MAGIC_TOOL_MODEL_DEFINITIONS = [
     inputImageKey: "image",
     imageIsArray: false,
     requiresPrompt: false,
-    extraInput: {},
-    optionFields: [],
+    // `strength` is the blend back over the original, GFPGAN's own `weight`.
+    // Full strength repaints the iris and its FFHQ bias turns hazel eyes blue,
+    // so the default is deliberately low — see ai-worker/pipelines/face_restore.py.
+    extraInput: { strength: 0.4 },
+    optionFields: [
+      { key: "strength", label: "Restoration strength", type: "number", min: 0, max: 1 },
+    ],
     priceMicros: 1_500,
-    notes: "Self-hosted face restoration. Same GFPGAN v1.4 weights as the Replicate entry.",
+    notes:
+      "Self-hosted face restoration: YuNet detects, the face is warped to the FFHQ template, GFPGAN v1.4 restores it, and only that region is blended back. Keep strength at or below 0.4 — higher changes eye colour.",
+  },
+  {
+    // Real-ESRGAN x4plus on our own worker (ai-worker/pipelines/upscale.py) at
+    // no per-image cost. NOTE the one capability the Replicate entry above has
+    // and this does not: `face_enhance`. Faces are a separate op here
+    // (selfhost/gfpgan), which keeps each tool doing one thing.
+    id: "selfhost/real-esrgan",
+    label: "Real-ESRGAN (خادمنا)",
+    provider: "selfhost",
+    op: "upscale",
+    promptKey: null,
+    inputImageKey: "image",
+    imageIsArray: false,
+    requiresPrompt: false,
+    extraInput: { scale: 2 },
+    optionFields: [{ key: "scale", label: "Upscale factor", type: "number", min: 1, max: 4 }],
+    priceMicros: 1_000,
+    notes: "Self-hosted upscale + sharpen. Same x4plus weights as the Replicate entry, no face enhancement.",
   },
   {
     id: "tencentarc/gfpgan",

@@ -16,6 +16,7 @@ import {
 } from "@/lib/settings/mobileAppSettings.server";
 import { getReplicateDefaultObjectRemovalModelId } from "@/lib/media/objectRemoval/providers/replicate.server";
 import { getFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
+import { optionalCreditSummary } from "@/lib/media/credits/index.server";
 
 const logger = createLogger("api.mobile.app-settings");
 
@@ -67,7 +68,15 @@ export async function GET(request: NextRequest) {
     // Font catalog version — mobile app caches the full font list keyed by this
     // and only re-fetches /api/mobile/fonts when it changes.
     const fontsVersion = await getFontCatalogVersion();
-    const publicResponseWithFonts = { ...publicResponsePayload, fontsVersion };
+    // ★The wallet rides along here (2026-09-08 direction): app-settings is the call every
+    // launch already makes, so the editor's AI sheets have a balance and a price list before
+    // anything asks for one. Null for a signed-out caller — the field is simply absent.
+    const credits = await optionalCreditSummary(request);
+    const publicResponseWithFonts = {
+      ...publicResponsePayload,
+      fontsVersion,
+      ...(credits ? { credits } : {}),
+    };
 
     requestLogger.info("Resolved mobile app settings", publicResponseWithFonts);
 

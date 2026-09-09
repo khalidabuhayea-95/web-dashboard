@@ -3092,7 +3092,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile AI Tools"],
           summary: "AI Tools catalogue (magic tools + templates)",
           description:
-            "The whole AI Tools tab in one call, as an ordered list of sections. Two admin systems feed it — one-tap **magic tools** (enhance, restore, colorize, remove background) and styled **templates** grouped by category — but they are merged here because they are the same gesture to a user: pick a tool, give a photo, get a picture back. Render every item the same way and pass its `id` to `/api/mobile/ai-tools/run`.\n\n**Never returns prompts or model ids** — those are the product and stay server-side.\n\nOnly published tools that have sample artwork appear. ALL tools require a paid subscription to RUN (403 `subscription_required` otherwise); the catalogue itself stays visible to everyone so the shop window still works, and `isPremium` remains as per-tool metadata. Prices differ per tool, so read `creditCost` from each item instead of assuming one tab-wide price.\n\nRequires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`. Cacheable privately for 60s.",
+            "The whole AI Tools tab in one call, as an ordered list of sections. Two admin systems feed it — one-tap **magic tools** (enhance, restore, colorize, remove background) and styled **templates** grouped by category — but they are merged here because they are the same gesture to a user: pick a tool, give a photo, get a picture back. Render every item the same way and pass its `id` to `/api/mobile/ai-tools/run`.\n\n**Never returns prompts or model ids** — those are the product and stay server-side.\n\nOnly published tools that have sample artwork appear. Running a tool needs AI CREDITS, not a subscription — a free account with a funded wallet may run any of them; `isPremium` remains as per-tool metadata only. Prices differ per tool, so read `creditCost` from each item instead of assuming one tab-wide price.\n\nRequires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`. Cacheable privately for 60s.",
           security: [{ bearerAuth: [] }],
           responses: {
             200: {
@@ -3124,7 +3124,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile AI Tools"],
           summary: "Run an AI tool on a photo",
           description:
-            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Subscription:** every tool requires an active paid subscription (Plus or Pro) — a free account answers 403 with `code: \"subscription_required\"`.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
+            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Entitlement:** credits alone — there is no subscription check. A free account that can afford the tool may run it; a plan is simply how most wallets get funded.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -3210,6 +3210,107 @@ export function buildMobileOpenApiSpec(serverOrigin) {
               description: "The tool failed to run",
               content: {
                 "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/mobile/media/generate-image": {
+        post: {
+          tags: ["Mobile Media"],
+          summary: "Generate an image from a text prompt",
+          description:
+            "Text to image. The prompt may be written in Arabic: it is translated to English server-side before the call, because every model cheap enough for this feature has an English-only text encoder. Returns the generated image bytes. Costs the `image-generation` credit allowance. Requires a logged-in mobile user: send the access token from the social login flow as `Authorization: Bearer <token>`.",
+          security: [{ bearerAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["prompt"],
+                  properties: {
+                    prompt: {
+                      type: "string",
+                      maxLength: 600,
+                      description: "What to draw. Arabic or English.",
+                      example: "قهوة لاتيه على طاولة خشبية",
+                    },
+                    aspectRatio: {
+                      type: "string",
+                      enum: ["1:1", "4:5", "3:4", "2:3", "9:16"],
+                      default: "1:1",
+                    },
+                    model: {
+                      type: "string",
+                      description:
+                        "Optional model override. An unknown value falls back to the default rather than failing.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            200: {
+              description: "The generated image",
+              content: {
+                "image/png": {
+                  schema: {
+                    type: "string",
+                    format: "binary",
+                  },
+                },
+              },
+            },
+            400: {
+              description: "Missing, empty or over-long prompt, or an unsupported aspect ratio",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            402: {
+              description: "Not enough AI credits",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
+              },
+            },
+            502: {
+              description: "The provider failed or returned no image",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/ErrorResponse",
+                  },
+                },
               },
             },
           },
@@ -3460,7 +3561,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Subscriptions"],
           summary: "Get the caller's Nayroz Pro entitlement",
           description:
-            "The server-side truth for whether this account has Nayroz Pro. The app refreshes it on sign-in, on foreground, after purchases, and when a silent `subscription_updated` push arrives; server endpoints enforce the same state themselves (e.g. premium AI tools answer 403 `subscription_required`).\n\nRequires a logged-in mobile user: send the access token as `Authorization: Bearer <token>`.",
+            "The server-side truth for whether this account has Nayroz Pro. The app refreshes it on sign-in, on foreground, after purchases, and when a silent `subscription_updated` push arrives; server endpoints enforce entitlements themselves where a feature has one; AI tools do not — they are governed by the credit wallet.\n\nRequires a logged-in mobile user: send the access token as `Authorization: Bearer <token>`.",
           security: [{ bearerAuth: [] }],
           responses: {
             200: {

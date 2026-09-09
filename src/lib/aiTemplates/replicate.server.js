@@ -35,6 +35,18 @@ async function replicateRequest(pathname, token, init = {}) {
   }
 }
 
+// A prediction we stop waiting for keeps running on Replicate and still bills
+// us for an image nobody receives. That path is real traffic, not a theoretical
+// branch: on 2026-09-03 seedream-5-pro answered one input in 58s and hung past
+// nine minutes on the very same input, so give up AND hang up.
+async function cancelPrediction(id, token) {
+  try {
+    await replicateRequest(`/predictions/${id}/cancel`, token, { method: "POST" });
+  } catch {
+    // Best-effort cleanup; the caller's timeout is the answer either way.
+  }
+}
+
 async function waitForPrediction(prediction, token) {
   const deadline = Date.now() + POLL_TIMEOUT_MS;
   let current = prediction;
@@ -42,7 +54,10 @@ async function waitForPrediction(prediction, token) {
     if (current.status === "failed" || current.status === "canceled") {
       throw new Error(current.error || `Prediction ${current.status}.`);
     }
-    if (Date.now() > deadline) throw new Error("Timed out waiting for the model.");
+    if (Date.now() > deadline) {
+      await cancelPrediction(current.id, token);
+      throw new Error("Timed out waiting for the model.");
+    }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
     current = await replicateRequest(`/predictions/${current.id}`, token);
   }

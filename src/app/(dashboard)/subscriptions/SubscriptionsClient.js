@@ -68,7 +68,7 @@ export default function SubscriptionsClient() {
       const credits = settingsJson?.settings?.mediaCredits ?? {};
       setSettings(settingsJson.settings ?? {});
       setForm({
-        monthlyAllowance: String(credits.monthlyAllowance ?? 1000),
+        monthlyAllowance: String(credits.monthlyAllowance ?? 200),
         plusMonthlyAllowance: String(credits.plusMonthlyAllowance ?? 10000),
         proMonthlyAllowance: String(credits.proMonthlyAllowance ?? 50000),
         referencePrices: Object.fromEntries(

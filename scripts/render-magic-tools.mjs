@@ -132,6 +132,21 @@ async function runTool(preset, beforeBuffer, token) {
     return Buffer.isBuffer(result.bytes) ? result.bytes : Buffer.from(result.bytes || []);
   }
 
+  // Our own worker, same contract as src/lib/magicTools/run.server.js: the op,
+  // the bytes, and whatever knobs that op reads.
+  if (definition.provider === "selfhost") {
+    const { decodeSelfhostImage, selfhostRunSync } = await import(
+      "../src/lib/media/selfhost/client.server.ts"
+    );
+    const { resolveMagicToolOptions } = await import("../src/lib/magicTools/models.js");
+    const output = await selfhostRunSync({
+      ...resolveMagicToolOptions(definition, preset.modelOptions),
+      op: definition.op,
+      image_b64: beforeBuffer.toString("base64"),
+    });
+    return decodeSelfhostImage(output).bytes;
+  }
+
   const dataUri = `data:image/jpeg;base64,${beforeBuffer.toString("base64")}`;
   const input = buildMagicToolModelInput(definition, preset.prompt, dataUri, preset.modelOptions);
   const created = await createPrediction(definition.id, input, token);

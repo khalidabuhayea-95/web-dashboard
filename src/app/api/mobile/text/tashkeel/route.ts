@@ -8,7 +8,7 @@ import {
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage } from "@/lib/media/credits/index.server";
+import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -95,6 +95,13 @@ export async function POST(request: NextRequest) {
       model: `selfhost/${result.model}`,
     });
 
+    // The wallet AFTER this run, so the app updates its shared balance from this very
+    // response instead of asking again (2026-09-08 direction).
+    const creditHeaders = await creditBalanceHeaders({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.TASHKEEL,
+    });
+
     requestLogger.info("Diacritization completed", {
       mobileUserId: mobileUser.id,
       inputChars: text.length,
@@ -103,7 +110,10 @@ export async function POST(request: NextRequest) {
       durationMs: Date.now() - startedAt,
     });
 
-    return jsonResponse(requestId, { text: result.text }, 200, { "Cache-Control": "no-store" });
+    return jsonResponse(requestId, { text: result.text }, 200, {
+      "Cache-Control": "no-store",
+      ...creditHeaders,
+    });
   } catch (error) {
     if (error instanceof TashkeelError) {
       requestLogger.warn("Diacritization rejected", { code: error.code, error: error.message });

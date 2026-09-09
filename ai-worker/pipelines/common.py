@@ -53,9 +53,14 @@ def encode_image(image: Image.Image, *, format: str = "PNG", quality: int = 92) 
     }
 
 
-def ok(output: dict[str, Any], started_at: float, *, device: str, model: str) -> dict[str, Any]:
+def ok(
+    output: dict[str, Any], started_at: float, *, device: str, model: str, **extra: Any
+) -> dict[str, Any]:
+    """Envelope every op returns. `extra` carries op-specific facts the caller
+    may want to log or assert on (face count, mask snap decisions, and so on)."""
     return {
         **output,
+        **extra,
         "model": model,
         "device": device,
         "duration_ms": int((time.time() - started_at) * 1000),

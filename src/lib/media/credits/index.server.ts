@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 
 import { resolveUserTier } from "@/lib/billing/subscriptionTier.server";
 import { createLogger } from "@/lib/logging/logger";
+import { resolveOptionalMobileBearer } from "@/lib/mobile/userAuth.server";
 import prisma from "@/lib/prisma";
 import { getMobileAppSettings } from "@/lib/settings/mobileAppSettings.server";
 import {
@@ -191,6 +193,61 @@ export async function checkMediaCredits({
       feature: normalizedFeature,
     });
     return openState();
+  }
+}
+
+/**
+ * Wallet headers for a SUCCESSFUL run, so the app never has to ask "what's left?" after an AI
+ * call — the answer rides the same response. Deliberately without `Retry-After`, which only
+ * means something on the 429 refusal that [createCreditHeaders] builds.
+ *
+ * Read the balance AFTER charging, so `X-Credits-Remaining` is the post-run figure.
+ */
+export async function creditBalanceHeaders({
+  mobileUserId,
+  feature,
+}: {
+  mobileUserId: string;
+  feature: string;
+}): Promise<Record<string, string>> {
+  try {
+    const balance = await checkMediaCredits({ mobileUserId, feature });
+    return {
+      "X-Credits-Feature": balance.feature,
+      "X-Credits-Cost": String(balance.cost),
+      "X-Credits-Allowance": String(balance.allowance),
+      "X-Credits-Remaining": String(balance.remaining),
+      ...(balance.resetAtIso ? { "X-Credits-Reset": balance.resetAtIso } : {}),
+    };
+  } catch (error) {
+    // A run that succeeded must never fail because we could not price the wallet afterwards.
+    logger.error("Post-run credit balance lookup failed", error, { mobileUserId, feature });
+    return {};
+  }
+}
+
+/**
+ * The caller's wallet for endpoints that merely CARRY it — the AI tools catalogue and mobile
+ * app-settings — rather than spending it.
+ *
+ * ★These two are the app's regular round trips, so riding along on them keeps every screen's
+ * balance current without a dedicated request (2026-09-08 direction). Returns null for a
+ * signed-out caller: an absent `credits` field reads as "unknown", which is exactly right,
+ * while a zeroed one would read as "you are out".
+ */
+export async function optionalCreditSummary(
+  request: NextRequest
+): Promise<Awaited<ReturnType<typeof getUserCreditSummary>> | null> {
+  try {
+    // resolveOptionalMobileBearer, not the 401-shaped resolver: a missing or expired token here
+    // means "no wallet to attach", never an error for the response this is riding on.
+    const mobileUser = await resolveOptionalMobileBearer(request);
+    if (!mobileUser?.id) return null;
+    return await getUserCreditSummary(mobileUser.id);
+  } catch (error) {
+    // This is a passenger on someone else's response; it must never sink it.
+    logger.error("Optional credit summary failed", error);
+    return null;
   }
 }
 

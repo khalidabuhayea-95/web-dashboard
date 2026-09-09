@@ -10,6 +10,8 @@ import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { removeBackground } from "@/lib/media/backgroundRemoval/index.server";
 import { isBackgroundRemovalError } from "@/lib/media/backgroundRemoval/errors";
 import { removeRasterBackgroundWithRembg } from "@/lib/media/backgroundRemoval/providers/rembg.server";
+import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
+import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -152,12 +154,37 @@ export async function POST(request) {
       });
     }
 
+    const insufficientCredits = await enforceMediaCredits({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
+    });
+    if (insufficientCredits) {
+      requestLogger.info("Background removal rejected: insufficient credits", {
+        mobileUserId: mobileUser.id,
+      });
+      return attachRequestIdHeader(insufficientCredits, requestId);
+    }
+
     const inputBytes = Buffer.from(await file.arrayBuffer());
     const safeFileName = sanitizeFileName(file.name) || "image";
     const result = await removeBackgroundForMobile({
       bytes: inputBytes,
       mimeType: file.type,
       fileName: safeFileName,
+    });
+
+    await recordMediaUsage({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
+      provider: String(result.provider || result.strategy || "local"),
+      model: "local/background-remover",
+    });
+
+    // The wallet AFTER this run, so the app updates its shared balance from this very
+    // response instead of asking again (2026-09-08 direction).
+    const creditHeaders = await creditBalanceHeaders({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
     });
 
     const durationMs = Date.now() - startedAt;
@@ -191,6 +218,8 @@ export async function POST(request) {
       new NextResponse(result.bytes, {
         status: 200,
         headers: {
+          ...creditHeaders,
+
           "Content-Type": "image/png",
           "Content-Disposition": `inline; filename=\"${result.fileName || "image-no-bg.png"}\"`,
           "Cache-Control": "no-store",

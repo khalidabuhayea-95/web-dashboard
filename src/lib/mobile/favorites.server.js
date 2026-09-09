@@ -34,6 +34,13 @@ function numberOr(value, fallback) {
   return Number.isFinite(parsed) ? parsed : fallback;
 }
 
+/** A SIZE: 0/negative/absent all mean "not recorded" — `Number(null)` is a finite 0, so numberOr
+ *  alone would ship a 1x1 canvas to the app (which crashes its editor). */
+function positiveSizeOr(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
+}
+
 function clampPage(value) {
   const parsed = Math.floor(numberOr(value, 1));
   return parsed >= 1 ? parsed : 1;
@@ -60,8 +67,8 @@ function serializeFavoriteTemplate(template, origin) {
     status: String(template.status || "draft"),
     category: String(template.category || "general"),
     subCategory: String(template.subCategory || "general"),
-    canvasWidth: Math.max(numberOr(canvasSize.width, 1080), 1),
-    canvasHeight: Math.max(numberOr(canvasSize.height, 1080), 1),
+    canvasWidth: positiveSizeOr(canvasSize.width, 1080),
+    canvasHeight: positiveSizeOr(canvasSize.height, 1080),
     pageCount: Math.max(1, Math.round(numberOr(template.pageCount, 1))),
     thumbnailUrl: buildThumbnailUrl(template.id, origin),
     // Favorited Pro templates must still wear a crown here, or the paywall at

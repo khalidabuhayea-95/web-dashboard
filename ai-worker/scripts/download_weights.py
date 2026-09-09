@@ -15,6 +15,10 @@ WEIGHTS_DIR = os.path.join(os.path.dirname(__file__), "..", "weights")
 SMALL = {
     "RealESRGAN_x4plus.pth": "https://github.com/xinntao/Real-ESRGAN/releases/download/v0.1.0/RealESRGAN_x4plus.pth",
     "GFPGANv1.4.pth": "https://github.com/TencentARC/GFPGAN/releases/download/v1.3.0/GFPGANv1.4.pth",
+    # YuNet face detector (~340 KB) for the face-restore op. OpenCV's bundled
+    # Haar cascade was tried first and is not usable here: on a hijab portrait it
+    # missed the face entirely and returned boxes on the background and clothing.
+    "face_detection_yunet_2023mar.onnx": "https://github.com/opencv/opencv_zoo/raw/main/models/face_detection_yunet/face_detection_yunet_2023mar.onnx",
 }
 
 DIFFUSION_REPOS = [

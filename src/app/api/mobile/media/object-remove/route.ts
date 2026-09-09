@@ -26,7 +26,7 @@ import {
   createRateLimitResponse,
 } from "@/lib/security/rateLimit.server";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage } from "@/lib/media/credits/index.server";
+import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
@@ -165,6 +165,13 @@ export async function POST(request: NextRequest) {
       model: result.model,
     });
 
+    // The wallet AFTER this run, so the app updates its shared balance from this very
+    // response instead of asking again (2026-09-08 direction).
+    const creditHeaders = await creditBalanceHeaders({
+      mobileUserId: mobileUser.id,
+      feature: MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL,
+    });
+
     requestLogger.info("Object removal completed", {
       mobileUserId: mobileUser.id,
       inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
@@ -182,6 +189,8 @@ export async function POST(request: NextRequest) {
       new NextResponse(result.bytes, {
         status: 200,
         headers: {
+          ...creditHeaders,
+
           "Content-Type": result.mimeType || "image/png",
           "Content-Disposition": `inline; filename="${result.fileName || "object-removed.png"}"`,
           "Cache-Control": "no-store",

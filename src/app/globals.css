@@ -375,6 +375,13 @@
   border-bottom: none;
 }
 
+/* When a card's body is collapsed away, the header has to close the box itself.
+   Must live here rather than as a `pb-*` utility: these component classes are
+   unlayered, so they outrank anything Tailwind emits into @layer utilities. */
+.card-header-collapsed {
+  padding-bottom: var(--ds-space-5);
+}
+
 .card-content {
   padding: var(--ds-space-5);
 }

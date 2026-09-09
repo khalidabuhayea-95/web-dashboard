@@ -10,8 +10,10 @@
 // model is ~$67/day from one user. The wallet is the actual spend ceiling.
 //
 // Credit pricing anchor: 1 credit ≈ $0.0005 of provider cost, so the default
-// 1,000-credit free allowance is worth about $0.40 of Replicate spend per user
-// per month. ★2026-08-31: credits were inflated x10 across the board (allowances,
+// 200-credit free allowance is worth about $0.10 of Replicate spend per account.
+// ★Cut from 1,000 to 200 on 2026-09-06: 1,000 was a month's worth of real work
+// given away for free, and it is a ONE-TIME grant (see isOneTimeAllowanceTier),
+// not a monthly one — so it is spend per ACCOUNT, not per user per month. ★2026-08-31: credits were inflated x10 across the board (allowances,
 // per-run costs, ledger history) purely for perception — "١٠٬٠٠٠ نقطة" reads as
 // generous where "١٠٠٠" read as stingy. Purchasing power did not change; per-run
 // costs were simultaneously REBASED from actual provider prices (below) so every
@@ -23,6 +25,8 @@ export const MEDIA_CREDIT_FEATURES = {
   AI_EXPAND: "ai-expand",
   UPSCALE: "upscale",
   OBJECT_REMOVAL: "object-removal",
+  BACKGROUND_REMOVAL: "background-removal",
+  IMAGE_GENERATION: "image-generation",
   TASHKEEL: "tashkeel",
   // One bucket for the whole AI Tools tab (templates + magic tools). The
   // per-run price is NOT this feature's configured cost — each tool carries its
@@ -40,11 +44,13 @@ export const MEDIA_CREDIT_FEATURE_LABELS = {
   [MEDIA_CREDIT_FEATURES.AI_EXPAND]: "AI expand",
   [MEDIA_CREDIT_FEATURES.UPSCALE]: "Upscale",
   [MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL]: "Object removal",
+  [MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL]: "Background removal (editor)",
+  [MEDIA_CREDIT_FEATURES.IMAGE_GENERATION]: "Generate image from a prompt",
   [MEDIA_CREDIT_FEATURES.TASHKEEL]: "Arabic diacritization (تشكيل)",
   [MEDIA_CREDIT_FEATURES.AI_TOOLS]: "AI tools (templates + magic tools)",
 };
 
-export const DEFAULT_MONTHLY_CREDIT_ALLOWANCE = 1_000;
+export const DEFAULT_MONTHLY_CREDIT_ALLOWANCE = 200;
 
 // Monthly allowance for Nayroz Plus subscribers (subscriptionTier "plus").
 // Worst-case provider exposure = allowance x $0.0004/credit (the nano-banana
@@ -68,6 +74,14 @@ export const DEFAULT_CREDIT_COSTS = {
   [MEDIA_CREDIT_FEATURES.AI_EXPAND]: 100, // ~$0.040 provider, $0.050 charged
   [MEDIA_CREDIT_FEATURES.UPSCALE]: 20, // ≤$0.006 provider, $0.010 charged
   [MEDIA_CREDIT_FEATURES.OBJECT_REMOVAL]: 10, // ~$0.0005 provider, $0.005 charged
+  // Our own rembg, in-process: $0 to run. Matched to the remove-background
+  // Magic Tool so the SAME job costs the same whichever screen starts it —
+  // the editor route used to be free, which was an accident, not a policy.
+  [MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL]: 10,
+  // flux-schnell is $0.003 — break-even is 6 credits, so 10 keeps a 67% margin
+  // while staying cheap enough that a Plus subscriber gets 1,000 images a month
+  // (a $3.00 worst case against ~$4.24 of net revenue).
+  [MEDIA_CREDIT_FEATURES.IMAGE_GENERATION]: 10,
   // The cheapest action we sell: a second of CPU on our own worker. Priced so
   // it reads as "almost free" next to an image run, not so it earns anything.
   [MEDIA_CREDIT_FEATURES.TASHKEEL]: 5,
@@ -103,6 +117,11 @@ export const DEFAULT_MODEL_PRICES_MICROS = {
   "ideogram-ai/ideogram-v4-turbo": 30_000,
   "ideogram-ai/ideogram-v4-balanced": 60_000,
   "bytedance/seedream-4.5": 40_000,
+  "black-forest-labs/flux-schnell": 3_000, // $3 per 1,000 images
+  "google/nano-banana-2-lite": 34_000, // flat, 1K only
+  "google/imagen-4-fast": 20_000,
+  "google/nano-banana-2": 67_000, // 1K tier; 2K is $0.101, 4K $0.151
+  "bytedance/seedream-5-pro": 50_000, // 1K tier, measured on Replicate 2026-09-02 ($0.09 at 2K)
   "google/nano-banana-pro": 134_000, // 1K/2K tier
   // Magic Tools specialist models (see src/lib/magicTools/models.js).
   "tencentarc/gfpgan": 3_200,

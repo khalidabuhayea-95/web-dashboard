@@ -7,6 +7,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import { buildAiToolsCatalog } from "@/lib/mobile/aiTools.server";
+import { optionalCreditSummary } from "@/lib/media/credits/index.server";
 
 export const runtime = "nodejs";
 
@@ -29,15 +30,22 @@ export async function GET(request: NextRequest) {
     // should be, with nothing to tell them what they were being asked to sign in FOR.
     // Running a tool stays authenticated and credit-metered in ./run.
     const catalog = await buildAiToolsCatalog();
+    // ★The wallet rides along for a SIGNED-IN caller (2026-09-08 direction): this tab's own
+    // call is what refreshes the balance it displays, instead of a second request.
+    const credits = await optionalCreditSummary(request);
 
     return attachRequestIdHeader(
-      NextResponse.json(catalog, {
+      NextResponse.json(credits ? { ...catalog, credits } : catalog, {
         status: 200,
         headers: {
           // Catalogue changes only when an admin edits it, but a stale tab is
-          // worse than a cheap revalidation, so keep it short. Public now that the
-          // payload no longer varies per caller.
-          "Cache-Control": "public, max-age=60",
+          // worse than a cheap revalidation, so keep it short — and it stays
+          // shareable only while the payload is the same for everyone.
+          //
+          // ★Once `credits` is attached the response is PER-USER, so the public
+          // cache would hand one account's balance to the next caller. That is why
+          // the signed-in variant is private and uncached.
+          "Cache-Control": credits ? "private, no-store" : "public, max-age=60",
         },
       }),
       requestId

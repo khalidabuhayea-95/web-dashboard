@@ -27,6 +27,20 @@ function numberOr(value, fallback = 0) {
   return Number.isFinite(next) ? next : fallback;
 }
 
+/**
+ * A SIZE: absent, non-numeric or non-positive all mean "not specified", so all three take the
+ * fallback.
+ *
+ * numberOr() is wrong for a dimension because `Number(null)` is 0 — a finite number — so a page
+ * that simply has no width recorded came back as 0 and then clamped to 1. That shipped a 1x1
+ * canvas to the app, which multiplies every project coordinate by viewportWidth/canvasWidth and
+ * crashed the editor outright on such a template.
+ */
+function positiveSizeOr(value, fallback) {
+  const next = Number(value);
+  return Number.isFinite(next) && next > 0 ? next : fallback;
+}
+
 function roundTiming(value) {
   return Math.round(value * 100) / 100;
 }
@@ -634,9 +648,22 @@ function readTextAlignment(item) {
   return item?.textAlign || item?.align;
 }
 
-function readLetterSpacing(item) {
-  if (typeof item?.charSpacing !== "undefined") return item.charSpacing;
-  return item?.letterSpacing;
+/**
+ * Letter spacing in the app's unit space: plain px alongside `size`.
+ *
+ * Fabric's `charSpacing` is in THOUSANDTHS OF AN EM, so it must be converted against the font
+ * size — the web editor's own Fabric import does exactly `(charSpacing / 1000) * fontSize`
+ * (SidePanel.tsx), and passing it through raw rendered a Canva import's 50 (= 0.05em ≈ 2px) as
+ * 50px of tracking on mobile: every glyph on its own wrapped line. The native editor's
+ * `letterSpacing` is already px and passes through untouched. Every published template stores the
+ * native field; `charSpacing` only rides raw Canva-extension imports.
+ */
+function readLetterSpacingPx(item, fontSizePx) {
+  const charSpacing = Number(item?.charSpacing);
+  if (typeof item?.charSpacing !== "undefined" && Number.isFinite(charSpacing)) {
+    return (charSpacing / 1000) * fontSizePx;
+  }
+  return numberOr(item?.letterSpacing, 0);
 }
 
 function readBlendMode(item) {
@@ -923,7 +950,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
       opacity: strokeColor.opacity,
       width: numberOr(item.strokeWidth, 0),
     },
-    letterSpacing: numberOr(readLetterSpacing(item), 0),
+    letterSpacing: readLetterSpacingPx(item, numberOr(item.fontSize, 42)),
     lineHeight: numberOr(item.lineHeight, 1.2),
     alignment: mapTextAlignment(readTextAlignment(item)),
     curveConfig: {
@@ -1557,8 +1584,8 @@ function mapBackground(value, options) {
 
 function resolveCanvasSize(template) {
   return {
-    width: Math.max(numberOr(template?.canvasSize?.width, 1080), 1),
-    height: Math.max(numberOr(template?.canvasSize?.height, 1080), 1),
+    width: positiveSizeOr(template?.canvasSize?.width, 1080),
+    height: positiveSizeOr(template?.canvasSize?.height, 1080),
   };
 }
 
@@ -1592,8 +1619,8 @@ function wrapOptionsForPage(options, pageIndex) {
 
 function resolvePageSize(page, canvasSize) {
   return {
-    width: Math.max(numberOr(page?.width, canvasSize.width), 1),
-    height: Math.max(numberOr(page?.height, canvasSize.height), 1),
+    width: positiveSizeOr(page?.width, canvasSize.width),
+    height: positiveSizeOr(page?.height, canvasSize.height),
   };
 }
 

@@ -130,10 +130,12 @@ export const PRESETS = [
     titleEn: "Face Enhance",
     titleAr: "تحسين الوجه",
     subtitleAr: "ملامح أوضح بدون تغيير الشكل",
-    model: "tencentarc/gfpgan",
-    modelOptions: { scale: 2 },
+    // Our own worker runs the same GFPGAN v1.4 weights the Replicate entry
+    // does, so this costs nothing per run — priced with the other free tools.
+    model: "selfhost/gfpgan",
+    modelOptions: { strength: 0.4 },
     prompt: "",
-    creditCost: 4,
+    creditCost: 10,
     sample: { ref: "woman__blazer-navy.jpg", degrade: "soft" },
   },
   {
