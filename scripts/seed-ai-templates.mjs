@@ -26,6 +26,7 @@ import path from "node:path";
 import { PrismaClient } from "@prisma/client";
 import sharp from "sharp";
 import { PRESETS, CATEGORIES } from "./ai-templates/presets.mjs";
+import { deleteStorageForUrls } from "../src/lib/storage/assetReferences.server.js";
 import {
   getPublicStorageBucketName,
   uploadObject,
@@ -190,9 +191,16 @@ try {
   }
 
   if (!args["keep-extra"]) {
-    const removedTemplates = await prisma.aiTemplate.deleteMany({
-      where: { slug: { notIn: PRESETS.map((preset) => preset.slug) } },
+    const extraWhere = { slug: { notIn: PRESETS.map((preset) => preset.slug) } };
+    const extraArt = await prisma.aiTemplate.findMany({
+      where: extraWhere,
+      select: { beforeUrl: true, afterUrl: true, thumbUrl: true },
     });
+    const removedTemplates = await prisma.aiTemplate.deleteMany({ where: extraWhere });
+    await deleteStorageForUrls(
+      extraArt.flatMap((item) => [item.beforeUrl, item.afterUrl, item.thumbUrl]),
+      { reason: "seed removed templates not in the library" }
+    );
     if (removedTemplates.count) {
       console.log(`Removed ${removedTemplates.count} template(s) not in the library.`);
     }

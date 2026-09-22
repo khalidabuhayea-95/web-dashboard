@@ -8,7 +8,7 @@
 
 **Already true (don't rebuild):**
 - **Enqueue + 202 + job id:** `src/app/api/tools/import-jobs/route.ts` — `createImportJob` INSERTs `status='pending'` (route.ts:124), returns `{ job }` with status `202` for new jobs / `200` for deduped (route.ts:148). Body always carries `job.id`.
-- **Client already polls** (no websocket to build): `src/app/(dashboard)/freepik-import/FreepikImportClient.js` POSTs, reads `payload.job.id` (line 445), then `pollImportJob` GETs `/api/tools/import-jobs/{id}` until `succeeded`/`failed` (lines 175-210). Same in `FreepikBackgroundImportSection.js`, `FreepikImportWorkspaceClient.js`.
+- **Client already polls** (no websocket to build): `src/app/(dashboard)/freepik-import/FreepikImportWorkspaceClient.js` POSTs, reads `payload.job.id` (line 836), then `pollImportJob` GETs `/api/tools/import-jobs/{id}` until `succeeded`/`failed` (defined line 196, called line 841). Same in `FreepikBackgroundImportSection.js`.
 - **Job state is in Postgres** as a **RAW SQL table, NOT a Prisma model.** `src/lib/tools/importJobsStore.server.js` — created/queried entirely via `prisma.$queryRaw` / `$executeRawUnsafe`. There is **no `model ImportJob` in `prisma/schema.prisma`** and no `prisma.importJob.*` accessor. Table also exists as a real migration: `prisma/migrations/20260310103000_add_import_jobs/migration.sql`.
 - **Atomic claim already exists:** `claimImportJob` (importJobsStore.server.js:298-325) = `UPDATE ... SET status='running' WHERE id=$ AND status='pending' RETURNING *`. Safe for concurrent workers.
 - **Stale recovery already exists:** `requeueStalledImportJob` (store:327-360), default 300s, keyed off `updated_at`. `drainImportJobs` (importJobsRunner.server.js:158-208) requeues then runs candidates.

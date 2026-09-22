@@ -32,6 +32,14 @@ function normalizeGuid(value) {
   return GUID_PATTERN.test(raw) ? raw : "";
 }
 
+// Importer defaults a category can carry: the Magnific search terms the importer page offers
+// as one-click suggestions (the first one is filled in when the category is chosen), plus the
+// orientation / content-type filter it should start from.
+export const BACKGROUND_IMPORT_ORIENTATIONS = ["all", "landscape", "portrait", "square"];
+export const BACKGROUND_IMPORT_CONTENT_TYPES = ["all", "photo", "vector", "psd"];
+const SEARCH_TERM_MAX_COUNT = 12;
+const SEARCH_TERM_MAX_LENGTH = 80;
+
 export const BACKGROUND_CATEGORY_SETTINGS = [
   {
     value: DEFAULT_BACKGROUND_CATEGORY,
@@ -39,6 +47,9 @@ export const BACKGROUND_CATEGORY_SETTINGS = [
     labelAr: "عام",
     thumbnailUrl: "",
     published: true,
+    searchTerms: [],
+    importOrientation: "all",
+    importContentType: "all",
   },
 ];
 
@@ -59,6 +70,27 @@ function toText(value, fallback = "General") {
 
 function toUrl(value) {
   return String(value || "").trim().slice(0, 2048);
+}
+
+// Accepts the stored array or the comma/newline-separated text the settings form edits.
+export function toSearchTerms(value) {
+  const parts = Array.isArray(value) ? value : String(value || "").split(/[,\n]/);
+  const terms = [];
+  const seen = new Set();
+  for (const part of parts) {
+    const term = String(part || "").replace(/\s+/g, " ").trim().slice(0, SEARCH_TERM_MAX_LENGTH);
+    const key = term.toLowerCase();
+    if (!term || seen.has(key)) continue;
+    seen.add(key);
+    terms.push(term);
+    if (terms.length >= SEARCH_TERM_MAX_COUNT) break;
+  }
+  return terms;
+}
+
+function toChoice(value, allowed, fallback) {
+  const normalized = String(value || "").trim().toLowerCase();
+  return allowed.includes(normalized) ? normalized : fallback;
 }
 
 function resolveGuid(value, seed) {
@@ -100,6 +132,9 @@ export function sanitizeBackgroundCategorySettings(input) {
       labelAr: toText(rawLabelAr, rawLabelEn || value),
       thumbnailUrl: toUrl(category?.thumbnailUrl || category?.thumbnail || ""),
       published: typeof category?.published === "boolean" ? category.published : true,
+      searchTerms: toSearchTerms(category?.searchTerms),
+      importOrientation: toChoice(category?.importOrientation, BACKGROUND_IMPORT_ORIENTATIONS, "all"),
+      importContentType: toChoice(category?.importContentType, BACKGROUND_IMPORT_CONTENT_TYPES, "all"),
     });
     usedValues.add(value);
     usedIds.add(id);
@@ -109,16 +144,9 @@ export function sanitizeBackgroundCategorySettings(input) {
     return sanitizeBackgroundCategorySettings(BACKGROUND_CATEGORY_SETTINGS);
   }
 
-  if (!categories.some((item) => item.value === DEFAULT_BACKGROUND_CATEGORY)) {
-    categories.unshift({
-      id: resolveGuid("", `background-category:${DEFAULT_BACKGROUND_CATEGORY}`),
-      value: DEFAULT_BACKGROUND_CATEGORY,
-      labelEn: "General",
-      labelAr: "عام",
-      thumbnailUrl: "",
-      published: true,
-    });
-  }
+  // No forced "general" category: re-adding it here made it undeletable, and Remove looked
+  // like it worked until the save came back with the category still there. Callers already
+  // degrade to settings[0] when the default value is absent (see fallbackCategoryValue).
 
   return categories;
 }

@@ -85,6 +85,39 @@ export interface AnimationSpecInput {
 
 const PI = Math.PI;
 
+/**
+ * How far a one-shot RISE travels, in design px.
+ *
+ * Measured off an MP4 Canva exported of their own ارتقاء on a 1080x1920 story: a 162px title and a
+ * 56px caption both travelled the same 80px, so the distance is FLAT, not a share of the layer.
+ */
+const CANVA_RISE_TRAVEL_PX = 80;
+
+/**
+ * Canva's التتابع (Succession), measured off an MP4 they exported of their own render.
+ *
+ * The layer resolves out of a heavy blur while it fades up. Tracked on every frame of a 1080x1920
+ * story by reading each frame's sharpness back as a Gaussian sigma (the settled text blurred by
+ * known amounts gives the lookup) and then dividing the ink by what that same blur would produce,
+ * which separates the blur from the opacity instead of letting one masquerade as the other.
+ *
+ * Opacity is LINEAR in progress — worst gap 0.029 across the whole run. The blur decays as
+ * 18.5 * (1 - p)^1.4 of Gaussian sigma, worst gap 0.50px of 1920. Both are flat pixel amounts
+ * rather than proportions of the layer: the smaller subtitle on the same page peaks at a comparable
+ * blur, not a proportionally smaller one, the same way their Rise travels a flat 80px.
+ *
+ * The constant below is a blur RADIUS, not that sigma, because that is what both renderers take
+ * (Konva's blur filter here, Compose's Modifier.blur on the app). Each converts it at roughly half,
+ * so 32 lands either side of the measured 18.5 sigma — within about 10% on both.
+ *
+ * Their name means the parts arrive one after another, but that is about the page's elements, not
+ * the glyphs: across six vertical slices of the title the half-ink times span 0.7s with no
+ * left-to-right or right-to-left order, so the layer resolves as ONE piece, which is how it is
+ * ported here.
+ */
+const CANVA_SUCCESSION_BLUR_PX = 32;
+const CANVA_SUCCESSION_BLUR_DECAY_EXPONENT = 1.4;
+
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
@@ -228,6 +261,30 @@ function evaluateAuthoredSpec(
   };
 }
 
+/**
+ * The one channel the authored curves cannot carry: a real blur.
+ *
+ * The art describes transform, opacity and a matte — nothing else — so DISSOLVE comes out of
+ * [evaluateAuthoredSpec] as a plain opacity fade, visually identical to FADE, when resolving out of
+ * a haze is its whole identity. Mobile layers this blur back on top of the authored curves
+ * (LayerAnimationVisualRuntime.withNayrozAnimationBlur), so the motion and timing still come from
+ * the art and only the haze is added — this is the same formula, kept in step with it.
+ */
+function withAuthoredBlur(
+  state: AnimationVisualState,
+  type: string,
+  progress: number,
+  width: number,
+  intensity: number
+): AnimationVisualState {
+  if (type !== "DISSOLVE") return state;
+  const blurRadiusPx = Math.max(
+    0,
+    (1 - clamp(progress, 0, 1)) * Math.max(6, width * 0.03) * intensity
+  );
+  return { ...state, blurRadiusPx };
+}
+
 /** The typewriter family: the fade + Wipe mask are the fallback for surfaces without glyphs. */
 function typewriterVisualState(
   progress: number,
@@ -267,7 +324,13 @@ export function resolveAnimationVisualState(
 
   // The authored art carries its own per-keyframe béziers and is read at RAW cycleProgress.
   const base: AnimationVisualState = getAuthoredCurves(type)
-    ? evaluateAuthoredSpec(type, cycleProgress, width, height)
+    ? withAuthoredBlur(
+        evaluateAuthoredSpec(type, cycleProgress, width, height),
+        type,
+        cycleProgress,
+        width,
+        intensity
+      )
     : resolveFormulaState();
 
   function resolveFormulaState(): AnimationVisualState {
@@ -283,6 +346,18 @@ export function resolveAnimationVisualState(
       case "RISE":
       case "SHIFT": {
         const riseY = vector.y !== 0 ? vector.y : type === "SHIFT" ? 1 : -1;
+        // A one-shot RISE is Canva's ارتقاء, measured frame by frame from an MP4 they exported of
+        // their own render: the layer travels CANVA_RISE_TRAVEL_PX while its opacity runs 0 -> 1,
+        // both on a QUADRATIC ease-out. That curve is not one of our easing options, and the editor
+        // exposes no easing control, so it is computed here from the raw progress rather than read
+        // from the spec. An infinite RISE keeps the older bob: a loop that faded to nothing on
+        // every cycle would blink.
+        if (type === "RISE" && !spec.infinite) {
+          const settle = 1 - (1 - cycleProgress) * (1 - cycleProgress);
+          state.translationY = -riseY * (1 - settle) * CANVA_RISE_TRAVEL_PX * intensity;
+          state.alphaMultiplier = clamp(settle, 0, 1);
+          return state;
+        }
         state.translationY = -riseY * (1 - progress) * Math.max(16, height * 0.22) * intensity;
         state.alphaMultiplier = clamp(0.12 + progress * 0.88, 0, 1);
         return state;
@@ -299,10 +374,21 @@ export function resolveAnimationVisualState(
         state.scaleXMultiplier = 0.92 + progress * 0.08;
         state.scaleYMultiplier = 0.92 + progress * 0.08;
         return state;
-      case "SUCCESSION":
+      case "SUCCESSION": {
+        // One-shot Succession is Canva's, measured (see the constants above): a blur resolving while
+        // the opacity rises dead straight. Both read the RAW progress, since a linear fade is not
+        // one of our easings and the blur's curve is not either. An infinite Succession keeps the
+        // older scale-and-fade pulse, which is what a loop of it should be.
+        if (!spec.infinite) {
+          const sharpen = Math.pow(1 - cycleProgress, CANVA_SUCCESSION_BLUR_DECAY_EXPONENT);
+          state.alphaMultiplier = clamp(cycleProgress, 0, 1);
+          state.blurRadiusPx = Math.max(0, CANVA_SUCCESSION_BLUR_PX * sharpen * intensity);
+          return state;
+        }
         state.scaleMultiplier = 0.82 + progress * 0.18;
         state.alphaMultiplier = clamp(0.06 + progress * 0.94, 0, 1);
         return state;
+      }
       case "BREATHE":
         state.scaleMultiplier = 1 + pingPong * 0.06 * intensity;
         state.alphaMultiplier = clamp(0.86 + pingPong * 0.14, 0, 1);

@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 import { publishCardThumb } from "@/lib/aiTools/thumb.server";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import { magicToolModelIncompatibility } from "@/lib/magicTools/models";
 import { runMagicTool } from "@/lib/magicTools/run.server";
 
@@ -139,6 +140,9 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id },
       data: { afterUrl, beforeUrl, thumbUrl },
     });
+
+    // Every generation mints fresh uuid keys, so the superseded art has to go explicitly.
+    await deleteStorageForUrls([tool.beforeUrl, tool.afterUrl, tool.thumbUrl], { slug: tool.slug });
 
     logger.info("Magic tool art generated", {
       userId: session.userId,

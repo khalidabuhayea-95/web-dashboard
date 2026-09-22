@@ -8,6 +8,7 @@ import {
   handleNotFound,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import { MAX_AI_TEMPLATE_TITLE_LENGTH } from "@/lib/aiTemplates/constants";
 
 export const runtime = "nodejs";
@@ -138,11 +139,27 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     });
     if (!existing) return handleNotFound("AI template category");
 
+    // The FK cascade wipes every template in the category; collect their art first or it is
+    // unreachable by the time the row is gone.
+    const doomed = await prisma.aiTemplate.findMany({
+      where: { categoryId: id },
+      select: { beforeUrl: true, afterUrl: true, thumbUrl: true },
+    });
+
     await prisma.aiTemplateCategory.delete({ where: { id } });
+    const storage = await deleteStorageForUrls(
+      doomed.flatMap((item: { beforeUrl: string | null; afterUrl: string | null; thumbUrl: string | null }) => [
+        item.beforeUrl,
+        item.afterUrl,
+        item.thumbUrl,
+      ]),
+      { categorySlug: existing.slug }
+    );
     logger.info("AI template category deleted", {
       userId: session.userId,
       slug: existing.slug,
       templates: existing._count.templates,
+      deletedObjects: storage.deleted,
     });
 
     return NextResponse.json({

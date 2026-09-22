@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
-import { ChevronLeft, ChevronRight, Pause, Play } from "lucide-react";
+import { ChevronDown, ChevronLeft, ChevronRight, ChevronUp, Pause, Play } from "lucide-react";
 
 import { FilmstripFrames, FilmstripOverlay } from "@/components/editor/TimelineFilmstrip";
 import { useTimelineScrubber } from "@/components/editor/useTimelineScrubber";
@@ -230,6 +230,8 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
   const timelineIsPlaying = useEditorStore((state) => state.timelineIsPlaying);
+  const timelineCollapsed = useEditorStore((state) => state.timelineCollapsed);
+  const setTimelineCollapsed = useEditorStore((state) => state.setTimelineCollapsed);
   const stageApi = useEditorStore((state) => state.stageApi);
   const setTimelinePlayheadMs = useEditorStore((state) => state.setTimelinePlayheadMs);
   const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
@@ -363,7 +365,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   }, [activePage?.background?.imageUri, activePage?.elements, selectedIds, showTimeline, stageApi]);
 
   useEffect(() => {
-    if (!templateVideoSource) return;
+    if (!templateVideoSource || timelineCollapsed) return;
 
     let disposed = false;
 
@@ -384,10 +386,10 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     return () => {
       disposed = true;
     };
-  }, [templateVideoSource, totalDurationMs]);
+  }, [templateVideoSource, timelineCollapsed, totalDurationMs]);
 
   useEffect(() => {
-    if (!selectedVideoSource || selectedPreviewKind !== "video") return;
+    if (!selectedVideoSource || selectedPreviewKind !== "video" || timelineCollapsed) return;
 
     let disposed = false;
 
@@ -413,6 +415,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     selectedVideoSource,
     selectedWindow.endMs,
     selectedWindow.startMs,
+    timelineCollapsed,
     totalDurationMs,
   ]);
   const effectiveTemplateVideoFrames = templateVideoSource ? templateVideoFrames : templateStageFrames;
@@ -424,13 +427,18 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     const node = timelineTrackRef.current;
     if (!node) return;
 
+    // Collapsing/expanding REPLACES the track element, so this must re-run and observe the new
+    // one (hence timelineCollapsed in the deps). It also measures the LIVE node instead of the
+    // one captured at setup: a stale observer on the detached element reports 0, and a 0 viewport
+    // width pins playheadViewportXPx at 0 — which froze the progress bar at the start.
     const measure = () => {
-      const rect = node.getBoundingClientRect();
-      timelineTrackBoundsRef.current = {
-        left: rect.left,
-        width: Math.max(0, (rect.width || node.clientWidth || 0) - timelineRightInsetPx),
-      };
-      setTimelineViewportWidth(Math.max(0, (rect.width || node.clientWidth || 0) - timelineRightInsetPx));
+      const target = timelineTrackRef.current;
+      if (!target || !target.isConnected) return;
+      const rect = target.getBoundingClientRect();
+      const width = Math.max(0, (rect.width || target.clientWidth || 0) - timelineRightInsetPx);
+      if (width <= 0) return;
+      timelineTrackBoundsRef.current = { left: rect.left, width };
+      setTimelineViewportWidth(width);
     };
 
     measure();
@@ -444,7 +452,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       resizeObserver?.disconnect();
       window.removeEventListener("resize", measure);
     };
-  }, [showTimeline, timelineRightInsetPx]);
+  }, [showTimeline, timelineCollapsed, timelineRightInsetPx]);
 
   useEffect(() => {
     if (!timelineIsPlaying || totalDurationMs <= 0) return;
@@ -567,7 +575,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   );
 
   useEffect(() => {
-    if (!showTimeline || !stageApi?.captureTimelineStripDataUrls || totalDurationMs <= 0) return;
+    if (!showTimeline || timelineCollapsed || !stageApi?.captureTimelineStripDataUrls || totalDurationMs <= 0) return;
     if (templateVideoSource) return;
     if (timelineIsPlaying || timelineIsScrubbing) return;
 
@@ -609,6 +617,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     showTimeline,
     stageApi,
     templateVideoSource,
+    timelineCollapsed,
     timelineIsPlaying,
     timelineIsScrubbing,
     totalDurationMs,
@@ -692,6 +701,42 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       window.removeEventListener("pointercancel", handlePointerEnd);
     };
   }, [activePointerId, endScrubbing, timelineIsScrubbing, updateScrubbing]);
+
+  // The collapsed rail is an ABSOLUTE progress bar: pressing at 60% of it means 60% of the
+  // timeline. The shared scrubber is a RELATIVE drag with invertDirection — right for dragging a
+  // filmstrip under a fixed playhead, but on a progress bar it runs backwards.
+  const collapsedRailRef = useRef<HTMLDivElement | null>(null);
+  const seekCollapsedRailToClientX = useCallback(
+    (clientX: number) => {
+      const node = collapsedRailRef.current;
+      if (!node || totalDurationMs <= 0) return;
+      const rect = node.getBoundingClientRect();
+      if (rect.width <= 0) return;
+      const ratio = clamp((clientX - rect.left) / rect.width, 0, 1);
+      setTimelinePlayheadMs(Math.round(ratio * totalDurationMs));
+    },
+    [setTimelinePlayheadMs, totalDurationMs]
+  );
+  const handleCollapsedRailPointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      setTimelinePlaying(false);
+      seekCollapsedRailToClientX(event.clientX);
+      const handleMove = (moveEvent: globalThis.PointerEvent) => {
+        seekCollapsedRailToClientX(moveEvent.clientX);
+      };
+      const handleEnd = () => {
+        window.removeEventListener("pointermove", handleMove);
+        window.removeEventListener("pointerup", handleEnd);
+        window.removeEventListener("pointercancel", handleEnd);
+      };
+      window.addEventListener("pointermove", handleMove);
+      window.addEventListener("pointerup", handleEnd);
+      window.addEventListener("pointercancel", handleEnd);
+    },
+    [seekCollapsedRailToClientX, setTimelinePlaying]
+  );
 
   const handleTrackPointerDown = useCallback(
     (event: ReactPointerEvent<HTMLDivElement>) => {
@@ -849,11 +894,77 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
     return null;
   }
 
+  // Collapsed: the whole bottom dock becomes a single row — play, clock, a scrub rail and the
+  // total. It keeps `timelineTrackRef` so measuring and scrubbing behave exactly as expanded
+  // (including the right inset the total label sits in), and EditorLayout hides the page strip
+  // while this is on, so the canvas gets the entire height back.
+  if (timelineCollapsed) {
+    return (
+      <div className="border-t border-[#cbd1da] bg-[#eef1f5] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-full border border-[#cad1db] bg-white px-2 py-1 shadow-sm">
+          <button
+            type="button"
+            onClick={() => setTimelineCollapsed(false)}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full border border-[#d6dce5] text-[#5b6472] transition hover:bg-black/5"
+            aria-label="Expand timeline"
+            aria-expanded={false}
+            title="Expand the timeline and the page strip"
+          >
+            <ChevronUp size={16} />
+          </button>
+          <button
+            type="button"
+            onClick={handlePlayButtonClick}
+            className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-full text-black transition hover:bg-black/5"
+            aria-label={timelineIsPlaying ? "Pause timeline" : "Play timeline"}
+          >
+            {timelineIsPlaying ? (
+              <Pause size={15} fill="currentColor" />
+            ) : (
+              <Play size={15} fill="currentColor" className="translate-x-[1px]" />
+            )}
+          </button>
+          <span className="shrink-0 text-[12px] font-bold tabular-nums text-[#111827]">
+            {formatTimelineTime(timelinePlayheadMs, true)}
+          </span>
+          <div
+            ref={timelineTrackRef}
+            className="relative h-7 flex-1 touch-none select-none"
+            onPointerDown={handleCollapsedRailPointerDown}
+          >
+            {/* A plain progress rail: the expanded timeline keeps the playhead CENTRED and scrolls
+                the ruler beneath it (playheadViewportXPx is therefore ~constant), which would look
+                frozen here — so the collapsed bar uses the absolute ratio instead. */}
+            <div
+              ref={collapsedRailRef}
+              className="pointer-events-none absolute inset-y-0 left-0 flex items-center"
+              style={{ right: `${timelineRightInsetPx}px` }}
+            >
+              <div className="relative h-1.5 w-full rounded-full bg-[#e6e9ef]">
+                <div
+                  className="absolute inset-y-0 left-0 rounded-full bg-[#c3cad6]"
+                  style={{ width: `${playheadRatio * 100}%` }}
+                />
+                <div
+                  className="absolute -top-[5px] h-4 w-[3px] -translate-x-1/2 rounded-full bg-black/90"
+                  style={{ left: `${playheadRatio * 100}%` }}
+                />
+              </div>
+            </div>
+            <span className="pointer-events-none absolute right-0 top-1/2 -translate-y-1/2 text-[10px] font-semibold tabular-nums text-[#6b7280]">
+              {formatTimelineTime(totalDurationMs)}
+            </span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="border-t border-[#cbd1da] bg-[#eef1f5] px-3 py-3">
       <div className="rounded-[24px] border border-[#cad1db] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-4 pb-4 pt-2 shadow-sm">
           <div className="grid grid-cols-[28px,1fr] gap-x-3">
-            <div className="pt-4">
+            <div className="flex flex-col items-center justify-between pb-1 pt-4">
               <button
                 type="button"
                 onClick={handlePlayButtonClick}
@@ -861,6 +972,16 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
                 aria-label={timelineIsPlaying ? "Pause timeline" : "Play timeline"}
               >
                 {timelineIsPlaying ? <Pause size={18} fill="currentColor" /> : <Play size={18} fill="currentColor" className="translate-x-[1px]" />}
+              </button>
+              <button
+                type="button"
+                onClick={() => setTimelineCollapsed(true)}
+                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#d6dce5] text-[#5b6472] transition hover:bg-black/5"
+                aria-label="Collapse timeline"
+                aria-expanded={true}
+                title="Collapse the timeline and the page strip"
+              >
+                <ChevronDown size={16} />
               </button>
             </div>
 

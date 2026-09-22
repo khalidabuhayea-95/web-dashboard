@@ -321,6 +321,7 @@ export async function GET(request, { params }) {
     select: {
       category: true,
       subCategory: true,
+      categories: true,
       data: true,
       thumbnailDataUrl: true,
     },

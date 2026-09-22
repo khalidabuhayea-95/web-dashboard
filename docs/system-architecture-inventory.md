@@ -55,9 +55,11 @@ There is one primary PostgreSQL database connection configured via `DATABASE_URL
 
 | Table | Purpose | Key fields |
 |---|---|---|
-| `Template` | Main template records | `id`, `ownerId`, `name`, `slug`, `status`, `version`, `canvasSize`, `category`, `subCategory`, `tags`, `thumbnailDataUrl`, `data`, timestamps |
+| `Template` | Main template records | `id`, `ownerId`, `name`, `slug`, `status`, `version`, `canvasSize`, `category`, `subCategory` (primary placement), `categories` (every `{category, subCategory}` placement), `tags`, `thumbnailDataUrl`, `data`, timestamps |
 | `TemplateRevision` | Version snapshots/history | `id`, `templateId`, `version`, `action`, `actorId`, `snapshot`, `createdAt` |
 | `AppSetting` | Key-value JSON settings | `key`, `value`, timestamps |
+| `Occasion` | Arabic/Islamic occasions calendar (Hijri or Gregorian rule, per-year date overrides, reminder + boost lead days) | `id`, `slug`, `titleEn`, `titleAr`, `kind`, `calendar`, `month`, `day`, `weekday`, `weekOrdinal`, `durationDays`, `reminderLeadDays`, `boostLeadDays`, `countries`, `keywords`, `dateOverrides`, `enabled`, `boostEnabled`, `hoistCategories` |
+| `OccasionItem` | Content linked to an occasion (templates, AI templates, elements, backgrounds, or whole categories) for the mobile seasonal boost | `occasionId`, `kind`, `itemId`, `sortOrder` |
 | `DashboardUser` | Dashboard login identity and roles | `id`, `email`, `passwordHash`, `role`, `isSystemAdmin` |
 | `DashboardInviteToken` | Invite/setup links for dashboard users | `tokenHash`, `normalizedEmail`, `role`, `expiresAt`, `consumedAt` |
 | `MobileUser` / `MobileIdentity` / `MobileRefreshToken` | Mobile social-login identities and bearer refresh sessions | provider identity, linked user, hashed refresh tokens |

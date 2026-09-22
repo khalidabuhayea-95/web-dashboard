@@ -5,9 +5,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { normalizePaletteForPublish, getPublishableSkipReason, inferPublishSource, tokenizeElementName } from "@/lib/editor/publishableElements";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
+import { normalizeElementCategory } from "@/lib/elements/categorySettings";
+import { getElementCategorySettings } from "@/lib/elements/categorySettings.server";
 import { logger } from "@/lib/logging/logger";
 import {
   getPublicStorageBucketName,
+  restorePublicObjectUrlFromClient,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
 import { getEditorSession } from "@/lib/templates/server";
@@ -151,7 +154,14 @@ async function uploadDataUrlToStorage(dataUrl: string, ownerId: string, baseName
 }
 
 function resolveElementAssetSource(element: PublishElement): string {
-  return sanitizeUrl(element.rasterOriginalSrc) || sanitizeUrl(element.src);
+  // The editor holds our own R2 assets as the RELATIVE proxy path the server rewrote them to
+  // (/api/storage/public/<key>), and it posts that back verbatim. sanitizeUrl builds a `new URL`,
+  // which rejects a relative path — so every element backed by a hosted asset was reported as
+  // "missing-source". Restore the absolute URL first; the helper passes anything else through.
+  return (
+    sanitizeUrl(restorePublicObjectUrlFromClient(element.rasterOriginalSrc)) ||
+    sanitizeUrl(restorePublicObjectUrlFromClient(element.src))
+  );
 }
 
 function buildSourceAssetId(element: PublishElement, templateId: string, assetUrl: string): string {
@@ -220,6 +230,12 @@ export async function POST(request: NextRequest) {
     if (!pageId || designPages.length === 0 || elementIds.length === 0) {
       return handleBadRequest("Missing page, design, or selected elements to publish.");
     }
+
+    // Published elements are filed under one element category, like Freepik imports. Resolved
+    // against the saved taxonomy so a stale value from the page cannot land in the table; an
+    // empty value keeps the default so old clients still publish.
+    const categorySettings = await getElementCategorySettings();
+    const categoryValue = normalizeElementCategory(sanitizeText(body?.categoryValue), categorySettings);
 
     const page = designPages.find((entry) => sanitizeText(entry?.id) === pageId) || null;
     if (!page) {
@@ -302,6 +318,7 @@ export async function POST(request: NextRequest) {
         sourceAssetId: buildSourceAssetId(element, templateId, assetUrl),
         ownerId: session.userId,
         kind: "image",
+        categoryValue,
         titleEn: metadata.titleEn,
         titleAr,
         tagsEn: metadata.tagsEn,

@@ -9,6 +9,8 @@ import { countImportedBackgroundAssetsByCategory } from "@/lib/editor/importedBa
 import { logger } from "@/lib/logging/logger";
 import { MOBILE_PUBLIC_JSON_CACHE_CATALOG } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
+import { hoistToFront } from "@/lib/occasions/hoist";
 import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
@@ -31,10 +33,10 @@ export async function GET(request: NextRequest) {
       source,
     });
 
-    const [settings, counts] = await Promise.all([
+    const [settings, counts] = (await Promise.all([
       getBackgroundCategorySettings(),
       countImportedBackgroundAssetsByCategory({ source }),
-    ]);
+    ])) as [any, Record<string, number>];
     const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
     const categories = getBackgroundCategoryOptions(settings, locale)
       .filter((item) => item.published !== false)
@@ -46,11 +48,14 @@ export async function GET(request: NextRequest) {
         published: item.published !== false,
         backgroundCount: Number(counts[item.value] || 0),
       }));
+    // Seasonal boost: categories linked to an active occasion lead the strip.
+    const boost = await getActiveOccasionBoost();
+    const orderedCategories = hoistToFront(categories, boost.hoistedBackgroundCategoryKeys, (item) => item.value);
 
     return NextResponse.json(
       {
         locale,
-        categories,
+        categories: orderedCategories,
       },
       {
         headers: {

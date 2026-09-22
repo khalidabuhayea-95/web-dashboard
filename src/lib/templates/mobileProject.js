@@ -11,7 +11,6 @@ import {
 import { resolveElementAnimations } from "@/lib/editor/animationSlots";
 import {
   getAnimationDefaults,
-  normalizeSpecAnimationType,
   normalizeSpecDirection,
   normalizeSpecEasing,
 } from "@/lib/editor/animationSpec";
@@ -567,9 +566,64 @@ function mapLayerAnimation(item, slots) {
   };
 }
 
+/**
+ * Every animation type the APP can render.
+ *
+ * ★Deliberately NOT `normalizeSpecAnimationType`, which validates against the web editor's own
+ * spec table. That table describes what the web PICKER offers; this describes what the mobile
+ * renderer understands, and the two are not the same set. Gating the slot payload on the web's
+ * table silently emptied it for every effect the web does not itself offer: a template authored
+ * with SLIDE came out as `animations: null` AND `animation.type: "NONE"` — while still carrying
+ * that entrance's duration, direction and easing, which is what made it look like a data problem
+ * rather than a mapping one. Measured on the local catalogue: 2 of the 4 published animated
+ * templates (SLIDE and TYPEWRITER_CHARS) rendered completely static on mobile, with no timeline.
+ *
+ * Kept in step with `LayerAnimationType` in the app's DesignProject.kt.
+ */
+const APP_ANIMATION_TYPES = new Set([
+  "NONE",
+  "ASCEND",
+  "BASELINE",
+  "BLOCK",
+  "BLUR",
+  "BREATHE",
+  "DRIFT",
+  "DROP",
+  "FADE",
+  "FLICKER",
+  "NEON",
+  "ONE_WORD",
+  "PAN",
+  "POP",
+  "PULSE",
+  "RISE",
+  "ROTATE",
+  "SCRAPBOOK",
+  "SHIFT",
+  "SKATE",
+  "SLIDE",
+  "STATIC",
+  "STOMP",
+  "SUCCESSION",
+  "TECTONIC",
+  "TUMBLE",
+  "TYPEWRITER_CHARS",
+  "TYPEWRITER_CURSOR",
+  "TYPEWRITER_WORDS",
+  "WIGGLE",
+  "WIPE",
+  "ZOOM",
+  "ZOOM_FADE",
+]);
+
+function normalizeAppAnimationType(value) {
+  const next = String(value ?? "NONE").toUpperCase();
+  return APP_ANIMATION_TYPES.has(next) ? next : "NONE";
+}
+
 function mapAnimationSlotSpec(spec, category) {
   if (!spec || typeof spec !== "object") return null;
-  const type = normalizeSpecAnimationType(spec.type);
+  const type = normalizeAppAnimationType(spec.type);
   if (type === "NONE") return null;
   const defaults = getAnimationDefaults(type);
   return {
@@ -1203,13 +1257,14 @@ function mapVideoLayer(item, index, canvasSize, options) {
     }),
     frameWidth: layerBaseWidth,
     frameHeight: layerBaseHeight,
-    thumbnailUri: resolveMediaUri(item.thumbnailUri || item.src || "", {
+    // Poster first (import `thumbnailUri`, editor `posterSrc`), else the clip URL itself.
+    thumbnailUri: resolveMediaUri(item.thumbnailUri || item.posterSrc || item.src || "", {
       assetResolver: options?.assetResolver,
       mediaUrlResolver: options?.mediaUrlResolver,
       scope: "layer",
       elementId: item.id || item.layerId || "",
       index,
-      field: item.thumbnailUri ? "thumbnailUri" : "src",
+      field: item.thumbnailUri ? "thumbnailUri" : item.posterSrc ? "posterSrc" : "src",
     }),
     sourceWidth,
     sourceHeight,
@@ -1953,6 +2008,16 @@ function slimMobileLayer(layer) {
     timelineStartMs: layer.timelineStartMs,
     timelineEndMs: layer.timelineEndMs,
     animation: layer.animation,
+    // ★The three-slot object, which this mapper used to drop on the floor.
+    //
+    // mapLayerAnimations builds it correctly and then every layer went through here, which
+    // rebuilds the object field by field and simply did not list `animations`. So the detail
+    // endpoint emitted `animations: null` for EVERY layer regardless of type, and the app — which
+    // prefers `animations` and falls back to the legacy single slot — was left with whatever the
+    // legacy field narrowed to. For an effect outside the legacy 20 that is `type: "NONE"`, so a
+    // template authored with an entrance rendered completely static, with no timeline at all.
+    // Spread rather than assigned so a layer with no slots keeps the payload it had.
+    ...(layer.animations ? { animations: layer.animations } : {}),
   };
 
   switch (String(layer.type || "").toUpperCase()) {
@@ -2209,14 +2274,43 @@ export function toMobileProjectSlim(template, options = {}) {
     addTiming(telemetry, "mapPagesMs", performance.now() - pagesStartedAt);
   }
 
+  // ★A SINGLE-page design's authored length, which nothing else on the payload carries.
+  //
+  // Per-page durations ride `pages[].durationMs`, and that array is only emitted for a deck — so a
+  // one-page design shipped no length at all and the app fell back to its own rule: longest layer
+  // window, floored at 15s. A template authored at 5s in the editor therefore opened as a 15s
+  // timeline on mobile, leaving a five-second animation sitting still for ten seconds after it
+  // finished. A deck does not need this: its pages already say how long each one runs, and the app
+  // prefers those.
+  const authoredDurationMs =
+    pageCount > 1 ? null : resolveSinglePageDurationMs(primaryPage, rawData);
+
   return {
     canvasWidth: primarySize.width,
     canvasHeight: primarySize.height,
     background,
     layers,
     pageCount,
+    ...(authoredDurationMs ? { durationMs: authoredDurationMs } : {}),
     ...(pagesPayload ? { pages: pagesPayload } : {}),
   };
+}
+
+/**
+ * The authored timeline length of a one-page design.
+ *
+ * The page's own `durationMs` is the editor's source of truth; `timeline.totalDurationMs` is the
+ * same number for a single page and covers designs stored before pages carried one. Returns null
+ * when neither is a usable length, so the app keeps its own default rather than being handed a
+ * zero.
+ */
+function resolveSinglePageDurationMs(primaryPage, rawData) {
+  const candidates = [primaryPage?.durationMs, rawData?.timeline?.totalDurationMs];
+  for (const candidate of candidates) {
+    const parsed = Number(candidate);
+    if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
+  }
+  return null;
 }
 
 export function toMobileTemplateDetailSlim(template, options = {}) {
@@ -2241,6 +2335,11 @@ export function toMobileTemplateDetailSlim(template, options = {}) {
     categoryValue: String(options?.categoryValue || template?.category || ""),
     subCategory: String(options?.subCategoryLabel || template?.subCategory || ""),
     subCategoryValue: String(options?.subCategoryValue || template?.subCategory || ""),
+    // Flat fields above are the primary placement; `placements` lists every category this
+    // template sits under (see localizeTemplateTaxonomy).
+    ...(Array.isArray(options?.placements) && options.placements.length > 0
+      ? { placements: options.placements }
+      : {}),
     isPremium: Boolean(template?.isPremium),
     thumbnailUrl,
     ...(preview ? { preview } : {}),

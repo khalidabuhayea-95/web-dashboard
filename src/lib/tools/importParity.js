@@ -163,6 +163,11 @@ function normalizePage(value, fallbackWidth = 1080, fallbackHeight = 1080) {
     height: Math.max(1, numberOr(source.height, fallbackHeight)),
     sourceWidth: Math.max(1, numberOr(source.sourceWidth, source.width || fallbackWidth)),
     sourceHeight: Math.max(1, numberOr(source.sourceHeight, source.height || fallbackHeight)),
+    // The source page's own length (Canva pages are 5s unless re-timed). Only present for an
+    // animated import; the editor falls back to its default page duration without it.
+    ...(numberOr(source.durationMs, 0) > 0
+      ? { durationMs: Math.min(600000, Math.round(numberOr(source.durationMs, 0))) }
+      : {}),
   };
 }
 
@@ -192,8 +197,22 @@ export function buildImportMetadata({
   usedFonts,
   warnings,
   assetManifest,
+  provenance,
 }, fallback = {}) {
   const safeSource = asString(source || fallback.source) || "unknown";
+  // Flat diagnostic markers about where the import came from (source/via/parity/layers…).
+  // They used to ride in `tags`, where mobile search matched them; kept here instead so they
+  // stay inspectable without ever being user-facing. Primitives only, a handful of keys.
+  const rawProvenance =
+    provenance && typeof provenance === "object" ? provenance : fallback.provenance || null;
+  const safeProvenance = rawProvenance
+    ? Object.fromEntries(
+        Object.entries(rawProvenance)
+          .filter(([key, value]) => /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/.test(key) && ["string", "number", "boolean"].includes(typeof value))
+          .slice(0, 16)
+          .map(([key, value]) => [key, typeof value === "string" ? value.slice(0, 80) : value])
+      )
+    : null;
   const safeVersion = Math.max(1, numberOr(importVersion || fallback.importVersion, IMPORT_PARITY_VERSION));
   const safeLayerTree = normalizeLayerTree(layerTree || fallback.layerTree);
   const safePage = normalizePage(
@@ -234,6 +253,7 @@ export function buildImportMetadata({
     usedFonts: safeUsedFonts,
     warnings: safeWarnings,
     assetManifest: safeAssetManifest,
+    ...(safeProvenance && Object.keys(safeProvenance).length > 0 ? { provenance: safeProvenance } : {}),
   };
 }
 
@@ -309,6 +329,7 @@ export function readImportMetadataFromTemplateData(templateData) {
       usedFonts: direct.usedFonts,
       warnings: direct.warnings,
       assetManifest: direct.assetManifest,
+      provenance: direct.provenance,
     },
     {
       page: {

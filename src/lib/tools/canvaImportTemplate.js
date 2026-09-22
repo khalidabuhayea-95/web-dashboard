@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
 import { resizeThumbnailDataUrlHalf } from "@/lib/media/thumbnailResize.server";
+import { fitImportedAnimationsToCategories } from "@/lib/editor/animationSlotFit";
 import { extractFabricData } from "@/lib/templates/editorData";
 import { uploadTemplatePageThumbnails } from "@/lib/templates/pageThumbnails.server";
 import { buildSnapshot, normalizeSlug } from "@/lib/templates/serverCore";
@@ -10,6 +11,44 @@ import {
   readImportMetadataFromEditorData,
 } from "@/lib/tools/importParity";
 import { findExternalCanvaReferences } from "@/lib/tools/importAssetSanitizer";
+
+const DEFAULT_IMPORT_PLACEMENTS = [{ category: "general", subCategory: "general" }];
+
+/**
+ * Where a newly imported template is filed: wherever the owner filed the one before it.
+ *
+ * Imports arrive in batches — a dozen Canva stories in a row — and every one of them used to land
+ * on general/general, so the same two dropdowns had to be re-picked for each. The most recently
+ * touched template IS "the previous one" in the only sense that matters here, and its placements
+ * were already validated against the taxonomy when it was saved, so they are copied as they stand.
+ * A first-ever import, or any lookup trouble, falls back to general.
+ */
+async function resolveImportPlacements(ownerId) {
+  if (!ownerId) return DEFAULT_IMPORT_PLACEMENTS;
+  try {
+    const previous = await prisma.template.findFirst({
+      where: { ownerId },
+      orderBy: { updatedAt: "desc" },
+      select: { category: true, subCategory: true, categories: true },
+    });
+    const pairs = Array.isArray(previous?.categories) ? previous.categories : [];
+    const cleaned = pairs
+      .map((pair) => ({
+        category: String(pair?.category || "").trim().toLowerCase(),
+        subCategory: String(pair?.subCategory || "").trim().toLowerCase(),
+      }))
+      .filter((pair) => Boolean(pair.category) && Boolean(pair.subCategory));
+    if (cleaned.length > 0) return cleaned;
+
+    // Older rows predate the placements array and carry only the scalar pair.
+    const category = String(previous?.category || "").trim().toLowerCase();
+    const subCategory = String(previous?.subCategory || "").trim().toLowerCase();
+    if (category && subCategory) return [{ category, subCategory }];
+  } catch (_error) {
+    // Inheriting a placement is a convenience; it must never be the reason an import fails.
+  }
+  return DEFAULT_IMPORT_PLACEMENTS;
+}
 
 function numberClamp(value, fallback, min, max) {
   const numeric = Number(value);
@@ -132,6 +171,8 @@ export async function createImportedTemplate({
   action = "import-canva",
   importMetadata,
   pageThumbnails = null,
+  /** Explicit placements win; otherwise the import inherits the previous template's. */
+  categories = null,
 }) {
   const sanitizedImageSource = sanitizeDataUrl(imageDataUrl);
   const rawThumbnailSource = sanitizeDataUrl(thumbnailDataUrl || imageDataUrl);
@@ -161,6 +202,18 @@ export async function createImportedTemplate({
     : buildFabricData(sanitizedImageSource, canvasWidth, canvasHeight, sourceWidth, sourceHeight);
   const metadataFromEditor = readImportMetadataFromEditorData(editorData);
   const data = attachImportMetadataToFabricData(baseData, importMetadata || metadataFromEditor);
+
+  // Canva's effects have no one-for-one equivalent here, so the importer maps each preset onto the
+  // closest one by feel. That says nothing about WHICH tab the result belongs to, and the tabs are
+  // not interchangeable — Rise, Pan, Drift and friends are Loop and Exit effects here, never
+  // entrances. A Canva entrance mapped onto Rise landed in the Entrance slot holding something that
+  // tab does not offer: unselectable in the editor, and an entrance the app does not list either.
+  // This is the second half of the mapping — the closest effect the tab actually offers — and it
+  // runs on the server so an older extension build cannot route around it.
+  const refittedAnimations = fitImportedAnimationsToCategories(data);
+  if (refittedAnimations > 0 && importMetadata && typeof importMetadata === "object") {
+    importMetadata.refittedAnimations = refittedAnimations;
+  }
   const disallowedCanvaReferences = findExternalCanvaReferences(
     {
       data,
@@ -194,6 +247,15 @@ export async function createImportedTemplate({
     templateId,
   });
 
+  const explicitPlacements = (Array.isArray(categories) ? categories : [])
+    .map((pair) => ({
+      category: String(pair?.category || "").trim().toLowerCase(),
+      subCategory: String(pair?.subCategory || "").trim().toLowerCase(),
+    }))
+    .filter((pair) => Boolean(pair.category) && Boolean(pair.subCategory));
+  const placements =
+    explicitPlacements.length > 0 ? explicitPlacements : await resolveImportPlacements(ownerId);
+
   return prisma.$transaction(async (tx) => {
     const created = await tx.template.create({
       data: {
@@ -205,8 +267,11 @@ export async function createImportedTemplate({
         canvasSize: { width: canvasWidth, height: canvasHeight },
         pageCount,
         ...(storedPageThumbnails ? { pageThumbnails: storedPageThumbnails } : {}),
-        category: "general",
-        subCategory: "general",
+        category: placements[0].category,
+        subCategory: placements[0].subCategory,
+        // Inherited from the previous template (see resolveImportPlacements); a designer
+        // re-files or widens it from the editor's Category tab afterwards.
+        categories: placements,
         tags,
         thumbnailDataUrl: sanitizedThumbnailSource || null,
         data,

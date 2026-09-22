@@ -40,6 +40,23 @@
         hops += 1;
       }
       if (!doc) return result;
+
+      // Canva's own document keywords. Present on templates from their library; usually EMPTY on
+      // a design a user created from one, because the copy does not inherit them. Free to read,
+      // so take them when they exist and let the server fall back to the title otherwise.
+      try {
+        const rawKeywords = doc.keywords && typeof doc.keywords.get === "function"
+          ? doc.keywords.get()
+          : doc.keywords;
+        if (Array.isArray(rawKeywords) && rawKeywords.length > 0) {
+          result.__keywords = rawKeywords
+            .map((k) => String(k || "").trim())
+            .filter(Boolean)
+            .slice(0, 24);
+        }
+      } catch (_e) {
+        /* keywords are a bonus; never fail the extraction for them */
+      }
       const seen = new Set();
       let elementsArray = null;
       const findElements = (obj, depth) => {
@@ -266,7 +283,15 @@
           const img = el.fill && el.fill.image;
           const media = img && img.media;
           if (!media || typeof media.id !== "string") return null;
-          const sb = img.sb && typeof img.sb === "object" ? img.sb : null;
+          // The media's draw rect inside the element frame. Canva renamed the minified prop from
+          // `sb` to `xb` (observed 2026-09: { left, top, width, height, rotation }, equal to the frame
+          // when the media simply fills it). Read the new name first, keep the old as a fallback.
+          const sb =
+            img.xb && typeof img.xb === "object"
+              ? img.xb
+              : img.sb && typeof img.sb === "object"
+                ? img.sb
+                : null;
           return {
             mediaId: media.id,
             version: Number(media.version) || undefined,
@@ -736,8 +761,190 @@
         } catch (_e) {
           /* resource timing unavailable */
         }
+        // The editor paints a paused background video as a plain <img> of its poster; read it
+        // from the DOM too — the resource-timing buffer (250 entries) evicts it on long sessions.
+        try {
+          document.querySelectorAll('img[src*="video-public.canva.com"]').forEach((img) => {
+            const m = String(img.currentSrc || img.src || "").match(
+              /https:\/\/video-public\.canva\.com\/([^/]+)\/([pl])\/[^?#]+\.jpe?g/i
+            );
+            if (!m) return;
+            const [url, vid, tier] = [m[0], m[1], m[2].toLowerCase()];
+            if (!posters[vid] || (tier === "l" && !/\/l\//.test(posters[vid]))) posters[vid] = url;
+          });
+        } catch (_e) {
+          /* ignore */
+        }
+        // The page's OWN fill — a colour and, optionally, a background image drawn over it. It is
+        // not an LB element, so the DOM/element walk never sees it, and every page div reports
+        // a transparent background-color; the server then guessed the page colour from the
+        // snapshot and picked the frame's sage (#a9ab94) instead of the real cream (#efe9dc).
+        // Observed shape: page.Vb.ctx.bxf[0] = { color, transparency, image: { media, xb,
+        // transparency }, flipX, flipY }.
+        // Observable-style model fields expose their value through get().
+        const unwrapObservable = (v) => (v && typeof v.get === "function" ? v.get() : v);
+        // The page's fill record, found by SHAPE rather than by key. The minified name rotates
+        // between Canva deploys — `page.Vb.ctx.bxf[0]` on one, a plain `page.Ub[0]` array on the
+        // next — and hardcoding one of them silently lost the whole page background: a design whose
+        // background is a VIDEO imported as a still, with the page colour guessed from the snapshot.
+        const looksLikePageFill = (value) =>
+          value &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          "transparency" in value &&
+          ("color" in value || "image" in value || "video" in value);
+        const findPageFillRecord = (obj) => {
+          if (!obj || typeof obj !== "object") return null;
+          for (const key of Object.keys(obj)) {
+            let value;
+            try {
+              value = unwrapObservable(obj[key]);
+            } catch (_e) {
+              continue;
+            }
+            if (!value || typeof value !== "object") continue;
+            if (Array.isArray(value)) {
+              const first = unwrapObservable(value[0]);
+              if (looksLikePageFill(first)) return first;
+              continue;
+            }
+            // Older deploys nest it one level down as <key>.ctx.bxf[0].
+            let nested = null;
+            try {
+              nested = value.ctx ? unwrapObservable(value.ctx.bxf) : null;
+            } catch (_e) {
+              nested = null;
+            }
+            if (Array.isArray(nested)) {
+              const first = unwrapObservable(nested[0]);
+              if (looksLikePageFill(first)) return first;
+            }
+          }
+          return null;
+        };
+        const readPageFill = (obj) => {
+          try {
+            const fill = findPageFillRecord(obj);
+            if (!fill || typeof fill !== "object") return null;
+            const get = unwrapObservable;
+            const color = String(get(fill.color) || "").trim();
+            const img = fill.image && fill.image.media && typeof fill.image.media.id === "string" ? fill.image : null;
+            const box = img ? img.xb || img.sb : null;
+            // Current model: a page background VIDEO is the fill's `video` slot — {video:"VA…",
+            // xb placement rect (page px, may exceed the page), transparency, autoplay, volume}.
+            // Older designs carried a per-scene clip ARRAY on the page object instead (see
+            // findClipsOnPageObj); both feed the same __background contract.
+            const vid =
+              fill.video && typeof fill.video === "object" && typeof get(fill.video.video) === "string"
+                ? fill.video
+                : null;
+            const vbox = vid ? vid.xb || vid.sb || vid.rb : null;
+            return {
+              color: /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color) ? color.toLowerCase() : "",
+              transparency: Number(get(fill.transparency)) || 0,
+              // The fill mirrors its media at the FILL level (a page photo flipped to put the
+              // minaret on the left); the DOM transform never shows it, so it must ride here.
+              flipX: Boolean(get(fill.flipX)),
+              flipY: Boolean(get(fill.flipY)),
+              durationUs: Number(get(fill.durationUs)) || 0,
+              video: vid
+                ? {
+                    videoId: String(get(vid.video)),
+                    transparency: Number(get(vid.transparency)) || 0,
+                    box:
+                      vbox && typeof vbox === "object"
+                        ? {
+                            left: Number(vbox.left) || 0,
+                            top: Number(vbox.top) || 0,
+                            width: Number(vbox.width) || 0,
+                            height: Number(vbox.height) || 0,
+                          }
+                        : null,
+                  }
+                : null,
+              image: img
+                ? {
+                    mediaId: img.media.id,
+                    transparency: Number(img.transparency) || 0,
+                    box: box && typeof box === "object"
+                      ? { left: Number(box.left) || 0, top: Number(box.top) || 0, width: Number(box.width) || 0, height: Number(box.height) || 0, rotation: Number(box.rotation) || 0 }
+                      : null,
+                  }
+                : null,
+            };
+          } catch (_e) {
+            return null;
+          }
+        };
+        // One synthetic clip for a fill-slot video: the page's own duration is the clip length.
+        const clipsFromFill = (fill, pageLike) => {
+          if (!fill || !fill.video || !fill.video.videoId) return null;
+          const pageDurationUs = Number(unwrapObservable(pageLike && pageLike.durationUs)) || 0;
+          const durationUs = fill.durationUs > 0 ? fill.durationUs : pageDurationUs;
+          return [
+            {
+              durationMs: Math.round(durationUs / 1000),
+              color: fill.color || null,
+              video: {
+                videoId: fill.video.videoId,
+                transparency: fill.video.transparency,
+                rb: fill.video.box,
+              },
+            },
+          ];
+        };
+        // Page-level animation ("Animate page"): ONE preset for the whole page, stored as
+        // page.animation = <preset id> — the SAME enum as element presets (Canva's "General" group
+        // is identical in both panels). Elements then carry no animation of their own, which is why
+        // a page-animated design imported completely static. `Xw` holds the user's overrides
+        // (direction/scale/colour) and stays empty while the preset's own defaults are in use.
+        // A Canva page's own length. Unset on a page the author never re-timed, where Canva
+        // still plays it as its nominal 5s (what the editor's 0:05 shows), so that is the default.
+        const readPageDurationMs = (obj, fillRecord) => {
+          try {
+            const us = Number(unwrapObservable(obj && obj.durationUs));
+            if (Number.isFinite(us) && us > 0) return Math.round(us / 1000);
+            // A page whose background is a VIDEO runs for the video's length, which the model does
+            // not state — the importer fills it in from the captured clip. Everything else plays
+            // for Canva's nominal 5s.
+            return fillRecord && fillRecord.video ? 0 : 5000;
+          } catch (_e) {
+            return 5000;
+          }
+        };
+        const readPageAnimation = (obj) => {
+          try {
+            if (!obj) return null;
+            const preset = Number(unwrapObservable(obj.animation));
+            if (!Number.isFinite(preset) || preset <= 0) return null;
+            const result = { preset };
+            const config = unwrapObservable(obj.Xw);
+            if (config && typeof config === "object") {
+              const direction = unwrapObservable(config.direction);
+              const scale = Number(unwrapObservable(config.scale));
+              if (typeof direction === "string" && direction) result.direction = direction.slice(0, 24);
+              if (Number.isFinite(scale) && scale > 0) result.scale = scale;
+            }
+            return result;
+          } catch (_e) {
+            return null;
+          }
+        };
         if (pageObj) {
-          const outClips = findClipsOnPageObj(pageObj);
+          const livePages = Array.isArray(doc.pages)
+            ? doc.pages
+            : doc.pages && typeof doc.pages[Symbol.iterator] === "function"
+              ? [...doc.pages]
+              : [];
+          // The walk finds a serialized copy of the page (same id, plain `elements` array) with no
+          // live Vb.ctx.bxf — the fill only exists on the live page from doc.pages.
+          const pageFill = readPageFill(livePages[0]) || readPageFill(pageObj);
+          if (pageFill && (pageFill.color || pageFill.image || pageFill.video)) result.__pageFill = pageFill;
+          const pageAnimation = readPageAnimation(livePages[0]) || readPageAnimation(pageObj);
+          if (pageAnimation) result.__pageAnimation = pageAnimation;
+          result.__pageDurationMs =
+            readPageDurationMs(livePages[0], pageFill) || readPageDurationMs(pageObj, pageFill);
+          const outClips = findClipsOnPageObj(pageObj) || clipsFromFill(pageFill, livePages[0] || pageObj);
           if (outClips && outClips.some((c) => c.video)) {
             result.__background = { clips: outClips, posters };
           }
@@ -843,7 +1050,9 @@
             for (let pageIndex = 0; pageIndex < pagesArray.length; pageIndex += 1) {
               const pageRoot = pagesArray[pageIndex];
               const pageElements = buildElementMap(findElementsArrayIn(pageRoot));
-              const pageClips = findClipsOnPageObj(findPageObjIn(pageRoot));
+              const pageFillForPage = readPageFill(pageRoot) || readPageFill(findPageObjIn(pageRoot));
+              const pageClips =
+                findClipsOnPageObj(findPageObjIn(pageRoot)) || clipsFromFill(pageFillForPage, pageRoot);
               pages.push({
                 index: pageIndex,
                 elements: pageElements,
@@ -851,6 +1060,9 @@
                   pageClips && pageClips.some((c) => c.video)
                     ? { clips: pageClips, posters }
                     : null,
+                fill: pageFillForPage,
+                animation: readPageAnimation(pageRoot) || readPageAnimation(findPageObjIn(pageRoot)),
+                durationMs: readPageDurationMs(pageRoot, pageFillForPage),
               });
             }
             if (pages.some((p) => Object.keys(p.elements).length > 0)) {

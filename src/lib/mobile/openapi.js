@@ -788,7 +788,7 @@ const schemas = {
       },
       topic: {
         type: "string",
-        enum: ["general", "support", "feature", "account", "business", "press", "privacy"],
+        enum: ["general", "support", "feature", "account", "business", "press", "privacy", "report"],
         default: "general",
         description: "Message category. Unknown values fall back to `general`.",
       },
@@ -1341,6 +1341,27 @@ const schemas = {
     // a 0-radius, 0-offset shadow sits exactly behind its layer and draws nothing. There is no
     // `enabled` flag here (unlike a TEXT layer's `shadow` object) — derive it from these values.
   },
+  TemplatePlacement: {
+    type: "object",
+    description:
+      "One category a template is filed under. A template can carry several; the flat category/subCategory fields on a template describe the first of them.",
+    required: [
+      "categoryId",
+      "categoryValue",
+      "categoryLabel",
+      "subCategoryId",
+      "subCategoryValue",
+      "subCategoryLabel",
+    ],
+    properties: {
+      categoryId: { type: "string", format: "uuid" },
+      categoryValue: { type: "string" },
+      categoryLabel: { type: "string", description: "Localized category label." },
+      subCategoryId: { type: "string", format: "uuid" },
+      subCategoryValue: { type: "string" },
+      subCategoryLabel: { type: "string", description: "Localized sub category label." },
+    },
+  },
   MobileTemplateSummary: {
     type: "object",
     required: [
@@ -1389,6 +1410,12 @@ const schemas = {
       categoryValue: { type: "string" },
       subCategoryId: { type: "string", format: "uuid" },
       subCategoryValue: { type: "string" },
+      placements: {
+        type: "array",
+        description:
+          "Every category this template is filed under, primary first. A multi-category template is repeated across the rails it belongs to, and the flat category fields above describe the rail it is listed under.",
+        items: { $ref: "#/components/schemas/TemplatePlacement" },
+      },
       thumbnailUrl: { type: "string" },
       thumbnailDataUrl: { type: "string" },
       previewVideoUrl: {
@@ -1501,6 +1528,12 @@ const schemas = {
       categoryValue: { type: "string" },
       subCategory: { type: "string", description: "Localized sub category label." },
       subCategoryValue: { type: "string" },
+      placements: {
+        type: "array",
+        description:
+          "Every category this template is filed under, primary first. A multi-category template is repeated across the rails it belongs to, and the flat category fields above describe the rail it is listed under.",
+        items: { $ref: "#/components/schemas/TemplatePlacement" },
+      },
       thumbnailUrl: { type: "string" },
       preview: {
         allOf: [{ $ref: "#/components/schemas/MobileTemplatePreviewSlim" }],
@@ -2131,6 +2164,19 @@ const schemas = {
         type: "string",
         description: "Raw template sub category value (not localized).",
       },
+      categories: {
+        type: "array",
+        description:
+          "Every category the template is filed under, primary first. Raw values, not localized; the flat category/subCategory fields above are its first entry.",
+        items: {
+          type: "object",
+          required: ["category", "subCategory"],
+          properties: {
+            category: { type: "string" },
+            subCategory: { type: "string" },
+          },
+        },
+      },
       canvasWidth: { type: "number" },
       canvasHeight: { type: "number" },
       thumbnailUrl: {
@@ -2492,6 +2538,56 @@ export function buildMobileOpenApiSpec(serverOrigin) {
         },
       },
       "/api/mobile/auth/me": {
+        delete: {
+          tags: ["Mobile Auth"],
+          summary: "Delete the signed-in account and its personal data",
+          description:
+            "Irreversible. Removes the user row and everything cascading from it " +
+            "(identities, refresh tokens, device tokens, favorites, media usage, " +
+            "subscription records) and scrubs the personal fields from any support " +
+            "messages the account left behind. Does NOT cancel an active store " +
+            "subscription — only the user can do that from Apple or Google. " +
+            "Required by Google Play's account deletion policy.",
+          security: [{ bearerAuth: [] }],
+          responses: {
+            200: {
+              description: "Account deleted",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["ok"],
+                    properties: { ok: { type: "boolean", example: true } },
+                  },
+                },
+              },
+            },
+            401: {
+              description: "Missing or invalid bearer token",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            429: {
+              description: "Too many deletion attempts",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+            500: {
+              description: "Deletion failed",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/ErrorResponse" },
+                },
+              },
+            },
+          },
+        },
         get: {
           tags: ["Mobile Auth"],
           summary: "Get current mobile user from bearer token",

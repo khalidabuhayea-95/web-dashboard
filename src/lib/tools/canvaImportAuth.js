@@ -1,7 +1,11 @@
 import { createHmac, timingSafeEqual } from "node:crypto";
 
 const TOKEN_VERSION = "v1";
-const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 30;
+// One year. The token is pasted into the Canva extension by hand, and a 30-day life meant the
+// import silently broke every month with an error that blamed the dev server. There is no
+// per-token revocation list — rotating CANVA_IMPORT_TOKEN_SECRET invalidates every issued token
+// at once, which is the escape hatch if one leaks.
+const DEFAULT_TTL_SECONDS = 60 * 60 * 24 * 365;
 
 function toBase64Url(input) {
   return Buffer.from(input)

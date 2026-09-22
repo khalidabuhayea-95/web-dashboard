@@ -25,8 +25,14 @@ model Template {
   /// Per-page preview images for multi-page designs: { [pageId]: publicUrl }. Page 1 falls back
   /// to thumbnailDataUrl, so this is only populated for pages 2..N.
   pageThumbnails    Json?
+  /// Primary placement, mirrored from categories[0]. Kept as scalars so the hot-path
+  /// composite index and older mobile builds keep working after multi-category landed.
   category          String                   @default("general")
   subCategory       String                   @default("general")
+  /// Every placement this template appears under: [{ category, subCategory }, ...].
+  /// Null on rows written before the multi-category migration — readers fall back to the
+  /// scalar pair via resolveTemplateCategoryPairs().
+  categories        Json?
   tags              Json
   thumbnailDataUrl  String?
   previewVideoUrl   String?
@@ -618,6 +624,71 @@ model TextEffect {
   updatedAt  DateTime @updatedAt
 
   @@index([published, sortOrder])
+}
+
+/// An Arabic/Islamic occasion on the content calendar (Eid, Ramadan, a National Day…).
+/// Recurs yearly from a Hijri or Gregorian anchor; `dateOverrides` pins the real
+/// (moon-sighted / moved) start per year. See src/lib/occasions/dates.ts.
+model Occasion {
+  id               String   @id @default(uuid()) @db.Uuid
+  slug             String   @unique
+  titleEn          String
+  titleAr          String
+  /// islamic | national | international | seasonal
+  kind             String   @default("islamic")
+  /// hijri | gregorian
+  calendar         String   @default("gregorian")
+  month            Int
+  /// Day of month for fixed dates; null when the weekday rule below is used.
+  day              Int?
+  /// Nth-weekday rule (gregorian only): weekday 0=Sun..6=Sat, weekOrdinal 1..4 or -1 (last).
+  weekday          Int?
+  weekOrdinal      Int?
+  durationDays     Int      @default(1)
+  /// Days before the start when the dashboard starts reminding the team.
+  reminderLeadDays Int      @default(30)
+  /// Days before the start when linked content starts being boosted on mobile.
+  boostLeadDays    Int      @default(14)
+  /// ISO-3166 alpha-2 codes the occasion applies to; [] = everywhere.
+  countries        Json     @default("[]")
+  /// Search terms (ar + en) that pre-filter the content pickers.
+  keywords         Json     @default("[]")
+  /// { "<gregorian or hijri year>": "YYYY-MM-DD" } — the real start, winning over the rule.
+  dateOverrides    Json     @default("{}")
+  /// Content ideas / phrases for the team. Free text.
+  notes            String   @default("")
+  emoji            String   @default("")
+  color            String   @default("")
+  enabled          Boolean  @default(true)
+  boostEnabled     Boolean  @default(true)
+  /// Move linked template/element/background/AI categories to the front of their lists
+  /// while the boost window is active.
+  hoistCategories  Boolean  @default(true)
+  sortOrder        Int      @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+  items            OccasionItem[]
+
+  @@index([enabled, calendar, month])
+}
+
+/// Content linked to an occasion. Targets are heterogeneous (two live in @@ignore'd
+/// raw-SQL tables), so there is no FK: `kind` ∈ template | template-category | ai-template |
+/// ai-category | element | element-category | background | background-category, and
+/// `itemId` is a row uuid, or for *-category kinds the taxonomy value
+/// ("category" or "category/subCategory"), the element/background category key, or the
+/// AI category slug. Dangling rows are dropped on read.
+model OccasionItem {
+  id         String   @id @default(uuid()) @db.Uuid
+  occasionId String   @db.Uuid
+  kind       String
+  itemId     String
+  sortOrder  Int      @default(0)
+  createdAt  DateTime @default(now())
+  occasion   Occasion @relation(fields: [occasionId], references: [id], onDelete: Cascade)
+
+  @@unique([occasionId, kind, itemId])
+  @@index([kind, itemId])
 }
 
 // One row per store subscription (Nayroz Pro). Written only by the billing

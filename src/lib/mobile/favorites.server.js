@@ -19,6 +19,7 @@ const FAVORITE_TEMPLATE_SELECT = {
   status: true,
   category: true,
   subCategory: true,
+  categories: true,
   canvasSize: true,
   pageCount: true,
   isPremium: true,
@@ -58,6 +59,28 @@ function buildThumbnailUrl(templateId, origin) {
   return base ? `${base}${path}` : path;
 }
 
+/**
+ * Raw stored placements, primary first. Deliberately not run through the taxonomy: this
+ * list is a passthrough of what the row holds, and validating it here would coerce
+ * dashboard-defined categories the default taxonomy does not know about.
+ */
+function serializeCategoryPairs(template) {
+  const raw = Array.isArray(template?.categories) ? template.categories : [];
+  const pairs = raw
+    .map((entry) => ({
+      category: String(entry?.category || "").trim(),
+      subCategory: String(entry?.subCategory || "").trim(),
+    }))
+    .filter((entry) => entry.category);
+  if (pairs.length > 0) return pairs;
+  return [
+    {
+      category: String(template?.category || "general"),
+      subCategory: String(template?.subCategory || "general"),
+    },
+  ];
+}
+
 function serializeFavoriteTemplate(template, origin) {
   if (!template) return null;
   const canvasSize = template.canvasSize || {};
@@ -67,6 +90,7 @@ function serializeFavoriteTemplate(template, origin) {
     status: String(template.status || "draft"),
     category: String(template.category || "general"),
     subCategory: String(template.subCategory || "general"),
+    categories: serializeCategoryPairs(template),
     canvasWidth: positiveSizeOr(canvasSize.width, 1080),
     canvasHeight: positiveSizeOr(canvasSize.height, 1080),
     pageCount: Math.max(1, Math.round(numberOr(template.pageCount, 1))),

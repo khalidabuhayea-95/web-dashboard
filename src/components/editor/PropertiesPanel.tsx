@@ -71,6 +71,9 @@ type ImageEditorElement = EditorElement & { type: "image" };
 type VideoEditorElement = EditorElement & { type: "video" };
 type MediaEditorElement = ImageEditorElement | VideoEditorElement;
 
+// Shortest clip the trim inputs allow — below this a video has nothing to show.
+const MIN_CLIP_LENGTH_SEC = 0.1;
+
 function numberOr(value: string, fallback: number) {
   const next = Number(value);
   return Number.isFinite(next) ? next : fallback;
@@ -96,6 +99,7 @@ interface PropertiesPanelProps {
 
 export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const [isConvertingMediaToFrame, setIsConvertingMediaToFrame] = useState(false);
+  const [isCuttingVideoFile, setIsCuttingVideoFile] = useState(false);
 
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
@@ -106,6 +110,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const recordHistory = useEditorStore((state) => state.recordHistory);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const convertMediaElementToFrame = useEditorStore((state) => state.convertMediaElementToFrame);
+  const setPageDuration = useEditorStore((state) => state.setPageDuration);
 
   const activePage = useMemo(
     () => pages.find((page) => page.id === activePageId) || pages[0],
@@ -128,6 +133,89 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
     (activeBorderElement.type === "image" ||
       activeBorderElement.type === "video" ||
       activeBorderElement.type === "rect");
+  // ── Video length ──────────────────────────────────────────────────────────────────────
+  // Trimming a clip is what sets the TEMPLATE's length when that clip is the page background
+  // (an imported Canva video page is exactly as long as its video), so the two are edited in
+  // one place: change the clip's in/out and the page follows.
+  const activeVideoElement = activeElement?.type === "video" ? (activeElement as VideoEditorElement) : null;
+  const videoSourceDurationSec = Math.max(0, Number(activeVideoElement?.videoDuration) || 0);
+  const videoStartSec = Math.max(0, Number(activeVideoElement?.videoStart) || 0);
+  const videoEndSec = (() => {
+    const raw = Number(activeVideoElement?.videoEnd);
+    if (Number.isFinite(raw) && raw > videoStartSec) return raw;
+    return videoSourceDurationSec > videoStartSec ? videoSourceDurationSec : videoStartSec + MIN_CLIP_LENGTH_SEC;
+  })();
+  const videoClipLengthSec = Math.max(0, videoEndSec - videoStartSec);
+  // A clip that IS the page background drives the template length; any other video is just trimmed
+  // (its own timeline window still decides when it plays).
+  const isPageBackgroundVideo = Boolean(
+    activeVideoElement &&
+      (activeVideoElement.isBackgroundLayer ||
+        (Math.abs(activeVideoElement.width * (activeVideoElement.scaleX || 1)) *
+          Math.abs(activeVideoElement.height * (activeVideoElement.scaleY || 1))) >=
+          0.9 * Math.max(1, activePage.width * activePage.height))
+  );
+  const applyVideoTrim = (nextStartSec: number, nextEndSec: number) => {
+    if (!activeVideoElement) return;
+    // With no known source length (a clip whose metadata never loaded) the requested end is the
+    // only bound there is — better than refusing the edit.
+    const sourceSec = videoSourceDurationSec > 0 ? videoSourceDurationSec : Math.max(nextEndSec, MIN_CLIP_LENGTH_SEC);
+    const start = Math.min(Math.max(0, nextStartSec), Math.max(0, sourceSec - MIN_CLIP_LENGTH_SEC));
+    const end = Math.min(Math.max(nextEndSec, start + MIN_CLIP_LENGTH_SEC), sourceSec);
+    const round = (value: number) => Math.round(value * 1000) / 1000;
+    updateElement(activeVideoElement.id, { videoStart: round(start), videoEnd: round(end) });
+    if (isPageBackgroundVideo) {
+      setPageDuration(activePage.id, Math.round((end - start) * 1000));
+    }
+  };
+  /**
+   * Start and End only choose which part of the file PLAYS. The whole file still ships, and the
+   * mobile payload carries no trim at all, so a 40s source shown here as a 10s clip still arrived on
+   * the phone as 40s. This cuts the file itself and re-points the layer at the shorter one, which
+   * every consumer then agrees on without having to understand a trim.
+   */
+  const cutVideoFileToClip = async () => {
+    if (!activeVideoElement || isCuttingVideoFile) return;
+    setIsCuttingVideoFile(true);
+    try {
+      const response = await fetch("/api/editor/media/trim-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          src: activeVideoElement.src,
+          startSec: videoStartSec,
+          endSec: videoEndSec,
+        }),
+      });
+      const result = await response.json().catch(() => null);
+      if (!response.ok || !result?.url) {
+        window.alert(result?.error || "The video could not be cut.");
+        return;
+      }
+      const round = (value: number) => Math.round(value * 1000) / 1000;
+      const durationSec = round(Number(result.durationSec) || videoClipLengthSec);
+      updateElement(activeVideoElement.id, {
+        src: String(result.url),
+        // The new file IS the clip, so the window covers all of it.
+        videoStart: 0,
+        videoEnd: durationSec,
+        videoDuration: durationSec,
+      });
+      if (isPageBackgroundVideo) {
+        setPageDuration(activePage.id, Math.round(durationSec * 1000));
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "The video could not be cut.");
+    } finally {
+      setIsCuttingVideoFile(false);
+    }
+  };
+  /** Nothing to cut when the clip already spans the whole source. */
+  const videoClipIsWholeFile =
+    videoSourceDurationSec > 0 &&
+    videoStartSec <= 0.01 &&
+    Math.abs(videoEndSec - videoSourceDurationSec) <= 0.01;
+
   const activeCornerMask: CornerRadiusCorners =
     activeBorderElement?.cornerRadiusCorners ?? ALL_CORNERS;
   const activeCornerAllOn =
@@ -934,6 +1022,85 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
             </div>
           ) : null}
 
+          {activeVideoElement ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <div className="flex items-center justify-between gap-2">
+                <Label className="m-0">Video length</Label>
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  {videoSourceDurationSec > 0
+                    ? `${videoSourceDurationSec.toFixed(2)}s source`
+                    : "source length unknown"}
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    Start (s)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0}
+                    value={Math.round(videoStartSec * 100) / 100}
+                    onChange={(event) => applyVideoTrim(numberOr(event.target.value, 0), videoEndSec)}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <Label className="m-0 text-xs font-normal text-slate-500 dark:text-slate-400">
+                    End (s)
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    min={0}
+                    value={Math.round(videoEndSec * 100) / 100}
+                    onChange={(event) =>
+                      applyVideoTrim(videoStartSec, numberOr(event.target.value, videoEndSec))
+                    }
+                  />
+                </div>
+              </div>
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-xs text-slate-500 dark:text-slate-400">
+                  Clip plays for {videoClipLengthSec.toFixed(2)}s
+                </span>
+                {isPageBackgroundVideo ? (
+                  <span className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                    Template follows this clip
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    className="text-xs font-medium text-slate-600 underline underline-offset-2 dark:text-slate-300"
+                    onClick={() =>
+                      setPageDuration(
+                        activePage.id,
+                        Math.round(Math.max(MIN_CLIP_LENGTH_SEC, videoClipLengthSec) * 1000)
+                      )
+                    }
+                  >
+                    Fit template to clip
+                  </button>
+                )}
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isCuttingVideoFile || videoClipIsWholeFile}
+                onClick={() => {
+                  void cutVideoFileToClip();
+                }}
+                className="w-full justify-start !rounded-lg !px-3 !text-sm !font-semibold"
+              >
+                {isCuttingVideoFile ? "Cutting the file..." : "Cut the file to this clip"}
+              </Button>
+              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                {videoClipIsWholeFile
+                  ? "The clip already covers the whole file, so there is nothing to cut."
+                  : "Start and End only choose what plays. This writes a shorter file, so the app gets the same length as here."}
+              </p>
+            </div>
+          ) : null}
           {activeBlurElement ? (
             <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
               <div className="flex items-center justify-between gap-2">

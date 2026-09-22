@@ -10,7 +10,11 @@ import {
   getPublicStorageBucketName,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
-import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
+import {
+  findExistingElementContentHashes,
+  upsertImportedElementAsset,
+} from "@/lib/editor/importedElements.server";
+import { dedupeByArtwork, fingerprintImageBytes } from "@/lib/tools/imageFingerprint.server";
 import { upsertImportedBackgroundAsset } from "@/lib/editor/importedBackgrounds.server";
 import {
   createBackgroundPreview,
@@ -22,6 +26,8 @@ import {
   getBackgroundCategorySettings,
 } from "@/lib/backgrounds/categorySettings.server";
 import { normalizeBackgroundCategory } from "@/lib/backgrounds/categorySettings";
+import { getElementCategorySettings } from "@/lib/elements/categorySettings.server";
+import { normalizeElementCategory } from "@/lib/elements/categorySettings";
 
 const FREEPIK_SETTINGS_KEY = "freepik_import_settings_v1";
 const MAGNIFIC_API_KEY_HEADER = "x-magnific-api-key";
@@ -157,11 +163,38 @@ function sanitizeBackgroundFilters(value) {
     }
   });
 
-  next.license = {
-    freemium: "1",
-  };
+  // License is a real choice now (Free / Premium / All), not a hard-coded free-only wall: the
+  // old forced `freemium=1` silently hid every premium background from the preview. Anything
+  // other than an explicit free/premium pick means "no license filter".
+  const license = normalizeLicenseChoice(source.license);
+  delete next.license;
+  if (license) {
+    next.license = { [license]: "1" };
+  }
 
   return next;
+}
+
+function normalizeLicenseChoice(value) {
+  if (value && typeof value === "object" && !Array.isArray(value)) {
+    if (String(value.premium ?? "") === "1" && String(value.freemium ?? "") !== "1") return "premium";
+    if (String(value.freemium ?? "") === "1" && String(value.premium ?? "") !== "1") return "freemium";
+    return "";
+  }
+  const normalized = sanitizeText(value).toLowerCase();
+  if (normalized === "free" || normalized === "freemium") return "freemium";
+  if (normalized === "premium") return "premium";
+  return "";
+}
+
+// Magnific tags each resource with its licence list; premium ones need a plan that covers
+// premium downloads, so the preview badges them before anyone tries to import.
+function normalizeResourceLicense(source) {
+  const licenses = Array.isArray(source?.licenses) ? source.licenses : [];
+  const types = licenses.map((entry) => sanitizeText(entry?.type).toLowerCase()).filter(Boolean);
+  if (types.includes("premium")) return "premium";
+  if (types.includes("freemium") || types.includes("free")) return "freemium";
+  return sanitizeText(source?.license).toLowerCase() === "premium" ? "premium" : "";
 }
 
 function appendFilterParam(params, prefix, rawValue) {
@@ -472,6 +505,7 @@ function normalizeFreepikBackgroundItem(item) {
     slug: sanitizeText(source.slug),
     type: sanitizeText(source.type || image.type),
     orientation: sanitizeText(image.orientation),
+    license: normalizeResourceLicense(source),
     tags,
     thumbnailUrl: sanitizeUrl(source.thumbnailUrl || previewSource?.url),
     assetUrl: sanitizeUrl(source.assetUrl || previewSource?.url),
@@ -538,14 +572,22 @@ export async function previewFreepikIcons({ query = {}, apiKey = "" } = {}) {
     throw createFreepikRequestError(response, payload, `Magnific request failed (${response.status}).`);
   }
 
-  const items = Array.isArray(payload?.data)
+  const rawItems = Array.isArray(payload?.data)
     ? payload.data.map(normalizeFreepikItem).filter((item) => item.id && item.thumbnailUrl)
     : [];
+
+  // ★The same artwork comes back several times per page under different ids, because Freepik
+  // sells one icon inside several packs and each pack is indexed separately. Collapsing them
+  // here is what stops the grid showing the same lantern four times — see imageFingerprint.
+  const { items, removed: duplicatesHidden } = await dedupeByArtwork(rawItems, {
+    getUrl: (item) => item.thumbnailUrl,
+  });
 
   const pagination = payload?.meta?.pagination || {};
   return {
     query: normalized,
     items,
+    duplicatesHidden,
     pagination: {
       total: Number.isFinite(Number(pagination.total)) ? Number(pagination.total) : items.length,
       lastPage: Number.isFinite(Number(pagination.last_page)) ? Number(pagination.last_page) : 1,
@@ -1059,11 +1101,25 @@ async function resolveBackgroundAssetUrl({ item, apiKey = "", acceptLanguage = "
   return fallbackUrl;
 }
 
-export async function runFreepikImportForOwner({ ownerId, selectedItems = [], onProgress } = {}) {
+export async function runFreepikImportForOwner({
+  ownerId,
+  selectedItems = [],
+  categoryValue = "",
+  onProgress,
+} = {}) {
   const safeOwnerId = sanitizeText(ownerId);
   if (!safeOwnerId) {
     throw new Error("Owner id is required for Magnific import.");
   }
+
+  // Every imported element is filed under exactly one THEME category, resolved against the saved
+  // list so a stale key from the page can never land in the table. Unlike backgrounds the value
+  // is optional — an import started before the categories existed still works, it just lands in
+  // the fallback and can be re-filed later.
+  const categorySettings = await getElementCategorySettings();
+  const normalizedCategoryValue = sanitizeText(categoryValue)
+    ? normalizeElementCategory(categoryValue, categorySettings)
+    : "";
 
   const items = sanitizeSelectedItems(selectedItems);
   if (items.length === 0) {
@@ -1081,10 +1137,15 @@ export async function runFreepikImportForOwner({ ownerId, selectedItems = [], on
   const result = {
     imported: 0,
     skipped: 0,
+    // Visually identical artwork the catalogue already holds under a different Magnific id.
+    duplicates: 0,
     failed: 0,
     totalRequested: items.length,
     errors: [],
   };
+  // Fingerprints added during THIS run, so two duplicates inside one selection also collapse —
+  // the row for the first is not committed until later in the loop.
+  const importedFingerprints = new Set();
 
   for (let index = 0; index < items.length; index += 1) {
     const item = items[index];
@@ -1142,6 +1203,22 @@ export async function runFreepikImportForOwner({ ownerId, selectedItems = [], on
         }
       }
 
+      // ★Duplicate check BEFORE the upload: Freepik resells the same artwork across icon packs,
+      // so the identical lantern arrives under several ids with different tags — and usually as
+      // different bytes, which is why this is a perceptual fingerprint and not a checksum.
+      // Asking first means a duplicate costs neither an R2 object nor a row.
+      const contentHash = await fingerprintImageBytes(uploadBytes);
+      if (contentHash) {
+        const alreadyHeld =
+          importedFingerprints.has(contentHash) ||
+          (await findExistingElementContentHashes([contentHash])).has(contentHash);
+        if (alreadyHeld) {
+          result.duplicates += 1;
+          continue;
+        }
+        importedFingerprints.add(contentHash);
+      }
+
       const storedUrl = await uploadAssetToStorage({
         ownerId: safeOwnerId,
         sourceAssetId: item.id,
@@ -1161,6 +1238,8 @@ export async function runFreepikImportForOwner({ ownerId, selectedItems = [], on
         sourceAssetId: item.id,
         ownerId: safeOwnerId,
         kind: "icon",
+        categoryValue: normalizedCategoryValue,
+        contentHash,
         titleEn,
         titleAr,
         tagsEn,

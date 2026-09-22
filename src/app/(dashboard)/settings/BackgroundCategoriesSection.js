@@ -20,22 +20,44 @@ import {
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
-import { Input, Label } from "@/components/ui/form";
+import { Input, Label, Select } from "@/components/ui/form";
 import { uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import { BACKGROUND_CATEGORY_SETTINGS } from "@/lib/backgrounds/categorySettings";
 
+let localCategorySeq = 0;
+
 function createEmptyBackgroundCategory() {
   return {
+    // Client-only identity so a brand-new row can be keyed before the server assigns an id.
+    // The sanitizer rebuilds each category from known fields, so this never reaches storage.
+    _uid: `new-${(localCategorySeq += 1)}`,
     value: "",
     labelEn: "",
     labelAr: "",
     thumbnailUrl: "",
     published: true,
+    searchTerms: "",
+    importOrientation: "all",
+    importContentType: "all",
   };
+}
+
+/**
+ * Identity for React keys and per-row refs. Index is the last resort only: keying by index
+ * makes every row after a removed one look like a different element, which remounts the file
+ * inputs and leaves the ref map pointing at the wrong category.
+ */
+function categoryKey(category, index) {
+  return String(category?.id || category?._uid || `index-${index}`);
 }
 
 function isBlank(value) {
   return String(value || "").trim().length === 0;
+}
+
+// Stored as an array; edited as comma-separated text (the server splits it back on save).
+function formatSearchTerms(value) {
+  return Array.isArray(value) ? value.join(", ") : String(value || "");
 }
 
 export default function BackgroundCategoriesSection({ canEdit }) {
@@ -45,6 +67,7 @@ export default function BackgroundCategoriesSection({ canEdit }) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState("Loading background categories...");
   const [sectionCollapsed, setSectionCollapsed] = useState(false);
+  const [assetCounts, setAssetCounts] = useState({});
   const [uploadingThumbnailIndex, setUploadingThumbnailIndex] = useState(null);
   const [draggingCategoryIndex, setDraggingCategoryIndex] = useState(null);
   const [dragOverCategory, setDragOverCategory] = useState({
@@ -73,6 +96,7 @@ export default function BackgroundCategoriesSection({ canEdit }) {
 
         if (!isMounted) return;
         setSettings(Array.isArray(payload?.settings) ? payload.settings : BACKGROUND_CATEGORY_SETTINGS);
+        setAssetCounts(payload?.counts && typeof payload.counts === "object" ? payload.counts : {});
         setStatus("");
       } catch (error) {
         if (!isMounted) return;
@@ -107,9 +131,27 @@ export default function BackgroundCategoriesSection({ canEdit }) {
     setSettings((current) => [...current, createEmptyBackgroundCategory()]);
   }, []);
 
-  const removeCategory = useCallback((index) => {
-    setSettings((current) => current.filter((_, itemIndex) => itemIndex !== index));
-  }, []);
+  const removeCategory = useCallback(
+    (index) => {
+      // Removing a category deletes the backgrounds inside it once the page is saved, so the
+      // count has to be on screen before the click, not discovered afterwards.
+      const category = settings[index];
+      const count = Number(assetCounts[String(category?.value || "")] || 0);
+      if (count > 0) {
+        const name = String(category?.labelEn || category?.labelAr || category?.value || "this category").trim();
+        const confirmed = window.confirm(
+          `Remove "${name}"?\n\n${count} background${count === 1 ? "" : "s"} filed under it will be ` +
+            `deleted, along with their image files, when you save. This cannot be undone.`
+        );
+        if (!confirmed) return;
+      }
+      setSettings((current) => current.filter((_, itemIndex) => itemIndex !== index));
+      // Drop the matching expand flag too. Without this the flags after `index` stay put while
+      // the rows shift up, so the wrong cards render expanded.
+      setExpandedCategories((current) => current.filter((_, itemIndex) => itemIndex !== index));
+    },
+    [assetCounts, settings]
+  );
 
   const moveCategory = useCallback((fromIndex, toIndex) => {
     if (fromIndex === toIndex) return;
@@ -173,7 +215,14 @@ export default function BackgroundCategoriesSection({ canEdit }) {
       }
 
       setSettings(Array.isArray(payload?.settings) ? payload.settings : BACKGROUND_CATEGORY_SETTINGS);
-      setStatus("Background categories saved.");
+      setAssetCounts(payload?.counts && typeof payload.counts === "object" ? payload.counts : {});
+      const removedCount = Array.isArray(payload?.removedCategories) ? payload.removedCategories.length : 0;
+      const deletedAssets = Number(payload?.deletedAssets || 0);
+      setStatus(
+        removedCount > 0
+          ? `Background categories saved. Removed ${removedCount} categor${removedCount === 1 ? "y" : "ies"} and deleted ${deletedAssets} background${deletedAssets === 1 ? "" : "s"}.`
+          : "Background categories saved."
+      );
     } catch (error) {
       setStatus(error?.message || "Failed to save background categories.");
     } finally {
@@ -181,8 +230,8 @@ export default function BackgroundCategoriesSection({ canEdit }) {
     }
   };
 
-  const triggerThumbnailPicker = useCallback((index) => {
-    const input = thumbnailInputRefs.current[index];
+  const triggerThumbnailPicker = useCallback((key) => {
+    const input = thumbnailInputRefs.current[key];
     if (input) {
       input.click();
     }
@@ -391,9 +440,11 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                 const displayName = String(category?.labelEn || category?.labelAr || category?.value || "Untitled").trim();
                 const isDragging = draggingCategoryIndex === categoryIndex;
                 const isDragOver = dragOverCategory.index === categoryIndex;
+                const rowKey = categoryKey(category, categoryIndex);
+                const assetCount = Number(assetCounts[String(category?.value || "")] || 0);
                 return (
                   <article
-                    key={`${category.value || "background-category"}-${categoryIndex}`}
+                    key={rowKey}
                     className={`h-fit rounded-xl border bg-background p-4 transition-shadow hover:shadow-sm ${
                       isDragOver
                         ? dragOverCategory.position === "after"
@@ -467,9 +518,9 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                           <input
                             ref={(node) => {
                               if (node) {
-                                thumbnailInputRefs.current[categoryIndex] = node;
+                                thumbnailInputRefs.current[rowKey] = node;
                               } else {
-                                delete thumbnailInputRefs.current[categoryIndex];
+                                delete thumbnailInputRefs.current[rowKey];
                               }
                             }}
                             type="file"
@@ -495,7 +546,7 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                           {canEdit ? (
                             <button
                               type="button"
-                              onClick={() => triggerThumbnailPicker(categoryIndex)}
+                              onClick={() => triggerThumbnailPicker(rowKey)}
                               className="absolute right-1.5 top-1.5 inline-flex h-7 w-7 items-center justify-center rounded-full border border-white/60 bg-white/90 text-foreground shadow-sm transition hover:bg-white"
                               aria-label={
                                 String(category?.thumbnailUrl || "").trim()
@@ -517,9 +568,16 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                           <h2 className="line-clamp-2 text-base font-semibold leading-tight text-foreground">
                             {displayName}({categoryIndex + 1})
                           </h2>
-                          <Badge variant={isPublished ? "success" : "warning"}>
-                            {isPublished ? "Published" : "Unpublished"}
-                          </Badge>
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <Badge variant={isPublished ? "success" : "warning"}>
+                              {isPublished ? "Published" : "Unpublished"}
+                            </Badge>
+                            {assetCount > 0 ? (
+                              <Badge variant="neutral">
+                                {assetCount} background{assetCount === 1 ? "" : "s"}
+                              </Badge>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
                       <div className="flex flex-wrap items-start justify-end gap-2">
@@ -621,6 +679,51 @@ export default function BackgroundCategoriesSection({ canEdit }) {
                           <p className="field-help text-muted-foreground">
                             Upload manually from the thumbnail card above, or paste an image URL if you already have one.
                           </p>
+                        </div>
+
+                        <div className="space-y-1.5 md:col-span-2">
+                          <Label htmlFor={`background-category-terms-${categoryIndex}`}>Magnific search terms</Label>
+                          <Input
+                            id={`background-category-terms-${categoryIndex}`}
+                            value={formatSearchTerms(category?.searchTerms)}
+                            onChange={(event) => updateCategory(categoryIndex, "searchTerms", event.target.value)}
+                            placeholder="marble texture background, white marble gold veins"
+                            disabled={!canEdit}
+                          />
+                          <p className="field-help text-muted-foreground">
+                            Comma-separated. Choosing this category on the Freepik import page fills in the first
+                            term and offers the rest as one-click chips.
+                          </p>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`background-category-orientation-${categoryIndex}`}>Import orientation</Label>
+                          <Select
+                            id={`background-category-orientation-${categoryIndex}`}
+                            value={category?.importOrientation || "all"}
+                            onChange={(event) => updateCategory(categoryIndex, "importOrientation", event.target.value)}
+                            disabled={!canEdit}
+                          >
+                            <option value="all">All orientations</option>
+                            <option value="portrait">Portrait</option>
+                            <option value="landscape">Landscape</option>
+                            <option value="square">Square</option>
+                          </Select>
+                        </div>
+
+                        <div className="space-y-1.5">
+                          <Label htmlFor={`background-category-content-type-${categoryIndex}`}>Import content type</Label>
+                          <Select
+                            id={`background-category-content-type-${categoryIndex}`}
+                            value={category?.importContentType || "all"}
+                            onChange={(event) => updateCategory(categoryIndex, "importContentType", event.target.value)}
+                            disabled={!canEdit}
+                          >
+                            <option value="all">All content types</option>
+                            <option value="photo">Photo</option>
+                            <option value="vector">Vector</option>
+                            <option value="psd">PSD</option>
+                          </Select>
                         </div>
                       </div>
                     ) : null}

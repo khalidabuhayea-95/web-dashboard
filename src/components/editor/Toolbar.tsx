@@ -12,6 +12,7 @@ import {
   ChevronRight,
   Copy,
   Download,
+  Film,
   FlipHorizontal,
   FlipVertical,
   Italic,
@@ -181,6 +182,8 @@ export default function Toolbar({
   const activeTemplateStatus = useEditorStore((state) => state.activeTemplateStatus);
   const activeTemplateCategory = useEditorStore((state) => state.activeTemplateCategory);
   const activeTemplateSubCategory = useEditorStore((state) => state.activeTemplateSubCategory);
+  const activeTemplateCategories = useEditorStore((state) => state.activeTemplateCategories);
+  const publishCategoryValue = useEditorStore((state) => state.publishCategoryValue);
   const activeTemplateTags = useEditorStore((state) => state.activeTemplateTags);
   const activeTemplateIsPremium = useEditorStore((state) => state.activeTemplateIsPremium);
   const selectedIds = useEditorStore((state) => state.selectedIds);
@@ -201,6 +204,7 @@ export default function Toolbar({
   const setTemplateMeta = useEditorStore((state) => state.setTemplateMeta);
   const updateTimeline = useEditorStore((state) => state.updateTimeline);
   const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
+  const previewGenerationActive = useEditorStore((state) => state.previewGenerationActive);
   const setPreviewGenerationActive = useEditorStore((state) => state.setPreviewGenerationActive);
   const clearTemplateMeta = useEditorStore((state) => state.clearTemplateMeta);
   const bumpImportedElementsRefreshKey = useEditorStore((state) => state.bumpImportedElementsRefreshKey);
@@ -216,6 +220,11 @@ export default function Toolbar({
   const templateQueryKey = useMemo(() => searchParams.toString(), [searchParams]);
   const templateIdFromQuery = useMemo(
     () => String(new URLSearchParams(templateQueryKey).get("templateId") || "").trim(),
+    [templateQueryKey]
+  );
+  // `?regeneratePreview=1` (templates list → "Regenerate preview") forces a fresh video preview.
+  const regeneratePreviewFromQuery = useMemo(
+    () => /^(1|true|yes)$/i.test(String(new URLSearchParams(templateQueryKey).get("regeneratePreview") || "").trim()),
     [templateQueryKey]
   );
 
@@ -932,7 +941,21 @@ export default function Toolbar({
       fallbackPosterDataUrl: string;
     }) => {
       const stageRecorder = stageApi?.recordTimelinePreviewVideo;
-      if (!templateId || !stageRecorder) return;
+      if (!templateId || !stageRecorder) {
+        // Both of these used to return in silence, which from the outside is a button that does
+        // nothing. Say which one it was.
+        setPreviewToast({ tone: "error", message: "The canvas is not ready yet. Try again in a moment." });
+        return;
+      }
+      // A hidden tab pauses compositing: every recorded frame — and the poster — would be blank,
+      // and that blank preview would ship to the list and the app. Keep the existing preview.
+      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
+        setPreviewToast({
+          tone: "error",
+          message: "Keep this tab open and in front while the preview records.",
+        });
+        return;
+      }
 
       previewAbortControllerRef.current?.abort();
       const jobId = previewGenerationIdRef.current + 1;
@@ -1225,7 +1248,10 @@ export default function Toolbar({
     saveAbortControllerRef.current = saveController;
     try {
       const parsedDesign = JSON.parse(exportDesign()) as EditorDesign;
-      const thumbnailDataUrl = stageApi?.captureThumbnailDataUrl?.() || "";
+      // First-frame capture (videos seeked to 0); "" from a hidden tab keeps the stored thumbnail.
+      const thumbnailDataUrl = stageApi?.captureTemplateThumbnailDataUrl
+        ? await stageApi.captureTemplateThumbnailDataUrl()
+        : stageApi?.captureThumbnailDataUrl?.() || "";
       const savedPageThumbnails = await collectPageThumbnailsForSave(parsedDesign);
       const response = await fetch("/api/templates", {
         method: "POST",
@@ -1240,6 +1266,9 @@ export default function Toolbar({
           },
           category: activeTemplateCategory || "general",
           subCategory: activeTemplateSubCategory || "general",
+          // Every placement the template is filed under. The scalars above stay as the
+          // primary so a save from an older client shape still lands somewhere sane.
+          categories: activeTemplateCategories,
           tags: activeTemplateTags,
           thumbnailDataUrl,
           // Per-page previews for the mobile page strip — one per page, including pages the
@@ -1261,6 +1290,7 @@ export default function Toolbar({
           status: template.status === "published" ? "published" : "draft",
           category: String(template.category || activeTemplateCategory || "general"),
           subCategory: String(template.subCategory || activeTemplateSubCategory || "general"),
+          ...(Array.isArray(template.categories) ? { categories: template.categories } : {}),
           tags: Array.isArray(template.tags) ? template.tags : activeTemplateTags,
         });
         updateTemplateIdInUrl(String(template.id));
@@ -1268,40 +1298,36 @@ export default function Toolbar({
         setTemplateMeta({ name: nextName });
       }
 
-      const isMotionTemplate = hasAnimatedTemplateContent(parsedDesign.pages, parsedDesign.timeline);
       if (template?.id) {
         const posterUrl =
           String(template?.preview?.posterUrl || "").trim() ||
           String(template?.thumbnailDataUrl || "").trim() ||
           String(thumbnailDataUrl || "").trim() ||
           null;
-        if (isMotionTemplate && stageApi?.recordTimelinePreviewVideo) {
-          void generateTemplatePreview({
-            templateId: String(template.id),
-            templateVersion: Number(template.version || 0),
-            fallbackPosterDataUrl: String(posterUrl || ""),
-          });
-        } else {
-          const templatePreview = template?.preview || null;
-          updateTimeline(
-            {
-              preview: {
-                status: String(templatePreview?.status || "not_requested"),
-                url: String(templatePreview?.url || "").trim() || null,
-                posterUrl:
-                  String(templatePreview?.posterUrl || "").trim() ||
-                  String(posterUrl || "").trim() ||
-                  null,
-                generatedAt:
-                  Number.isFinite(Number(templatePreview?.updatedAt))
-                    ? new Date(Number(templatePreview.updatedAt)).toISOString()
-                    : null,
-                error: String(templatePreview?.error || "").trim() || null,
-              },
+        // Saving does NOT record a preview: it is a real-time capture of the whole timeline
+        // (13 seconds for a 13-second design) and it would run on every save, including
+        // autosaves. The "Generate preview" button in the toolbar is the only trigger, plus
+        // the templates list's "Regenerate preview" (which opens the editor with a flag).
+        // Just mirror whatever preview the server currently holds into the local timeline.
+        const templatePreview = template?.preview || null;
+        updateTimeline(
+          {
+            preview: {
+              status: String(templatePreview?.status || "not_requested"),
+              url: String(templatePreview?.url || "").trim() || null,
+              posterUrl:
+                String(templatePreview?.posterUrl || "").trim() ||
+                String(posterUrl || "").trim() ||
+                null,
+              generatedAt:
+                Number.isFinite(Number(templatePreview?.updatedAt))
+                  ? new Date(Number(templatePreview.updatedAt)).toISOString()
+                  : null,
+              error: String(templatePreview?.error || "").trim() || null,
             },
-            { recordHistory: false }
-          );
-        }
+          },
+          { recordHistory: false }
+        );
       }
 
       return template;
@@ -1321,6 +1347,7 @@ export default function Toolbar({
   }, [
     activePage?.height,
     activePage?.width,
+    activeTemplateCategories,
     activeTemplateCategory,
     activeTemplateId,
     activeTemplateName,
@@ -1328,13 +1355,57 @@ export default function Toolbar({
     activeTemplateTags,
     collectPageThumbnailsForSave,
     exportDesign,
-    generateTemplatePreview,
     isSavingTemplate,
     stageApi,
     setTemplateMeta,
     updateTimeline,
     updateTemplateIdInUrl,
   ]);
+
+  // Save first, then record: the capture reads the live stage, and the server rejects a preview
+  // whose version is older than the template's — saving makes both match what is stored.
+  const handleGeneratePreview = useCallback(async () => {
+    if (previewGenerationActive || isSavingTemplate) return;
+    if (!stageApi?.recordTimelinePreviewVideo) {
+      window.alert("The canvas is not ready yet. Try again in a moment.");
+      return;
+    }
+    const saved = await saveTemplate();
+    const templateId = String(saved?.id || activeTemplateId || "").trim();
+    if (!templateId) return;
+    await generateTemplatePreview({
+      templateId,
+      templateVersion: Number(saved?.version || 0),
+      fallbackPosterDataUrl:
+        String(saved?.preview?.posterUrl || "").trim() ||
+        String(saved?.thumbnailDataUrl || "").trim() ||
+        String(designTimeline.preview.posterUrl || "").trim(),
+    });
+  }, [
+    activeTemplateId,
+    designTimeline.preview.posterUrl,
+    generateTemplatePreview,
+    isSavingTemplate,
+    previewGenerationActive,
+    saveTemplate,
+    stageApi,
+  ]);
+
+  // The templates list's "Regenerate preview" opens the editor with ?regeneratePreview=1. That is
+  // an explicit click too, so it runs once the template is loaded — nothing else is automatic.
+  const requestedPreviewRef = useRef("");
+  useEffect(() => {
+    if (!regeneratePreviewFromQuery) return undefined;
+    const templateId = String(activeTemplateId || "").trim();
+    if (!templateId || requestedPreviewRef.current === templateId) return undefined;
+    if (!stageApi?.recordTimelinePreviewVideo) return undefined;
+    requestedPreviewRef.current = templateId;
+    // Fonts and media are still streaming in right after load; the recorder samples the live stage.
+    const timeoutId = window.setTimeout(() => {
+      void handleGeneratePreview();
+    }, 3000);
+    return () => window.clearTimeout(timeoutId);
+  }, [activeTemplateId, handleGeneratePreview, regeneratePreviewFromQuery, stageApi]);
 
   const publishTemplate = useCallback(async () => {
     if (isPublishingTemplate || activeTemplateStatus === "published") return;
@@ -1366,6 +1437,7 @@ export default function Toolbar({
           status: template.status === "published" ? "published" : "draft",
           category: String(template.category || activeTemplateCategory || "general"),
           subCategory: String(template.subCategory || activeTemplateSubCategory || "general"),
+          ...(Array.isArray(template.categories) ? { categories: template.categories } : {}),
           tags: Array.isArray(template.tags) ? template.tags : activeTemplateTags,
         });
       } else {
@@ -1466,6 +1538,7 @@ export default function Toolbar({
           status: template.status === "published" ? "published" : "draft",
           category: String(template.category || activeTemplateCategory || "general"),
           subCategory: String(template.subCategory || activeTemplateSubCategory || "general"),
+          ...(Array.isArray(template.categories) ? { categories: template.categories } : {}),
           tags: Array.isArray(template.tags) ? template.tags : activeTemplateTags,
         });
       } else {
@@ -1502,6 +1575,7 @@ export default function Toolbar({
           templateId: activeTemplateId || "",
           pageId: activePage.id,
           elementIds: publishCandidateIds,
+          categoryValue: publishCategoryValue,
           design: parsedDesign,
         }),
       });
@@ -1516,7 +1590,26 @@ export default function Toolbar({
       clearPublishCandidates();
 
       if (publishedCount === 0 && skippedCount > 0) {
-        window.alert("No selected elements were publishable. Background and full-page images are skipped.");
+        // Report the server's ACTUAL reason. The old fixed message always blamed
+        // "background / full-page", which sent debugging down the wrong path when the real
+        // cause was a missing or unresolvable asset source.
+        const reasons = Array.from(
+          new Set(
+            (payload.skipped as Array<{ reason?: string }>)
+              .map((entry) => String(entry?.reason || "").trim())
+              .filter(Boolean)
+          )
+        );
+        const explain: Record<string, string> = {
+          "background-like": "it covers the page (backgrounds are skipped)",
+          "unsupported-type": "it is not an image layer",
+          "missing-source": "its image source could not be resolved",
+          "missing-element": "the layer was not found on the page",
+        };
+        const detail = reasons.map((reason) => explain[reason] || reason).join("; ");
+        window.alert(
+          `Nothing was published — ${skippedCount} skipped${detail ? `: ${detail}` : "."}`
+        );
         return;
       }
 
@@ -1537,6 +1630,7 @@ export default function Toolbar({
     activeTemplateId,
     bumpImportedElementsRefreshKey,
     clearPublishCandidates,
+    publishCategoryValue,
     exportDesign,
     isPublishingElements,
     publishCandidateIds,
@@ -1580,6 +1674,12 @@ export default function Toolbar({
     isDeletingTemplate,
   ]);
 
+  // A video preview only means something for a design that moves (video layer or animation); the
+  // server clears the preview of a static template on save, so the button is hidden for those.
+  const isMotionDesign = useMemo(
+    () => hasAnimatedTemplateContent(pages, designTimeline),
+    [designTimeline, pages]
+  );
   const templateShareUrl = useMemo(
     () => buildTemplateShareUrl(activeTemplateId),
     [activeTemplateId]
@@ -2090,6 +2190,19 @@ export default function Toolbar({
           >
             {isSavingTemplate ? "Saving..." : "Save"}
           </Button>
+          {isMotionDesign ? (
+            <Button
+              type="button"
+              variant="ghost"
+              className="!h-8 !rounded !px-3 !text-sm !font-medium !text-[#1b2738]"
+              onClick={() => void handleGeneratePreview()}
+              disabled={previewGenerationActive || isSavingTemplate || isDeletingTemplate}
+              title="Save the template and record a video preview of the timeline (takes about as long as the design runs)"
+            >
+              <Film size={15} />
+              {previewGenerationActive ? "Generating preview..." : "Generate preview"}
+            </Button>
+          ) : null}
           <Button
             type="button"
             variant="ghost"

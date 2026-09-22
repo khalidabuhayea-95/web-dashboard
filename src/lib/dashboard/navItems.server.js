@@ -1,4 +1,5 @@
 import { Roles } from "@/lib/auth/roles";
+import { countOccasionReminders } from "@/lib/occasions/occasions.server";
 import { countContactMessagesByStatus } from "@/lib/support/contactMessages.server";
 
 /**
@@ -37,12 +38,30 @@ export async function buildDashboardNavItems(role) {
     }
   }
 
+  // Occasions inside their reminder window with nothing linked yet. Every role sees this
+  // badge — designers are the ones who make the templates the reminder is asking for.
+  let occasionsNeedingContent = 0;
+  try {
+    occasionsNeedingContent = (await countOccasionReminders()).needsContent;
+  } catch {
+    occasionsNeedingContent = 0;
+  }
+
   // Content management — everything a designer needs to produce templates.
   // Configuration, credentials, and people-management are admin-only; see the
   // page-level requireRole calls for the real gate.
   const content = [
     { href: "/templates", label: "Templates", icon: "templates" },
     { href: "/categories", label: "Categories", icon: "categories" },
+    {
+      href: "/occasions",
+      label: "Occasions",
+      icon: "occasions",
+      badge: occasionsNeedingContent,
+      badgeLabel: "occasions needing content",
+      countHref: "/api/admin/occasions/count",
+      countKey: "needsContent",
+    },
   ];
   if (isAdmin) {
     content.push(

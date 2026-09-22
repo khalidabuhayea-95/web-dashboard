@@ -22,11 +22,20 @@ import {
   createMobilePublicMediaUrlResolver,
   createTemplateAssetResolver,
 } from "@/lib/mobile/templateAssets";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
+import { applyOccasionCategoryOrder, stablePartition } from "@/lib/occasions/hoist";
+import { resolvePinnedWindow } from "@/lib/occasions/pinnedPagination";
+import { buildTemplateBoostWhere, makeTemplateBoostPredicate } from "@/lib/occasions/templateBoost";
+import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
 import prisma from "@/lib/prisma";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 
 const logger = createLogger("api.mobile.templates");
+
+// Cap on how many boosted rows the pinned-first pagination tracks per request. Past it the
+// tail of boosted content falls back to recency order; nothing disappears.
+const MAX_PINNED_ROWS = 5000;
 
 function parsePositiveInt(value: any, fallback: number): number {
   const parsed = Number(value);
@@ -126,7 +135,10 @@ export async function buildMobileTemplatesListResponse(
     const locale = resolveMobileLocale(request, searchParams);
     const taxonomySettings = await getTemplateTaxonomySettings();
     const taxonomy = prepareMobileTaxonomy(taxonomySettings);
-    const categories = localizeCategoryOptions(taxonomy, locale);
+    // Seasonal boost: linked categories lead the list (matching /templates/taxonomy and the
+    // home feed) and linked templates are pinned to the front of the results.
+    const boost = await getActiveOccasionBoost();
+    const categories = applyOccasionCategoryOrder(localizeCategoryOptions(taxonomy, locale), boost);
     const categoryIdParam = searchParams.get("categoryId");
     const subCategoryIdParam = searchParams.get("subCategoryId");
     const query =
@@ -179,17 +191,17 @@ export async function buildMobileTemplatesListResponse(
       return attachRequestIdHeader(response, requestId);
     }
 
-    const baseWhere = {
-      ...audience.statusWhere,
-      ...publishedScopeWhere,
-      ...(categoryValue ? { category: categoryValue } : {}),
-      ...(subCategoryValue ? { subCategory: subCategoryValue } : {}),
-    };
-    const where = {
-      ...baseWhere,
+    // Both the published-taxonomy scope and the category filter match ANY placement, so
+    // each is its own OR fragment and they have to be AND-merged, not spread together.
+    const baseWhere = mergeTemplateWhere(
+      audience.statusWhere,
+      publishedScopeWhere,
+      templateCategoryWhere({ category: categoryValue, subCategory: subCategoryValue })
+    );
+    const where = mergeTemplateWhere(baseWhere, {
       ...(tags.length > 0 ? { tags: { array_contains: tags } } : {}),
       ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
-    };
+    });
     const templateSelect = {
       id: true,
       name: true,
@@ -197,6 +209,7 @@ export async function buildMobileTemplatesListResponse(
       version: true,
       category: true,
       subCategory: true,
+      categories: true,
       tags: true,
       canvasSize: true,
       pageCount: true,
@@ -216,8 +229,10 @@ export async function buildMobileTemplatesListResponse(
     let rows: any[] = [];
     let total = 0;
 
+    const boostWhere = buildTemplateBoostWhere(boost, taxonomy);
+
     if (searchMode === "queryOnly" && query) {
-      const matchingRows = (
+      let matchingRows = (
         await prisma.template.findMany({
           where: baseWhere,
           orderBy: { updatedAt: "desc" },
@@ -225,9 +240,12 @@ export async function buildMobileTemplatesListResponse(
         })
       ).filter((template: any) => templateMatchesCombinedQuery(template, query));
 
+      const isBoosted = makeTemplateBoostPredicate(boost);
+      if (isBoosted) matchingRows = stablePartition(matchingRows, isBoosted);
+
       total = matchingRows.length;
       rows = matchingRows.slice(skip, skip + pageSize);
-    } else {
+    } else if (!boostWhere) {
       [rows, total] = await prisma.$transaction([
         prisma.template.findMany({
           where,
@@ -238,6 +256,42 @@ export async function buildMobileTemplatesListResponse(
         }),
         prisma.template.count({ where }),
       ]);
+    } else {
+      // Pinned-first pagination: every boosted row that matches `where` occupies the first
+      // positions of the virtual list, the remainder follows, `total` is unchanged. The
+      // remainder is `id notIn pinned` rather than `NOT boostWhere` because `categories` is
+      // a nullable jsonb and NOT over it would drop legacy rows from every page.
+      const pinnedIds: string[] = (
+        await prisma.template.findMany({
+          where: mergeTemplateWhere(where, boostWhere),
+          orderBy: { updatedAt: "desc" },
+          select: { id: true },
+          take: MAX_PINNED_ROWS,
+        })
+      ).map((row: { id: string }) => row.id);
+      if (pinnedIds.length === MAX_PINNED_ROWS) {
+        requestLogger.warn("Occasion boost hit the pinned-row cap", { cap: MAX_PINNED_ROWS });
+      }
+      const window = resolvePinnedWindow({ skip, take: pageSize, pinnedCount: pinnedIds.length });
+      const pagePinnedIds = pinnedIds.slice(window.pinnedSkip, window.pinnedSkip + window.pinnedTake);
+      const [pinnedRows, restRows, count] = await Promise.all([
+        pagePinnedIds.length
+          ? prisma.template.findMany({ where: { id: { in: pagePinnedIds } }, select: templateSelect })
+          : Promise.resolve([] as any[]),
+        window.restTake > 0
+          ? prisma.template.findMany({
+              where: mergeTemplateWhere(where, { id: { notIn: pinnedIds } }),
+              orderBy: { updatedAt: "desc" },
+              skip: window.restSkip,
+              take: window.restTake,
+              select: templateSelect,
+            })
+          : Promise.resolve([] as any[]),
+        prisma.template.count({ where }),
+      ]);
+      const pinnedById = new Map(pinnedRows.map((row: any) => [row.id, row]));
+      rows = [...pagePinnedIds.map((id: string) => pinnedById.get(id)).filter(Boolean), ...restRows];
+      total = count;
     }
 
     const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);
@@ -247,12 +301,15 @@ export async function buildMobileTemplatesListResponse(
       return {
         ...toMobileTemplate(template, { assetResolver, mediaUrlResolver, includeProject: false }),
         status: String(template.status || ""),
+        // Flat fields keep the single-category shape older clients read — the grouping below
+        // re-points them at the rail each copy is listed under. `placements` is the full list.
         category: localized.categoryLabel,
         subCategory: localized.subCategoryLabel,
         categoryId: localized.categoryId,
         categoryValue: localized.categoryValue,
         subCategoryId: localized.subCategoryId,
         subCategoryValue: localized.subCategoryValue,
+        placements: localized.placements,
       };
     });
 
@@ -271,24 +328,59 @@ export async function buildMobileTemplatesListResponse(
     );
     const groupedBySubCategoryMap = new Map<string, any>();
 
+    // A multi-category template belongs in EVERY rail it was placed in, so it is emitted
+    // once per placement (narrowed to the requested filter). Each copy reports the labels
+    // of the rail it is rendered under, not the template's primary placement.
     templates.forEach((template: any, index: number) => {
-      const categoryValueKey = String(template.categoryValue || "");
-      const subCategoryValueKey = String(template.subCategoryValue || "");
-      const key = `${categoryValueKey}::${subCategoryValueKey}`;
-      const existing = groupedBySubCategoryMap.get(key);
-      if (existing) {
-        existing.templates.push(template);
-        return;
-      }
-      groupedBySubCategoryMap.set(key, {
-        category: String(template.category || ""),
-        categoryId: String(template.categoryId || ""),
-        categoryValue: categoryValueKey,
-        subCategory: String(template.subCategory || ""),
-        subCategoryId: String(template.subCategoryId || ""),
-        subCategoryValue: subCategoryValueKey,
-        templates: [template],
-        _firstIndex: index,
+      const allPlacements = Array.isArray(template.placements) ? template.placements : [];
+      const matching = allPlacements.filter(
+        (placement: any) =>
+          (!categoryValue || placement.categoryValue === categoryValue) &&
+          (!subCategoryValue || placement.subCategoryValue === subCategoryValue)
+      );
+      const placements =
+        matching.length > 0
+          ? matching
+          : [
+              {
+                categoryId: template.categoryId,
+                categoryValue: template.categoryValue,
+                categoryLabel: template.category,
+                subCategoryId: template.subCategoryId,
+                subCategoryValue: template.subCategoryValue,
+                subCategoryLabel: template.subCategory,
+              },
+            ];
+
+      placements.forEach((placement: any) => {
+        const categoryValueKey = String(placement.categoryValue || "");
+        const subCategoryValueKey = String(placement.subCategoryValue || "");
+        const key = `${categoryValueKey}::${subCategoryValueKey}`;
+        const entry = {
+          ...template,
+          category: String(placement.categoryLabel || ""),
+          categoryId: String(placement.categoryId || ""),
+          categoryValue: categoryValueKey,
+          subCategory: String(placement.subCategoryLabel || ""),
+          subCategoryId: String(placement.subCategoryId || ""),
+          subCategoryValue: subCategoryValueKey,
+        };
+
+        const existing = groupedBySubCategoryMap.get(key);
+        if (existing) {
+          existing.templates.push(entry);
+          return;
+        }
+        groupedBySubCategoryMap.set(key, {
+          category: entry.category,
+          categoryId: entry.categoryId,
+          categoryValue: categoryValueKey,
+          subCategory: entry.subCategory,
+          subCategoryId: entry.subCategoryId,
+          subCategoryValue: subCategoryValueKey,
+          templates: [entry],
+          _firstIndex: index,
+        });
       });
     });
 

@@ -366,6 +366,39 @@ async function decodeDataUrlToBitmap(dataUrl) {
   return createImageBitmap(blob);
 }
 
+// Is [posterSrc] a single frame of a clipWidth x clipHeight video? Canva's poster URL sometimes
+// answers with a scrubber FILMSTRIP — several frames tiled in one sheet — and a sheet passed off as
+// a poster is drawn stretched across the whole video layer (observed: the scene stacked twice above
+// a black band). The captured clip's own dimensions are ground truth, so compare aspects.
+// Unknown either way (no dimensions, a poster that will not decode) keeps the poster: a missing
+// thumbnail is worse than an unverified one, and the scraper already gated on the clip rect.
+async function posterMatchesVideoAspect(posterSrc, clipWidth, clipHeight) {
+  const width = Number(clipWidth) || 0;
+  const height = Number(clipHeight) || 0;
+  if (width <= 0 || height <= 0) return true;
+  try {
+    const blob = String(posterSrc).startsWith("data:image/")
+      ? dataUrlToBlob(posterSrc)
+      : await (await fetch(posterSrc)).blob();
+    const bitmap = await createImageBitmap(blob);
+    const posterWidth = bitmap.width;
+    const posterHeight = bitmap.height;
+    bitmap.close?.();
+    const posterAspect = posterWidth / Math.max(1, posterHeight);
+    const videoAspect = width / height;
+    const matches = Math.abs(posterAspect - videoAspect) / videoAspect <= 0.15;
+    if (!matches) {
+      logger.warn("Background video poster rejected: not a single frame of the clip", {
+        poster: `${posterWidth}x${posterHeight}`,
+        clip: `${width}x${height}`,
+      });
+    }
+    return matches;
+  } catch (_error) {
+    return true;
+  }
+}
+
 // Fraction of (downsampled) pixels that are opaque (alpha > 200). Returns -1 on failure.
 async function imageOpaqueFraction(dataUrl) {
   try {
@@ -689,7 +722,7 @@ const CANVA_ANIMATION_PRESET_TO_TYPE = {
   14: "DRIFT", // انسيابية الصورة (Image flow — slow photo drift)
   15: "BREATHE", // تكبير الصورة (Photo zoom / Ken Burns — closest editor motion is the slow scale wave)
   16: "RISE", // ارتقاء الصور (Photo rise)
-  17: "WIPE", // Block (text block reveal — closest editor motion)
+  17: "BLOCK", // Block — we have the real thing now (شريط: a bar sweeps past and leaves the text)
   26: "WIPE", // المسح (Wipe)
   // 28 is NOT a panel preset: it's the id Canva assigns to CUSTOM "create an animation" motion
   // paths (baked Acb keyframes) — imported exactly via mediaMotionPath, never via this table.
@@ -698,10 +731,59 @@ const CANVA_ANIMATION_PRESET_TO_TYPE = {
   31: "SUCCESSION", // التتابع (Succession)
   38: "PULSE", // تكبير اهتزازي (Shake zoom)
   39: "PAN", // انزلاق سريع (Quick slide)
+  40: "WAVE", // تموج (Ripple) — matched by name, not observed
   41: "FLICKER", // موجة الانحراف اللوني (Chromatic aberration wave — glitch-like)
   42: "FLICKER", // التلفزيون القديم (Old TV — glitch/static)
+  43: "DRIFT", // حركة بطيئة (Slow motion) — matched by name, not observed
 };
 
+// PAGE animations ("Animate page") use a SEPARATE enum from element presets — verified by applying
+// each one on a scratch copy and reading page.animation: page Rise=5 while element 5 is Neon, page
+// Fade=3 while element 3 is Drift, page Pop=11 while element 11 is Stomp. Routing a page preset
+// through the element table would therefore pick an unrelated animation, so it gets its own map.
+// Calibrated 2026-09-22 on a copy of DAHN3H7074o (Canva Arabic UI), then RE-VERIFIED 2026-09-22 on
+// DAHOPR_iwyk without touching the design: every tile in the Animate panel carries its own preset in
+// its React props (`memoizedProps.animation.animation`, with `animation.type` = "page" | "element" |
+// "element_mask"), so walking up the fiber from each `button[role="switch"]` reads the WHOLE enum —
+// id, family and label — in one pass. That is strictly better than applying each preset to a scratch
+// element: nothing is written, and the two id spaces cannot be confused because the family says
+// which is which. Every id below 1-13/20-27 matched; 17-19 were added from that read.
+const CANVA_PAGE_ANIMATION_PRESET_TO_TYPE = {
+  1: "BLOCK", // Block
+  2: "BREATHE", // ظهور بطيء (Breathe)
+  3: "FADE", // تلاشي (Fade)
+  4: "PAN", // تأرجح (Pan)
+  5: "RISE", // ارتقاء (Rise)
+  6: "TUMBLE", // دوران (Tumble)
+  7: "BASELINE", // Baseline
+  8: "NEON", // نيون (Neon)
+  9: "DRIFT", // انجراف (Drift)
+  10: "TECTONIC", // حركة تكتونية (Tectonic)
+  11: "POP", // انبثاق (Pop)
+  12: "SCRAPBOOK", // سجل قصاصات (Scrapbook)
+  13: "STOMP", // سقوط هوائي (Stomp)
+  17: "DRIFT", // انسيابية الصورة (Image flow)
+  18: "BREATHE", // تكبير الصورة (Photo zoom)
+  19: "RISE", // ارتقاء الصور (Photo rise)
+  20: "WIPE", // المسح (Wipe)
+  // 21-27 are the "متميز" (Featured) page STYLES. Each is a COMBO — Canva gives text and images
+  // different motions under one name — so a single editor type can only approximate it. Only 23 is
+  // confirmed by watching it play (fade in + drop from above, ~1s); the rest are matched by name.
+  21: "FADE", // بسيط (Simple)
+  22: "BREATHE", // ناعم (Soft)
+  23: "DRIFT", // مضحكة (Wacky) — verified on DAHN3H7074o
+  24: "POP", // حفلة (Party)
+  26: "WIPE", // مؤسسة (Corporate)
+  27: "FADE", // هادئ (Calm)
+};
+
+// Four of those map onto effects that PING-PONG or ride a wave: they finish exactly where they
+// started. As an ENTRANCE they reveal nothing at all, and no entrance tab offers them, so the
+// editor's picker showed an empty selection on a layer that plainly had an animation. They belong
+// in the loop slot, where an infinite spec cycles them the way Canva plays them. The rest of the
+// page presets (Rise, Pan, Drift, Tectonic, Stomp, Tumble) SETTLE into place, so they stay
+// entrances.
+const CANVA_PAGE_AMBIENT_TYPES = new Set(["BREATHE", "NEON", "BASELINE", "SCRAPBOOK"]);
 // Canva easing enum → editor easing (best-effort; editor also has its own per-type defaults).
 const CANVA_ANIMATION_EASING_TO_EDITOR = { 0: "LINEAR", 1: "EASE_OUT", 2: "EASE_IN_OUT" };
 
@@ -736,11 +818,31 @@ function buildEditorAnimationFields(animation) {
   }
   if (!mode && !hasMotionPath) return fields.canvaAnimationPreset === null ? {} : fields;
   if (mode) {
-    const mappedType = CANVA_ANIMATION_PRESET_TO_TYPE[animation.canvaPreset];
+    // A page animation carries a preset from the PAGE enum (see the table above), so it must not
+    // be looked up in the element one — the ids collide with different meanings.
+    const mappedType = animation.fromPageAnimation
+      ? CANVA_PAGE_ANIMATION_PRESET_TO_TYPE[animation.canvaPreset]
+      : CANVA_ANIMATION_PRESET_TO_TYPE[animation.canvaPreset];
+    // An UNKNOWN page preset is not an animation Canva plays. The page enum above is complete (read
+    // straight off Canva's own tiles), so an id outside it is a leftover from whatever template the
+    // design was built from — DAHOPR_iwyk carries page.animation = 31 while Canva's page panel shows
+    // nothing applied and plays nothing. The generic fallback would have put a FADE on EVERY layer
+    // of that design, inventing an animation the original does not have. Element presets keep the
+    // fallback: there the id came from a tile the user really did click.
+    if (animation.fromPageAnimation && !mappedType) {
+      return fields.canvaAnimationPreset === null ? {} : fields;
+    }
     fields.mediaAnimationType = mappedType || (mode === "LOOP" ? "PULSE" : "FADE");
+    if (animation.fromPageAnimation && CANVA_PAGE_AMBIENT_TYPES.has(fields.mediaAnimationType)) {
+      mode = "LOOP";
+    }
     fields.mediaAnimationMode = mode;
     const durationMs = Number(animation.durationMs) > 0 ? Math.round(Number(animation.durationMs)) : undefined;
     if (durationMs) fields.mediaAnimationDurationMs = durationMs;
+    // A page animation carries in/out legs rather than one duration; a looping one takes the in leg.
+    if (mode === "LOOP" && !durationMs && Number(animation.inMs) > 0) {
+      fields.mediaAnimationDurationMs = Math.round(Number(animation.inMs));
+    }
     if (mode === "IN_OUT") {
       fields.mediaAnimationDurationMs = Math.round(Number(animation.inMs));
       fields.mediaAnimationOutDurationMs = Math.round(Number(animation.outMs));
@@ -3010,6 +3112,17 @@ function sliceFiberModelForPage(fiberModel, pageIndex) {
   if (page.background && typeof page.background === "object") {
     sliced.__background = page.background;
   }
+  // The page's own fill (colour / photo placement + flips): the scraper reads it for the
+  // full-page background node, which has no LB element of its own.
+  if (page.fill && typeof page.fill === "object") {
+    sliced.__pageFill = page.fill;
+  }
+  if (page.animation && typeof page.animation === "object") {
+    sliced.__pageAnimation = page.animation;
+  }
+  if (Number(page.durationMs) > 0) {
+    sliced.__pageDurationMs = Number(page.durationMs);
+  }
   return sliced;
 }
 
@@ -3037,14 +3150,51 @@ async function listCanvaPagesInTab(tabId) {
   }
 }
 
+// ── Debugger sessions ──────────────────────────────────────────────────────────────────────
+// One attachment per tab, refcounted: the background-video capture holds a CDP Network session
+// open for several seconds, and a trusted page-switch click inside that window must not try to
+// attach a second time (Chrome refuses) or detach underneath it. Chrome shows its standard
+// "is debugging this browser" banner while attached; the last release clears it.
+const debuggerSessions = new Map();
+
+async function acquireDebugger(tabId) {
+  const existing = debuggerSessions.get(tabId);
+  if (existing) {
+    existing.refs += 1;
+    return { tabId };
+  }
+  try {
+    await chrome.debugger.attach({ tabId }, "1.3");
+  } catch (error) {
+    // A previous session that failed to detach (worker restart mid-import) is still ours.
+    if (!/already attached/i.test(String(error?.message || ""))) throw error;
+  }
+  debuggerSessions.set(tabId, { refs: 1 });
+  return { tabId };
+}
+
+async function releaseDebugger(tabId) {
+  const session = debuggerSessions.get(tabId);
+  if (!session) return;
+  session.refs -= 1;
+  if (session.refs > 0) return;
+  debuggerSessions.delete(tabId);
+  try {
+    await chrome.debugger.detach({ tabId });
+  } catch (_detachError) {
+    /* already detached */
+  }
+}
+
+function cdpSend(tabId, method, params = {}) {
+  return chrome.debugger.sendCommand({ tabId }, method, params);
+}
+
 // Trusted input via the debugger protocol: Canva's page-switcher thumbnails ignore synthetic
 // DOM events (isTrusted checks), so a real Input.dispatchMouseEvent click — indistinguishable
-// from a physical one — is the only reliable way to change pages in single-page view. Chrome
-// shows its standard "is debugging this browser" banner while attached; attach/detach is scoped
-// to each click so the banner clears between pages.
+// from a physical one — is the only reliable way to change pages in single-page view.
 async function trustedClickAt(tabId, x, y) {
-  const target = { tabId };
-  await chrome.debugger.attach(target, "1.3");
+  await acquireDebugger(tabId);
   try {
     const base = {
       x: Math.round(x),
@@ -3053,22 +3203,912 @@ async function trustedClickAt(tabId, x, y) {
       clickCount: 1,
       pointerType: "mouse",
     };
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
-      type: "mousePressed",
-      ...base,
-    });
+    await cdpSend(tabId, "Input.dispatchMouseEvent", { type: "mouseMoved", x: base.x, y: base.y, pointerType: "mouse" });
+    await sleep(30);
+    await cdpSend(tabId, "Input.dispatchMouseEvent", { type: "mousePressed", ...base, buttons: 1 });
     await sleep(40);
-    await chrome.debugger.sendCommand(target, "Input.dispatchMouseEvent", {
-      type: "mouseReleased",
-      ...base,
-    });
+    await cdpSend(tabId, "Input.dispatchMouseEvent", { type: "mouseReleased", ...base, buttons: 0 });
   } finally {
+    await releaseDebugger(tabId);
+  }
+}
+
+// ── Background video capture ───────────────────────────────────────────────────────────────
+// Canva streams a page's background video through MediaSource from signed media.canva.com
+// URLs: the <video> src is a blob:, and the page's own JS is CORS-blocked from the file. The
+// extension is not: a CDP Network session on the tab sees every media request the player makes
+// while we force playback, and the service worker — host permission on *.canva.com, no CORS —
+// re-downloads the signed URL in full. Byte-range and segmented deliveries are reassembled.
+// Everything here is best-effort: any failure leaves the poster-frame layer in place.
+const BINARY_ASSET_SCHEME = "canva-ext-binary://";
+const pendingBinaryAssets = new Map();
+const MAX_CAPTURED_VIDEO_BYTES = 200 * 1024 * 1024;
+const VIDEO_CAPTURE_MAX_PLAYBACK_MS = 8000;
+const VIDEO_CAPTURE_MIN_PLAYBACK_MS = 2500;
+const VIDEO_CAPTURE_QUIET_MS = 1500;
+const VIDEO_RANGE_CHUNK_BYTES = 8 * 1024 * 1024;
+const VIDEO_MAX_SEGMENTS = 400;
+const MEDIA_URL_IMAGE_RE = /\.(jpe?g|png|webp|gif|svg|avif|bmp|ico)(\?|#|$)/i;
+const MEDIA_URL_VIDEO_EXT_RE = /\.(mp4|m4s|m4v|webm|mov|mpd|m3u8|ts)(\?|#|$)/i;
+
+// Blobs travel to the dashboard as multipart parts, never as JSON: a 30 MB clip base64'd into
+// the manifest would triple the memory the worker needs and defeat the transport size checks.
+function registerBinaryAsset(blob, fileName) {
+  const ref = `${BINARY_ASSET_SCHEME}${crypto.randomUUID()}`;
+  pendingBinaryAssets.set(ref, { blob, fileName: String(fileName || "asset.bin") });
+  return ref;
+}
+
+function isBinaryAssetRef(value) {
+  return typeof value === "string" && value.startsWith(BINARY_ASSET_SCHEME) && pendingBinaryAssets.has(value);
+}
+
+function clearBinaryAssets() {
+  pendingBinaryAssets.clear();
+}
+
+async function blobToDataUrl(blob) {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  const CHUNK = 0x8000;
+  for (let index = 0; index < bytes.length; index += CHUNK) {
+    binary += String.fromCharCode.apply(null, bytes.subarray(index, index + CHUNK));
+  }
+  return `data:${blob.type || "application/octet-stream"};base64,${btoa(binary)}`;
+}
+
+// The JSON transport (tab-bridge fallback) cannot carry blobs; inline them as data URLs there.
+async function inlineBinaryAssetsForJson(body, serializedBody) {
+  if (pendingBinaryAssets.size === 0 || !String(serializedBody || "").includes(BINARY_ASSET_SCHEME)) {
+    return serializedBody;
+  }
+  const inline = async (value) => {
+    if (typeof value === "string" && value.startsWith(BINARY_ASSET_SCHEME)) {
+      const asset = pendingBinaryAssets.get(value);
+      return asset ? await blobToDataUrl(asset.blob) : "";
+    }
+    if (Array.isArray(value)) return Promise.all(value.map(inline));
+    if (value && typeof value === "object") {
+      const out = {};
+      for (const [key, nested] of Object.entries(value)) out[key] = await inline(nested);
+      return out;
+    }
+    return value;
+  };
+  return JSON.stringify(await inline(body));
+}
+
+function isCanvaHostUrl(url) {
+  try {
+    return /(^|\.)canva\.com$/i.test(new URL(String(url || "")).hostname);
+  } catch (_error) {
+    return false;
+  }
+}
+
+function looksLikeCanvaVideoUrl(url, videoId) {
+  const value = String(url || "");
+  if (!/^https:/i.test(value) || !isCanvaHostUrl(value) || MEDIA_URL_IMAGE_RE.test(value)) return false;
+  if (MEDIA_URL_VIDEO_EXT_RE.test(value)) return true;
+  if (videoId && value.includes(videoId)) return true;
+  return /\/video\//i.test(value);
+}
+
+function lowerCaseHeaders(headers) {
+  const out = {};
+  Object.entries(headers && typeof headers === "object" ? headers : {}).forEach(([key, value]) => {
+    out[String(key).toLowerCase()] = String(value ?? "");
+  });
+  return out;
+}
+
+function parseContentRange(value) {
+  const match = /bytes\s+(\d+)-(\d+)\/(\d+|\*)/i.exec(String(value || ""));
+  if (!match) return null;
+  return {
+    start: Number(match[1]),
+    end: Number(match[2]),
+    total: match[3] === "*" ? 0 : Number(match[3]),
+  };
+}
+
+function describeVideoUrl(url) {
+  try {
+    const parsed = new URL(url);
+    return `${parsed.hostname}${parsed.pathname}`;
+  } catch (_error) {
+    return String(url || "").slice(0, 120);
+  }
+}
+
+function readBoxType(bytes, offset) {
+  if (!bytes || offset + 8 > bytes.length) return "";
+  return String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+}
+
+// Container sniff on the first bytes: "ftyp" = complete MP4/fMP4 init, "styp"/"moof" = a media
+// segment with no init (useless alone), EBML magic = WebM.
+function sniffVideoContainer(bytes) {
+  if (!bytes || bytes.length < 12) return "";
+  if (bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return "webm";
+  const type = readBoxType(bytes, 0);
+  if (type === "ftyp") return "mp4";
+  if (type === "styp" || type === "moof" || type === "sidx") return "mp4-segment";
+  return "";
+}
+
+function readUint32(bytes, offset) {
+  return ((bytes[offset] << 24) >>> 0) + (bytes[offset + 1] << 16) + (bytes[offset + 2] << 8) + bytes[offset + 3];
+}
+
+function readUint64(bytes, offset) {
+  return readUint32(bytes, offset) * 4294967296 + readUint32(bytes, offset + 4);
+}
+
+// Walks the top-level boxes of an MP4 blob (only headers are read, so a non-fast-start file with
+// moov at the end costs a few tiny slices) and reads the duration from moov/mvhd — or, for a
+// fragmented file whose mvhd says 0, from moov/mvex/mehd.
+async function readMp4DurationSeconds(blob) {
+  try {
+    const size = blob.size;
+    let offset = 0;
+    let moov = null;
+    for (let guard = 0; guard < 64 && offset + 8 <= size; guard += 1) {
+      const header = new Uint8Array(await blob.slice(offset, Math.min(size, offset + 16)).arrayBuffer());
+      let boxSize = readUint32(header, 0);
+      const type = readBoxType(header, 0);
+      let headerSize = 8;
+      if (boxSize === 1) {
+        boxSize = readUint64(header, 8);
+        headerSize = 16;
+      } else if (boxSize === 0) {
+        boxSize = size - offset;
+      }
+      if (boxSize < headerSize) break;
+      if (type === "moov") {
+        moov = new Uint8Array(await blob.slice(offset, Math.min(size, offset + boxSize)).arrayBuffer());
+        break;
+      }
+      offset += boxSize;
+    }
+    if (!moov) return 0;
+    let timescale = 0;
+    let duration = 0;
+    let fragmentDuration = 0;
+    const walk = (bytes, start, end, depth) => {
+      let cursor = start;
+      while (cursor + 8 <= end) {
+        let boxSize = readUint32(bytes, cursor);
+        const type = readBoxType(bytes, cursor);
+        let headerSize = 8;
+        if (boxSize === 1) {
+          boxSize = readUint64(bytes, cursor + 8);
+          headerSize = 16;
+        } else if (boxSize === 0) {
+          boxSize = end - cursor;
+        }
+        if (boxSize < headerSize) return;
+        const body = cursor + headerSize;
+        if (type === "mvhd") {
+          const version = bytes[body];
+          if (version === 1) {
+            timescale = readUint32(bytes, body + 20);
+            duration = readUint64(bytes, body + 24);
+          } else {
+            timescale = readUint32(bytes, body + 12);
+            duration = readUint32(bytes, body + 16);
+          }
+        } else if (type === "mehd") {
+          const version = bytes[body];
+          fragmentDuration = version === 1 ? readUint64(bytes, body + 4) : readUint32(bytes, body + 4);
+        } else if ((type === "mvex" || type === "moov") && depth < 3) {
+          walk(bytes, body, cursor + boxSize, depth + 1);
+        }
+        cursor += boxSize;
+      }
+    };
+    walk(moov, 0, moov.length, 0);
+    const ticks = duration > 0 ? duration : fragmentDuration;
+    if (!(timescale > 0) || !(ticks > 0)) return 0;
+    const seconds = ticks / timescale;
+    return Number.isFinite(seconds) && seconds < 24 * 3600 ? seconds : 0;
+  } catch (_error) {
+    return 0;
+  }
+}
+
+async function fetchCanvaMediaBytes(url, { rangeHeader = "", timeoutMs = 120_000 } = {}) {
+  // "omit" first: signed URLs (csig=…) answer ACAO:* and reject credentialed requests.
+  for (const credentials of ["omit", "include"]) {
     try {
-      await chrome.debugger.detach(target);
-    } catch (_detachError) {
-      /* already detached */
+      const response = await fetchWithTimeout(
+        url,
+        {
+          method: "GET",
+          credentials,
+          cache: "no-store",
+          headers: rangeHeader ? { Range: rangeHeader } : {},
+        },
+        timeoutMs
+      );
+      if (!response.ok) continue;
+      const buffer = await response.arrayBuffer();
+      return {
+        status: response.status,
+        buffer,
+        contentType: String(response.headers.get("content-type") || "").toLowerCase(),
+        contentRange: parseContentRange(response.headers.get("content-range")),
+        contentLength: Number(response.headers.get("content-length") || buffer.byteLength),
+      };
+    } catch (_error) {
+      /* next credentials mode */
     }
   }
+  return null;
+}
+
+// Runs in the page (MAIN world): drives every <video> and reports what the player knows.
+// Retroactive discovery too — Resource Timing keeps the full (signed) URL of every fetch/XHR
+// the player already made, so a video that is buffered before we attach is still found.
+function probeCanvaVideosInPage(mode, videoId) {
+  const out = { videos: [], resources: [] };
+  try {
+    performance.setResourceTimingBufferSize(4000);
+  } catch (_e) {
+    /* ignore */
+  }
+  try {
+    const videoExt = /\.(mp4|m4s|m4v|webm|mov|mpd|m3u8|ts)(\?|#|$)/i;
+    const imageExt = /\.(jpe?g|png|webp|gif|svg|avif|bmp|ico)(\?|#|$)/i;
+    for (const entry of performance.getEntriesByType("resource")) {
+      const name = String(entry.name || "");
+      if (!/^https:\/\/[^/]*\.canva\.com\//i.test(name) || imageExt.test(name)) continue;
+      const matches =
+        videoExt.test(name) || (videoId && name.includes(videoId)) || /\/video\//i.test(name);
+      if (!matches) continue;
+      out.resources.push({
+        url: name,
+        initiatorType: String(entry.initiatorType || ""),
+        bytes: Number(entry.transferSize || entry.encodedBodySize || 0),
+        startTime: Number(entry.startTime || 0),
+      });
+    }
+  } catch (_e) {
+    /* resource timing unavailable */
+  }
+  try {
+    for (const video of Array.from(document.querySelectorAll("video"))) {
+      try {
+        if (mode === "play") {
+          video.muted = true;
+          video.defaultMuted = true;
+          if (video.preload !== "auto") video.preload = "auto";
+          try {
+            if (video.currentTime > 0.25) video.currentTime = 0;
+          } catch (_seekError) {
+            /* not seekable yet */
+          }
+          const playing = video.play();
+          if (playing && typeof playing.catch === "function") playing.catch(() => {});
+        } else if (mode === "stop") {
+          video.pause();
+          try {
+            video.currentTime = 0;
+          } catch (_seekError) {
+            /* ignore */
+          }
+        }
+        out.videos.push({
+          src: String(video.currentSrc || video.src || ""),
+          duration: Number(video.duration),
+          width: Number(video.videoWidth || 0),
+          height: Number(video.videoHeight || 0),
+          readyState: Number(video.readyState || 0),
+          paused: Boolean(video.paused),
+        });
+      } catch (_videoError) {
+        /* next video */
+      }
+    }
+  } catch (_e) {
+    /* ignore */
+  }
+  return out;
+}
+
+async function probeCanvaVideos(tabId, mode, videoId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: probeCanvaVideosInPage,
+      args: [String(mode || "probe"), String(videoId || "")],
+    });
+    const found = Array.isArray(results)
+      ? results.find((entry) => entry && entry.result && typeof entry.result === "object")?.result
+      : null;
+    return found || { videos: [], resources: [] };
+  } catch (_error) {
+    return { videos: [], resources: [] };
+  }
+}
+
+// Canva's editor paints a paused background video as its poster <img>: no <video> element exists
+// until the design is played, so the timeline Play control gets a trusted click (synthetic clicks
+// are ignored, like the page-switcher thumbnails). The control is localized — match the Arabic UI
+// too — and "Preview"/"معاينة" (a different, full-screen control) is never it. A "pause" label
+// means playback is already running, so nothing needs clicking.
+async function findCanvaPlayButton(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        // No `\b` here: JS word boundaries are ASCII-only, so `تشغيل\b` can never match — the Arabic
+        // label ends with non-\w characters on both sides. Anchor on whitespace/end instead.
+        const PLAY = /^(play|تشغيل|reproducir|lecture|lire|abspielen|riproduci|reproduzir|oynat)(\s|$)/i;
+        const PAUSE = /^(pause|إيقاف مؤقت|pausar|pausa|pausieren|duraklat)(\s|$)/i;
+        const PREVIEW = /preview|معاينة|present|عرض/i;
+        const candidates = Array.from(document.querySelectorAll("button, [role='button']"));
+        let pauseControl = null;
+        for (const node of candidates) {
+          const label = `${node.getAttribute("aria-label") || ""} ${node.getAttribute("title") || ""}`.trim();
+          if (!label || PREVIEW.test(label)) continue;
+          const rect = node.getBoundingClientRect();
+          if (rect.width < 8 || rect.height < 8) continue;
+          const hit = { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2, label };
+          if (PLAY.test(label)) return { ...hit, state: "play" };
+          if (!pauseControl && PAUSE.test(label)) pauseControl = { ...hit, state: "pause" };
+        }
+        return pauseControl;
+      },
+    });
+    return Array.isArray(results) ? results.find((entry) => entry?.result)?.result || null : null;
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Fallback when the trusted click does not start playback: call the Play control's React handler
+// directly in the MAIN world. React handlers do not see isTrusted, only native listeners do.
+async function invokeCanvaPlayHandler(tabId) {
+  try {
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      world: "MAIN",
+      func: () => {
+        const PLAY = /^(play|تشغيل|reproducir|lecture|lire|abspielen|riproduci|reproduzir|oynat)(\s|$)/i;
+        const button = Array.from(document.querySelectorAll("button, [role='button']")).find((node) =>
+          PLAY.test(`${node.getAttribute("aria-label") || ""} ${node.getAttribute("title") || ""}`.trim())
+        );
+        if (!button) return "no-button";
+        const propsKey = Object.keys(button).find((key) => key.startsWith("__reactProps$"));
+        const props = propsKey ? button[propsKey] : null;
+        if (!props) return "no-react-props";
+        const rect = button.getBoundingClientRect();
+        const fakeEvent = (type) => ({
+          type,
+          target: button,
+          currentTarget: button,
+          nativeEvent: new MouseEvent(type, { bubbles: true, cancelable: true }),
+          button: 0,
+          buttons: 0,
+          clientX: rect.left + rect.width / 2,
+          clientY: rect.top + rect.height / 2,
+          pointerType: "mouse",
+          isTrusted: true,
+          preventDefault() {},
+          stopPropagation() {},
+          persist() {},
+          isDefaultPrevented: () => false,
+          isPropagationStopped: () => false,
+        });
+        const called = [];
+        for (const name of ["onPointerDown", "onMouseDown", "onPointerUp", "onMouseUp", "onClick"]) {
+          if (typeof props[name] === "function") {
+            try {
+              props[name](fakeEvent(name.slice(2).toLowerCase()));
+              called.push(name);
+            } catch (error) {
+              called.push(`${name}!${String(error && error.message).slice(0, 40)}`);
+            }
+          }
+        }
+        return called.length ? called.join("+") : "no-handlers";
+      },
+    });
+    return Array.isArray(results) ? String(results.find((entry) => entry?.result)?.result || "no-result") : "no-result";
+  } catch (error) {
+    return `error:${describeError(error)}`;
+  }
+}
+
+// Starts the design playing and reports how. "Started" = the control's label flipped to pause, or
+// a <video> element exists with data on the way; polled, because Canva builds its player lazily.
+async function triggerCanvaPlayback(tabId, control, videoId, diagnostics) {
+  const readState = async () => {
+    const [state, probe] = await Promise.all([findCanvaPlayButton(tabId), probeCanvaVideos(tabId, "probe", videoId)]);
+    const playing =
+      (state && state.state === "pause") ||
+      probe.videos.some((video) => !video.paused || Number(video.readyState) >= 1);
+    return { playing, label: state ? `${state.state}:${state.label}` : "none", videoEls: probe.videos.length };
+  };
+  const waitStarted = async (ms) => {
+    const until = Date.now() + ms;
+    let last = null;
+    while (Date.now() < until) {
+      await sleep(300);
+      last = await readState();
+      if (last.playing) return last;
+    }
+    return last || (await readState());
+  };
+  await trustedClickAt(tabId, control.x, control.y);
+  let state = await waitStarted(3000);
+  diagnostics.afterCdpClick = `${state.label} videoEls=${state.videoEls}`;
+  if (state.playing) return { method: "cdp-click", ...state };
+  diagnostics.reactHandler = await invokeCanvaPlayHandler(tabId);
+  state = await waitStarted(2500);
+  if (state.playing) return { method: "react-handler", ...state };
+  return { method: "none", ...state };
+}
+
+async function collectCdpResponseBody(tabId, requestId, sessionId = "") {
+  try {
+    const target = sessionId ? { tabId, sessionId } : { tabId };
+    const result = await chrome.debugger.sendCommand(target, "Network.getResponseBody", { requestId });
+    if (!result || typeof result.body !== "string") return null;
+    if (result.base64Encoded) {
+      const binary = atob(result.body);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+      return bytes;
+    }
+    return new TextEncoder().encode(result.body);
+  } catch (_error) {
+    return null;
+  }
+}
+
+// Numbered segment URLs (…/seg-12.m4s, …/12.m4s, …segment=12…): returns the template pieces
+// so the missing indexes can be fetched directly.
+function splitSegmentUrl(url) {
+  const value = String(url || "");
+  const match = /^(.*?)(\d+)(\.(?:m4s|mp4|m4v|ts)(?:[?#].*)?)$/i.exec(value);
+  if (!match) return null;
+  return { prefix: match[1], index: Number(match[2]), digits: match[2].length, suffix: match[3] };
+}
+
+async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress = () => {} } = {}) {
+  const diagnostics = { videoId, attached: false, requests: 0, mediaRequests: 0, method: "", probeResources: 0 };
+  const requests = new Map();
+  const mediaOrder = [];
+  let lastMediaAt = 0;
+  const onEvent = (source, method, params) => {
+    if (!source || source.tabId !== tabId || !params) return;
+    // Media fetched from a dedicated worker reports on the worker's (flattened) session: enable
+    // Network there as soon as it attaches so its requests land in the same table.
+    if (method === "Target.attachedToTarget") {
+      const type = String(params.targetInfo?.type || "");
+      if ((type === "worker" || type === "shared_worker") && params.sessionId) {
+        diagnostics.workerSessions = (diagnostics.workerSessions || 0) + 1;
+        chrome.debugger
+          .sendCommand({ tabId, sessionId: params.sessionId }, "Network.enable", {
+            maxTotalBufferSize: 256 * 1024 * 1024,
+            maxResourceBufferSize: 128 * 1024 * 1024,
+          })
+          .catch(() => {});
+      }
+      return;
+    }
+    if (method === "Network.requestWillBeSent") {
+      const url = String(params.request?.url || "");
+      if (!/^https:/i.test(url)) return;
+      diagnostics.requests += 1;
+      requests.set(params.requestId, {
+        requestId: params.requestId,
+        sessionId: String(source.sessionId || ""),
+        url,
+        resourceType: String(params.type || ""),
+        rangeHeader: lowerCaseHeaders(params.request?.headers).range || "",
+        order: requests.size,
+        status: 0,
+        mimeType: "",
+        contentRange: null,
+        contentLength: 0,
+        finished: false,
+        isMedia: false,
+      });
+      return;
+    }
+    const entry = requests.get(params.requestId);
+    if (!entry) return;
+    if (method === "Network.responseReceived") {
+      const headers = lowerCaseHeaders(params.response?.headers);
+      entry.status = Number(params.response?.status || 0);
+      entry.mimeType = String(params.response?.mimeType || headers["content-type"] || "").toLowerCase();
+      entry.contentRange = parseContentRange(headers["content-range"]);
+      entry.contentLength = Number(headers["content-length"] || 0);
+      const mimeSaysVideo =
+        entry.mimeType.startsWith("video/") ||
+        /application\/(mp4|octet-stream|dash\+xml|vnd\.apple\.mpegurl|x-mpegurl)/.test(entry.mimeType);
+      entry.isMedia =
+        isCanvaHostUrl(entry.url) &&
+        !entry.mimeType.startsWith("image/") &&
+        !MEDIA_URL_IMAGE_RE.test(entry.url) &&
+        entry.status > 0 &&
+        entry.status < 400 &&
+        (mimeSaysVideo || entry.resourceType === "Media" || looksLikeCanvaVideoUrl(entry.url, videoId));
+      if (entry.isMedia) {
+        diagnostics.mediaRequests += 1;
+        mediaOrder.push(entry);
+        lastMediaAt = Date.now();
+      }
+      return;
+    }
+    if (method === "Network.loadingFinished") {
+      entry.finished = true;
+      entry.encodedDataLength = Number(params.encodedDataLength || 0);
+      if (entry.isMedia) lastMediaAt = Date.now();
+    }
+  };
+
+  let playButtonClicked = null;
+  let probe = { videos: [], resources: [] };
+  try {
+    await acquireDebugger(tabId);
+    diagnostics.attached = true;
+    chrome.debugger.onEvent.addListener(onEvent);
+    await cdpSend(tabId, "Network.enable", {
+      maxTotalBufferSize: 512 * 1024 * 1024,
+      maxResourceBufferSize: 256 * 1024 * 1024,
+    });
+    await cdpSend(tabId, "Target.setAutoAttach", {
+      autoAttach: true,
+      waitForDebuggerOnStart: false,
+      flatten: true,
+    }).catch(() => {});
+    reportProgress("Capturing background video...");
+    probe = await probeCanvaVideos(tabId, "play", videoId);
+    diagnostics.probeResources = probe.resources.length;
+    diagnostics.videoElements = probe.videos.length;
+    const somethingPlays = probe.videos.some((video) => !video.paused || video.readyState >= 2);
+    if (!somethingPlays) {
+      const control = await findCanvaPlayButton(tabId);
+      diagnostics.playControl = control ? `${control.state}:${control.label}` : "none";
+      if (control && control.state === "play") {
+        const started = await triggerCanvaPlayback(tabId, control, videoId, diagnostics);
+        diagnostics.playback = started.method;
+        diagnostics.videoElementsAfterPlay = started.videoEls;
+        if (started.method !== "none") playButtonClicked = control;
+      } else if (control && control.state === "pause") {
+        diagnostics.playback = "already-playing";
+      }
+    }
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < VIDEO_CAPTURE_MAX_PLAYBACK_MS) {
+      await sleep(250);
+      const elapsed = Date.now() - startedAt;
+      const finishedMedia = mediaOrder.filter((entry) => entry.finished).length;
+      if (
+        elapsed >= VIDEO_CAPTURE_MIN_PLAYBACK_MS &&
+        finishedMedia > 0 &&
+        Date.now() - lastMediaAt >= VIDEO_CAPTURE_QUIET_MS
+      ) {
+        break;
+      }
+    }
+    const stopProbe = await probeCanvaVideos(tabId, "stop", videoId);
+    diagnostics.videoElementsAtEnd = stopProbe.videos.length;
+    if (stopProbe.videos.length > 0) probe.videos = stopProbe.videos;
+    if (playButtonClicked) {
+      // Leave the design where the user had it: the same control now reads "pause" — click it
+      // only in that state (a blind second click could START a playback that never began).
+      const control = await findCanvaPlayButton(tabId);
+      if (control && control.state === "pause") {
+        await trustedClickAt(tabId, control.x, control.y).catch(() => {});
+      }
+    }
+
+    // ── Choose the source ────────────────────────────────────────────────────────────────
+    // Prefer what the player fetched while we watched (certainly the right clip); fall back to
+    // Resource Timing entries for a clip buffered before we attached.
+    const byUrl = new Map();
+    mediaOrder.forEach((entry) => {
+      const bucket = byUrl.get(entry.url) || { url: entry.url, entries: [], total: 0 };
+      bucket.entries.push(entry);
+      if (entry.contentRange?.total) bucket.total = Math.max(bucket.total, entry.contentRange.total);
+      byUrl.set(entry.url, bucket);
+    });
+    const candidateUrls = Array.from(byUrl.values())
+      .sort((a, b) => (b.total || 0) - (a.total || 0) || b.entries.length - a.entries.length)
+      .map((bucket) => bucket.url);
+    probe.resources
+      .filter((resource) => !byUrl.has(resource.url))
+      .sort((a, b) => b.bytes - a.bytes)
+      .forEach((resource) => candidateUrls.push(resource.url));
+    if (candidateUrls.length === 0) {
+      return {
+        ok: false,
+        reason: probe.videos.length === 0 ? "no-video-element" : "no-media-requests",
+        diagnostics,
+      };
+    }
+
+    const videoMeta = probe.videos.find((video) => Number.isFinite(video.duration) && video.duration > 0) || probe.videos[0] || null;
+    const finish = async (parts, method, sourceUrl) => {
+      const totalBytes = parts.reduce((sum, part) => sum + part.byteLength, 0);
+      if (totalBytes < 1024) return null;
+      if (totalBytes > MAX_CAPTURED_VIDEO_BYTES) {
+        return { ok: false, reason: `video-too-large:${Math.round(totalBytes / 1048576)}MB`, diagnostics };
+      }
+      const head = parts[0] instanceof Uint8Array ? parts[0] : new Uint8Array(parts[0]);
+      const container = sniffVideoContainer(head.subarray(0, 16));
+      if (container !== "mp4" && container !== "webm") return null;
+      const mimeType = container === "webm" ? "video/webm" : "video/mp4";
+      const blob = new Blob(parts, { type: mimeType });
+      const parsedDuration = container === "mp4" ? await readMp4DurationSeconds(blob) : 0;
+      const durationSec =
+        parsedDuration > 0
+          ? parsedDuration
+          : videoMeta && Number.isFinite(videoMeta.duration) && videoMeta.duration > 0
+            ? videoMeta.duration
+            : 0;
+      diagnostics.method = method;
+      diagnostics.bytes = totalBytes;
+      diagnostics.source = describeVideoUrl(sourceUrl);
+      return {
+        ok: true,
+        blob,
+        mimeType,
+        bytes: totalBytes,
+        durationSec,
+        width: Number(videoMeta?.width || 0),
+        height: Number(videoMeta?.height || 0),
+        method,
+        diagnostics,
+      };
+    };
+
+    for (const url of candidateUrls.slice(0, 4)) {
+      const bucket = byUrl.get(url) || { url, entries: [], total: 0 };
+      const segment = splitSegmentUrl(url);
+      const segmentUrls = Array.from(byUrl.keys()).filter((other) => {
+        const otherSegment = splitSegmentUrl(other);
+        return otherSegment && segment && otherSegment.prefix === segment.prefix && otherSegment.suffix === segment.suffix;
+      });
+      const isSegmented = Boolean(segment) && segmentUrls.length >= 2;
+
+      if (!isSegmented) {
+        // A) One signed URL, whole file. Works for plain and byte-range deliveries alike when the
+        //    signature is not bound to a range.
+        reportProgress("Downloading background video...");
+        const full = await fetchCanvaMediaBytes(url);
+        if (full && full.status === 200 && full.buffer.byteLength > 0) {
+          const result = await finish([full.buffer], "refetch", url);
+          if (result) return result;
+        }
+        // B) The server insists on ranges: walk the file in fixed chunks.
+        const total =
+          (full?.status === 206 && full.contentRange?.total) || bucket.total || 0;
+        if (total > 0 && total <= MAX_CAPTURED_VIDEO_BYTES) {
+          const parts = [];
+          let failed = false;
+          for (let start = 0; start < total; start += VIDEO_RANGE_CHUNK_BYTES) {
+            const end = Math.min(total, start + VIDEO_RANGE_CHUNK_BYTES) - 1;
+            reportProgress(`Downloading background video (${Math.round((start / total) * 100)}%)...`);
+            const chunk = await fetchCanvaMediaBytes(url, { rangeHeader: `bytes=${start}-${end}` });
+            if (!chunk || chunk.buffer.byteLength !== end - start + 1) {
+              failed = true;
+              break;
+            }
+            parts.push(chunk.buffer);
+          }
+          if (!failed) {
+            const result = await finish(parts, "ranges", url);
+            if (result) return result;
+          }
+        }
+        // C) Last resort: what the player itself buffered, when it is contiguous from byte 0.
+        const buffered = bucket.entries
+          .filter((entry) => entry.finished && entry.contentRange)
+          .sort((a, b) => a.contentRange.start - b.contentRange.start);
+        if (buffered.length > 0 && buffered[0].contentRange.start === 0) {
+          const parts = [];
+          let cursor = 0;
+          let contiguous = true;
+          for (const entry of buffered) {
+            if (entry.contentRange.start > cursor) {
+              contiguous = false;
+              break;
+            }
+            const body = await collectCdpResponseBody(tabId, entry.requestId, entry.sessionId);
+            if (!body) {
+              contiguous = false;
+              break;
+            }
+            const skip = cursor - entry.contentRange.start;
+            parts.push(skip > 0 ? body.subarray(skip) : body);
+            cursor = entry.contentRange.end + 1;
+          }
+          const total2 = buffered[0].contentRange.total || cursor;
+          if (contiguous && cursor >= total2) {
+            const result = await finish(parts, "buffered", url);
+            if (result) return result;
+          }
+        }
+        continue;
+      }
+
+      // D) Segmented stream (DASH-style numbered files): init segment + every media segment in
+      //    index order. Segments the player never reached are fetched by their number.
+      const initCandidates = Array.from(byUrl.keys()).filter((other) => {
+        const otherSegment = splitSegmentUrl(other);
+        return !otherSegment && /init|\.mp4(\?|#|$)/i.test(other) && other.startsWith(segment.prefix.split("/").slice(0, -1).join("/"));
+      });
+      let initBytes = null;
+      for (const initUrl of initCandidates) {
+        const fetched = await fetchCanvaMediaBytes(initUrl);
+        if (fetched && sniffVideoContainer(new Uint8Array(fetched.buffer).subarray(0, 16)) === "mp4") {
+          initBytes = fetched.buffer;
+          break;
+        }
+      }
+      const known = segmentUrls.map((other) => splitSegmentUrl(other).index).sort((a, b) => a - b);
+      const firstIndex = Math.max(0, Math.min(...known) <= 1 ? Math.min(...known) : 0);
+      const parts = initBytes ? [initBytes] : [];
+      let totalBytes = initBytes ? initBytes.byteLength : 0;
+      let index = firstIndex;
+      let fetchedSegments = 0;
+      while (index < firstIndex + VIDEO_MAX_SEGMENTS) {
+        const segmentUrl = `${segment.prefix}${String(index).padStart(segment.digits, "0")}${segment.suffix}`;
+        const fetched = await fetchCanvaMediaBytes(segmentUrl, { timeoutMs: 30_000 });
+        if (!fetched || fetched.buffer.byteLength === 0) {
+          if (fetchedSegments === 0 && index === 0) {
+            index += 1;
+            continue;
+          }
+          break;
+        }
+        if (!initBytes && parts.length === 0 && sniffVideoContainer(new Uint8Array(fetched.buffer).subarray(0, 16)) !== "mp4") {
+          break;
+        }
+        parts.push(fetched.buffer);
+        totalBytes += fetched.buffer.byteLength;
+        fetchedSegments += 1;
+        if (totalBytes > MAX_CAPTURED_VIDEO_BYTES) break;
+        reportProgress(`Downloading background video (${fetchedSegments} segments)...`);
+        index += 1;
+      }
+      if (fetchedSegments > 0) {
+        const result = await finish(parts, "segments", url);
+        if (result) return result;
+      }
+    }
+    return { ok: false, reason: "download-failed", diagnostics };
+  } catch (error) {
+    return { ok: false, reason: `capture-error:${describeError(error)}`, diagnostics };
+  } finally {
+    try {
+      chrome.debugger.onEvent.removeListener(onEvent);
+    } catch (_listenerError) {
+      /* ignore */
+    }
+    if (diagnostics.attached) {
+      await cdpSend(tabId, "Network.disable").catch(() => {});
+      await releaseDebugger(tabId);
+    }
+  }
+}
+
+// Swaps the page's poster-frame layer (scraper: imageProvenance "background-video-poster") for a
+// real video object when the clip can be captured. Geometry follows the model's video rect
+// (`rb`) when the clip is larger than the page; the poster stays as the video's thumbnail. The
+// server's asset sanitizer uploads both (src → video/*, thumbnailUri → image), the web editor
+// and mobile exporter read `layerType: "video"`. Capture is cached per Canva video id, so a
+// design whose six scenes reuse one clip downloads it once.
+async function attachCapturedBackgroundVideo(fabricObjects, context) {
+  const objects = Array.isArray(fabricObjects) ? fabricObjects : [];
+  const posterIndexes = objects
+    .map((object, index) => (String(object?.imageProvenance || "") === "background-video-poster" ? index : -1))
+    .filter((index) => index >= 0);
+  if (posterIndexes.length === 0) return { objects, captured: false, attempted: false };
+  const warnings = Array.isArray(context?.importWarnings) ? context.importWarnings : [];
+  const fiberModel = context?.fiberModel || {};
+  const pageBackground =
+    (Array.isArray(fiberModel.__pages) ? fiberModel.__pages[context?.pageIndex ?? 0]?.background : null) ||
+    fiberModel.__background ||
+    null;
+  const clips = Array.isArray(pageBackground?.clips) ? pageBackground.clips : [];
+  const videoClip = clips.find((clip) => clip && clip.video) || null;
+  const videoId = String(videoClip?.video?.videoId || "");
+  const cache = context?.cache instanceof Map ? context.cache : new Map();
+  const cacheKey = videoId || `page-${context?.pageIndex ?? 0}`;
+  if (!cache.has(cacheKey)) {
+    cache.set(
+      cacheKey,
+      captureCanvaBackgroundVideo(context.tabId, { videoId, reportProgress: context?.reportProgress })
+    );
+  }
+  const capture = await cache.get(cacheKey);
+  if (!capture?.ok) {
+    logger.warn("Background video capture failed; keeping poster frame", {
+      reason: capture?.reason,
+      diagnostics: capture?.diagnostics,
+    });
+    const d = capture?.diagnostics || {};
+    const detail = [
+      `requests=${Number(d.requests || 0)}`,
+      `media=${Number(d.mediaRequests || 0)}`,
+      `videoEls=${Number(d.videoElements || 0)}${Number.isFinite(Number(d.videoElementsAfterPlay)) ? `→${d.videoElementsAfterPlay}` : ""}${Number.isFinite(Number(d.videoElementsAtEnd)) ? `→${d.videoElementsAtEnd}` : ""}`,
+      `control=${String(d.playControl || "?")}`,
+      `playback=${String(d.playback || "-")}`,
+      ...(d.afterCdpClick ? [`afterClick=${d.afterCdpClick}`] : []),
+      ...(d.reactHandler ? [`react=${d.reactHandler}`] : []),
+      `timing=${Number(d.probeResources || 0)}`,
+      `workers=${Number(d.workerSessions || 0)}`,
+    ].join(" ");
+    warnings.push(
+      `Background video imported as a static poster frame (capture: ${String(capture?.reason || "unknown")}; ${detail}); timing and transparency preserved.`
+    );
+    return { objects, captured: false, attempted: true, reason: capture?.reason };
+  }
+  const blobRef = registerBinaryAsset(
+    capture.blob,
+    `canva-background-video.${capture.mimeType === "video/webm" ? "webm" : "mp4"}`
+  );
+  const pageWidth = Math.max(1, Math.round(numberOr(context?.pageWidth, 1080)));
+  const pageHeight = Math.max(1, Math.round(numberOr(context?.pageHeight, 1920)));
+  const rb = videoClip?.video?.rb;
+  const hasRect = rb && Number(rb.width) > 0 && Number(rb.height) > 0;
+  const durationSec = Math.round(Math.max(0, Number(capture.durationSec) || 0) * 1000) / 1000;
+  const nextObjects = objects.slice();
+  // One decode for the whole page: every poster index here is the same clip's poster frame.
+  const firstPosterSrc = String(nextObjects[posterIndexes[0]]?.src || "");
+  const posterUsable =
+    (firstPosterSrc.startsWith("data:image/") || /^https?:\/\//i.test(firstPosterSrc)) &&
+    (await posterMatchesVideoAspect(firstPosterSrc, capture.width, capture.height));
+  for (const index of posterIndexes) {
+    const poster = nextObjects[index];
+    const posterSrc = posterUsable ? String(poster?.src || "") : "";
+    nextObjects[index] = {
+      ...poster,
+      type: "video",
+      layerType: "video",
+      importKind: "video",
+      layerName: "Background video",
+      left: hasRect ? Number(rb.left) || 0 : 0,
+      top: hasRect ? Number(rb.top) || 0 : 0,
+      width: hasRect ? Math.round(Number(rb.width)) : pageWidth,
+      height: hasRect ? Math.round(Number(rb.height)) : pageHeight,
+      scaleX: 1,
+      scaleY: 1,
+      src: blobRef,
+      ...(posterSrc.startsWith("data:image/") || /^https?:\/\//i.test(posterSrc) ? { thumbnailUri: posterSrc } : {}),
+      videoStart: 0,
+      videoEnd: durationSec,
+      videoDuration: durationSec,
+      sourceWidth: capture.width > 0 ? capture.width : hasRect ? Math.round(Number(rb.width)) : pageWidth,
+      sourceHeight: capture.height > 0 ? capture.height : hasRect ? Math.round(Number(rb.height)) : pageHeight,
+      fallback: false,
+      fallbackReason: "",
+      imageProvenance: "background-video",
+      videoCapture: {
+        videoId,
+        method: capture.method,
+        bytes: capture.bytes,
+        durationSec,
+      },
+    };
+  }
+  if (!posterUsable) {
+    warnings.push(
+      "Background video poster dropped (it was not a single frame of the clip); the layer shows the video itself once it decodes."
+    );
+  }
+  warnings.push(
+    `Background video captured (${(capture.bytes / 1048576).toFixed(1)} MB${durationSec > 0 ? `, ${durationSec.toFixed(1)} s` : ""}, ${capture.method}).`
+  );
+  return { objects: nextObjects, captured: true, attempted: true, durationMs: Math.round(durationSec * 1000) };
 }
 
 async function displayedPageMatches(tabId, expectedLbIds) {
@@ -3446,6 +4486,7 @@ function shouldExternalizeMultipartAsset(key, value) {
     normalizedKey === "imagedataurl" ||
     normalizedKey === "thumbnaildataurl" ||
     normalizedKey === "src" ||
+    normalizedKey === "thumbnailuri" ||
     normalizedKey === "dataurl"
   );
 }
@@ -3463,6 +4504,9 @@ function extensionFromMultipartMimeType(mimeType) {
   if (normalized.includes("otf")) return "otf";
   if (normalized.includes("woff2")) return "woff2";
   if (normalized.includes("woff")) return "woff";
+  if (normalized.includes("mp4")) return "mp4";
+  if (normalized.includes("webm")) return "webm";
+  if (normalized.includes("quicktime")) return "mov";
   return "bin";
 }
 
@@ -3478,6 +4522,14 @@ async function createDashboardMultipartPayload(body, token) {
   let assetCounter = 0;
 
   const rewriteValue = (value, keyHint = "") => {
+    // Captured background videos are registered as blobs (registerBinaryAsset) and referenced by
+    // a placeholder string; they ride as parts exactly like externalized data URLs.
+    if (isBinaryAssetRef(value)) {
+      const asset = pendingBinaryAssets.get(value);
+      const assetKey = `${IMPORT_MULTIPART_ASSET_PREFIX}${assetCounter++}`;
+      assetEntries.push({ assetKey, blob: asset.blob, keyHint: keyHint || "video" });
+      return { __canvaMultipartAssetRef: assetKey };
+    }
     if (typeof value === "string" && shouldExternalizeMultipartAsset(keyHint, value)) {
       // Resilience: never let ONE unparseable asset abort the whole import. If dataUrlToBlob still
       // throws (a genuinely malformed data URL), leave the value INLINE and keep going — the server's
@@ -3704,6 +4756,7 @@ async function postToDashboard(payload) {
   }
 
   if (!response) {
+    const bridgeSerializedBody = await inlineBinaryAssetsForJson(payloadBody, serializedBody);
     for (let index = 0; index < attempts.length; index += 1) {
       const endpoint = attempts[index];
       try {
@@ -3716,7 +4769,7 @@ async function postToDashboard(payload) {
         const bridgeResult = await postToDashboardViaTabBridge({
           endpoint,
           token: payload.token,
-          serializedBody,
+          serializedBody: bridgeSerializedBody,
           reportProgress,
         });
         const bridgeStatus = Number(bridgeResult?.status || 0);
@@ -4073,6 +5126,8 @@ async function importActiveCanvaTab(message, options = {}) {
   // One full capture pass (DOM scrape + screenshots + isolation + hybrid build + font
   // resolution) scoped to a single design page. pageInfo === null runs the legacy
   // whole-viewport single-page behavior.
+  clearBinaryAssets();
+  const backgroundVideoCaptureCache = new Map();
   const capturePageArtifacts = async (pageInfo, pageIndex) => {
     const pagePrefix = isMultiPageImport ? `Page ${pageIndex + 1}/${pagePlan.length}: ` : "";
     const pageProgress = (text) => reportProgress(`${pagePrefix}${text}`);
@@ -4283,11 +5338,6 @@ async function importActiveCanvaTab(message, options = {}) {
           ". Move the Canva playhead to the START of the video (0:00) and reimport to capture the full design."
       );
     }
-    if (captureMeta?.timelineSupplement?.backgroundVideoPoster) {
-      importWarnings.push(
-        "Background video imported as a static poster frame (Canva video files are download-protected); timing and transparency preserved."
-      );
-    }
     if (isolatedSnapshotWarnings.length > 0) {
       importWarnings.push(...isolatedSnapshotWarnings);
     }
@@ -4408,10 +5458,33 @@ async function importActiveCanvaTab(message, options = {}) {
       Math.round(sourceWidth || Number(captureMeta.designWidth || 1080)),
       Math.round(sourceHeight || Number(captureMeta.designHeight || 1920))
     );
+    // Background video: replace the poster-frame layer with the captured clip when possible.
+    let backgroundVideoDurationMs = 0;
+    if (captureMeta?.timelineSupplement?.backgroundVideoPoster) {
+      const videoSwap = await timePhase("captureBackgroundVideo", () =>
+        attachCapturedBackgroundVideo(fabricObjects, {
+          tabId: tab.id,
+          pageIndex,
+          fiberModel: designFiberModel,
+          cache: backgroundVideoCaptureCache,
+          importWarnings,
+          pageWidth: sourceWidth || Number(captureMeta.designWidth || 1080),
+          pageHeight: sourceHeight || Number(captureMeta.designHeight || 1920),
+          reportProgress: (text) => reportProgress(`${pagePrefix}${text}`),
+        })
+      );
+      fabricObjects = videoSwap.objects;
+      // A video-backed page runs for the clip's length, and only the capture knows it (the model
+      // leaves page.durationUs unset for these).
+      if (videoSwap.captured && Number(videoSwap.durationMs) > 0) {
+        backgroundVideoDurationMs = Math.round(Number(videoSwap.durationMs));
+      }
+    }
     const fallbackWidth = Math.max(1, Math.round(sourceWidth || 1080));
     const fallbackHeight = Math.max(1, Math.round(sourceHeight || 1080));
     const hasMeaningfulDrawableLayers = fabricObjects.some((object) => {
       const type = String(object?.type || "").toLowerCase();
+      if (type === "video") return Boolean(String(object?.src || "").trim());
       if (type === "image") return Boolean(String(object?.src || "").startsWith("data:image/") || /^https?:\/\//i.test(String(object?.src || "")));
       if (type === "textbox") return Boolean(String(object?.text || "").trim());
       return false;
@@ -4463,6 +5536,7 @@ async function importActiveCanvaTab(message, options = {}) {
       usedFonts,
       importedCustomFonts,
       hasExtractedLayers: pageHasExtractedLayers,
+      backgroundVideoDurationMs,
     };
   };
 
@@ -4564,8 +5638,31 @@ async function importActiveCanvaTab(message, options = {}) {
 
   // Per-page capture already degraded empty pages to their own snapshot objects; this outer
   // fallback only fires when merging produced nothing at all.
+  // Canva's page fill colour, when the model exposes it. The server only infers a colour from
+  // the snapshot when none is sent, and that inference took the frame's sage for a cream page.
+  const modelPageColor = String(designFiberModel?.__pageFill?.color || "").trim().toLowerCase();
+  // Canva's page length (5s unless the author re-timed it). It only travels for a design that
+  // actually plays — a static import keeps the editor's own default page duration, and shipping a
+  // 5s page for a still template would shorten it for no reason.
+  const designPlays =
+    Boolean(designFiberModel?.__pageAnimation) ||
+    Boolean(designFiberModel?.__background) ||
+    capturedArtifacts.some((artifacts) => Number(artifacts?.backgroundVideoDurationMs) > 0) ||
+    (Array.isArray(fabricObjects) &&
+      fabricObjects.some((object) => String(object?.mediaAnimationType || "NONE") !== "NONE"));
+  const canvaPageDurationMs = (pageIndex) => {
+    if (!designPlays) return 0;
+    // A captured background video states the page's real length; the model does not.
+    const captured = Number(capturedArtifacts[pageIndex]?.backgroundVideoDurationMs);
+    if (Number.isFinite(captured) && captured > 0) return Math.round(captured);
+    const pages = Array.isArray(designFiberModel?.__pages) ? designFiberModel.__pages : null;
+    const fromPage = pages && pages[pageIndex] ? Number(pages[pageIndex].durationMs) : 0;
+    const value = fromPage > 0 ? fromPage : Number(designFiberModel?.__pageDurationMs);
+    return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+  };
   const fabricData = {
     version: "7.0.0",
+    ...(/^#[0-9a-f]{3}([0-9a-f]{3})?$/.test(modelPageColor) ? { backgroundColor: modelPageColor } : {}),
     objects:
       fabricObjects.length > 0
         ? fabricObjects
@@ -4599,6 +5696,10 @@ async function importActiveCanvaTab(message, options = {}) {
       {
         sourceUrl: String(captureMeta.sourceUrl || tab.url || ""),
         title: String(captureMeta.title || ""),
+        // Canva's own document keywords when the design carries them (see __keywords in
+        // canva-fiber-main). Usually absent on a user's copy of a template, in which case the
+        // server derives search tags from the title instead.
+        canvaKeywords: Array.isArray(designFiberModel?.__keywords) ? designFiberModel.__keywords : [],
         imageDataUrl: hasExtractedLayers ? undefined : imageDataUrl,
         thumbnailDataUrl,
         fabricData,
@@ -4618,6 +5719,7 @@ async function importActiveCanvaTab(message, options = {}) {
             height: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
             sourceWidth: sourceWidth || Math.round(Number(captureMeta.rect?.width || 1080)),
             sourceHeight: sourceHeight || Math.round(Number(captureMeta.rect?.height || 1080)),
+            ...(canvaPageDurationMs(0) > 0 ? { durationMs: canvaPageDurationMs(0) } : {}),
           },
           // Multi-page designs: ordered page descriptors; every fabric object carries an
           // importPageIndex pointing into this list. `page` above stays the first page for
@@ -4629,6 +5731,9 @@ async function importActiveCanvaTab(message, options = {}) {
                   name: `Page ${mergedPageIndex + 1}`,
                   width: Math.max(1, Math.round(artifacts.sourceWidth || sourceWidth || 1080)),
                   height: Math.max(1, Math.round(artifacts.sourceHeight || sourceHeight || 1080)),
+                  ...(canvaPageDurationMs(mergedPageIndex) > 0
+                    ? { durationMs: canvaPageDurationMs(mergedPageIndex) }
+                    : {}),
                   // The page's own cropped screenshot, reused as its preview image — the app's
                   // page strip paints these instead of compositing every page on first open.
                   ...(String(artifacts.imageDataUrl || "").startsWith("data:image/")
@@ -4654,14 +5759,19 @@ async function importActiveCanvaTab(message, options = {}) {
   );
 
   const endpoint = `${dashboardUrl}/api/tools/canva-import/extension-import`;
-  const result = await timePhase("postToDashboard", () =>
-    postToDashboard({
-      endpoint,
-      token,
-      body: requestBody,
-      reportProgress,
-    })
-  );
+  let result;
+  try {
+    result = await timePhase("postToDashboard", () =>
+      postToDashboard({
+        endpoint,
+        token,
+        body: requestBody,
+        reportProgress,
+      })
+    );
+  } finally {
+    clearBinaryAssets();
+  }
 
   const sortedPhaseTimings = Object.entries(phaseTimings).sort((a, b) => b[1] - a[1]);
   const provenanceCounts = (Array.isArray(fabricObjects) ? fabricObjects : []).reduce(

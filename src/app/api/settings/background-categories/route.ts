@@ -7,6 +7,7 @@ import {
   getBackgroundCategorySettings,
   saveBackgroundCategorySettings,
 } from "@/lib/backgrounds/categorySettings.server";
+import { countImportedBackgroundAssetsByCategory } from "@/lib/editor/importedBackgrounds.server";
 
 export async function GET() {
   try {
@@ -18,8 +19,12 @@ export async function GET() {
     });
 
     const settings = await getBackgroundCategorySettings();
+    // Per-category asset counts: removing a category deletes its backgrounds, so the page has
+    // to be able to say how many before asking the user to confirm.
+    const counts = await countImportedBackgroundAssetsByCategory().catch(() => ({}));
     return NextResponse.json({
       settings,
+      counts,
       // Taxonomy is content: every role that reaches this endpoint (admin and
       // designer, per getEditorSession) may edit it.
       canEdit: true,
@@ -45,8 +50,16 @@ export async function PUT(request: NextRequest) {
       userId: session.userId,
     });
 
-    const settings = await saveBackgroundCategorySettings(body?.settings);
-    return NextResponse.json({ settings, canEdit: true });
+    const result = await saveBackgroundCategorySettings(body?.settings);
+    const counts = await countImportedBackgroundAssetsByCategory().catch(() => ({}));
+    return NextResponse.json({
+      settings: result.settings,
+      counts,
+      removedCategories: result.removedCategories,
+      deletedAssets: result.deletedAssets,
+      deletedObjects: result.deletedObjects,
+      canEdit: true,
+    });
   } catch (error) {
     return handleApiError(
       error,

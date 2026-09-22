@@ -545,14 +545,41 @@ function hasPreviewTimelineContent(
   return timeline?.source?.animatedImport === true;
 }
 
+// A clip fills its PLAYED length — end minus start — not its end time. A 40s video trimmed to
+// 4s..12s occupies 8s of the page, which is exactly what the renderer plays before it loops
+// (resolveVideoSourceTimeAtFrame works on the same span). Using the end alone made a page keep the
+// trimmed-away head.
+function clipPlayedSeconds(source: {
+  videoStart?: unknown;
+  videoEnd?: unknown;
+  videoDuration?: unknown;
+} | null | undefined) {
+  const start = Math.max(0, Number(source?.videoStart) || 0);
+  const end = Number(source?.videoEnd);
+  const duration = Number(source?.videoDuration);
+  const resolvedEnd =
+    Number.isFinite(end) && end > start
+      ? end
+      : Number.isFinite(duration) && duration > start
+        ? duration
+        : 0;
+  return resolvedEnd > start ? resolvedEnd - start : 0;
+}
+
 export function getPageDurationMs(page: { durationMs?: number | null } | null | undefined) {
   const raw = Number(page?.durationMs);
   const elements = Array.isArray((page as { elements?: unknown[] } | null | undefined)?.elements)
     ? ((page as { elements?: unknown[] }).elements as Array<{
         type?: unknown;
+        videoStart?: unknown;
         videoDuration?: unknown;
         videoEnd?: unknown;
-        frameContent?: { kind?: unknown; videoDuration?: unknown; videoEnd?: unknown } | null;
+        frameContent?: {
+          kind?: unknown;
+          videoStart?: unknown;
+          videoDuration?: unknown;
+          videoEnd?: unknown;
+        } | null;
       }>)
     : [];
   const longestVideoDurationMs = elements.reduce((maxDurationMs, element) => {
@@ -560,13 +587,9 @@ export function getPageDurationMs(page: { durationMs?: number | null } | null | 
     const frameKind = String(element?.frameContent?.kind || "").trim().toLowerCase();
     const rawSeconds =
       type === "video"
-        ? Number.isFinite(Number(element?.videoEnd)) && Number(element?.videoEnd) > 0
-          ? Number(element?.videoEnd)
-          : Number(element?.videoDuration || 0)
+        ? clipPlayedSeconds(element)
         : frameKind === "video"
-          ? Number.isFinite(Number(element?.frameContent?.videoEnd)) && Number(element?.frameContent?.videoEnd) > 0
-            ? Number(element?.frameContent?.videoEnd)
-            : Number(element?.frameContent?.videoDuration || 0)
+          ? clipPlayedSeconds(element?.frameContent)
           : 0;
     const nextDurationMs =
       Number.isFinite(rawSeconds) && rawSeconds > 0 ? Math.round(rawSeconds * 1000) : 0;
@@ -705,7 +728,18 @@ export function isElementVisibleAtPlayhead(
 ) {
   if (!element || element.visible === false) return false;
   const window = resolveTimelineWindow(element, pageDurationMs);
-  return playheadMs >= window.startMs && playheadMs < window.endMs;
+  if (playheadMs < window.startMs) return false;
+  if (playheadMs < window.endMs) return true;
+  // The playhead PARKED on the timeline's last instant is still showing the final frame, so a
+  // layer that runs to the end of the page must not vanish there. Playback leaves the playhead
+  // exactly there when it finishes, and the half-open test above hid every layer at once — the
+  // canvas went blank white the moment a preview finished playing. Interior boundaries keep the
+  // exclusive rule: a layer whose window ends at 3s is still correctly gone at 3s.
+  const pageEnd = Math.max(
+    MIN_LAYER_DURATION_MS,
+    Math.round(pageDurationMs || DEFAULT_PAGE_DURATION_MS)
+  );
+  return playheadMs >= pageEnd && window.endMs >= pageEnd;
 }
 
 export interface TimelinePageEntry<TPage> {

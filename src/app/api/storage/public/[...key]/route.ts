@@ -65,9 +65,18 @@ function buildHeaders(object: {
   CacheControl?: unknown;
   ContentType?: unknown;
   ContentLength?: unknown;
+  ContentRange?: unknown;
   ETag?: unknown;
 }, options: { versioned?: boolean; objectKey?: string } = {}) {
   const headers = new Headers();
+  // ★Advertised unconditionally, on HEAD as well as GET.
+  //
+  // AVFoundation probes an HTTP asset before it will open it and refuses any server that does not
+  // answer ranges, failing the entire load with -11850 "The server is not correctly configured" —
+  // which is every template video and every preview.mp4 blank on iOS, with no error the user can
+  // see. Advertising the capability and honouring `Range` below are one fix; neither half works
+  // alone.
+  headers.set("Accept-Ranges", "bytes");
   headers.set(
     "Cache-Control",
     options.versioned
@@ -86,6 +95,8 @@ function buildHeaders(object: {
     headers.set("Content-Type", String(object.ContentType));
   }
   if (object.ContentLength != null) headers.set("Content-Length", String(object.ContentLength));
+  // Present only on a ranged read; R2 has already narrowed ContentLength to match the slice.
+  if (object.ContentRange) headers.set("Content-Range", String(object.ContentRange));
   if (object.ETag) headers.set("ETag", object.ETag);
   return headers;
 }
@@ -97,14 +108,22 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       return NextResponse.json({ error: "Missing object key." }, { status: 400 });
     }
 
-    const object = await getObject(getPublicStorageBucketName(), objectKey);
+    const rangeHeader = request.headers.get("range")?.trim() || "";
+    const object = await getObject(getPublicStorageBucketName(), objectKey, {
+      range: rangeHeader,
+    });
     const body = toWebStream(object.Body);
     if (!body) {
       return NextResponse.json({ error: "Object body is unavailable." }, { status: 404 });
     }
 
+    // Only ContentRange proves the upstream actually honoured the range — a driver that ignored it
+    // returned the whole object, and answering 206 for a full body would corrupt the client's
+    // reassembly.
+    const isPartial = Boolean(rangeHeader) && Boolean(object.ContentRange);
+
     return new Response(body, {
-      status: 200,
+      status: isPartial ? 206 : 200,
       headers: buildHeaders(object, {
         versioned: request.nextUrl.searchParams.has("v"),
         objectKey,
@@ -114,6 +133,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     const statusCode = Number((error as { $metadata?: { httpStatusCode?: number } })?.$metadata?.httpStatusCode || 0);
     if (statusCode === 404 || (error as { name?: string })?.name === "NoSuchKey") {
       return NextResponse.json({ error: "Object not found." }, { status: 404 });
+    }
+    // A range past the end of the object: the spec answer is 416, and players rely on it to
+    // discover the true length instead of treating the read as a hard failure.
+    if (statusCode === 416 || (error as { name?: string })?.name === "InvalidRange") {
+      return new Response(null, { status: 416, headers: { "Accept-Ranges": "bytes" } });
     }
     return NextResponse.json({ error: "Failed to load media object." }, { status: 502 });
   }

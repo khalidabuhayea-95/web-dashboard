@@ -7,6 +7,7 @@ import { listAllImportedBackgroundAssets } from "@/lib/editor/importedBackground
 import { logger } from "@/lib/logging/logger";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
 import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
@@ -42,10 +43,13 @@ export async function GET(request: NextRequest, context: RouteContext) {
       categoryValue: category.value,
     });
 
+    // Seasonal boost: backgrounds linked to an active occasion lead their category.
+    const boost = await getActiveOccasionBoost();
     const result = await listAllImportedBackgroundAssets({
       source,
       categoryValue: category.value,
       locale,
+      boost: { ids: boost.backgroundIds, categoryKeys: [] },
     });
 
     const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);

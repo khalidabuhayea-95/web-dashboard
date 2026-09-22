@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatImportResult } from "./importResultSummary";
 import { ChevronDown, ChevronUp } from "lucide-react";
 
 import Button from "@/components/ui/button";
@@ -29,11 +30,17 @@ const BACKGROUND_FILTER_SELECT_OPTIONS = {
     { value: "vector", label: "Vector" },
     { value: "psd", label: "PSD" },
   ],
+  license: [
+    { value: "all", label: "Free + Premium" },
+    { value: "freemium", label: "Free only" },
+    { value: "premium", label: "Premium only" },
+  ],
 };
 
 const DEFAULT_BACKGROUND_FILTERS = {
   orientation: "all",
   contentType: "all",
+  license: "all",
 };
 
 const IMPORT_POLL_INTERVAL_MS = 2000;
@@ -67,6 +74,13 @@ function normalizeBackgroundContentTypeValue(value) {
   return normalized;
 }
 
+function normalizeBackgroundLicenseValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (normalized === "free" || normalized === "freemium") return "freemium";
+  if (normalized === "premium") return "premium";
+  return "all";
+}
+
 function buildBackgroundFiltersPayload(filters) {
   const payload = {};
 
@@ -84,6 +98,13 @@ function buildBackgroundFiltersPayload(filters) {
     };
   }
 
+  const license = normalizeBackgroundLicenseValue(filters?.license);
+  if (license !== "all") {
+    payload.license = {
+      [license]: 1,
+    };
+  }
+
   return payload;
 }
 
@@ -94,6 +115,21 @@ function formatBackgroundSizeLabel(width, height) {
   return `${safeWidth} x ${safeHeight}`;
 }
 
+// The preview box takes the asset's own proportions so the whole picture is visible before it is
+// imported — a fixed-height cover crop hid the top and bottom of every portrait background,
+// which is exactly the part that decides whether it has copy space. The box is not height-capped
+// on purpose: a cap letterboxed tall assets behind checkerboard bands, and a tall card is the
+// honest preview of a 9:16 story background. Unknown dimensions fall back to a 4:3 box and the
+// image letterboxes inside it instead of being cropped.
+function previewAspectRatio(item) {
+  const width = Number(item?.width);
+  const height = Number(item?.height);
+  if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+    return `${width} / ${height}`;
+  }
+  return "4 / 3";
+}
+
 function normalizePreviewItem(item) {
   const source = item && typeof item === "object" ? item : {};
   return {
@@ -102,6 +138,7 @@ function normalizePreviewItem(item) {
     slug: String(source.slug || "").trim(),
     type: String(source.type || "").trim(),
     orientation: String(source.orientation || "").trim(),
+    license: String(source.license || "").trim().toLowerCase(),
     tags: Array.isArray(source.tags)
       ? source.tags.map((tag) => String(tag || "").trim()).filter(Boolean)
       : [],
@@ -248,6 +285,28 @@ export default function FreepikBackgroundImportSection({
 
   const selectedCount = selectedItems.length;
 
+  const selectedCategory = useMemo(
+    () => backgroundCategories.find((item) => item.value === selectedCategoryValue) || null,
+    [backgroundCategories, selectedCategoryValue]
+  );
+  const suggestedTerms = Array.isArray(selectedCategory?.searchTerms) ? selectedCategory.searchTerms : [];
+
+  // Choosing a category starts the search from the suggestions saved on it (Settings >
+  // Background categories): its first term plus its preferred orientation / content type.
+  // The remaining terms stay one click away as chips under the form.
+  useEffect(() => {
+    if (!selectedCategory) return;
+    const terms = Array.isArray(selectedCategory.searchTerms) ? selectedCategory.searchTerms : [];
+    if (terms.length > 0) {
+      setBackgroundQuery((current) => ({ ...current, term: terms[0], page: 1 }));
+    }
+    setFilters((current) => ({
+      ...current,
+      orientation: normalizeBackgroundOrientationValue(selectedCategory.importOrientation),
+      contentType: normalizeBackgroundContentTypeValue(selectedCategory.importContentType),
+    }));
+  }, [selectedCategory]);
+
   const updateBackgroundQueryField = (field, value) => {
     setBackgroundQuery((current) => ({
       ...current,
@@ -264,7 +323,7 @@ export default function FreepikBackgroundImportSection({
 
   useEffect(() => {
     setSelectedIds(new Set());
-  }, [filters.contentType, filters.orientation]);
+  }, [filters.contentType, filters.orientation, filters.license]);
 
   const fetchPreview = async (override = {}) => {
     setPreviewBusy(true);
@@ -542,6 +601,21 @@ export default function FreepikBackgroundImportSection({
             </Select>
           </div>
           <div className="space-y-2">
+            <Label htmlFor="freepik-background-license">filters[license]</Label>
+            <Select
+              id="freepik-background-license"
+              value={filters.license}
+              onChange={(event) => updateFilterField("license", event.target.value)}
+              disabled={loadingSettings}
+            >
+              {BACKGROUND_FILTER_SELECT_OPTIONS.license.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </Select>
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="freepik-background-language">Accept-Language</Label>
             <Input
               id="freepik-background-language"
@@ -575,6 +649,33 @@ export default function FreepikBackgroundImportSection({
             <Input id="freepik-background-selection-count" value={String(selectedCount)} readOnly />
           </div>
         </div>
+
+        {suggestedTerms.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2" data-testid="freepik-background-suggested-terms">
+            <span className="text-xs text-muted-foreground">
+              Suggested terms for {selectedCategory?.labelEn || selectedCategoryValue}:
+            </span>
+            {suggestedTerms.map((term) => {
+              const active = term === String(backgroundQuery.term || "").trim();
+              return (
+                <button
+                  key={term}
+                  type="button"
+                  aria-pressed={active}
+                  disabled={loadingSettings}
+                  onClick={() => setBackgroundQuery((current) => ({ ...current, term, page: 1 }))}
+                  className={`rounded-full border px-3 py-1 text-xs transition-colors ${
+                    active
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-muted/40 text-foreground hover:bg-muted"
+                  }`}
+                >
+                  {term}
+                </button>
+              );
+            })}
+          </div>
+        ) : null}
 
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="secondary" onClick={() => void fetchPreview()} disabled={previewBusy || loadingSettings}>
@@ -627,7 +728,7 @@ export default function FreepikBackgroundImportSection({
 
         {importResult ? (
           <div className="rounded-xl border border-border bg-muted/25 p-3 text-sm">
-            Imported: {Number(importResult.imported || 0)} | Failed: {Number(importResult.failed || 0)} | Requested: {Number(importResult.totalRequested || 0)}
+            {formatImportResult(importResult, " | ")}
           </div>
         ) : null}
 
@@ -636,7 +737,9 @@ export default function FreepikBackgroundImportSection({
             No preview backgrounds yet.
           </div>
         ) : (
-          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          // Masonry columns: cards keep their asset's ratio, so a row-based grid left holes next
+          // to every tall portrait card. Column flow packs mixed ratios without gaps.
+          <div className="columns-1 gap-3 sm:columns-2 lg:columns-3">
             {previewItems.map((item) => {
               const selected = selectedIds.has(item.id);
               return (
@@ -644,22 +747,37 @@ export default function FreepikBackgroundImportSection({
                   key={item.id}
                   type="button"
                   onClick={() => toggleSelected(item.id)}
-                  className={`rounded-xl border p-2 text-left transition ${
+                  className={`mb-3 block w-full break-inside-avoid rounded-xl border p-2 text-left transition ${
                     selected ? "border-primary ring-1 ring-primary/20" : "border-border hover:bg-accent/40"
                   }`}
                 >
-                  <div className="relative overflow-hidden rounded-md bg-white">
+                  <div
+                    className="relative w-full overflow-hidden rounded-md"
+                    style={{
+                      aspectRatio: previewAspectRatio(item),
+                      // Checkerboard shows through transparent pixels and any letterboxing.
+                      backgroundImage: "repeating-conic-gradient(#e5e7eb 0 25%, #f9fafb 0 50%)",
+                      backgroundSize: "16px 16px",
+                    }}
+                  >
                     {/* eslint-disable-next-line @next/next/no-img-element */}
                     <img
                       src={item.thumbnailUrl || item.assetUrl}
                       alt={item.title || "Magnific background"}
-                      className="h-40 w-full object-cover"
+                      className="h-full w-full object-contain"
                     />
-                    {item.type ? (
-                      <span className="absolute left-2 top-2 rounded-full bg-[#1f2a39] px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
-                        {item.type}
-                      </span>
-                    ) : null}
+                    <div className="absolute left-2 top-2 flex gap-1">
+                      {item.type ? (
+                        <span className="rounded-full bg-[#1f2a39] px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
+                          {item.type}
+                        </span>
+                      ) : null}
+                      {item.license === "premium" ? (
+                        <span className="rounded-full bg-amber-500 px-2 py-0.5 text-[10px] font-semibold uppercase text-white">
+                          Premium
+                        </span>
+                      ) : null}
+                    </div>
                     <input
                       type="checkbox"
                       checked={selected}

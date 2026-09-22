@@ -59,7 +59,9 @@ import {
   getPlayheadMsForFrame,
   resolveAnimatedElementPoseAtFrame,
   resolveAnimatedElementEffectsAtFrame,
+  type RenderPoseOptions,
   resolvePreviewRenderFps,
+  PREVIEW_CAPTURE_FPS,
   resolveVideoSourceTimeAtFrame,
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
@@ -86,8 +88,37 @@ import {
 } from "@/lib/editor/animationTimeline";
 
 interface PreviewMediaController {
+  /**
+   * Put the element on the exact frame [frame]. A seek — correct for a still, and the only way to
+   * get an exact one, but far too slow to run once per frame of a recording (see [beginPlayback]).
+   */
   syncToFrame: (frame: number, fps: number) => Promise<void>;
+  /**
+   * ★Start rolling the element at 1x for a real-time capture, positioned for timeline [atMs].
+   *
+   * Preview recording used to call [syncToFrame] on every frame, which is a seek per frame. On a
+   * keyframe-sparse clip each seek costs 40-350ms and `syncVideoElementToTime` gives up after 180,
+   * so the recorder captured the same frame over and over — a 13-second preview.mp4 that is a
+   * still image. Playing decodes the same footage forward in hardware, once, and the recorder just
+   * grabs whatever frame is on screen each tick.
+   */
+  beginPlayback: (atMs: number) => Promise<void>;
+  /**
+   * Nudge a rolling element back onto [targetMs] if it has drifted materially. Cheap and
+   * synchronous: on the common path it compares two numbers and returns.
+   */
+  resyncPlayback: (targetMs: number) => void;
+  /** Stop rolling and leave the element where it is. */
+  endPlayback: () => void;
 }
+
+/**
+ * How far a rolling element may drift from the timeline before the recorder re-seeks it, in ms.
+ *
+ * Matches the editor's own playback tolerance on both mobile platforms, so a preview recorded here
+ * and the same design played in the app agree about what "in sync" means.
+ */
+const PREVIEW_PLAYBACK_RESYNC_THRESHOLD_MS = 250;
 
 interface ImageNodeProps {
   element: EditorElement;
@@ -98,6 +129,12 @@ interface ImageNodeProps {
   previewFps?: number;
   pageDurationMs?: number;
   forceTimelineSync?: boolean;
+  /**
+   * True while the preview RECORDER is driving the clips itself: it plays them once and resyncs
+   * them on its own cadence. The per-frame seek below has to stay out of the way then. Seeking on
+   * every captured frame fights that playback and the recording comes out as garbled bands.
+   */
+  suspendMediaTimelineSync?: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
   onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
@@ -789,6 +826,7 @@ function CanvasVideoNodeImpl({
   previewFps = 60,
   pageDurationMs = 0,
   forceTimelineSync = false,
+  suspendMediaTimelineSync = false,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -866,6 +904,26 @@ function CanvasVideoNodeImpl({
     };
   }, [element.src, element.videoEnd, element.videoStart]);
 
+  // Poster (first frame) drawn until the video decodes — see EditorElement.posterSrc. Kept with
+  // its source so a stale image never draws for a changed src; set only from the load callback.
+  const [poster, setPoster] = useState<{ src: string; image: HTMLImageElement } | null>(null);
+  useEffect(() => {
+    const source = String(element.posterSrc || "").trim();
+    if (!source) return undefined;
+    let mounted = true;
+    const image = new window.Image();
+    image.crossOrigin = "anonymous";
+    image.onload = () => {
+      if (!mounted) return;
+      setPoster({ src: source, image });
+      mediaRef.current?.getLayer()?.batchDraw();
+    };
+    image.src = source;
+    return () => {
+      mounted = false;
+    };
+  }, [element.posterSrc]);
+  const posterImage = poster && poster.src === String(element.posterSrc || "").trim() ? poster.image : null;
   const syncVideoToFrame = useCallback(
     async (frame: number, fps: number) => {
       const media = videoRef.current;
@@ -897,25 +955,136 @@ function CanvasVideoNodeImpl({
     [element, pageDurationMs]
   );
 
+  // Where in the SOURCE this layer should be for a given timeline position, honouring the layer's
+  // start offset, its trim and the loop it does when the page outlives the clip. Shared by the
+  // seek path and the playback path so a scrubbed frame and a recorded one cannot disagree.
+  const resolveSourceSecondsAtMs = useCallback(
+    (timelineMs: number) => {
+      const media = videoRef.current;
+      const duration = media && Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+      const sourceStart = Math.max(0, Number(element.videoStart) || 0);
+      const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+      const rawVideoEnd = Number(element.videoEnd);
+      const sourceEnd = Math.max(
+        sourceStart + 0.01,
+        duration > 0
+          ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+          : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+            ? rawVideoEnd
+            : fallbackEnd
+      );
+      const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+      const sourceSpan = Math.max(0.01, sourceEnd - sourceStart);
+      const localSeconds = Math.max(0, timelineMs - Math.max(0, layerWindow.startMs)) / 1000;
+      return { seconds: sourceStart + (localSeconds % sourceSpan), sourceStart, sourceEnd };
+    },
+    [element, pageDurationMs]
+  );
+
+  const beginVideoPlayback = useCallback(
+    async (atMs: number) => {
+      const media = videoRef.current;
+      if (!media) return;
+      const { seconds } = resolveSourceSecondsAtMs(atMs);
+      // ONE seek, to the starting position. Everything after this is the decoder running forward.
+      await syncVideoElementToTime(media, seconds, 0.05);
+      // The clip loops inside its own window while the page runs on; leaving loop on lets the
+      // element handle that itself rather than making the recorder seek at every wrap.
+      media.loop = true;
+      media.playbackRate = 1;
+      try {
+        await media.play();
+      } catch {
+        // Autoplay refusal on a muted element is not expected, but a failed play must not take
+        // the whole recording down — the capture simply holds this layer's current frame.
+      }
+    },
+    [resolveSourceSecondsAtMs]
+  );
+
+  const resyncVideoPlayback = useCallback(
+    (targetMs: number) => {
+      const media = videoRef.current;
+      if (!media || media.paused) return;
+      const { seconds } = resolveSourceSecondsAtMs(targetMs);
+      if (Math.abs(media.currentTime - seconds) * 1000 <= PREVIEW_PLAYBACK_RESYNC_THRESHOLD_MS) return;
+      try {
+        media.currentTime = seconds;
+      } catch {
+        // A seek refused mid-playback just means this tick stays where it is.
+      }
+    },
+    [resolveSourceSecondsAtMs]
+  );
+
+  const endVideoPlayback = useCallback(() => {
+    const media = videoRef.current;
+    if (!media) return;
+    media.pause();
+  }, []);
+
   useEffect(() => {
     if (!registerPreviewMediaController) return undefined;
     registerPreviewMediaController(element.id, {
       syncToFrame: syncVideoToFrame,
+      beginPlayback: beginVideoPlayback,
+      resyncPlayback: resyncVideoPlayback,
+      endPlayback: endVideoPlayback,
     });
     return () => registerPreviewMediaController(element.id, null);
-  }, [element.id, registerPreviewMediaController, syncVideoToFrame]);
+  }, [
+    beginVideoPlayback,
+    element.id,
+    endVideoPlayback,
+    registerPreviewMediaController,
+    resyncVideoPlayback,
+    syncVideoToFrame,
+  ]);
 
   useEffect(() => {
-    if (!forceTimelineSync) return;
+    if (!forceTimelineSync || suspendMediaTimelineSync) return;
     void syncVideoToFrame(playheadFrame, previewFps);
-  }, [forceTimelineSync, playheadFrame, previewFps, syncVideoToFrame]);
+  }, [forceTimelineSync, suspendMediaTimelineSync, playheadFrame, previewFps, syncVideoToFrame]);
 
+  // The playhead at the moment playback starts (play can be pressed mid-timeline). A ref, because
+  // the effect below must not re-run — and re-seek — on every frame of playback.
+  const playheadFrameRef = useRef(playheadFrame);
+  const previewFpsRef = useRef(previewFps);
+  useEffect(() => {
+    playheadFrameRef.current = playheadFrame;
+    previewFpsRef.current = previewFps;
+  }, [playheadFrame, previewFps]);
   useEffect(() => {
     const media = videoRef.current;
-    if (!media || forceTimelineSync) return;
+    if (!media || forceTimelineSync) return undefined;
+    let cancelled = false;
     media.loop = true;
-    void media.play().catch(() => undefined);
-  }, [forceTimelineSync, video]);
+    void (async () => {
+      // Align to the playhead first, then let the element run; syncVideoToFrame pauses, so play()
+      // comes after it.
+      await syncVideoToFrame(playheadFrameRef.current, previewFpsRef.current);
+      if (cancelled) return;
+      void media.play().catch(() => undefined);
+    })();
+    // A trimmed clip loops inside its own window — native `loop` would replay the whole file.
+    const handleTimeUpdate = () => {
+      const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+      const sourceStart = Math.max(0, Number(element.videoStart) || 0);
+      const rawVideoEnd = Number(element.videoEnd);
+      const sourceEnd =
+        Number.isFinite(rawVideoEnd) && rawVideoEnd > sourceStart
+          ? Math.min(rawVideoEnd, duration > 0 ? duration : rawVideoEnd)
+          : duration;
+      if (sourceEnd > sourceStart && media.currentTime >= sourceEnd - 0.02) {
+        media.currentTime = sourceStart;
+      }
+    };
+    media.addEventListener("timeupdate", handleTimeUpdate);
+    return () => {
+      cancelled = true;
+      media.removeEventListener("timeupdate", handleTimeUpdate);
+    };
+  }, [element.videoEnd, element.videoStart, forceTimelineSync, syncVideoToFrame, video]);
 
   useEffect(() => {
     const media = videoRef.current;
@@ -929,6 +1098,40 @@ function CanvasVideoNodeImpl({
       media.removeEventListener("seeked", redraw);
       media.removeEventListener("loadeddata", redraw);
       media.removeEventListener("canplay", redraw);
+    };
+  }, [video]);
+  // Konva has no idea the <video> advanced a frame, and the events above only fire on seeks and
+  // load. While the media plays, repaint the layer every animation frame — same as the GIF path —
+  // otherwise the canvas keeps showing whatever frame was current when the last `seeked` fired.
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return undefined;
+    let frame = 0;
+    const tick = () => {
+      mediaRef.current?.getLayer()?.batchDraw();
+      frame = window.requestAnimationFrame(tick);
+    };
+    const start = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      if (!frame) return;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      mediaRef.current?.getLayer()?.batchDraw();
+    };
+    media.addEventListener("play", start);
+    media.addEventListener("playing", start);
+    media.addEventListener("pause", stop);
+    media.addEventListener("ended", stop);
+    if (!media.paused) start();
+    return () => {
+      media.removeEventListener("play", start);
+      media.removeEventListener("playing", start);
+      media.removeEventListener("pause", stop);
+      media.removeEventListener("ended", stop);
+      stop();
     };
   }, [video]);
 
@@ -972,8 +1175,10 @@ function CanvasVideoNodeImpl({
         context.fillStrokeShape(shape);
         buildMediaShapePath(context, element);
         context.clip();
-        if (video) {
+        if (video && video.readyState >= 2) {
           context.drawImage(video, 0, 0, element.width, element.height);
+        } else if (posterImage) {
+          context.drawImage(posterImage, 0, 0, element.width, element.height);
         } else {
           context.fillStyle = "rgba(255,255,255,0.001)";
           context.fillRect(0, 0, element.width, element.height);
@@ -994,6 +1199,12 @@ interface FrameNodeProps {
   previewFps: number;
   pageDurationMs: number;
   forceTimelineSync: boolean;
+  /**
+   * True while the preview RECORDER is driving the clips itself: it plays them once and resyncs
+   * them on its own cadence. The per-frame seek below has to stay out of the way then. Seeking on
+   * every captured frame fights that playback and the recording comes out as garbled bands.
+   */
+  suspendMediaTimelineSync?: boolean;
   onSelect: (event: Konva.KonvaEventObject<MouseEvent | TouchEvent>) => void;
   onContextMenu: (event: Konva.KonvaEventObject<PointerEvent>) => void;
   onDragMove: (event: Konva.KonvaEventObject<DragEvent>) => void;
@@ -1110,6 +1321,7 @@ function CanvasFrameNodeImpl({
   previewFps,
   pageDurationMs,
   forceTimelineSync,
+  suspendMediaTimelineSync = false,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -1266,6 +1478,66 @@ function CanvasFrameNodeImpl({
     [element, frameContent, pageDurationMs]
   );
 
+  // Same play-don't-seek treatment as a bare video layer — a clip inside a frame is decoded by the
+  // identical element and was just as static in recorded previews.
+  const resolveFrameContentSourceSeconds = useCallback(
+    (timelineMs: number) => {
+      const media = videoRef.current;
+      const duration = media && Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
+      const sourceStart = Math.max(0, Number(frameContent?.videoStart) || 0);
+      const fallbackEnd = duration > 0 ? duration : sourceStart + 0.25;
+      const rawVideoEnd = Number(frameContent?.videoEnd);
+      const sourceEnd = Math.max(
+        sourceStart + 0.01,
+        duration > 0
+          ? Math.min(Number.isFinite(rawVideoEnd) && rawVideoEnd > 0 ? rawVideoEnd : fallbackEnd, duration)
+          : Number.isFinite(rawVideoEnd) && rawVideoEnd > 0
+            ? rawVideoEnd
+            : fallbackEnd
+      );
+      const layerWindow = resolveTimelineWindow(element, pageDurationMs);
+      const sourceSpan = Math.max(0.01, sourceEnd - sourceStart);
+      const localSeconds = Math.max(0, timelineMs - Math.max(0, layerWindow.startMs)) / 1000;
+      return sourceStart + (localSeconds % sourceSpan);
+    },
+    [element, frameContent, pageDurationMs]
+  );
+
+  const beginFrameContentPlayback = useCallback(
+    async (atMs: number) => {
+      const media = videoRef.current;
+      if (!media || frameContent?.kind !== "video") return;
+      await syncVideoElementToTime(media, resolveFrameContentSourceSeconds(atMs), 0.05);
+      media.loop = true;
+      media.playbackRate = 1;
+      try {
+        await media.play();
+      } catch {
+        // See the bare-video note: a refused play degrades to a held frame, not a failed record.
+      }
+    },
+    [frameContent?.kind, resolveFrameContentSourceSeconds]
+  );
+
+  const resyncFrameContentPlayback = useCallback(
+    (targetMs: number) => {
+      const media = videoRef.current;
+      if (!media || media.paused || frameContent?.kind !== "video") return;
+      const seconds = resolveFrameContentSourceSeconds(targetMs);
+      if (Math.abs(media.currentTime - seconds) * 1000 <= PREVIEW_PLAYBACK_RESYNC_THRESHOLD_MS) return;
+      try {
+        media.currentTime = seconds;
+      } catch {
+        // Ignore a refused mid-playback seek.
+      }
+    },
+    [frameContent?.kind, resolveFrameContentSourceSeconds]
+  );
+
+  const endFrameContentPlayback = useCallback(() => {
+    videoRef.current?.pause();
+  }, []);
+
   useEffect(() => {
     if (!registerPreviewMediaController) return undefined;
     if (frameContent?.kind !== "video") {
@@ -1274,32 +1546,54 @@ function CanvasFrameNodeImpl({
     }
     registerPreviewMediaController(element.id, {
       syncToFrame: syncFrameContentVideoToFrame,
+      beginPlayback: beginFrameContentPlayback,
+      resyncPlayback: resyncFrameContentPlayback,
+      endPlayback: endFrameContentPlayback,
     });
     return () => registerPreviewMediaController(element.id, null);
   }, [
+    beginFrameContentPlayback,
     element.id,
+    endFrameContentPlayback,
     frameContent?.kind,
     registerPreviewMediaController,
+    resyncFrameContentPlayback,
     syncFrameContentVideoToFrame,
   ]);
 
   useEffect(() => {
-    if (!forceTimelineSync || frameContent?.kind !== "video") return;
+    if (!forceTimelineSync || suspendMediaTimelineSync || frameContent?.kind !== "video") return;
     void syncFrameContentVideoToFrame(playheadFrame, previewFps);
   }, [
     forceTimelineSync,
+    suspendMediaTimelineSync,
     frameContent?.kind,
     playheadFrame,
     previewFps,
     syncFrameContentVideoToFrame,
   ]);
 
+  const framePlayheadFrameRef = useRef(playheadFrame);
+  const framePreviewFpsRef = useRef(previewFps);
+  useEffect(() => {
+    framePlayheadFrameRef.current = playheadFrame;
+    framePreviewFpsRef.current = previewFps;
+  }, [playheadFrame, previewFps]);
   useEffect(() => {
     const media = videoRef.current;
-    if (!media || frameContent?.kind !== "video" || forceTimelineSync) return;
+    if (!media || frameContent?.kind !== "video" || forceTimelineSync) return undefined;
+    let cancelled = false;
     media.loop = true;
-    void media.play().catch(() => undefined);
-  }, [forceTimelineSync, frameContent?.kind, video]);
+    void (async () => {
+      // Align to the playhead, then run on the element's own clock (see CanvasVideoNode).
+      await syncFrameContentVideoToFrame(framePlayheadFrameRef.current, framePreviewFpsRef.current);
+      if (cancelled) return;
+      void media.play().catch(() => undefined);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [forceTimelineSync, frameContent?.kind, syncFrameContentVideoToFrame, video]);
 
   useEffect(() => {
     const media = videoRef.current;
@@ -1313,6 +1607,40 @@ function CanvasFrameNodeImpl({
       media.removeEventListener("seeked", redraw);
       media.removeEventListener("loadeddata", redraw);
       media.removeEventListener("canplay", redraw);
+    };
+  }, [video]);
+  // Konva has no idea the <video> advanced a frame, and the events above only fire on seeks and
+  // load. While the media plays, repaint the layer every animation frame — same as the GIF path —
+  // otherwise the canvas keeps showing whatever frame was current when the last `seeked` fired.
+  useEffect(() => {
+    const media = videoRef.current;
+    if (!media) return undefined;
+    let frame = 0;
+    const tick = () => {
+      mediaRef.current?.getLayer()?.batchDraw();
+      frame = window.requestAnimationFrame(tick);
+    };
+    const start = () => {
+      if (frame) return;
+      frame = window.requestAnimationFrame(tick);
+    };
+    const stop = () => {
+      if (!frame) return;
+      window.cancelAnimationFrame(frame);
+      frame = 0;
+      mediaRef.current?.getLayer()?.batchDraw();
+    };
+    media.addEventListener("play", start);
+    media.addEventListener("playing", start);
+    media.addEventListener("pause", stop);
+    media.addEventListener("ended", stop);
+    if (!media.paused) start();
+    return () => {
+      media.removeEventListener("play", start);
+      media.removeEventListener("playing", start);
+      media.removeEventListener("pause", stop);
+      media.removeEventListener("ended", stop);
+      stop();
     };
   }, [video]);
 
@@ -1535,6 +1863,21 @@ interface CanvasPageSceneProps {
   playheadFrame: number;
   previewFps: number;
   forceTimelineSync: boolean;
+  /**
+   * Draw the page AT REST — entrances finished, exits not started — instead of sampling the
+   * animation at [playheadFrame]. See RenderPoseOptions: frame 0 of a page whose layers all fade
+   * in is blank, so the editing canvas (and every thumbnail taken from it) asked for the frame
+   * and got an empty white page. Only a resting playhead and the poster capture pass this.
+   */
+  settledPose?: boolean;
+  /** True while the timeline is actually running, which is when the SELECTED layer must animate too. */
+  timelinePlaying?: boolean;
+  /**
+   * True while the preview RECORDER is driving the clips itself: it plays them once and resyncs
+   * them on its own cadence. The per-frame seek below has to stay out of the way then. Seeking on
+   * every captured frame fights that playback and the recording comes out as garbled bands.
+   */
+  suspendMediaTimelineSync?: boolean;
   interactive: boolean;
   toolMode: ToolMode;
   frameDropTargetId?: string;
@@ -1626,6 +1969,9 @@ function CanvasPageSceneImpl({
   playheadFrame,
   previewFps,
   forceTimelineSync,
+  settledPose = false,
+  timelinePlaying = false,
+  suspendMediaTimelineSync = false,
   interactive,
   toolMode,
   frameDropTargetId = "",
@@ -1662,6 +2008,8 @@ function CanvasPageSceneImpl({
     [registerPreviewMediaController]
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Stable so the memoized node components below are not re-rendered by a fresh object identity.
+  const poseOptions = useMemo<RenderPoseOptions>(() => ({ settled: settledPose }), [settledPose]);
 
   // Per-element event handlers, cached by element id and stable for the lifetime
   // of that element. The node components are memoized, and passing freshly
@@ -1880,7 +2228,8 @@ function CanvasPageSceneImpl({
             element,
             playheadFrame,
             previewFps,
-            pageDurationMs
+            pageDurationMs,
+            poseOptions
           );
           // The layer's own static blur (Blur control) and any animation blur share one filter
           // pass — take the stronger of the two so a blurred layer animating a blur doesn't
@@ -1893,17 +2242,62 @@ function CanvasPageSceneImpl({
           const elementHandlers = getElementHandlers(element.id);
           const isEditingFrameContent = interactive && frameContentEditId === element.id;
           const isSelected = interactive && selectedIdSet.has(element.id);
+          // Reveal mattes and per-glyph motion used to be resolved inside the TEXT branch alone, so
+          // Wipe, Gradient wipe, Circular, Radial and Block were computed and then dropped for every
+          // photo, video and shape — the effect simply did nothing. A matte is geometry, not
+          // typography, so every layer kind is handed one now.
+          const resolvedEffects = resolveAnimatedElementEffectsAtFrame(
+            element,
+            playheadFrame,
+            previewFps,
+            pageDurationMs,
+            poseOptions
+          );
+          // The layer you are working on keeps its plain node so the Transformer and the inline text
+          // editor are never wrapped — but only while the timeline is at REST. During playback it has
+          // to animate like every other layer: suppressing it there meant picking an effect and
+          // pressing play showed nothing, because the layer you just clicked was still selected.
+          const effects = resolvedEffects && (!isSelected || timelinePlaying) ? resolvedEffects : null;
+          // Per-glyph motion has no glyphs to move on a photo, so the layer travels as a single unit.
+          // That is the honest degradation — the alternative is the effect doing nothing at all.
+          const unitGlyph =
+            effects?.glyphMotion && element.type !== "text"
+              ? glyphVisual(
+                  effects.glyphMotion.type,
+                  effects.glyphMotion.progress,
+                  effects.glyphMotion.durationMs,
+                  0,
+                  1,
+                  0,
+                  1
+                )
+              : null;
+          const matteMask =
+            element.type !== "text" ? ((effects?.revealMask ?? null) as ClipMask | null) : null;
+          const isMatted = Boolean(matteMask || unitGlyph);
+          // Under a matte the wrapping group owns the pose and the node itself sits at the origin,
+          // so the clip is expressed in the layer's own coordinates.
+          const nodePose: ElementRenderPose = isMatted
+            ? { x: 0, y: 0, rotation: 0, scaleX: 1, scaleY: 1, opacity: 1, blurRadius: pose.blurRadius }
+            : pose;
           const canTransform =
-            interactive && isSelected && !element.locked && toolMode !== "draw" && !isEditingFrameContent;
+            interactive &&
+            isSelected &&
+            !element.locked &&
+            toolMode !== "draw" &&
+            !isEditingFrameContent &&
+            // Dragging a node that sits inside a posed wrapper would report group-local
+            // coordinates, so a layer mid-reveal is not draggable.
+            !isMatted;
           const commonProps = {
             ref: (node: Konva.Node | null) => safeRegisterRef(element.id, node),
             id: element.id,
-            x: pose.x,
-            y: pose.y,
-            rotation: pose.rotation,
-            scaleX: pose.scaleX,
-            scaleY: pose.scaleY,
-            opacity: pose.opacity,
+            x: nodePose.x,
+            y: nodePose.y,
+            rotation: nodePose.rotation,
+            scaleX: nodePose.scaleX,
+            scaleY: nodePose.scaleY,
+            opacity: nodePose.opacity,
             draggable: canTransform,
             listening: interactive,
             globalCompositeOperation: element.blendMode,
@@ -1934,371 +2328,406 @@ function CanvasPageSceneImpl({
               : undefined,
           };
 
-          if (element.type === "frame") {
-            return (
-              <CanvasFrameNode
-                key={element.id}
-                element={element}
-                pose={pose}
-                interactive={interactive}
-                canTransform={canTransform}
-                isDropTarget={interactive && frameDropTargetId === element.id}
-                isContentEditing={isEditingFrameContent}
-                playheadFrame={playheadFrame}
-                previewFps={previewFps}
-                pageDurationMs={pageDurationMs}
-                forceTimelineSync={forceTimelineSync}
-                registerRef={safeRegisterRef}
-                registerPreviewMediaController={safeRegisterPreviewMediaController}
-                onSelect={elementHandlers.onSelect}
-                onContextMenu={elementHandlers.onContextMenu}
-                onDragMove={elementHandlers.onDragMove}
-                onDragEnd={elementHandlers.onDragEnd}
-                onTransformEnd={elementHandlers.onTransformEnd}
-                onEnterContentEdit={elementHandlers.onEnterContentEdit}
-                onContentTransform={elementHandlers.onContentTransform}
-                onContentMetadata={elementHandlers.onContentMetadata}
-              />
-            );
-          }
-
-          if (element.type === "image") {
-            return (
-              <CanvasImageNode
-                key={element.id}
-                element={element}
-                pose={pose}
-                interactive={interactive}
-                canTransform={canTransform}
-                playheadFrame={playheadFrame}
-                previewFps={previewFps}
-                pageDurationMs={pageDurationMs}
-                forceTimelineSync={forceTimelineSync}
-                registerRef={safeRegisterRef}
-                onSelect={elementHandlers.onSelect}
-                onContextMenu={elementHandlers.onContextMenu}
-                onDragMove={elementHandlers.onDragMove}
-                onDragEnd={elementHandlers.onDragEnd}
-                onTransformEnd={elementHandlers.onTransformEnd}
-                onImageMetadata={elementHandlers.onImageMetadata}
-                // Only blurred layers need the re-cache nudge; skip the extra render otherwise.
-                onContentReady={staticBlurRadius > 0 ? refreshBlurCaches : undefined}
-              />
-            );
-          }
-
-          if (element.type === "video") {
-            return (
-              <CanvasVideoNode
-                key={element.id}
-                element={element}
-                pose={pose}
-                interactive={interactive}
-                canTransform={canTransform}
-                playheadFrame={playheadFrame}
-                previewFps={previewFps}
-                pageDurationMs={pageDurationMs}
-                forceTimelineSync={forceTimelineSync}
-                registerRef={safeRegisterRef}
-                registerPreviewMediaController={safeRegisterPreviewMediaController}
-                onSelect={elementHandlers.onSelect}
-                onContextMenu={elementHandlers.onContextMenu}
-                onDragMove={elementHandlers.onDragMove}
-                onDragEnd={elementHandlers.onDragEnd}
-                onTransformEnd={elementHandlers.onTransformEnd}
-                onVideoMetadata={elementHandlers.onVideoMetadata}
-              />
-            );
-          }
-
-          if (element.type === "text") {
-            const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
-            const direction = resolveTextDirection(element.text);
-            // Text outline. `fillAfterStrokeEnabled` paints the fill over the stroke so the stroke
-            // reads as an outline hugging the glyph instead of eating half of it.
-            const textStrokeWidthPx = resolveTextStrokeWidthPx(element.strokeWidth, element.fontSize);
-            const textStrokeProps =
-              textStrokeWidthPx > 0 && String(element.stroke || "").trim()
-                ? {
-                    stroke: element.stroke,
-                    strokeWidth: textStrokeWidthPx,
-                    fillAfterStrokeEnabled: true,
-                  }
-                : {};
-            const hasTextCurve = isCurvedText(element);
-
-            if (hasTextCurve) {
+          // The type dispatch is a function so its result can be wrapped: a layer under a matte is
+          // drawn inside a clipped group, with the pose moved onto the wrapper.
+          const renderTypedNode = () => {
+            if (element.type === "frame") {
               return (
-                <Group
+                <CanvasFrameNode
+                  key={element.id}
+                  element={element}
+                  pose={nodePose}
+                  interactive={interactive}
+                  canTransform={canTransform}
+                  isDropTarget={interactive && frameDropTargetId === element.id}
+                  isContentEditing={isEditingFrameContent}
+                  playheadFrame={playheadFrame}
+                  previewFps={previewFps}
+                  pageDurationMs={pageDurationMs}
+                  forceTimelineSync={forceTimelineSync}
+                  suspendMediaTimelineSync={suspendMediaTimelineSync}
+                  registerRef={safeRegisterRef}
+                  registerPreviewMediaController={safeRegisterPreviewMediaController}
+                  onSelect={elementHandlers.onSelect}
+                  onContextMenu={elementHandlers.onContextMenu}
+                  onDragMove={elementHandlers.onDragMove}
+                  onDragEnd={elementHandlers.onDragEnd}
+                  onTransformEnd={elementHandlers.onTransformEnd}
+                  onEnterContentEdit={elementHandlers.onEnterContentEdit}
+                  onContentTransform={elementHandlers.onContentTransform}
+                  onContentMetadata={elementHandlers.onContentMetadata}
+                />
+              );
+            }
+
+            if (element.type === "image") {
+              return (
+                <CanvasImageNode
+                  key={element.id}
+                  element={element}
+                  pose={nodePose}
+                  interactive={interactive}
+                  canTransform={canTransform}
+                  playheadFrame={playheadFrame}
+                  previewFps={previewFps}
+                  pageDurationMs={pageDurationMs}
+                  forceTimelineSync={forceTimelineSync}
+                  registerRef={safeRegisterRef}
+                  onSelect={elementHandlers.onSelect}
+                  onContextMenu={elementHandlers.onContextMenu}
+                  onDragMove={elementHandlers.onDragMove}
+                  onDragEnd={elementHandlers.onDragEnd}
+                  onTransformEnd={elementHandlers.onTransformEnd}
+                  onImageMetadata={elementHandlers.onImageMetadata}
+                  // Only blurred layers need the re-cache nudge; skip the extra render otherwise.
+                  onContentReady={staticBlurRadius > 0 ? refreshBlurCaches : undefined}
+                />
+              );
+            }
+
+            if (element.type === "video") {
+              return (
+                <CanvasVideoNode
+                  key={element.id}
+                  element={element}
+                  pose={nodePose}
+                  interactive={interactive}
+                  canTransform={canTransform}
+                  playheadFrame={playheadFrame}
+                  previewFps={previewFps}
+                  pageDurationMs={pageDurationMs}
+                  forceTimelineSync={forceTimelineSync}
+                  suspendMediaTimelineSync={suspendMediaTimelineSync}
+                  registerRef={safeRegisterRef}
+                  registerPreviewMediaController={safeRegisterPreviewMediaController}
+                  onSelect={elementHandlers.onSelect}
+                  onContextMenu={elementHandlers.onContextMenu}
+                  onDragMove={elementHandlers.onDragMove}
+                  onDragEnd={elementHandlers.onDragEnd}
+                  onTransformEnd={elementHandlers.onTransformEnd}
+                  onVideoMetadata={elementHandlers.onVideoMetadata}
+                />
+              );
+            }
+
+            if (element.type === "text") {
+              const konvaFontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
+              const direction = resolveTextDirection(element.text);
+              // Text outline. `fillAfterStrokeEnabled` paints the fill over the stroke so the stroke
+              // reads as an outline hugging the glyph instead of eating half of it.
+              const textStrokeWidthPx = resolveTextStrokeWidthPx(element.strokeWidth, element.fontSize);
+              const textStrokeProps =
+                textStrokeWidthPx > 0 && String(element.stroke || "").trim()
+                  ? {
+                      stroke: element.stroke,
+                      strokeWidth: textStrokeWidthPx,
+                      fillAfterStrokeEnabled: true,
+                    }
+                  : {};
+              const hasTextCurve = isCurvedText(element);
+
+              if (hasTextCurve) {
+                return (
+                  <Group
+                    key={element.id}
+                    {...commonProps}
+                    onDblClick={
+                      interactive
+                        ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                        : undefined
+                    }
+                    onDblTap={
+                      interactive
+                        ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                        : undefined
+                    }
+                  >
+                    <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
+                    <TextPath
+                      {...textStrokeProps}
+                      data={resolveTextCurvePath(element)}
+                      text={element.text}
+                      fill={element.color || element.fill}
+                      fontSize={element.fontSize}
+                      fontFamily={resolveCssFontFamily(element.fontFamily)}
+                      fontStyle={konvaFontStyle}
+                      fontVariant="normal"
+                      align={element.align}
+                      letterSpacing={element.letterSpacing}
+                      textDecoration={element.textDecoration}
+                      textBaseline="middle"
+                      listening={false}
+                    />
+                  </Group>
+                );
+              }
+
+              // Phase-2 preview effects (reveal matte / typewriter / BLOCK bar), resolved once above
+              // for every layer kind. The selected element keeps the plain <Text> while the timeline is
+              // at rest so the Konva Transformer and the inline-edit path are never wrapped, and joins
+              // in as soon as playback starts.
+              const textFx = effects;
+              // Per-WORD motion (ASCEND rises each word in, ONE_WORD shows one at a time). Rendered
+              // as one <Text> per word at a measured x — words shape correctly split (unlike
+              // per-CHAR, which would break Arabic). Single line only; multi-line falls through to
+              // the reveal/clip fallback below. These types also carry a WIPE mask, so this MUST
+              // run before the generic clip branch or the word motion never shows.
+              const perWordType = textFx?.glyphMotion?.type;
+              if (
+                textFx?.glyphMotion &&
+                (perWordType === "ASCEND" || perWordType === "ONE_WORD") &&
+                !element.text.includes("\n")
+              ) {
+                const words = splitWordsForMotion(element.text);
+                if (words.length > 0) {
+                  const gm = textFx.glyphMotion;
+                  const rtl = direction === "rtl";
+                  const fontCss = `${konvaFontStyle} ${element.fontSize}px ${resolveCssFontFamily(
+                    element.fontFamily
+                  )}`;
+                  const measured = measureWordAdvances(words, fontCss, element.letterSpacing || 0);
+                  const boxes = layoutWordsSingleLine(
+                    words.map((w, i) => ({ text: w, width: measured.widths[i] })),
+                    measured.spaceWidth,
+                    element.width,
+                    element.align === "center" ? "center" : element.align === "right" ? "right" : "left",
+                    rtl
+                  );
+                  const lineHeightPx = element.fontSize * (element.lineHeight || 1);
+                  return (
+                    <Group key={element.id} {...commonProps}>
+                      {boxes.map((b) => {
+                        const gv = glyphVisual(gm.type, gm.progress, gm.durationMs, 0, 1, b.wordIndex, words.length);
+                        if (!gv || gv.alpha <= 0.001) return null; // ONE_WORD hides inactive words
+                        return (
+                          <Text
+                            key={b.wordIndex}
+                            {...textStrokeProps}
+                            x={b.x}
+                            y={gv.translateYEm * lineHeightPx}
+                            text={b.text}
+                            fill={element.color || element.fill}
+                            fontSize={element.fontSize}
+                            fontFamily={resolveCssFontFamily(element.fontFamily)}
+                            fontStyle={konvaFontStyle}
+                            fontVariant="normal"
+                            letterSpacing={element.letterSpacing}
+                            textDecoration={element.textDecoration}
+                            opacity={gv.alpha}
+                            listening={false}
+                          />
+                        );
+                      })}
+                    </Group>
+                  );
+                }
+              }
+              if (textFx && (textFx.revealMask || textFx.textReveal || textFx.overlayBar)) {
+                const rtl = direction === "rtl";
+                let clip: ClipMask | null = textFx.revealMask
+                  ? (textFx.revealMask as ClipMask)
+                  : null;
+                if (!clip && textFx.textReveal) {
+                  clip = {
+                    kind: "WIPE",
+                    progress: revealFraction(
+                      textFx.textReveal.progress,
+                      textFx.textReveal.mode,
+                      textFx.textReveal.durationMs,
+                      element.text
+                    ),
+                  };
+                }
+                const bar = textFx.overlayBar;
+                const localTextProps = {
+                  ...textStrokeProps,
+                  width: element.width,
+                  height: element.height,
+                  text: element.text,
+                  fill: element.color || element.fill,
+                  fontSize: element.fontSize,
+                  fontFamily: resolveCssFontFamily(element.fontFamily),
+                  fontStyle: konvaFontStyle,
+                  fontVariant: "normal" as const,
+                  lineHeight: element.lineHeight,
+                  align: element.align,
+                  direction,
+                  letterSpacing: element.letterSpacing,
+                  textDecoration: element.textDecoration,
+                  listening: false,
+                };
+                return (
+                  <Group key={element.id} {...commonProps}>
+                    <Group
+                      listening={false}
+                      clipFunc={
+                        clip
+                          ? (ctx) => drawRevealClip(ctx, clip!, element.width, element.height, rtl)
+                          : undefined
+                      }
+                    >
+                      <Text {...localTextProps} />
+                    </Group>
+                    {bar ? (
+                      // BLOCK's bar rides ON TOP of the swept text (outside the clip), in the text's
+                      // own colour — the thing doing the uncovering.
+                      <Rect
+                        x={bar.leftFraction * element.width}
+                        y={0}
+                        width={bar.widthFraction * element.width}
+                        height={element.height}
+                        fill={element.color || element.fill}
+                        listening={false}
+                      />
+                    ) : null}
+                  </Group>
+                );
+              }
+
+              return (
+                <Text
                   key={element.id}
                   {...commonProps}
+                  {...textStrokeProps}
+                  width={element.width}
+                  height={element.height}
+                  text={element.text}
+                  fill={element.color || element.fill}
+                  fontSize={element.fontSize}
+                  fontFamily={resolveCssFontFamily(element.fontFamily)}
+                  fontStyle={konvaFontStyle}
+                  fontVariant="normal"
+                  lineHeight={element.lineHeight}
+                  align={element.align}
+                  direction={direction}
+                  letterSpacing={element.letterSpacing}
+                  textDecoration={element.textDecoration}
                   onDblClick={
                     interactive
-                      ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                      ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
                       : undefined
                   }
                   onDblTap={
                     interactive
-                      ? (event) => onBeginInlineTextEdit?.(event.target, element)
+                      ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
                       : undefined
                   }
-                >
-                  <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
-                  <TextPath
-                    {...textStrokeProps}
-                    data={resolveTextCurvePath(element)}
-                    text={element.text}
-                    fill={element.color || element.fill}
-                    fontSize={element.fontSize}
-                    fontFamily={resolveCssFontFamily(element.fontFamily)}
-                    fontStyle={konvaFontStyle}
-                    fontVariant="normal"
-                    align={element.align}
-                    letterSpacing={element.letterSpacing}
-                    textDecoration={element.textDecoration}
-                    textBaseline="middle"
-                    listening={false}
-                  />
-                </Group>
+                />
               );
             }
 
-            // Phase-2 preview effects (reveal matte / typewriter / BLOCK bar). Rendered only for
-            // NON-selected text — the selected element keeps the plain <Text> so the Konva
-            // Transformer and inline-edit path are never wrapped. Effects are inert at rest, so
-            // this only diverges from the plain node mid-animation during playback.
-            const textFx = isSelected
-              ? null
-              : resolveAnimatedElementEffectsAtFrame(element, playheadFrame, previewFps, pageDurationMs);
-            // Per-WORD motion (ASCEND rises each word in, ONE_WORD shows one at a time). Rendered
-            // as one <Text> per word at a measured x — words shape correctly split (unlike
-            // per-CHAR, which would break Arabic). Single line only; multi-line falls through to
-            // the reveal/clip fallback below. These types also carry a WIPE mask, so this MUST
-            // run before the generic clip branch or the word motion never shows.
-            const perWordType = textFx?.glyphMotion?.type;
-            if (
-              textFx?.glyphMotion &&
-              (perWordType === "ASCEND" || perWordType === "ONE_WORD") &&
-              !element.text.includes("\n")
-            ) {
-              const words = splitWordsForMotion(element.text);
-              if (words.length > 0) {
-                const gm = textFx.glyphMotion;
-                const rtl = direction === "rtl";
-                const fontCss = `${konvaFontStyle} ${element.fontSize}px ${resolveCssFontFamily(
-                  element.fontFamily
-                )}`;
-                const measured = measureWordAdvances(words, fontCss, element.letterSpacing || 0);
-                const boxes = layoutWordsSingleLine(
-                  words.map((w, i) => ({ text: w, width: measured.widths[i] })),
-                  measured.spaceWidth,
-                  element.width,
-                  element.align === "center" ? "center" : element.align === "right" ? "right" : "left",
-                  rtl
-                );
-                const lineHeightPx = element.fontSize * (element.lineHeight || 1);
-                return (
-                  <Group key={element.id} {...commonProps}>
-                    {boxes.map((b) => {
-                      const gv = glyphVisual(gm.type, gm.progress, gm.durationMs, 0, 1, b.wordIndex, words.length);
-                      if (!gv || gv.alpha <= 0.001) return null; // ONE_WORD hides inactive words
-                      return (
-                        <Text
-                          key={b.wordIndex}
-                          {...textStrokeProps}
-                          x={b.x}
-                          y={gv.translateYEm * lineHeightPx}
-                          text={b.text}
-                          fill={element.color || element.fill}
-                          fontSize={element.fontSize}
-                          fontFamily={resolveCssFontFamily(element.fontFamily)}
-                          fontStyle={konvaFontStyle}
-                          fontVariant="normal"
-                          letterSpacing={element.letterSpacing}
-                          textDecoration={element.textDecoration}
-                          opacity={gv.alpha}
-                          listening={false}
-                        />
-                      );
-                    })}
-                  </Group>
-                );
-              }
-            }
-            if (textFx && (textFx.revealMask || textFx.textReveal || textFx.overlayBar)) {
-              const rtl = direction === "rtl";
-              let clip: ClipMask | null = textFx.revealMask
-                ? (textFx.revealMask as ClipMask)
-                : null;
-              if (!clip && textFx.textReveal) {
-                clip = {
-                  kind: "WIPE",
-                  progress: revealFraction(
-                    textFx.textReveal.progress,
-                    textFx.textReveal.mode,
-                    textFx.textReveal.durationMs,
-                    element.text
-                  ),
-                };
-              }
-              const bar = textFx.overlayBar;
-              const localTextProps = {
-                ...textStrokeProps,
-                width: element.width,
-                height: element.height,
-                text: element.text,
-                fill: element.color || element.fill,
-                fontSize: element.fontSize,
-                fontFamily: resolveCssFontFamily(element.fontFamily),
-                fontStyle: konvaFontStyle,
-                fontVariant: "normal" as const,
-                lineHeight: element.lineHeight,
-                align: element.align,
-                direction,
-                letterSpacing: element.letterSpacing,
-                textDecoration: element.textDecoration,
-                listening: false,
-              };
+            if (element.type === "circle") {
               return (
-                <Group key={element.id} {...commonProps}>
-                  <Group
-                    listening={false}
-                    clipFunc={
-                      clip
-                        ? (ctx) => drawRevealClip(ctx, clip!, element.width, element.height, rtl)
-                        : undefined
-                    }
-                  >
-                    <Text {...localTextProps} />
-                  </Group>
-                  {bar ? (
-                    // BLOCK's bar rides ON TOP of the swept text (outside the clip), in the text's
-                    // own colour — the thing doing the uncovering.
-                    <Rect
-                      x={bar.leftFraction * element.width}
-                      y={0}
-                      width={bar.widthFraction * element.width}
-                      height={element.height}
-                      fill={element.color || element.fill}
-                      listening={false}
-                    />
-                  ) : null}
-                </Group>
+                <Circle
+                  key={element.id}
+                  {...commonProps}
+                  // Konva draws Circle/Star around their POSITION, but every other element type —
+                  // and the store, snapping, alignment and the layers panel — treats x/y as the
+                  // box's TOP-LEFT. Without this offset a circle paints half its width up and to
+                  // the left of where its own box says it is (imported circles landed a radius off
+                  // their labels). The offset moves the local origin, so rotation still pivots on
+                  // the top-left like every other shape.
+                  offsetX={-element.width / 2}
+                  offsetY={-element.height / 2}
+                  radius={Math.max(4, Math.min(element.width, element.height) / 2)}
+                  fill={element.fill}
+                  stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+                  strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+                />
+              );
+            }
+
+            if (element.type === "line") {
+              return (
+                <Line
+                  key={element.id}
+                  {...commonProps}
+                  points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
+                  stroke={element.stroke || element.fill}
+                  strokeWidth={Math.max(1, element.strokeWidth || 4)}
+                  lineCap="round"
+                  lineJoin="round"
+                  tension={0.2}
+                />
+              );
+            }
+
+            if (element.type === "arrow") {
+              return (
+                <Arrow
+                  key={element.id}
+                  {...commonProps}
+                  points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
+                  fill={element.fill}
+                  stroke={element.stroke || element.fill}
+                  strokeWidth={Math.max(1, element.strokeWidth || 5)}
+                  pointerLength={14}
+                  pointerWidth={14}
+                />
+              );
+            }
+
+            if (element.type === "star") {
+              return (
+                <Star
+                  key={element.id}
+                  {...commonProps}
+                  // Same centre-origin correction as Circle above.
+                  offsetX={-element.width / 2}
+                  offsetY={-element.height / 2}
+                  numPoints={5}
+                  innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
+                  outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}
+                  fill={element.fill}
+                  stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
+                  strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+                />
               );
             }
 
             return (
-              <Text
+              <Rect
                 key={element.id}
                 {...commonProps}
-                {...textStrokeProps}
                 width={element.width}
                 height={element.height}
-                text={element.text}
-                fill={element.color || element.fill}
-                fontSize={element.fontSize}
-                fontFamily={resolveCssFontFamily(element.fontFamily)}
-                fontStyle={konvaFontStyle}
-                fontVariant="normal"
-                lineHeight={element.lineHeight}
-                align={element.align}
-                direction={direction}
-                letterSpacing={element.letterSpacing}
-                textDecoration={element.textDecoration}
-                onDblClick={
-                  interactive
-                    ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
-                    : undefined
-                }
-                onDblTap={
-                  interactive
-                    ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
-                    : undefined
-                }
-              />
-            );
-          }
-
-          if (element.type === "circle") {
-            return (
-              <Circle
-                key={element.id}
-                {...commonProps}
-                // Konva draws Circle/Star around their POSITION, but every other element type —
-                // and the store, snapping, alignment and the layers panel — treats x/y as the
-                // box's TOP-LEFT. Without this offset a circle paints half its width up and to
-                // the left of where its own box says it is (imported circles landed a radius off
-                // their labels). The offset moves the local origin, so rotation still pivots on
-                // the top-left like every other shape.
-                offsetX={-element.width / 2}
-                offsetY={-element.height / 2}
-                radius={Math.max(4, Math.min(element.width, element.height) / 2)}
                 fill={element.fill}
                 stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
                 strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
+                cornerRadius={resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)}
               />
             );
-          }
+          };
 
-          if (element.type === "line") {
-            return (
-              <Line
-                key={element.id}
-                {...commonProps}
-                points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
-                stroke={element.stroke || element.fill}
-                strokeWidth={Math.max(1, element.strokeWidth || 4)}
-                lineCap="round"
-                lineJoin="round"
-                tension={0.2}
-              />
-            );
-          }
-
-          if (element.type === "arrow") {
-            return (
-              <Arrow
-                key={element.id}
-                {...commonProps}
-                points={element.points.length > 2 ? element.points : [0, 0, element.width, element.height]}
-                fill={element.fill}
-                stroke={element.stroke || element.fill}
-                strokeWidth={Math.max(1, element.strokeWidth || 5)}
-                pointerLength={14}
-                pointerWidth={14}
-              />
-            );
-          }
-
-          if (element.type === "star") {
-            return (
-              <Star
-                key={element.id}
-                {...commonProps}
-                // Same centre-origin correction as Circle above.
-                offsetX={-element.width / 2}
-                offsetY={-element.height / 2}
-                numPoints={5}
-                innerRadius={Math.max(6, Math.min(element.width, element.height) * 0.2)}
-                outerRadius={Math.max(12, Math.min(element.width, element.height) * 0.5)}
-                fill={element.fill}
-                stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
-                strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
-              />
-            );
-          }
+          if (!isMatted) return renderTypedNode();
 
           return (
-            <Rect
+            <Group
               key={element.id}
-              {...commonProps}
-              width={element.width}
-              height={element.height}
-              fill={element.fill}
-              stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
-              strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
-              cornerRadius={resolveCornerRadiusList(element.cornerRadius, element.cornerRadiusCorners)}
-            />
+              x={pose.x}
+              y={
+                pose.y +
+                (unitGlyph
+                  ? unitGlyph.translateYEm * Math.max(12, element.height * GLYPH_UNIT_RISE_FRACTION)
+                  : 0)
+              }
+              rotation={pose.rotation}
+              scaleX={pose.scaleX}
+              scaleY={pose.scaleY}
+              opacity={pose.opacity * (unitGlyph ? unitGlyph.alpha : 1)}
+              listening={interactive}
+            >
+              <Group
+                listening={interactive}
+                clipFunc={
+                  matteMask
+                    ? (ctx) => drawRevealClip(ctx, matteMask, element.width, element.height, false)
+                    : undefined
+                }
+              >
+                {renderTypedNode()}
+              </Group>
+            </Group>
           );
         })}
       </Group>
@@ -2440,6 +2869,33 @@ function isCurvedText(element: EditorElement) {
   );
 }
 
+// Zoom a template opens at. A full-bleed 1080x1920 story only fits a laptop viewport well below
+// half size, so the editor starts zoomed out rather than fitted (fitToScreen stays on the button).
+const INITIAL_ZOOM_SCALE = 0.35;
+// The zoom the user last picked, remembered across reloads (per browser, not per template — it is
+// a working preference, like a sidebar width). Storage can throw or come back empty (private mode,
+// blocked site data), which just means the editor opens at INITIAL_ZOOM_SCALE.
+const ZOOM_SCALE_STORAGE_KEY = "nayroz.editor.zoomScale";
+
+function readStoredZoomScale(): number | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const stored = Number(window.localStorage.getItem(ZOOM_SCALE_STORAGE_KEY));
+    if (!Number.isFinite(stored) || stored <= 0) return null;
+    return clamp(stored, MIN_SCALE, MAX_SCALE);
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredZoomScale(scale: number) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ZOOM_SCALE_STORAGE_KEY, String(Math.round(scale * 1000) / 1000));
+  } catch {
+    /* storage unavailable — the zoom simply is not remembered */
+  }
+}
 const MIN_SCALE = 0.1;
 const MAX_SCALE = 4;
 // How far past the page edge panning may go, so the border is never flush with
@@ -2448,6 +2904,10 @@ const PAN_MARGIN = 80;
 // Page thumbnails ship to mobile as page-strip tiles — small on purpose so a many-page save
 // stays a light payload. Matches the width PageBar downscales its own captures to.
 const PAGE_THUMBNAIL_MAX_WIDTH_PX = 168;
+// Per-glyph motion is authored in em, which a photo does not have. This is the stand-in: a rise of
+// roughly an eighth of the layer's height reads like the text version without being comical on a
+// full-bleed background.
+const GLYPH_UNIT_RISE_FRACTION = 0.12;
 
 export default function CanvasEditor() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -2729,6 +3189,8 @@ export default function CanvasEditor() {
   const [frameContentEditId, setFrameContentEditId] = useState("");
   const [captureFrameOverride, setCaptureFrameOverride] = useState<number | null>(null);
   const [exportFrameOverride, setExportFrameOverride] = useState(0);
+  // Only the POSTER frame is taken settled — the recorded frames must animate for real.
+  const [exportSettledPose, setExportSettledPose] = useState(false);
   const [exportMaxDimension, setExportMaxDimension] = useState(720);
   // The hidden export stage duplicates the entire scene (a second Konva node per
   // element, plus a second decoded bitmap/video per media layer). Keeping it
@@ -2745,9 +3207,13 @@ export default function CanvasEditor() {
   const frameDropTargetTimeoutRef = useRef<number | null>(null);
   const expiredFrameDropTargetRef = useRef("");
   const autoFitPageIdRef = useRef("");
-  // While true, the initial-load zoom keeps re-applying 50% as the container is measured. Any
+  // While true, the initial-load zoom keeps re-applying INITIAL_ZOOM_SCALE as the container is
+  // measured. Any
   // manual zoom/pan flips it off so the user's view is never yanked back.
   const autoFitActiveRef = useRef(false);
+  // Last zoom the user chose: seeded from localStorage on first use, then kept in step with every
+  // manual zoom so switching pages re-applies what the user is actually looking at.
+  const rememberedZoomScaleRef = useRef<number | null>(null);
   const previewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
   const exportPreviewMediaControllersRef = useRef<Map<string, PreviewMediaController>>(new Map());
   const timelinePlayheadMsRef = useRef(timelinePlayheadMs);
@@ -2794,6 +3260,17 @@ export default function CanvasEditor() {
     captureFrameOverride === null
       ? activePagePlayheadMs
       : Math.min(activePageDurationMs, frameToSampleTimeMs(captureFrameOverride, previewRenderFps));
+  // At REST the editing canvas draws the settled design instead of sampling the animation, the way
+  // Canva's canvas does. Frame 0 of a page whose every layer fades in is fully transparent, so a
+  // template like that opened on an empty white canvas and the autosaved thumbnail captured from
+  // this same stage was stored pure white. Rest means the playhead parked at one of its two ends —
+  // a fresh load sits at 0, a finished playback sits at the duration. Every interior position is a
+  // deliberate scrub and keeps showing the real animated frame, as do playback and frame captures.
+  const activePageTimelineAtRest =
+    !timelineIsPlaying &&
+    !previewGenerationActive &&
+    captureFrameOverride === null &&
+    (effectiveActivePagePlayheadMs <= 0 || effectiveActivePagePlayheadMs >= activePageDurationMs);
 
   // ---------------------------------------------------------------------------
   // Imperative playback
@@ -2858,10 +3335,13 @@ export default function CanvasEditor() {
   }, []);
 
   // Hand control back to React: rewind the nodes to the poses of the last render
-  // so react-konva's next diff is computed against the state it believes in.
+  // so react-konva's next diff is computed against the state it believes in. That includes WHICH
+  // pose React drew — a resting stage renders settled, so rewinding to the animated pose of the
+  // same frame would leave the nodes somewhere react-konva has no reason to diff them back from.
   const releaseImperativePoses = useCallback(() => {
     if (!imperativePoseDirtyRef.current) return false;
     const restoreFrame = lastRenderedFrameRef.current;
+    const restoreOptions: RenderPoseOptions = { settled: activePageTimelineAtRest };
     let layer: Konva.Layer | null = null;
     for (const element of elements) {
       const node = nodeRefs.current[element.id];
@@ -2872,7 +3352,8 @@ export default function CanvasEditor() {
           element,
           restoreFrame,
           previewRenderFps,
-          activePageDurationMs
+          activePageDurationMs,
+          restoreOptions
         )
       );
       layer = layer || node.getLayer();
@@ -2880,7 +3361,13 @@ export default function CanvasEditor() {
     layer?.batchDraw();
     imperativePoseDirtyRef.current = false;
     return false;
-  }, [activePageDurationMs, applyPoseToNode, elements, previewRenderFps]);
+  }, [
+    activePageDurationMs,
+    activePageTimelineAtRest,
+    applyPoseToNode,
+    elements,
+    previewRenderFps,
+  ]);
 
   const applyImperativePlaybackFrame = useCallback(
     (timelineMs: number) => {
@@ -3006,7 +3493,14 @@ export default function CanvasEditor() {
   // would corrupt the recording. The timeline filmstrip renders from the hidden export stage and must
   // never block the editor (it re-runs on load and on every element change).
   const showBlockingPreviewOverlay = previewGenerationActive;
-  const forceTimelineMediaSync = Boolean(designTimeline.enabled) || captureFrameOverride !== null || previewGenerationActive;
+  // Frame-exact seeking belongs to the RECORDER and to a PARKED playhead (scrubbing): each seek
+  // decodes from the nearest keyframe, which cannot keep up at 30–60 fps — a playing timeline left
+  // every video frozen on one frame. While the timeline plays live, the <video> runs on its own
+  // clock instead, aligned once when playback starts (see CanvasVideoNode).
+  const forceTimelineMediaSync =
+    captureFrameOverride !== null ||
+    previewGenerationActive ||
+    (Boolean(designTimeline.enabled) && !timelineIsPlaying);
 
   const registerPreviewMediaController = useCallback(
     (id: string, controller: PreviewMediaController | null) => {
@@ -3044,6 +3538,36 @@ export default function CanvasEditor() {
     const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
     if (controllers.length === 0) return;
     await Promise.all(controllers.map((controller) => controller.syncToFrame(frame, fps)));
+  }, []);
+
+  /** Start every export-stage clip rolling at 1x, positioned for timeline [atMs]. */
+  const beginExportPreviewMediaPlayback = useCallback(async (atMs: number) => {
+    const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
+    if (controllers.length === 0) return;
+    await Promise.all(
+      controllers.map((controller) => controller.beginPlayback?.(atMs)?.catch?.(() => undefined))
+    );
+  }, []);
+
+  /** Drift-correct rolling clips. Synchronous by design — the capture loop must not await it. */
+  const resyncExportPreviewMediaPlayback = useCallback((targetMs: number) => {
+    exportPreviewMediaControllersRef.current.forEach((controller) => {
+      try {
+        controller.resyncPlayback?.(targetMs);
+      } catch {
+        // One misbehaving element must not stop the capture.
+      }
+    });
+  }, []);
+
+  const endExportPreviewMediaPlayback = useCallback(() => {
+    exportPreviewMediaControllersRef.current.forEach((controller) => {
+      try {
+        controller.endPlayback?.();
+      } catch {
+        // Ignore — the recording is already finished by this point.
+      }
+    });
   }, []);
 
   const registerExportNodeRef = useCallback((_id: string, _node: Konva.Node | null) => {}, []);
@@ -3206,6 +3730,10 @@ export default function CanvasEditor() {
   const captureThumbnailDataUrl = useCallback(() => {
     const stage = stageRef.current;
     if (!stage || !activePage) return "";
+    // A hidden tab pauses compositing: the stage rasterises EMPTY, and a blank capture would be
+    // saved as the template thumbnail (observed: a video template's thumbnail turned pure white
+    // after a background-tab autosave). Capture nothing instead; the server keeps the old one.
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return "";
 
     const x = viewport.x;
     const y = viewport.y;
@@ -3226,7 +3754,27 @@ export default function CanvasEditor() {
       return "";
     }
   }, [activePage, viewport.scale, viewport.x, viewport.y]);
-
+  // The thumbnail a save ships (dashboard list + mobile cards): the page at its FIRST frame. Every
+  // mounted video (layer or frame content) is seeked to frame 0 for the capture and put back to
+  // the playhead afterwards, so the stored thumbnail is the clip's opening frame wherever the
+  // playhead sits; a clip that has not decoded yet draws its poster (CanvasVideoNode).
+  const captureTemplateThumbnailDataUrl = useCallback(async () => {
+    if (typeof document !== "undefined" && document.visibilityState === "hidden") return "";
+    const controllers = Array.from(previewMediaControllersRef.current.values());
+    const syncAll = (frame: number) =>
+      Promise.all(
+        controllers.map((controller) => controller.syncToFrame(frame, previewRenderFps).catch(() => undefined))
+      );
+    if (controllers.length > 0) {
+      await syncAll(0);
+      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+    }
+    try {
+      return captureThumbnailDataUrl();
+    } finally {
+      if (controllers.length > 0) void syncAll(activePagePlayheadFrame);
+    }
+  }, [captureThumbnailDataUrl, previewRenderFps, activePagePlayheadFrame]);
   const renderCurrentPageToCanvas = useCallback(
     (maxDimension = 720) => {
       const stage = stageRef.current;
@@ -3510,6 +4058,10 @@ export default function CanvasEditor() {
       const requestedMaxDimension = Math.max(120, Math.round(Number(options?.maxDimension) || 720));
       let posterDataUrl = "";
       const frameDurationMs = 1000 / Math.max(1, fps);
+      // The rate frames are pushed to the recorder at, independent of the 60fps timeline grid
+      // `fps` describes. See PREVIEW_CAPTURE_FPS for why these are not the same number.
+      const captureFps = Math.max(1, Math.min(fps, PREVIEW_CAPTURE_FPS));
+      const captureIntervalMs = 1000 / captureFps;
       const recorderMimeType = getSupportedPreviewRecorderMimeType();
       const getRecordedExtension = (mimeType: string) => {
         const normalized = String(mimeType || "").trim().toLowerCase();
@@ -3530,6 +4082,11 @@ export default function CanvasEditor() {
         flushSync(() => {
           setExportMaxDimension(requestedMaxDimension);
           setExportFrameOverride(0);
+          // The poster is the still that represents this template everywhere it is not playing —
+          // the card in the dashboard, the mobile catalog, the <video> placeholder. Frame 0 is the
+          // wrong still for that: an entrance has not run yet, so a page whose layers all fade in
+          // rasterises blank and the stored poster came out pure white. Take it settled.
+          setExportSettledPose(true);
         });
         await waitForAnimationFrame();
         await waitForStageDrawableMedia(stage);
@@ -3549,6 +4106,15 @@ export default function CanvasEditor() {
           posterDataUrl = "";
         }
 
+        // Back to the real timeline: everything recorded from here on has to animate, starting
+        // from the true frame 0 the settled poster deliberately skipped.
+        flushSync(() => {
+          setExportSettledPose(false);
+        });
+        stage.getLayers().forEach((layer) => layer.draw());
+        await waitForAnimationFrame();
+        ensureNotAborted();
+
         const exportLayer = stage.getLayers()[0];
         if (!exportLayer || typeof exportLayer.getNativeCanvasElement !== "function") {
           throw new Error("Preview export canvas is unavailable.");
@@ -3567,7 +4133,7 @@ export default function CanvasEditor() {
           requestCapturedFrame = () => initialTrack.requestFrame?.();
         } else {
           recordingStream.getTracks().forEach((track) => track.stop());
-          recordingStream = exportCanvas.captureStream(fps);
+          recordingStream = exportCanvas.captureStream(captureFps);
         }
         const mediaRecorderOptions =
           recorderMimeType && recorderMimeType.length > 0
@@ -3676,20 +4242,43 @@ export default function CanvasEditor() {
             stage.getLayers().forEach((layer) => layer.draw());
             requestCapturedFrame?.();
             await waitForAnimationFrame();
+
+            // ★PLAY the clips for the capture; do not seek them frame by frame.
+            //
+            // This loop used to await syncExportPreviewMediaControllers on every frame, which is
+            // an HTMLVideoElement seek per frame. Template clips are keyframe-sparse (the one that
+            // exposed this carries 7 keyframes across 13.2s), so each seek cost 40-350ms while
+            // syncVideoElementToTime gives up after 180 — the element never arrived, every tick
+            // captured the frame already on screen, and preview.mp4 came out as a 13-second STILL.
+            // Playing decodes the footage forward in hardware once; the recorder then captures
+            // whatever the decoder has produced, which is what a real-time capture should do.
+            //
+            // The clips are started BEFORE the timeline so their first decoded frame is already up
+            // when the playhead begins to move, and the recording opens on moving video instead of
+            // a held poster.
+            await beginExportPreviewMediaPlayback(0);
+            ensureNotAborted();
             setTimelinePlaying(true);
 
             const startedAt = performance.now();
-            let lastCapturedFrame = 0;
+            let lastResyncedFrame = -1;
+            let lastRenderedExportFrame = -1;
+            let lastCaptureAtMs = startedAt;
 
             while (true) {
               ensureNotAborted();
               const elapsedMs = Math.max(0, performance.now() - startedAt);
+              // The imperative playback driver is switched off while a preview records (it would
+              // fight the recorder), and it is the ONLY thing that advances these two refs. Reading
+              // them here meant every tick saw time zero: the recording came out as the opening
+              // frame held for its whole length, with just the <video> layers moving because they
+              // decode in their own elements. Take the live value from the store instead.
+              const timelineMs = useEditorStore.getState().timelinePlayheadMs;
+              livePlaybackPlayheadMsRef.current = timelineMs;
+              timelinePlayheadMsRef.current = timelineMs;
               const playheadMs = Math.max(
                 0,
-                Math.min(
-                  durationMs,
-                  timelinePlayheadMsRef.current - activePageTimelineStartMs
-                )
+                Math.min(durationMs, timelineMs - activePageTimelineStartMs)
               );
               const livePlayheadFrame = getFrameAlignedPlayheadFrame(
                 playheadMs,
@@ -3697,13 +4286,38 @@ export default function CanvasEditor() {
                 activePageDurationMs
               );
 
-              if (livePlayheadFrame !== lastCapturedFrame) {
-                await syncExportPreviewMediaControllers(livePlayheadFrame, fps);
-                lastCapturedFrame = livePlayheadFrame;
+              // Synchronous and cheap: on the common path every controller compares two numbers
+              // and returns. Only a clip that has genuinely parted company with the timeline —
+              // a stall, a wrap — is nudged, and it is never awaited.
+              if (livePlayheadFrame !== lastResyncedFrame) {
+                resyncExportPreviewMediaPlayback(playheadMs);
+                lastResyncedFrame = livePlayheadFrame;
               }
 
-              stage.getLayers().forEach((layer) => layer.draw());
-              requestCapturedFrame?.();
+              // ★Redraw and capture on the CAPTURE cadence, not on every animation frame.
+              //
+              // The stage redraw is the expensive half of this loop, and doing it 60 times a
+              // second produced no extra distinct frames — the clips underneath are 30fps — while
+              // taking the CPU their decoders needed. Skipping the off-beat ticks keeps the rAF
+              // loop (so the playhead reading and the drift check stay fine-grained) and spends
+              // the work only where a frame is actually going to the recorder.
+              const nowMs = performance.now();
+              if (nowMs - lastCaptureAtMs >= captureIntervalMs) {
+                lastCaptureAtMs = nowMs;
+                // Put the SCENE on this frame before painting it. `layer.draw()` only repaints the
+                // Konva nodes as they currently stand; the poses, the reveal mattes and the
+                // typewriter reveals all come from a React render, so without this the capture
+                // holds whatever the scene looked like when recording began. Guarded on the frame
+                // actually changing, so a capture tick inside the same frame costs nothing.
+                if (livePlayheadFrame !== lastRenderedExportFrame) {
+                  lastRenderedExportFrame = livePlayheadFrame;
+                  flushSync(() => {
+                    forcePlaybackRender();
+                  });
+                }
+                stage.getLayers().forEach((layer) => layer.draw());
+                requestCapturedFrame?.();
+              }
 
               if (playheadMs >= durationMs || elapsedMs >= durationMs + frameDurationMs) {
                 break;
@@ -3712,6 +4326,9 @@ export default function CanvasEditor() {
             }
 
             setTimelinePlaying(false);
+            endExportPreviewMediaPlayback();
+            // The final frame is the one place an exact seek still earns its cost: it is the frame
+            // the poster and the last recorded moment both come from.
             await syncExportPreviewMediaControllers(
               getFrameAlignedPlayheadFrame(durationMs, previewRenderFps, activePageDurationMs),
               fps
@@ -3793,6 +4410,7 @@ export default function CanvasEditor() {
         setTimelinePlayheadMs(restoreTimelinePlayheadMs);
         flushSync(() => {
           setExportFrameOverride(0);
+          setExportSettledPose(false);
         });
         stage.getLayers().forEach((layer) => layer.draw());
         releaseExportStage();
@@ -3807,6 +4425,9 @@ export default function CanvasEditor() {
       previewRenderFps,
       renderExportPageToCanvas,
       syncExportPreviewMediaControllers,
+      beginExportPreviewMediaPlayback,
+      resyncExportPreviewMediaPlayback,
+      endExportPreviewMediaPlayback,
       setTimelinePlayheadMs,
       setTimelinePlaying,
       ensureExportStage,
@@ -4061,7 +4682,7 @@ export default function CanvasEditor() {
     return () => observer.disconnect();
   }, []);
 
-  // On first load / refresh, always start the template at 50% zoom. Applied SYNCHRONOUSLY (no
+  // On first load / refresh, always start the template at INITIAL_ZOOM_SCALE. Applied SYNCHRONOUSLY (no
   // rAF) so it can't be starved by the re-render churn during template load — an earlier rAF
   // version was cancelled on every re-render and left the default 100%. It keeps re-applying
   // (centered) as the ResizeObserver reports the real container size, and the `autoFitActiveRef`
@@ -4074,7 +4695,10 @@ export default function CanvasEditor() {
       autoFitActiveRef.current = true;
     }
     if (!autoFitActiveRef.current) return;
-    const next = getCenteredViewportForScale(0.5);
+    if (rememberedZoomScaleRef.current === null) {
+      rememberedZoomScaleRef.current = readStoredZoomScale() ?? INITIAL_ZOOM_SCALE;
+    }
+    const next = getCenteredViewportForScale(rememberedZoomScaleRef.current);
     if (next) updateViewport(next);
   }, [
     activePage,
@@ -4083,6 +4707,17 @@ export default function CanvasEditor() {
     getCenteredViewportForScale,
     updateViewport,
   ]);
+
+  // Remember the zoom the user picked — every path (slider, +/-, ctrl+wheel, pinch, Fit to screen)
+  // ends in updateViewport, and every one of them clears autoFitActiveRef first, so that flag is
+  // what separates "the user chose this" from the automatic opening zoom. The write is debounced
+  // because a wheel or pinch produces dozens of scale changes per second.
+  useEffect(() => {
+    if (autoFitActiveRef.current) return undefined;
+    rememberedZoomScaleRef.current = viewport.scale;
+    const timeoutId = window.setTimeout(() => writeStoredZoomScale(viewport.scale), 400);
+    return () => window.clearTimeout(timeoutId);
+  }, [viewport.scale]);
 
   useEffect(() => {
     const handleOutsideClick = () => setContextMenu(null);
@@ -4192,6 +4827,7 @@ export default function CanvasEditor() {
       fitToScreen,
       exportPng,
       captureThumbnailDataUrl,
+      captureTemplateThumbnailDataUrl,
       captureThumbnailDataUrlForPage,
       captureTimelineStripDataUrls,
       recordTimelinePreviewVideo,
@@ -4201,6 +4837,7 @@ export default function CanvasEditor() {
     return () => setStageApi(null);
   }, [
     captureThumbnailDataUrl,
+    captureTemplateThumbnailDataUrl,
     captureThumbnailDataUrlForPage,
     captureTimelineStripDataUrls,
     recordTimelinePreviewVideo,
@@ -5349,8 +5986,10 @@ export default function CanvasEditor() {
             pageDurationMs={activePageDurationMs}
             playheadMs={effectiveActivePagePlayheadMs}
             playheadFrame={effectiveActivePageFrame}
+            settledPose={activePageTimelineAtRest}
             previewFps={previewRenderFps}
             forceTimelineSync={forceTimelineMediaSync}
+            timelinePlaying={timelineIsPlaying}
             interactive
             toolMode={toolMode}
             frameDropTargetId={frameDropTargetId}
@@ -5496,8 +6135,14 @@ export default function CanvasEditor() {
                   // page's playhead (which is meaningless for a different page).
                   playheadMs={exportPageIdOverride ? 0 : effectiveExportPlayheadMs}
                   playheadFrame={exportPageIdOverride ? 0 : effectiveExportPlayheadFrame}
+                  settledPose={exportSettledPose}
                   previewFps={previewRenderFps}
                   forceTimelineSync
+                  // The recorder plays the clips itself and resyncs them on its own cadence, so the
+                  // per-frame seek inside each media node must stand down for the recording. It only
+                  // ran once before, because nothing re-rendered this scene mid-recording; now that
+                  // every captured frame renders, leaving it on made the video record as garbled bands.
+                  suspendMediaTimelineSync={previewGenerationActive && timelineIsPlaying}
                   interactive={false}
                   toolMode={toolMode}
                   includePageOutline={false}

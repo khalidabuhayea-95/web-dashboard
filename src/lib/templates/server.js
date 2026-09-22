@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { getDashboardSession } from "@/lib/auth/roles";
 import { appendVersionParam } from "@/lib/storage/objectStorage.server";
 import {
+  buildTemplateCategoryFields,
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
 } from "@/lib/templates/templateSettings";
@@ -29,6 +30,11 @@ export function normalizeCategory(value, settings) {
 
 export function normalizeSubCategory(value, category, settings) {
   return normalizeTemplateSubCategory(value, category, settings);
+}
+
+/** Primary scalars + full placement list for a write. See buildTemplateCategoryFields. */
+export function normalizeCategoryFields(input, settings) {
+  return buildTemplateCategoryFields(input, settings);
 }
 
 export function normalizeTags(value) {

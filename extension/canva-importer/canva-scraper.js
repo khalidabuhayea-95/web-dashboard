@@ -85,23 +85,26 @@
         const matchers = [
           { type: "NONE", label: "None", regex: /\b(none|no animation|instant|instant show|instant hide|hard cut|show hide)\b|بدون|بدون حركة/ },
           { type: "FADE", label: "Fade", regex: /\b(static|fade|fade in|fade out|dissolve|soft dissolve)\b|ثابت|تلاشي/ },
-          { type: "RISE", label: "Rise", regex: /\b(rise)\b|ارتفاع/ },
-          { type: "PAN", label: "Pan", regex: /\b(pan)\b|تأرجح|ترنح/ },
+          { type: "RISE", label: "Rise", regex: /\b(rise)\b|ارتقاء|ارتفاع/ },
+          { type: "PAN", label: "Pan", regex: /\b(pan|quick slide)\b|تأرجح|ترنح|انزلاق سريع/ },
           { type: "POP", label: "Pop", regex: /\b(pop|zoom|zoom in|zoom out)\b|انبثاق/ },
-          { type: "WIPE", label: "Wipe", regex: /\b(directional wipe|wipe)\b|المسح/ },
+          { type: "BLOCK", label: "Block", regex: /\bblock\b|شريط/ },
+          { type: "WIPE", label: "Wipe", regex: /\b(directional wipe|wipe|brush reveal)\b|المسح|اسحب الفرشاة/ },
           { type: "BLUR", label: "Blur", regex: /\b(blur|soft blur)\b|تمويه/ },
           { type: "SUCCESSION", label: "Succession", regex: /\b(succession|zoom fade)\b|التتابع/ },
-          { type: "BREATHE", label: "Breathe", regex: /\b(breathe|slow reveal)\b|ظهور بطيء/ },
+          { type: "BREATHE", label: "Breathe", regex: /\b(breathe|slow reveal|photo zoom)\b|ظهور بطيء|تكبير الصورة/ },
           { type: "BASELINE", label: "Baseline", regex: /\b(baseline|bounce)\b|baseline|خط الأساس/ },
-          { type: "DRIFT", label: "Drift", regex: /\b(drift|slide|slide in|slide out)\b|انجراف/ },
+          { type: "DRIFT", label: "Drift", regex: /\b(drift|slide|slide in|slide out|image flow|slow motion)\b|انجراف|انسيابية الصورة|حركة بطيئة/ },
+          // تموج (Ripple) is its own loop for us; nothing else in this list undulates.
+          { type: "WAVE", label: "Wave", regex: /\b(ripple|wave)\b|تموج/ },
           { type: "TECTONIC", label: "Tectonic", regex: /\b(soft gradient wipe|wipe gradient|gradient wipe|tectonic)\b|حركة تكتونية/ },
           { type: "TUMBLE", label: "Tumble", regex: /\b(tumble|turn|radial sweep reveal|radial sweep|radial)\b|دوران/ },
           { type: "NEON", label: "Neon", regex: /\b(neon|soft circular reveal|circular fade)\b|نيون/ },
           { type: "SCRAPBOOK", label: "Scrapbook", regex: /\b(scrapbook)\b|سجل قصاصات/ },
           { type: "STOMP", label: "Stomp", regex: /\b(stomp|circular reveal|circular|aerial)\b|سقوط هوائي/ },
           { type: "ROTATE", label: "Rotate", regex: /\b(continuous rotation|rotation|spin|rotate)\b|تدوير/ },
-          { type: "FLICKER", label: "Flicker", regex: /\bflicker\b|ومض/ },
-          { type: "PULSE", label: "Pulse", regex: /\b(pulse|pulse zoom|squash and stretch|heart beat|heartbeat)\b|تقلص العنصر وتمدد|نبض/ },
+          { type: "FLICKER", label: "Flicker", regex: /\b(flicker|old tv|chromatic)\b|ومض|التلفزيون القديم|موجة الانحراف اللوني/ },
+          { type: "PULSE", label: "Pulse", regex: /\b(pulse|pulse zoom|shake zoom|squash and stretch|heart beat|heartbeat)\b|تقلص العنصر وتمدد|نبض|تكبير اهتزازي/ },
           { type: "WIGGLE", label: "Wiggle", regex: /\b(wiggle|directional shake|shake)\b|اهتزاز سريع|اهتزاز سريع بالاتجاه/ },
         ];
         return matchers.find((entry) => entry.regex.test(value)) || null;
@@ -1566,6 +1569,27 @@
           reader.onerror = () => resolve("");
           reader.readAsDataURL(blob);
         });
+      // Image type from the bytes themselves. CDNs mislabel: video-public.canva.com serves the
+      // video poster JPEGs as application/octet-stream, which a Content-Type check alone rejects.
+      const sniffImageMimeType = async (blob) => {
+        try {
+          const head = new Uint8Array(await blob.slice(0, 12).arrayBuffer());
+          if (head[0] === 0xff && head[1] === 0xd8 && head[2] === 0xff) return "image/jpeg";
+          if (head[0] === 0x89 && head[1] === 0x50 && head[2] === 0x4e && head[3] === 0x47) return "image/png";
+          if (head[0] === 0x47 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x38) return "image/gif";
+          if (
+            head[0] === 0x52 && head[1] === 0x49 && head[2] === 0x46 && head[3] === 0x46 &&
+            head[8] === 0x57 && head[9] === 0x45 && head[10] === 0x42 && head[11] === 0x50
+          ) {
+            return "image/webp";
+          }
+          const text = String.fromCharCode(...head.subarray(0, 5)).toLowerCase();
+          if (text.startsWith("<svg") || text.startsWith("<?xml")) return "image/svg+xml";
+          return "";
+        } catch (_e) {
+          return "";
+        }
+      };
 
       // Hosts where the user's Canva session cookies are appropriate to send.
       // For any other origin, fetch with `credentials: "omit"` to avoid leaking
@@ -1619,8 +1643,15 @@
             const blob = await response.blob();
             if (!blob || blob.size <= 0 || blob.size > maxBytes) continue;
             const mimeType = String(blob.type || "").trim().toLowerCase();
-            if (mimeType && !mimeType.startsWith("image/")) continue;
-            const dataUrl = await toDataUrlFromBlob(blob);
+            let typedBlob = blob;
+            if (!mimeType.startsWith("image/")) {
+              // Trust the magic bytes over the header (see sniffImageMimeType); a genuine
+              // non-image still falls through to the next mode / empty result.
+              const sniffed = await sniffImageMimeType(blob);
+              if (!sniffed) continue;
+              typedBlob = new Blob([blob], { type: sniffed });
+            }
+            const dataUrl = await toDataUrlFromBlob(typedBlob);
             if (String(dataUrl).startsWith("data:image/")) return dataUrl;
           } catch (_error) {
             // Try the next credentials mode.
@@ -3118,6 +3149,43 @@
         }
       };
 
+      /**
+       * Turns the fiber model's in-frame crop (`fill.sb` — the media's draw rect in the element's
+       * OWN frame coordinates, design px) into the normalized source region fitDataUrlToDisplayedBox
+       * wants. Returns null when there is nothing to crop.
+       *
+       * Why prefer this over measuring the DOM: `sb` is exact and pre-rotation, so it needs no
+       * orientation remap, no zoom/DPR correction, and it is unaffected by the element being
+       * clipped at the page edge. The DOM path can only see what is on screen.
+       */
+      const modelCropRegionForFrame = (crop, frameWidth, frameHeight) => {
+        if (!crop || !(crop.width > 0) || !(crop.height > 0)) return null;
+        // A rotated fill would need the region rotated too; keeping the full media is the safe miss.
+        if (Math.abs(Number(crop.rotation) || 0) > 0.5) return null;
+        const frameW = Number(frameWidth) || 0;
+        const frameH = Number(frameHeight) || 0;
+        if (frameW < 1 || frameH < 1) return null;
+        // Media exactly fills its frame: no crop, and saying so lets callers skip the whole path.
+        const matchesFrame =
+          Math.abs(crop.left) < 1 &&
+          Math.abs(crop.top) < 1 &&
+          Math.abs(crop.width - frameW) < 2 &&
+          Math.abs(crop.height - frameH) < 2;
+        if (matchesFrame) return null;
+        // Visible region = media rect ∩ frame rect, as fractions of the MEDIA rect.
+        const visX = Math.max(0, crop.left);
+        const visY = Math.max(0, crop.top);
+        const visRight = Math.min(frameW, crop.left + crop.width);
+        const visBottom = Math.min(frameH, crop.top + crop.height);
+        if (visRight - visX < 1 || visBottom - visY < 1) return null;
+        return {
+          x: (visX - crop.left) / crop.width,
+          y: (visY - crop.top) / crop.height,
+          width: (visRight - visX) / crop.width,
+          height: (visBottom - visY) / crop.height,
+        };
+      };
+
       const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null) => {
         if (!String(dataUrl || "").startsWith("data:image/")) return null;
         const MAX_FITTED_IMAGE_SIDE = 1920;
@@ -3681,6 +3749,16 @@
             : null;
         const fiberModelById =
           passedModel && Object.keys(passedModel).length ? passedModel : buildFiberElementModel();
+        // The page's own fill (canva-fiber-main readPageFill): a full-page photo is not an LB
+        // element, so its mirror flags and placement box only exist here.
+        const pageFill =
+          fiberModelById.__pageFill && typeof fiberModelById.__pageFill === "object"
+            ? fiberModelById.__pageFill
+            : null;
+        const pageFillImageBox =
+          pageFill?.image?.box && Number(pageFill.image.box.width) > 0 && Number(pageFill.image.box.height) > 0
+            ? pageFill.image.box
+            : null;
 
         for (let layerIndex = 0; layerIndex < layerNodes.length; layerIndex += 1) {
           const node = layerNodes[layerIndex];
@@ -3863,24 +3941,47 @@
           const styledHeight = hasStyleGeometry
             ? Math.max(1, styleHeight * nodeScale.y * layerScaleY)
             : 0;
-          const styleWidthRatio = styledWidth > 0 ? styledWidth / rawDesignWidth : 0;
-          const styleHeightRatio = styledHeight > 0 ? styledHeight / rawDesignHeight : 0;
+          // The viewport rect is the ROTATED footprint, while the style width/height describe
+          // the element's own un-rotated frame. For a layer turned by ~90° the two are swapped,
+          // so compare against the swapped rect or the styled geometry is wrongly rejected and
+          // the fit target becomes the portrait footprint of a landscape asset — which centre-
+          // cropped a 1600x382 floral strip (in a 1920x458 frame, rotated -90°) to a 91x382
+          // sliver that fabric then stretched 21x. Anchor placement is centre-based, so keeping
+          // the un-rotated frame does not move the layer.
+          const rotationSourceAngle = styleTransform.hasAngle ? styleTransform.angle : transform.angle;
+          const normalizedRotation = ((Number(rotationSourceAngle || 0) % 180) + 180) % 180;
+          const isQuarterTurned = Math.abs(normalizedRotation - 90) <= 1.5;
+          const comparableWidth = isQuarterTurned ? rawDesignHeight : rawDesignWidth;
+          const comparableHeight = isQuarterTurned ? rawDesignWidth : rawDesignHeight;
+          const styleWidthRatio = styledWidth > 0 ? styledWidth / comparableWidth : 0;
+          const styleHeightRatio = styledHeight > 0 ? styledHeight / comparableHeight : 0;
           const styleGeometryMatchesViewport =
             hasStyleGeometry &&
             styleWidthRatio >= 0.8 &&
             styleWidthRatio <= 1.25 &&
             styleHeightRatio >= 0.8 &&
             styleHeightRatio <= 1.25;
+          // rawDesignWidth/Height are the layer's screen bounding box in design px — for a
+          // layer turned by a multiple of 90° that box is the frame with its sides SWAPPED.
+          // (The styled comparison cannot be relied on here: styledWidth carries the page zoom
+          // via nodeScale — measured 650x155 for a 1920x458 frame at 34% — so it is in screen
+          // px while rawDesign is in design px, and the two never match.) Swapping the raw box
+          // back is exact for quarter turns and keeps the centre, so the layer does not move.
+          const quarterTurnedFallback = isQuarterTurned && !styleGeometryMatchesViewport;
           const width = isFullPageBackground
             ? Math.max(1, Number(designWidth || rect.width))
             : styleGeometryMatchesViewport
               ? styledWidth
-              : rawDesignWidth;
+              : quarterTurnedFallback
+                ? rawDesignHeight
+                : rawDesignWidth;
           const height = isFullPageBackground
             ? Math.max(1, Number(designHeight || rect.height))
             : styleGeometryMatchesViewport
               ? styledHeight
-              : rawDesignHeight;
+              : quarterTurnedFallback
+                ? rawDesignWidth
+                : rawDesignHeight;
           const x = isFullPageBackground ? 0 : centerDesignX - width / 2;
           const y = isFullPageBackground ? 0 : centerDesignY - height / 2;
           const layerAngle = isFullPageBackground
@@ -3890,8 +3991,11 @@
               : styleTransform.hasAngle
                 ? styleTransform.angle
                 : transform.angle;
-          const layerFlipX = isFullPageBackground ? false : Boolean(transform.flipX);
-          const layerFlipY = isFullPageBackground ? false : Boolean(transform.flipY);
+          // A page-fill photo is mirrored at the FILL level (page.Vb.ctx.bxf[0].flipX), which the
+          // DOM transform never shows — the DOM flag stays ignored for the background node and the
+          // model's flag is applied instead (a mosque photo imported with the minaret on the wrong side).
+          const layerFlipX = isFullPageBackground ? Boolean(pageFill?.flipX) : Boolean(transform.flipX);
+          const layerFlipY = isFullPageBackground ? Boolean(pageFill?.flipY) : Boolean(transform.flipY);
           if (width < 2 || height < 2) continue;
 
           const textFromParagraphs = Array.from(node.querySelectorAll("p"))
@@ -4169,7 +4273,35 @@
           const snapshotIsLossyFallback =
             Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
-          if (shouldPreserveRenderedImagePixels && imageAcquisitionJob?.kind === "element") {
+          // The model states outright whether the media is cropped inside its frame, so this no
+          // longer depends on the DOM heuristic guessing "masked". Only valid while the layer keeps
+          // its FULL frame geometry — when shouldUseVisibleGeometry clips the box to the on-canvas
+          // part, the crop has to describe that same clipped rectangle, which only the DOM
+          // measurement does.
+          const modelElementForCrop = fiberModelById[String(node.id || "")] || null;
+          // The page fill's photo placement (`__pageFill.image.box`, page px, may exceed the page)
+          // is the same contract as an element's media crop, so it feeds the same region math —
+          // the slice the page shows, in the media's own space. Before, the photo was blindly
+          // cover-fitted, which only matches Canva when the placement happens to be centred.
+          const modelCropRegion = shouldUseVisibleGeometry
+            ? null
+            : isFullPageBackground && pageFillImageBox
+              ? modelCropRegionForFrame(pageFillImageBox, designWidth, designHeight)
+              : modelCropRegionForFrame(
+                  modelFillImage?.crop,
+                  modelElementForCrop?.width,
+                  modelElementForCrop?.height
+                );
+
+          // A model-reported crop means the element shows a SLICE of its media. Without the fit
+          // path the fetched asset is drawn whole into the frame; with it but no region, the
+          // centre-crop-to-aspect fallback slices the middle — which is how a square floral
+          // vignette masked to a tall strip came in as a 91x382 sliver stretched 5x.
+          if (modelCropRegion && imageAcquisitionJob?.kind === "element") {
+            imageAcquisitionJob = { ...imageAcquisitionJob, fitFetchedToTarget: true };
+          }
+
+          if ((shouldPreserveRenderedImagePixels || modelCropRegion) && imageAcquisitionJob?.kind === "element") {
             // buildDisplayedImageCropRegion maps the visible region in SCREEN space; for a layer
             // rendered rotated ~180° (and/or fill-mirrored) that region must be remapped into the
             // UN-rotated source's coordinate space or the crop picks the OPPOSITE corner of the
@@ -4195,11 +4327,13 @@
               // A reproducible frame crops to its FULL box, not the page-clipped one — its
               // geometry is the full box too (see shouldUseVisibleGeometry), and the two must
               // describe the same rectangle or the photo slides inside its frame.
-              cropRegion: isMaskedImage
-                ? remapRegionForOrientation(
-                    buildDisplayedImageCropRegion(imageElement, frameRectForCrop)
-                  )
-                : null,
+              cropRegion:
+                modelCropRegion ||
+                (isMaskedImage
+                  ? remapRegionForOrientation(
+                      buildDisplayedImageCropRegion(imageElement, frameRectForCrop)
+                    )
+                  : null),
             };
           }
           if (shouldPreserveRenderedImagePixels && !hasCompanionText) {
@@ -4685,31 +4819,16 @@
           // Most instanced decorations have sb == frame (full image, no crop) and skip untouched.
           await runWithConcurrency(supplementImages, 4, async (layer) => {
             const crop = layer.sourceCrop;
-            if (!crop || !(crop.width > 0) || !(crop.height > 0)) return;
-            if (Math.abs(Number(crop.rotation) || 0) > 0.5) return; // rotated fills: keep full media
             const frameW = Number(layer.width) || 0;
             const frameH = Number(layer.height) || 0;
-            if (frameW < 1 || frameH < 1) return;
-            const matchesFrame =
-              Math.abs(crop.left) < 1 &&
-              Math.abs(crop.top) < 1 &&
-              Math.abs(crop.width - frameW) < 2 &&
-              Math.abs(crop.height - frameH) < 2;
-            if (matchesFrame) return;
+            const region = modelCropRegionForFrame(crop, frameW, frameH);
+            if (!region) return;
             const dataUrl = String(layer.imageDataUrl || "");
             if (!dataUrl.startsWith("data:image/")) return;
-            // visible region = media rect ∩ frame rect, expressed as fractions of the media rect
             const visX = Math.max(0, crop.left);
             const visY = Math.max(0, crop.top);
             const visRight = Math.min(frameW, crop.left + crop.width);
             const visBottom = Math.min(frameH, crop.top + crop.height);
-            if (visRight - visX < 1 || visBottom - visY < 1) return;
-            const region = {
-              x: (visX - crop.left) / crop.width,
-              y: (visY - crop.top) / crop.height,
-              width: (visRight - visX) / crop.width,
-              height: (visBottom - visY) / crop.height,
-            };
             try {
               const cropped = await fitDataUrlToDisplayedBox(
                 dataUrl,
@@ -4815,6 +4934,23 @@
                   ...(totalMs > 0 ? { timelineStartMs: 0, timelineEndMs: totalMs } : {}),
                 });
                 backgroundPosterAdded = true;
+                // The DOM path already captured this clip's poster <img> as a non-LB full-page
+                // background layer. With the model poster (and, downstream, the real video) in
+                // place it would sit ABOVE them and hide the video — drop it. A page fill is
+                // either a video or an image, never both, so any non-LB full-page background
+                // node on a video page is that video's own rendering.
+                for (let dupIndex = layers.length - 1; dupIndex >= 0; dupIndex -= 1) {
+                  const dup = layers[dupIndex];
+                  if (
+                    dup &&
+                    dup.isBackgroundNode &&
+                    dup.isFullPageBackground &&
+                    !/^LB/.test(String(dup.id || "")) &&
+                    dup.id !== "model-background-video-poster"
+                  ) {
+                    layers.splice(dupIndex, 1);
+                  }
+                }
               }
             }
           } catch (_bgPosterError) {
@@ -4849,12 +4985,60 @@
             const n = Number(us);
             return Number.isFinite(n) && n > 0 ? Math.round(n / 1000) : 0;
           };
+          // Canva gives EVERY element a start and a duration even on a STATIC design — its pages
+          // are nominally 5s — so stamping those windows unconditionally made every import look
+          // like a timeline design: the editor counts a layer whose window is shorter than the
+          // page as animated, and a 5s window inside the 15s default page is exactly that (plus
+          // any leftover per-element offset the template author never meant as animation). Carry
+          // the timing only when the design really moves: a background video track, or at least
+          // one element with a real animation (extractAnimation returns null for Canva's empty
+          // {type} placeholders, so a non-null animation means an actual preset/motion path).
+          const designHasMotion =
+            Boolean(fiberModelById.__background) ||
+            Boolean(fiberModelById.__pageAnimation) ||
+            Object.keys(fiberModelById).some(
+              (key) =>
+                !key.startsWith("__") && Boolean(fiberModelById[key] && fiberModelById[key].animation)
+            );
+          // "Animate page" gives the PAGE one preset and leaves the elements without any, so a
+          // design animated that way imported perfectly static. Hand every layer that has no
+          // animation of its own a synthesized copy. Mode is IN_OUT — Canva's own default for a
+          // page animation is "كلاهما" (both) — which is only correct now that the import also
+          // carries Canva's page duration, so the exit lands at the end of the page and not at the
+          // end of the editor's longer default.
+          const pageAnimation = fiberModelById.__pageAnimation;
+          const pageAnimationPreset = Number(pageAnimation && pageAnimation.preset);
+          if (Number.isFinite(pageAnimationPreset) && pageAnimationPreset > 0) {
+            for (const layer of layers) {
+              if (!layer || layer.animation) continue;
+              layer.animation = {
+                canvaPreset: pageAnimationPreset,
+                mode: "IN_OUT",
+                inMs: 1000,
+                outMs: 1000,
+                durationMs: 1000,
+                fromPageAnimation: true,
+                ...(pageAnimation.direction ? { pageDirection: pageAnimation.direction } : {}),
+              };
+            }
+          }
+          // Windows are only worth carrying when they SEQUENCE something. Canva hands every element
+          // the same default window (0 → the page's nominal 5s), and stamping that into our longer
+          // default page would make the whole design vanish partway through. So stamp only when the
+          // layers actually differ from one another.
+          const windowSignatures = new Set();
+          for (const layer of layers) {
+            const model = fiberModelById[String((layer && layer.id) || "")];
+            const durMs = model ? usToMsFloor(model.durationUs) : 0;
+            windowSignatures.add(durMs > 0 ? `${usToMsFloor(model.startUs)}:${durMs}` : "none");
+          }
+          const windowsAreSequenced = windowSignatures.size > 1;
           for (const layer of layers) {
             const model = fiberModelById[String((layer && layer.id) || "")];
             if (!model) continue;
             const startMs = usToMsFloor(model.startUs);
             const durMs = usToMsFloor(model.durationUs);
-            if (durMs > 0) {
+            if (designHasMotion && windowsAreSequenced && durMs > 0) {
               layer.timelineStartMs = startMs;
               layer.timelineEndMs = startMs + durMs;
             }

@@ -14,6 +14,8 @@
 //   node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-fonts.ts --apply
 
 import { randomUUID } from "node:crypto";
+import { deleteFontFileObjects } from "@/lib/editor/fontStorage.server";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 
 import prisma from "@/lib/prisma";
 import { getObject } from "@/lib/storage/objectStorage.server";
@@ -252,6 +254,7 @@ async function main() {
           // Delete first: normalizedAlias is globally unique, so the dropped
           // row has to release its names before the survivor can claim them.
           await tx.fontFamily.delete({ where: { id: drop.id } });
+          // (storage for the dropped family is removed after the transaction commits)
           await tx.fontFamily.update({
             where: { id: keep.id },
             data: { displayName, categories },
@@ -262,6 +265,10 @@ async function main() {
               skipDuplicates: true,
             });
           }
+        });
+        await deleteFontFileObjects(drop.files, { fontId: drop.id, reason: "dedupe" });
+        await deleteStorageForUrls([drop.previewImageUrl, drop.previewImageDarkUrl], {
+          fontId: drop.id,
         });
       }
       merged += 1;

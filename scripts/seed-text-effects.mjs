@@ -11,6 +11,7 @@
 
 import { PrismaClient } from "@prisma/client";
 import { PRESETS } from "./text-effects/presets.mjs";
+import { deleteStorageForUrls } from "../src/lib/storage/assetReferences.server.js";
 import { normalizeTextEffectSpec } from "../src/lib/textEffects/spec.js";
 
 function parseArgs(argv) {
@@ -65,8 +66,11 @@ try {
   }
 
   if (!args["keep-extra"]) {
-    const removed = await prisma.textEffect.deleteMany({
-      where: { slug: { notIn: PRESETS.map((preset) => preset.slug) } },
+    const extraWhere = { slug: { notIn: PRESETS.map((preset) => preset.slug) } };
+    const extraArt = await prisma.textEffect.findMany({ where: extraWhere, select: { previewUrl: true } });
+    const removed = await prisma.textEffect.deleteMany({ where: extraWhere });
+    await deleteStorageForUrls(extraArt.map((item) => item.previewUrl), {
+      reason: "seed removed effects not in the library",
     });
     if (removed.count) console.log(`Removed ${removed.count} effect(s) not in the library.`);
   }

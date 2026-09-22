@@ -15,6 +15,7 @@ import {
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 import { publishCardThumb } from "@/lib/aiTools/thumb.server";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import { aiTemplateModelIncompatibility } from "@/lib/aiTemplates/models";
 import { runAiTemplateRender } from "@/lib/aiTemplates/replicate.server";
 
@@ -151,6 +152,11 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
     const updated = await prisma.aiTemplate.update({
       where: { id },
       data: { afterUrl, beforeUrl, thumbUrl },
+    });
+
+    // Every generation mints fresh uuid keys, so the superseded art has to go explicitly.
+    await deleteStorageForUrls([template.beforeUrl, template.afterUrl, template.thumbUrl], {
+      slug: template.slug,
     });
 
     logger.info("AI template art generated", {

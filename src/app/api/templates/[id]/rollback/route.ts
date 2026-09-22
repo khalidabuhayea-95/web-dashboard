@@ -1,7 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
-import { buildSnapshot, canAccessTemplate, getEditorSession } from "@/lib/templates/server";
+import {
+  buildSnapshot,
+  canAccessTemplate,
+  getEditorSession,
+  normalizeCategoryFields,
+} from "@/lib/templates/server";
+import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 import { handleApiError, handleBadRequest, handleNotFound, handleForbidden } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 
@@ -49,6 +55,7 @@ export async function POST(
     }
 
     const snapshot = revision.snapshot || {};
+    const taxonomySettings = await getTemplateTaxonomySettings();
 
     logger.info("Rolling back template", {
       userId: session.userId,
@@ -64,9 +71,14 @@ export async function POST(
           slug: typeof snapshot.slug === "string" ? snapshot.slug : template.slug,
           status: typeof snapshot.status === "string" ? snapshot.status : template.status,
           canvasSize: snapshot.canvasSize ?? template.canvasSize,
-          category: typeof snapshot.category === "string" ? snapshot.category : template.category,
-          subCategory:
-            typeof snapshot.subCategory === "string" ? snapshot.subCategory : template.subCategory,
+          // Revisions taken before multi-category carry no `categories`; normalizing the
+          // snapshot's scalar pair rebuilds a valid single placement for them.
+          ...normalizeCategoryFields({
+            category: typeof snapshot.category === "string" ? snapshot.category : template.category,
+            subCategory:
+              typeof snapshot.subCategory === "string" ? snapshot.subCategory : template.subCategory,
+            categories: Array.isArray(snapshot.categories) ? snapshot.categories : undefined,
+          }, taxonomySettings),
           tags: Array.isArray(snapshot.tags) ? snapshot.tags : template.tags,
           thumbnailDataUrl:
             typeof snapshot.thumbnailDataUrl === "string"

@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { deleteStorageForUrls, deleteStorageObjects } from "@/lib/storage/assetReferences.server";
 import { deriveReadableFontLabel } from "@/lib/editor/customFontLabel";
 import { bumpFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
 
@@ -556,9 +557,17 @@ export async function upsertFontFamilyWithFiles({
     },
   });
 
+  // Variants this import no longer carries are dropped below; remember their objects so they
+  // can be removed once the rows are gone, instead of leaking on every re-import.
+  const droppedFiles = [];
   await prisma.$transaction(async (tx) => {
     const fileKinds = fileInputs.map((file) => file.kind);
     if (fileKinds.length > 0) {
+      const dropped = await tx.fontFile.findMany({
+        where: { fontId: font.id, kind: { notIn: fileKinds } },
+        select: { storageBucket: true, storagePath: true, publicUrl: true },
+      });
+      droppedFiles.push(...dropped);
       await tx.fontFile.deleteMany({
         where: {
           fontId: font.id,
@@ -601,10 +610,31 @@ export async function upsertFontFamilyWithFiles({
     }
   });
 
+  await deleteFontFileObjects(droppedFiles, { fontId: font.id, reason: "variants dropped on upsert" });
+
   // Catalog changed — advance the version so mobile clients re-fetch.
   await bumpFontCatalogVersion();
 
   return getFontFamilyById(font.id);
+}
+
+/**
+ * Font files record their own (bucket, key) and may sit outside the public bucket, so they go
+ * through the bucket-aware cleanup; a file that only has a public URL is parsed from it.
+ */
+export async function deleteFontFileObjects(files, context = {}) {
+  const items = (Array.isArray(files) ? files : [])
+    .map((file) => ({
+      bucket: String(file?.storageBucket || "").trim(),
+      key: String(file?.storagePath || "").trim(),
+    }))
+    .filter((item) => item.key);
+  const urlOnly = (Array.isArray(files) ? files : [])
+    .filter((file) => !String(file?.storagePath || "").trim())
+    .map((file) => file?.publicUrl);
+  const a = await deleteStorageObjects(items, context);
+  const b = await deleteStorageForUrls(urlOnly, context);
+  return { requested: a.requested + b.requested, deleted: a.deleted + b.deleted };
 }
 
 export async function deleteFontFamily({ id, family, source = FONT_SOURCE_CUSTOM }) {
@@ -629,6 +659,12 @@ export async function deleteFontFamily({ id, family, source = FONT_SOURCE_CUSTOM
     };
   }
   await prisma.fontFamily.delete({ where: { id: existing.id } });
+
+  // FontFile rows cascaded with the family; their objects and the preview images did not.
+  await deleteFontFileObjects(existing.files, { fontId: existing.id });
+  await deleteStorageForUrls([existing.previewImageUrl, existing.previewImageDarkUrl], {
+    fontId: existing.id,
+  });
 
   // Catalog changed — advance the version so mobile clients re-fetch.
   await bumpFontCatalogVersion();

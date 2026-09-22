@@ -15,8 +15,12 @@ import {
   resolveCategoryFilterValue,
   resolveSubCategoryFilterValue,
 } from "@/lib/mobile/taxonomy";
+import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
+import { applyOccasionCategoryOrder } from "@/lib/occasions/hoist";
+import { sortRowsBySnapshotOrder } from "@/lib/occasions/templateBoost";
 
 const TEMPLATES_PER_SUBCATEGORY = 10;
 const MAX_TEMPLATES_PER_SUBCATEGORY = 50;
@@ -25,6 +29,56 @@ function parsePositiveInt(value, fallback) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return fallback;
   return Math.floor(parsed);
+}
+
+const RAIL_TEMPLATE_SELECT = {
+  id: true,
+  name: true,
+  status: true,
+  version: true,
+  updatedAt: true,
+  canvasSize: true,
+  pageCount: true,
+  isPremium: true,
+  thumbnailDataUrl: true,
+  previewVideoUrl: true,
+  previewPosterUrl: true,
+  previewStatus: true,
+  previewDurationMs: true,
+  previewVersion: true,
+  previewUpdatedAt: true,
+};
+
+/**
+ * One rail's templates. Without boosted ids this is exactly the pre-occasions query. With
+ * them, two queries run in parallel under the SAME `where` (audience status, category,
+ * tag/query filters — so a draft never leaks and a filtered-out template is not pinned):
+ * the boosted rows, kept in the occasion's own order, then the rest in recency order.
+ */
+async function fetchRailTemplates({ where, take, boostedIds }) {
+  if (!boostedIds.length) {
+    return prisma.template.findMany({
+      where,
+      orderBy: { updatedAt: "desc" },
+      take,
+      select: RAIL_TEMPLATE_SELECT,
+    });
+  }
+  const [boosted, rest] = await Promise.all([
+    prisma.template.findMany({
+      where: mergeTemplateWhere(where, { id: { in: boostedIds } }),
+      orderBy: { updatedAt: "desc" },
+      take,
+      select: RAIL_TEMPLATE_SELECT,
+    }),
+    prisma.template.findMany({
+      where: mergeTemplateWhere(where, { id: { notIn: boostedIds } }),
+      orderBy: { updatedAt: "desc" },
+      take,
+      select: RAIL_TEMPLATE_SELECT,
+    }),
+  ]);
+  return [...sortRowsBySnapshotOrder(boosted, boostedIds), ...rest].slice(0, take);
 }
 
 export async function GET(request) {
@@ -40,7 +94,14 @@ export async function GET(request) {
   const locale = resolveMobileLocale(request, searchParams);
   const taxonomySettings = await getTemplateTaxonomySettings();
   const taxonomy = prepareMobileTaxonomy(taxonomySettings);
-  const localizedCategories = localizeCategoryOptions(taxonomy, locale);
+  // Seasonal boost: while an occasion is active its linked categories move to the front
+  // (the same reorder /templates/taxonomy and the grouped list apply, so tabs and rails
+  // agree) and its linked templates lead their rails.
+  const boost = await getActiveOccasionBoost();
+  const localizedCategories = applyOccasionCategoryOrder(
+    localizeCategoryOptions(taxonomy, locale),
+    boost
+  );
 
   const categoryIdParam = searchParams.get("categoryId");
   const subCategoryIdParam = searchParams.get("subCategoryId");
@@ -102,36 +163,29 @@ export async function GET(request) {
     });
 
   const templateRowsPerSubCategory = await Promise.all(
-    subCategoryDescriptors.map(({ category, subCategory }) =>
-      prisma.template.findMany({
-        where: {
-          ...audience.statusWhere,
-          category: category.value,
-          subCategory: subCategory.value,
-          ...(tag ? { tags: { array_contains: [tag] } } : {}),
-          ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
-        },
-        orderBy: { updatedAt: "desc" },
+    subCategoryDescriptors.map(({ category, subCategory }) => {
+      // A rail that is itself linked to the occasion is all-boosted, so its order is
+      // unchanged and the single query stays; other rails pin their boosted templates.
+      const railIsLinked = boost.templateCategoryPairs.some(
+        (pair) =>
+          pair.category === category.value && (!pair.subCategory || pair.subCategory === subCategory.value)
+      );
+      const boostedIds = railIsLinked ? [] : boost.templateIdsByPair[`${category.value}::${subCategory.value}`] || [];
+      return fetchRailTemplates({
+        // Matches any placement, so a multi-category template shows up on every rail it
+        // was assigned to rather than only its primary one.
+        where: mergeTemplateWhere(
+          audience.statusWhere,
+          templateCategoryWhere({ category: category.value, subCategory: subCategory.value }),
+          {
+            ...(tag ? { tags: { array_contains: [tag] } } : {}),
+            ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
+          }
+        ),
         take: templatesPerSubCategory,
-        select: {
-          id: true,
-          name: true,
-          status: true,
-          version: true,
-          updatedAt: true,
-          canvasSize: true,
-          pageCount: true,
-          isPremium: true,
-          thumbnailDataUrl: true,
-          previewVideoUrl: true,
-          previewPosterUrl: true,
-          previewStatus: true,
-          previewDurationMs: true,
-          previewVersion: true,
-          previewUpdatedAt: true,
-        },
-      })
-    )
+        boostedIds,
+      });
+    })
   );
 
   const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);

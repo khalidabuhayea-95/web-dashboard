@@ -22,6 +22,7 @@ import {
   restorePublicObjectUrlFromClient,
   rewritePublicObjectUrlsForClient,
 } from "@/lib/storage/objectStorage.server";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 
 const IMPORTED_BACKGROUNDS_RATE_LIMIT = {
   limit: 120,
@@ -133,7 +134,12 @@ export async function DELETE(request: NextRequest) {
       return handleNotFound("Imported background");
     }
 
-    return NextResponse.json(result);
+    // Row first, then storage: the objects are only unreferenced once the row is gone.
+    const storage = await deleteStorageForUrls([result.assetUrl, result.thumbnailUrl], {
+      backgroundId: result.id,
+    });
+
+    return NextResponse.json({ ...result, deletedObjects: storage.deleted });
   } catch (error) {
     return handleApiError(
       error,

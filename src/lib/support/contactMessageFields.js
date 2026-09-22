@@ -45,6 +45,10 @@ export const CONTACT_MESSAGE_TOPICS = [
   { value: "business", label: "الشراكات والأعمال", labelEn: "Partnerships" },
   { value: "press", label: "الإعلام والصحافة", labelEn: "Press" },
   { value: "privacy", label: "الخصوصية وحقوق البيانات", labelEn: "Privacy & data rights" },
+  // Google Play's AI-Generated Content policy requires an in-app way to report an offensive
+  // AI result. The app's report button lands here, so these need their own key rather than
+  // being folded into "privacy" — a safety report has to be findable in the inbox.
+  { value: "report", label: "الإبلاغ عن محتوى", labelEn: "Content report" },
 ];
 
 export const CONTACT_MESSAGE_TOPIC_VALUES = CONTACT_MESSAGE_TOPICS.map((topic) => topic.value);

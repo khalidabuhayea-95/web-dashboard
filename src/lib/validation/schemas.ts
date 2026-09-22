@@ -15,8 +15,18 @@ export const templatePayloadSchema = z.object({
   name: z.string().min(1, "Name is required").max(255),
   slug: z.string().min(1).max(255).optional(),
   status: z.enum(["draft", "published"]).default("draft"),
+  // Primary placement; `categories` carries the full list and wins when present.
   category: z.string().max(255).default("general"),
   subCategory: z.string().max(255).default("general"),
+  categories: z
+    .array(
+      z.object({
+        category: z.string().max(255),
+        subCategory: z.string().max(255).optional(),
+      })
+    )
+    .max(12)
+    .optional(),
   tags: z.array(z.string()).default([]),
   canvasSize: z.object({
     width: z.number().positive(),

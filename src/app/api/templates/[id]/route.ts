@@ -16,6 +16,7 @@ import {
   appendVersionParam,
   deleteObjects,
   getPublicStorageBucketName,
+  getTemplateThumbnailBucketName,
   parsePublicObjectKey,
   rewritePublicObjectUrlsForClient,
 } from "@/lib/storage/objectStorage.server";
@@ -68,6 +69,31 @@ async function isObjectKeyReferencedOutsideTemplate(key: string, templateId: str
       SELECT 1
       FROM "AppSetting"
       WHERE POSITION(${key} IN value::text) > 0
+      UNION ALL
+      SELECT 1
+      FROM "FontFamily"
+      WHERE POSITION(${key} IN COALESCE("previewImageUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("previewImageDarkUrl", '')) > 0
+      UNION ALL
+      SELECT 1
+      FROM "AiTemplate"
+      WHERE POSITION(${key} IN COALESCE("beforeUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("afterUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("thumbUrl", '')) > 0
+      UNION ALL
+      SELECT 1
+      FROM "MagicTool"
+      WHERE POSITION(${key} IN COALESCE("beforeUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("afterUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("thumbUrl", '')) > 0
+      UNION ALL
+      SELECT 1
+      FROM "GalleryImage"
+      WHERE POSITION(${key} IN url) > 0
+      UNION ALL
+      SELECT 1
+      FROM "TextEffect"
+      WHERE POSITION(${key} IN COALESCE("previewUrl", '')) > 0
     ) refs
   `;
 
@@ -101,6 +127,9 @@ async function findDeletableTemplateMediaKeys(template: any) {
     thumbnailDataUrl: template.thumbnailDataUrl,
     previewVideoUrl: template.previewVideoUrl,
     previewPosterUrl: template.previewPosterUrl,
+    // Per-page previews for multi-page designs. Easy to miss — they live in their own column,
+    // not in `data`, so leaving them out stranded one object per page on every delete.
+    pageThumbnails: template.pageThumbnails,
     data: template.data,
     revisions: template.revisions?.map((revision: any) => revision.snapshot) || [],
   });
@@ -223,22 +252,29 @@ export async function DELETE(
 
     await prisma.template.delete({ where: { id: templateId } });
 
-    const mediaBucket = getPublicStorageBucketName();
+    // Thumbnails can be routed to their own bucket via TEMPLATE_THUMBNAIL_BUCKET. Deleting a
+    // key that is not in a bucket is a no-op, so sweeping both is simpler and safer than
+    // trying to work out which bucket each key came from.
+    const mediaBuckets = Array.from(
+      new Set([getPublicStorageBucketName(), getTemplateThumbnailBucketName()].filter(Boolean))
+    );
     let deletedMediaCount = 0;
     let mediaDeleteError = "";
     if (mediaCleanup.deletable.length > 0) {
-      try {
-        await deleteObjects(mediaBucket, mediaCleanup.deletable);
-        deletedMediaCount = mediaCleanup.deletable.length;
-      } catch (error) {
-        mediaDeleteError = error instanceof Error ? error.message : String(error || "");
-        logger.warn("Failed to delete template media objects", {
-          templateId,
-          mediaBucket,
-          mediaCount: mediaCleanup.deletable.length,
-          error: mediaDeleteError,
-        });
+      for (const mediaBucket of mediaBuckets) {
+        try {
+          await deleteObjects(mediaBucket, mediaCleanup.deletable);
+        } catch (error) {
+          mediaDeleteError = error instanceof Error ? error.message : String(error || "");
+          logger.warn("Failed to delete template media objects", {
+            templateId,
+            mediaBucket,
+            mediaCount: mediaCleanup.deletable.length,
+            error: mediaDeleteError,
+          });
+        }
       }
+      if (!mediaDeleteError) deletedMediaCount = mediaCleanup.deletable.length;
     }
 
     logger.info("Template deleted", {

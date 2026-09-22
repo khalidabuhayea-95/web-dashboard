@@ -1,6 +1,8 @@
+import { templateCategoryScopeWhere } from "@/lib/templates/categoryQuery";
 import {
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
+  resolveTemplateCategoryPairs,
   sanitizeTemplateCategorySettings,
 } from "@/lib/templates/templateSettings";
 
@@ -39,34 +41,34 @@ export function prepareMobileTaxonomy(settings) {
   return { categories, categoryByValue, categoryById, categoryValueBySubCategoryId };
 }
 
-export function buildPublishedTemplateScopeWhere(taxonomy) {
+export function publishedTaxonomyPairs(taxonomy) {
   const categories = Array.isArray(taxonomy?.categories) ? taxonomy.categories : [];
-  const pairs = categories.flatMap((category) =>
+  return categories.flatMap((category) =>
     (Array.isArray(category.subCategories) ? category.subCategories : []).map((subCategory) => ({
       category: String(category.value || ""),
       subCategory: String(subCategory.value || ""),
     }))
   );
-
-  if (pairs.length === 0) return null;
-  return { OR: pairs };
 }
 
+export function buildPublishedTemplateScopeWhere(taxonomy) {
+  return templateCategoryScopeWhere(publishedTaxonomyPairs(taxonomy));
+}
+
+/**
+ * A multi-category template is in scope as soon as ONE of its placements survives the
+ * published taxonomy — the rest are simply not rendered.
+ */
 export function isTemplateAllowedByTaxonomy(template, taxonomy) {
   const categories = Array.isArray(taxonomy?.categories) ? taxonomy.categories : [];
   if (categories.length === 0) return false;
 
-  const categoryValue = normalizeTemplateCategory(template?.category, categories);
-  const category = taxonomy.categoryByValue?.get(categoryValue) || null;
-  if (!category) return false;
-
-  const subCategoryValue = normalizeTemplateSubCategory(
-    template?.subCategory,
-    categoryValue,
-    categories
-  );
-  const subCategories = Array.isArray(category.subCategories) ? category.subCategories : [];
-  return subCategories.some((item) => String(item.value || "") === subCategoryValue);
+  return resolveTemplateCategoryPairs(template, categories).some((pair) => {
+    const category = taxonomy.categoryByValue?.get(pair.category) || null;
+    if (!category) return false;
+    const subCategories = Array.isArray(category.subCategories) ? category.subCategories : [];
+    return subCategories.some((item) => String(item.value || "") === pair.subCategory);
+  });
 }
 
 export function resolveCategoryFilterValue(input, taxonomy) {
@@ -112,11 +114,11 @@ export function resolveSubCategoryFilterValue(input, categoryValue, taxonomy) {
   return exists ? normalizedResolvedValue : undefined;
 }
 
-export function localizeTemplateTaxonomy(template, taxonomy, locale) {
-  const categoryValue = normalizeTemplateCategory(template?.category, taxonomy.categories);
+function localizePair(pair, taxonomy, locale) {
+  const categoryValue = normalizeTemplateCategory(pair?.category, taxonomy.categories);
   const category = taxonomy.categoryByValue.get(categoryValue) || taxonomy.categories[0] || null;
   const subCategoryValue = normalizeTemplateSubCategory(
-    template?.subCategory,
+    pair?.subCategory,
     categoryValue,
     taxonomy.categories
   );
@@ -131,6 +133,39 @@ export function localizeTemplateTaxonomy(template, taxonomy, locale) {
     subCategoryValue,
     categoryLabel: resolveLabel(category, locale),
     subCategoryLabel: resolveLabel(subCategory, locale),
+  };
+}
+
+/**
+ * One placement in flat fields (what every client has always read), plus `placements` —
+ * every placement the template appears under, primary first, narrowed to the published
+ * taxonomy. Placements whose category or sub category is unpublished are dropped rather
+ * than coerced, so an unpublished rail never leaks a label.
+ */
+export function localizeTemplateTaxonomy(template, taxonomy, locale) {
+  const pairs = resolveTemplateCategoryPairs(template, taxonomy.categories);
+  const primary = localizePair(pairs[0], taxonomy, locale);
+
+  const placements = [];
+  const seen = new Set();
+  pairs.forEach((pair) => {
+    const category = taxonomy.categoryByValue.get(pair.category);
+    if (!category) return;
+    const subCategories = Array.isArray(category.subCategories) ? category.subCategories : [];
+    if (!subCategories.some((item) => String(item.value || "") === pair.subCategory)) return;
+    const localized = localizePair(pair, taxonomy, locale);
+    const key = `${localized.categoryValue}::${localized.subCategoryValue}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    placements.push(localized);
+  });
+
+  // Flat fields describe the first placement that actually survives the published taxonomy.
+  // Falling back to the raw primary here would coerce an unpublished category to "General"
+  // and mislabel a template that is perfectly visible under one of its other placements.
+  return {
+    ...(placements[0] || primary),
+    placements: placements.length > 0 ? placements : [primary],
   };
 }
 

@@ -20,6 +20,7 @@ export function buildSnapshot(template) {
     canvasSize: template.canvasSize,
     category: template.category,
     subCategory: template.subCategory,
+    categories: template.categories ?? null,
     tags: template.tags,
     thumbnailDataUrl: template.thumbnailDataUrl,
     previewVideoUrl: template.previewVideoUrl ?? null,

@@ -8,6 +8,7 @@ import {
   handleNotFound,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import {
   MAX_AI_TEMPLATE_PROMPT_LENGTH as MAX_PROMPT_LENGTH,
   MAX_AI_TEMPLATE_TITLE_LENGTH as MAX_TITLE_LENGTH,
@@ -170,7 +171,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     if (!existing) return handleNotFound("AI template");
 
     await prisma.aiTemplate.delete({ where: { id } });
-    logger.info("AI template deleted", { userId: session.userId, slug: existing.slug });
+    // Row first, then storage: the images are only unreferenced once the row is gone.
+    const storage = await deleteStorageForUrls([existing.beforeUrl, existing.afterUrl, existing.thumbUrl], { slug: existing.slug });
+    logger.info("AI template deleted", {
+      userId: session.userId,
+      slug: existing.slug,
+      deletedObjects: storage.deleted,
+    });
     return NextResponse.json({ ok: true, id, slug: existing.slug });
   } catch (error) {
     return handleApiError(error, "Failed to delete AI template");

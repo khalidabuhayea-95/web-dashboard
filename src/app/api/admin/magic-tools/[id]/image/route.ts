@@ -11,6 +11,7 @@ import {
   handleNotFound,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import { publishCardThumb } from "@/lib/aiTools/thumb.server";
 
 export const runtime = "nodejs";
@@ -106,6 +107,12 @@ export async function POST(request: NextRequest, { params }: { params: Promise<{
       where: { id },
       data: kind === "before" ? { beforeUrl: url } : { afterUrl: url, thumbUrl },
     });
+
+    // Every upload mints a fresh uuid key, so the superseded art has to go explicitly.
+    await deleteStorageForUrls(
+      kind === "before" ? [tool.beforeUrl] : [tool.afterUrl, tool.thumbUrl],
+      { slug: tool.slug, kind }
+    );
 
     logger.info("Magic tool art replaced", { userId: session.userId, slug: tool.slug, kind });
     return NextResponse.json({ ok: true, tool: updated });

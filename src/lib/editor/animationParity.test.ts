@@ -6,6 +6,13 @@
  * sizes (2000 rows). This test feeds the identical grid through the web port and asserts every
  * field matches. If a formula, an easing, a reveal mask, a glyph channel or the new BLOCK bar
  * drifts from mobile, exactly one row fails and names the type.
+ *
+ * CAVEAT — the fixture is a SNAPSHOT, so it only proves parity with mobile as of its capture.
+ * Mobile added DISSOLVE's blur (LayerAnimationVisualRuntime.withNayrozAnimationBlur) AFTER this
+ * file was generated, and the stale rows kept passing against a web port that had no blur at all —
+ * a green suite hid a real difference for weeks. Those DISSOLVE `blur` values were recomputed from
+ * that Kotlin formula on 2026-09-22; every other column is still mobile's own output. Regenerate
+ * the whole fixture from the mobile runtime whenever its animation code changes.
  */
 import test from "node:test";
 import assert from "node:assert/strict";

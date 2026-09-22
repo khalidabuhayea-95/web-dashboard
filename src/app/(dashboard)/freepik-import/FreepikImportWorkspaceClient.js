@@ -1,9 +1,12 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { formatImportResult, summarizeImportResult } from "./importResultSummary";
 import {
   ArrowUpRight,
+  ChevronDown,
   Download,
+  FolderTree,
   Image as ImageIcon,
   Import,
   Loader2,
@@ -267,16 +270,48 @@ function StatusBanner({ status }) {
   );
 }
 
-function SurfaceCard({ title, description, icon: Icon, children, className = "" }) {
+/**
+ * Collapse control. The whole header is the hit area — on a page this dense, a 24px chevron is
+ * a needlessly small target for something you toggle constantly.
+ */
+function CollapseToggle({ collapsed, label, onToggle, className = "" }) {
+  return (
+    <button
+      type="button"
+      onClick={onToggle}
+      aria-expanded={!collapsed}
+      className={`inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border/70 bg-white/80 text-[color:var(--ds-text-muted)] transition hover:bg-white hover:text-[color:var(--ds-text)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[color:var(--ds-primary)] ${className}`}
+    >
+      <span className="sr-only">{collapsed ? `Expand ${label}` : `Collapse ${label}`}</span>
+      <ChevronDown
+        className={`h-4 w-4 transition-transform duration-200 ${collapsed ? "-rotate-90" : ""}`}
+        aria-hidden="true"
+      />
+    </button>
+  );
+}
+
+function SurfaceCard({
+  title,
+  description,
+  icon: Icon,
+  children,
+  className = "",
+  collapsible = false,
+  defaultCollapsed = false,
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const foldable = collapsible && !collapsed;
+
   return (
     <div
       className={`rounded-[24px] border border-border/70 bg-white/85 p-5 shadow-[0_10px_30px_rgba(15,23,42,0.05)] backdrop-blur ${className}`}
     >
-      <div className="mb-4 flex items-start gap-3">
+      <div className={`flex items-start gap-3 ${collapsible && collapsed ? "" : "mb-4"}`}>
         <div className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-[linear-gradient(180deg,rgba(59,91,219,0.12),rgba(59,91,219,0.05))] text-[color:var(--ds-primary)]">
           <Icon className="h-4.5 w-4.5" aria-hidden="true" />
         </div>
-        <div>
+        <div className="min-w-0 flex-1">
           <h3 className="text-base font-semibold tracking-[-0.02em] text-[color:var(--ds-text)]">
             {title}
           </h3>
@@ -286,16 +321,36 @@ function SurfaceCard({ title, description, icon: Icon, children, className = "" 
             </p>
           ) : null}
         </div>
+        {collapsible ? (
+          <CollapseToggle
+            collapsed={collapsed}
+            label={title}
+            onToggle={() => setCollapsed((current) => !current)}
+          />
+        ) : null}
       </div>
-      {children}
+      {collapsible && collapsed ? null : children}
     </div>
   );
 }
 
-function WorkspaceSection({ eyebrow, title, description, icon: Icon, badges, children, footer }) {
+function WorkspaceSection({
+  eyebrow,
+  title,
+  description,
+  icon: Icon,
+  badges,
+  children,
+  footer,
+  collapsible = false,
+  defaultCollapsed = false,
+}) {
+  const [collapsed, setCollapsed] = useState(defaultCollapsed);
+  const isCollapsed = collapsible && collapsed;
+
   return (
     <section className="overflow-hidden rounded-[28px] border border-white/65 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(249,250,253,0.95))] shadow-[0_18px_48px_rgba(15,23,42,0.07)]">
-      <div className="border-b border-border/70 px-5 py-5 sm:px-7 sm:py-6">
+      <div className={`px-5 py-5 sm:px-7 sm:py-6 ${isCollapsed ? "" : "border-b border-border/70"}`}>
         <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
           <div className="min-w-0">
             <div className="flex items-center gap-3">
@@ -316,20 +371,35 @@ function WorkspaceSection({ eyebrow, title, description, icon: Icon, badges, chi
             </p>
           </div>
 
-          {badges?.length ? (
-            <div className="flex flex-wrap gap-2 lg:justify-end">
-              {badges.map((badge) => (
-                <StatusPill key={`${badge.tone}-${badge.label}`} tone={badge.tone}>
-                  {badge.label}
-                </StatusPill>
-              ))}
-            </div>
-          ) : null}
+          <div className="flex items-start gap-3 lg:justify-end">
+            {badges?.length ? (
+              <div className="flex flex-wrap gap-2 lg:justify-end">
+                {badges.map((badge) => (
+                  <StatusPill key={`${badge.tone}-${badge.label}`} tone={badge.tone}>
+                    {badge.label}
+                  </StatusPill>
+                ))}
+              </div>
+            ) : null}
+            {collapsible ? (
+              <CollapseToggle
+                collapsed={collapsed}
+                label={title}
+                onToggle={() => setCollapsed((current) => !current)}
+              />
+            ) : null}
+          </div>
         </div>
       </div>
 
-      <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-7">{children}</div>
-      {footer ? <div className="border-t border-border/70 px-5 py-5 sm:px-7">{footer}</div> : null}
+      {isCollapsed ? null : (
+        <>
+          <div className="space-y-5 px-5 py-5 sm:px-7 sm:py-7">{children}</div>
+          {footer ? (
+            <div className="border-t border-border/70 px-5 py-5 sm:px-7">{footer}</div>
+          ) : null}
+        </>
+      )}
     </section>
   );
 }
@@ -450,6 +520,47 @@ export default function FreepikImportWorkspaceClient() {
   const [jobProgress, setJobProgress] = useState("");
   const [importResult, setImportResult] = useState(null);
 
+  const [elementCategories, setElementCategories] = useState([]);
+  const [categoriesLoading, setCategoriesLoading] = useState(true);
+  const [selectedCategoryValue, setSelectedCategoryValue] = useState("");
+
+  useEffect(() => {
+    let mounted = true;
+
+    const loadCategories = async () => {
+      setCategoriesLoading(true);
+      try {
+        const response = await fetch("/api/settings/element-categories", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          throw new Error(formatErrorMessage(payload, "Failed to load element categories."));
+        }
+
+        if (!mounted) return;
+        const nextCategories = Array.isArray(payload?.settings)
+          ? payload.settings.filter((item) => item && typeof item === "object" && item.published !== false)
+          : [];
+        setElementCategories(nextCategories);
+        setSelectedCategoryValue((current) => {
+          if (current && nextCategories.some((item) => item.value === current)) return current;
+          return String(nextCategories[0]?.value || "");
+        });
+      } catch (error) {
+        if (!mounted) return;
+        setElementCategories([]);
+        setSelectedCategoryValue("");
+        setStatus(createStatus("error", error?.message || "Failed to load element categories."));
+      } finally {
+        if (mounted) setCategoriesLoading(false);
+      }
+    };
+
+    void loadCategories();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
   useEffect(() => {
     let mounted = true;
 
@@ -521,6 +632,24 @@ export default function FreepikImportWorkspaceClient() {
   }, [previewItems, selectedIds]);
 
   const selectedCount = selectedIds.size;
+
+  const selectedCategory = useMemo(
+    () => elementCategories.find((item) => item.value === selectedCategoryValue) || null,
+    [elementCategories, selectedCategoryValue]
+  );
+  const suggestedTerms = Array.isArray(selectedCategory?.searchTerms) ? selectedCategory.searchTerms : [];
+
+  // Choosing a category seeds the search from the terms saved on it (Settings > Element
+  // categories): the first goes into the term field, the rest stay one click away as chips.
+  // Every seeded term is phrased to return CUT-OUT artwork — an element that arrives with a
+  // background behind it is unusable on a canvas.
+  useEffect(() => {
+    if (!selectedCategory) return;
+    const terms = Array.isArray(selectedCategory.searchTerms) ? selectedCategory.searchTerms : [];
+    if (terms.length > 0) {
+      setQuery((current) => ({ ...current, term: terms[0], page: 1 }));
+    }
+  }, [selectedCategory]);
 
   const updateQueryField = (field, value) => {
     setQuery((current) => ({
@@ -622,7 +751,15 @@ export default function FreepikImportWorkspaceClient() {
         page: Number(nextQuery.page) || 1,
       }));
       setSelectedIds(new Set());
-      setStatus(createStatus("success", `Loaded ${items.length} icon(s).`));
+      const duplicatesHidden = Number(payload?.duplicatesHidden) || 0;
+      setStatus(
+        createStatus(
+          "success",
+          duplicatesHidden > 0
+            ? `Loaded ${items.length} icon(s) — hid ${duplicatesHidden} repeat(s) of the same artwork.`
+            : `Loaded ${items.length} icon(s).`
+        )
+      );
     } catch (error) {
       setPreviewItems([]);
       setPreviewPagination({
@@ -665,6 +802,10 @@ export default function FreepikImportWorkspaceClient() {
       setStatus(createStatus("warning", "Select at least one icon before import."));
       return;
     }
+    if (!selectedCategoryValue) {
+      setStatus(createStatus("warning", "Choose an element category before import."));
+      return;
+    }
 
     setImportBusy(true);
     setJobProgress("Creating import job...");
@@ -692,6 +833,7 @@ export default function FreepikImportWorkspaceClient() {
             created: item.created,
             sourcePayload: item.sourcePayload,
           })),
+          categoryValue: selectedCategoryValue,
           query,
         }),
       });
@@ -716,19 +858,25 @@ export default function FreepikImportWorkspaceClient() {
           ? completedJob.result
           : {};
       setImportResult(result);
-      const imported = Number(result.imported || 0);
-      const failed = Number(result.failed || 0);
-      const requested = Number(result.totalRequested || selectedItems.length);
+      const summary = summarizeImportResult({
+        ...result,
+        totalRequested: Number(result.totalRequested || selectedItems.length),
+      });
       const firstError =
         Array.isArray(result.errors) && result.errors.length > 0
           ? String(result.errors[0]?.message || "").trim()
           : "";
+      // Duplicates are the usual reason imported < requested, so the reason is spelled out here
+      // rather than leaving the gap to be guessed at.
+      const duplicateNote =
+        summary.duplicates > 0
+          ? ` ${summary.duplicates} were already in the library (same artwork under another Magnific id).`
+          : "";
       setStatus(
         createStatus(
           firstError ? "warning" : "success",
-          firstError
-            ? `Import completed. Imported ${imported} / ${requested}. Failed: ${failed}. First error: ${firstError}`
-            : `Import completed. Imported ${imported} / ${requested}. Failed: ${failed}.`
+          `Import completed. Imported ${summary.imported} / ${summary.requested}. Failed: ${summary.failed}.${duplicateNote}` +
+            (firstError ? ` First error: ${firstError}` : "")
         )
       );
     } catch (error) {
@@ -748,6 +896,7 @@ export default function FreepikImportWorkspaceClient() {
         title="Search, preview, and import Magnific icons"
         description="Tune search defaults, preview the current query response, and import only the assets you want. The workflow is laid out for quick iteration rather than raw parameter dumping."
         icon={Search}
+        collapsible
         badges={[
           { tone: hasDefaultChanges ? "warning" : "success", label: hasDefaultChanges ? "Unsaved defaults" : "Defaults synced" },
           { tone: selectedCount > 0 ? "success" : "neutral", label: `${selectedCount} selected` },
@@ -762,11 +911,77 @@ export default function FreepikImportWorkspaceClient() {
           />
         }
       >
+        <SurfaceCard
+          icon={FolderTree}
+          title="Destination category"
+          description="Every imported element is filed under one theme category. Picking it also seeds the search with that category's saved terms."
+          collapsible
+        >
+          <div className="grid gap-4">
+            <FieldBlock
+              id="freepik-element-category"
+              label="Element category"
+              description="Required — an element that lands with no category is invisible in the app's strip."
+              hint="This section searches the ICONS catalogue (v1/icons) only."
+            >
+              <Select
+                id="freepik-element-category"
+                value={selectedCategoryValue}
+                onChange={(event) => setSelectedCategoryValue(event.target.value)}
+                disabled={categoriesLoading || elementCategories.length === 0}
+              >
+                {elementCategories.length === 0 ? (
+                  <option value="">
+                    {categoriesLoading ? "Loading categories..." : "No categories"}
+                  </option>
+                ) : (
+                  elementCategories.map((item) => (
+                    <option key={item.id || item.value} value={item.value}>
+                      {item.labelEn || item.labelAr || item.value}
+                    </option>
+                  ))
+                )}
+              </Select>
+            </FieldBlock>
+          </div>
+
+          {suggestedTerms.length > 0 ? (
+            <div
+              className="mt-4 flex flex-wrap items-center gap-2"
+              data-testid="freepik-element-suggested-terms"
+            >
+              <span className="text-sm text-[color:var(--ds-text-muted)]">
+                Terms for {selectedCategory?.labelEn || selectedCategoryValue}:
+              </span>
+              {suggestedTerms.map((term) => {
+                const active = term === String(query.term || "").trim();
+                return (
+                  <button
+                    key={term}
+                    type="button"
+                    aria-pressed={active}
+                    disabled={loadingSettings}
+                    onClick={() => setQuery((current) => ({ ...current, term, page: 1 }))}
+                    className={`rounded-full border px-3 py-1.5 text-[0.8rem] transition-colors ${
+                      active
+                        ? "border-[color:var(--ds-primary)] bg-[color:var(--ds-primary)] text-white"
+                        : "border-border/70 bg-white/70 text-[color:var(--ds-text)] hover:bg-white"
+                    }`}
+                  >
+                    {term}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </SurfaceCard>
+
         <div className="grid gap-4 lg:grid-cols-[minmax(0,1.1fr)_minmax(0,0.9fr)]">
           <SurfaceCard
             icon={WandSparkles}
             title="Search defaults"
             description="Keep the most common icon-search settings ready for faster preview cycles."
+            collapsible
           >
             <div className="grid gap-4 md:grid-cols-2">
               <FieldBlock
@@ -892,6 +1107,7 @@ export default function FreepikImportWorkspaceClient() {
             icon={Sparkles}
             title="Filter tuning"
             description="Shape the visible result set before opening preview and selection."
+            collapsible
           >
             <div className="grid gap-4">
               <FieldBlock id="freepik-filter-color" label="Color filter">
@@ -1073,7 +1289,7 @@ export default function FreepikImportWorkspaceClient() {
 
             {importResult ? (
               <div className="rounded-2xl border border-border/70 bg-slate-50/80 px-4 py-3 text-sm text-[color:var(--ds-text-muted)]">
-                Imported {Number(importResult.imported || 0)} • Failed {Number(importResult.failed || 0)} • Requested {Number(importResult.totalRequested || 0)}
+                {formatImportResult(importResult, " • ")}
               </div>
             ) : null}
 
@@ -1102,6 +1318,8 @@ export default function FreepikImportWorkspaceClient() {
         title="Background import"
         description="Use the existing background import workflow from the same page so teams can manage both Magnific asset types from one workspace."
         icon={Download}
+        collapsible
+        defaultCollapsed
         badges={[{ tone: "neutral", label: "Shared import workspace" }]}
       >
         <FreepikBackgroundImportSection

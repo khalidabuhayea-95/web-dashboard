@@ -215,24 +215,9 @@ export function sanitizeTemplateCategorySettings(input) {
     return sanitizeTemplateCategorySettings(TEMPLATE_CATEGORY_SETTINGS);
   }
 
-  if (!categories.some((item) => item.value === DEFAULT_TEMPLATE_CATEGORY)) {
-    categories.unshift({
-      id: resolveGuid("", `category:${DEFAULT_TEMPLATE_CATEGORY}`),
-      value: DEFAULT_TEMPLATE_CATEGORY,
-      labelEn: "General",
-      labelAr: "عام",
-      published: true,
-      subCategories: [
-        {
-          id: resolveGuid("", `subcategory:${DEFAULT_TEMPLATE_CATEGORY}:${DEFAULT_TEMPLATE_SUBCATEGORY}`),
-          value: DEFAULT_TEMPLATE_SUBCATEGORY,
-          labelEn: "General",
-          labelAr: "عام",
-          published: true,
-        },
-      ],
-    });
-  }
+  // No forced "general" category: re-adding it here made it undeletable, and Remove looked
+  // like it worked until the save came back with the category still there. Callers already
+  // degrade to settings[0] when the default value is absent (see fallbackCategoryValue).
 
   return categories;
 }
@@ -352,4 +337,133 @@ export function getTemplateSubCategoryOptions(
     labelAr: subCategory.labelAr,
     published: subCategory.published !== false,
   }));
+}
+
+/**
+ * A template can sit in several places in the taxonomy at once. Each placement is a
+ * `{ category, subCategory }` pair — a bare category is meaningless here because every
+ * sub category belongs to exactly one parent. The first pair is the primary placement and
+ * is mirrored into the scalar `Template.category` / `Template.subCategory` columns, which
+ * older mobile builds (and the hot-path composite index) still read.
+ */
+export const MAX_TEMPLATE_CATEGORIES = 12;
+
+export function templateCategoryPairKey(pair) {
+  return `${String(pair?.category || "")}::${String(pair?.subCategory || "")}`;
+}
+
+function strictCategoryValue(value, index) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  const key = toKey(raw);
+  if (index.categoryByValue.has(key)) return key;
+  const byId = index.categoryById.get(normalizeGuid(raw));
+  return byId?.value || "";
+}
+
+function strictSubCategoryValue(value, categorySetting) {
+  const subCategories = categorySetting?.subCategories || [];
+  const raw = String(value || "").trim();
+  const key = toKey(raw);
+  const id = normalizeGuid(raw);
+  if (id) {
+    const byId = subCategories.find((item) => String(item.id || "") === id);
+    if (byId?.value) return byId.value;
+  }
+  const byValue = subCategories.find((item) => item.value === key);
+  if (byValue?.value) return byValue.value;
+  return fallbackSubCategoryValue(categorySetting);
+}
+
+/** Pull `{ category, subCategory }` out of the several shapes clients send. */
+function readCategoryPairInput(entry) {
+  if (!entry) return null;
+  if (typeof entry === "string") {
+    const [category, subCategory] = entry.split(/[/:]/, 2);
+    return { category, subCategory };
+  }
+  if (typeof entry !== "object") return null;
+  return {
+    category: entry.category ?? entry.categoryValue ?? entry.categoryId ?? "",
+    subCategory: entry.subCategory ?? entry.subCategoryValue ?? entry.subCategoryId ?? "",
+  };
+}
+
+/**
+ * Normalize a list of placements: unknown categories are dropped, unknown sub categories
+ * fall back to their parent's first one, duplicates collapse, and the list is capped.
+ * `primary` (the legacy scalar pair) seeds the result when the list is empty or missing,
+ * so a caller that only knows the old fields still gets a valid single placement back.
+ */
+export function normalizeTemplateCategoryPairs(
+  input,
+  settings = TEMPLATE_CATEGORY_SETTINGS,
+  primary = null
+) {
+  const index = buildCategoryIndex(settings);
+  const source = Array.isArray(input) ? input : [];
+  const pairs = [];
+  const seen = new Set();
+
+  source.forEach((entry) => {
+    if (pairs.length >= MAX_TEMPLATE_CATEGORIES) return;
+    const raw = readCategoryPairInput(entry);
+    if (!raw) return;
+    const category = strictCategoryValue(raw.category, index);
+    if (!category) return;
+    const subCategory = strictSubCategoryValue(raw.subCategory, index.categoryByValue.get(category));
+    const pair = { category, subCategory };
+    const key = templateCategoryPairKey(pair);
+    if (seen.has(key)) return;
+    seen.add(key);
+    pairs.push(pair);
+  });
+
+  if (pairs.length > 0) return pairs;
+
+  const category = normalizeTemplateCategory(primary?.category, index.normalizedSettings);
+  return [
+    {
+      category,
+      subCategory: normalizeTemplateSubCategory(
+        primary?.subCategory,
+        category,
+        index.normalizedSettings
+      ),
+    },
+  ];
+}
+
+/**
+ * Read side of the same contract. Rows written before the multi-category migration (and any
+ * writer that only set the scalars) have no `categories`, so fall back to the primary pair.
+ */
+export function resolveTemplateCategoryPairs(template, settings = TEMPLATE_CATEGORY_SETTINGS) {
+  return normalizeTemplateCategoryPairs(template?.categories, settings, {
+    category: template?.category,
+    subCategory: template?.subCategory,
+  });
+}
+
+/**
+ * Single place that keeps the scalar primary pair and the `categories` list consistent for
+ * a write. `existingCategories` matters on update: a payload without a `categories` key
+ * (an older client, or a code path that only knows the scalars) keeps the placements the
+ * row already had instead of silently pulling the template out of its other rails, while
+ * an explicit scalar pair still becomes the new primary.
+ */
+export function buildTemplateCategoryFields(input, settings = TEMPLATE_CATEGORY_SETTINGS) {
+  const primary = { category: input?.category, subCategory: input?.subCategory };
+  const source = Array.isArray(input?.categories)
+    ? input.categories
+    : [
+        ...(String(input?.category || "").trim() ? [primary] : []),
+        ...(Array.isArray(input?.existingCategories) ? input.existingCategories : []),
+      ];
+  const pairs = normalizeTemplateCategoryPairs(source, settings, primary);
+  return {
+    category: pairs[0].category,
+    subCategory: pairs[0].subCategory,
+    categories: pairs,
+  };
 }

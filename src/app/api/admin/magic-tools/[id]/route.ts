@@ -8,6 +8,7 @@ import {
   handleNotFound,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import {
   MAX_MAGIC_TOOL_PROMPT_LENGTH,
   MAX_MAGIC_TOOL_SUBTITLE_LENGTH,
@@ -188,7 +189,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     if (!existing) return handleNotFound("Magic tool");
 
     await prisma.magicTool.delete({ where: { id } });
-    logger.info("Magic tool deleted", { userId: session.userId, slug: existing.slug });
+    // Row first, then storage: the images are only unreferenced once the row is gone.
+    const storage = await deleteStorageForUrls([existing.beforeUrl, existing.afterUrl, existing.thumbUrl], { slug: existing.slug });
+    logger.info("Magic tool deleted", {
+      userId: session.userId,
+      slug: existing.slug,
+      deletedObjects: storage.deleted,
+    });
     return NextResponse.json({ ok: true, id, slug: existing.slug });
   } catch (error) {
     return handleApiError(error, "Failed to delete magic tool");

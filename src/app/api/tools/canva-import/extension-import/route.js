@@ -1470,6 +1470,49 @@ export function OPTIONS() {
   return withCors(new NextResponse(null, { status: 204 }));
 }
 
+
+// Arabic/Latin stop words that would match everything and rank nothing.
+const TAG_STOP_WORDS = new Set([
+  "و", "في", "من", "على", "مع", "عن", "الى", "إلى", "هذا", "هذه", "ذلك",
+  "the", "a", "an", "of", "for", "with", "and", "or", "to", "in", "on", "by", "at",
+  "copy", "design", "untitled", "نسخة", "تصميم",
+]);
+const MAX_SEARCH_TAGS = 16;
+
+/**
+ * Search tags for an imported Canva template.
+ *
+ * Canva exposes `document.keywords`, but only templates in ITS library carry them — a design a
+ * user made from one comes through empty — so the title is the dependable source. A Canva title
+ * like "قصة instagram ازرق وبيج عصرية برسومات ورود اقتباس قرآني" is exactly what an Arabic user
+ * types into search, which the previous fixed tags ("canva", "imported", "extension") were not:
+ * they were identical on every template, so they ranked nothing and leaked the design's origin
+ * into user-facing search. Those now live in importMetadata instead.
+ *
+ * Source typos are carried through verbatim — a tag is a search key, not a correction.
+ */
+function buildSearchTags(title, canvaKeywords) {
+  const out = [];
+  const seen = new Set();
+  const push = (raw) => {
+    const value = String(raw || "").trim().toLowerCase();
+    if (value.length < 2 || TAG_STOP_WORDS.has(value) || seen.has(value)) return;
+    if (out.length >= MAX_SEARCH_TAGS) return;
+    seen.add(value);
+    out.push(value.slice(0, 32));
+  };
+
+  // Canva's own keywords first: when present they are curated, not derived.
+  (Array.isArray(canvaKeywords) ? canvaKeywords : []).forEach(push);
+
+  String(title || "")
+    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
+    .split(/\s+/)
+    .forEach(push);
+
+  return out;
+}
+
 export async function POST(request) {
   const requestId = resolveRequestId(request);
   const requestLogger = logger.child(getRequestLogContext(request, requestId));
@@ -1535,6 +1578,7 @@ export async function POST(request) {
   const editorData = body?.editorData;
   const sourceUrl = String(body?.sourceUrl || "").trim();
   const title = parseTitle(body?.title);
+  const canvaKeywords = Array.isArray(body?.canvaKeywords) ? body.canvaKeywords : [];
   const requestedName = String(body?.name || "").trim() || title;
   const requestedSlug = String(body?.slug || "").trim();
   const dimensions = normalizeCanvasInput({
@@ -1844,6 +1888,12 @@ export async function POST(request) {
         height: dimensions.canvasHeight,
         sourceWidth: dimensions.sourceWidth,
         sourceHeight: dimensions.sourceHeight,
+        // The source page's own length, sent only for a design that actually plays. This object is
+        // rebuilt field by field, so anything not named here is dropped before the metadata
+        // whitelist ever sees it — which is what silently lost the imported page duration.
+        ...(Number(metadataFromEditor?.page?.durationMs) > 0
+          ? { durationMs: Number(metadataFromEditor.page.durationMs) }
+          : {}),
       },
       // Multi-page imports: ordered page descriptors matching the fabric objects'
       // importPageIndex tags. Absent for single-page imports.
@@ -1931,6 +1981,15 @@ export async function POST(request) {
     }
   }
   importMetadata.warnings = Array.from(new Set(importWarnings.map((item) => String(item || "").trim()).filter(Boolean)));
+  // Provenance markers used to sit in `tags`, where the mobile search matched them. They are
+  // diagnostics, not search terms, so they live here now.
+  importMetadata.provenance = {
+    source: "canva",
+    via: "extension",
+    parity: "v2",
+    layers: Boolean(hasFabricData),
+    canvaKeywordCount: canvaKeywords.length,
+  };
 
   try {
     const template = await createImportedTemplate({
@@ -1944,7 +2003,7 @@ export async function POST(request) {
       canvasHeight: dimensions.canvasHeight,
       sourceWidth: dimensions.sourceWidth,
       sourceHeight: dimensions.sourceHeight,
-      tags: hasFabricData ? ["canva", "imported", "extension", "layers", "parity-v2"] : ["canva", "imported", "extension", "parity-v2"],
+      tags: buildSearchTags(requestedName || title, canvaKeywords),
       action: "import-canva-extension",
       importMetadata,
       pageThumbnails: incomingPageThumbnails,

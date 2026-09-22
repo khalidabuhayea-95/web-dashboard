@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 
 import Button from "@/components/ui/button";
+import UpcomingOccasions from "./UpcomingOccasions";
 import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/components/ui/card";
 import {
   AreaChart,
@@ -250,6 +251,8 @@ export default function DashboardClient({ role }) {
           </Button>
         </CardContent>
       </Card>
+
+      <UpcomingOccasions />
 
       {role === "admin" ? (
         !stats ? (

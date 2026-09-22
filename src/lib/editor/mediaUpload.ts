@@ -82,3 +82,70 @@ export function dataUrlToFile(
   const safeName = String(fileName || "").trim() || `upload-${Date.now()}.png`;
   return new File([bytes], safeName, { type: mimeType || fallbackMimeType });
 }
+
+/**
+ * First frame of a video file, uploaded as a JPEG — the layer's poster (EditorElement.posterSrc).
+ * Best-effort: resolves "" when the browser cannot decode the file or the upload fails, so a
+ * poster never blocks the video itself.
+ */
+export async function uploadVideoPosterFromFile(
+  file: File,
+  options?: { maxDimension?: number; signal?: AbortSignal }
+): Promise<string> {
+  if (typeof document === "undefined" || typeof URL === "undefined") return "";
+  const objectUrl = URL.createObjectURL(file);
+  try {
+    const frame = await new Promise<HTMLCanvasElement | null>((resolve) => {
+      const video = document.createElement("video");
+      let settled = false;
+      const finish = (canvas: HTMLCanvasElement | null) => {
+        if (settled) return;
+        settled = true;
+        video.removeAttribute("src");
+        video.load();
+        resolve(canvas);
+      };
+      const timeoutId = window.setTimeout(() => finish(null), 8000);
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      video.addEventListener("error", () => {
+        window.clearTimeout(timeoutId);
+        finish(null);
+      });
+      // loadeddata = the first frame is decoded (readyState >= HAVE_CURRENT_DATA) at time 0.
+      video.addEventListener("loadeddata", () => {
+        window.clearTimeout(timeoutId);
+        try {
+          const maxDimension = Math.max(64, Number(options?.maxDimension) || 720);
+          const scale = Math.min(1, maxDimension / Math.max(1, video.videoWidth, video.videoHeight));
+          const canvas = document.createElement("canvas");
+          canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+          canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+          const context = canvas.getContext("2d");
+          if (!context || !video.videoWidth) {
+            finish(null);
+            return;
+          }
+          context.drawImage(video, 0, 0, canvas.width, canvas.height);
+          finish(canvas);
+        } catch {
+          finish(null);
+        }
+      });
+      video.src = objectUrl;
+      video.load();
+    });
+    if (!frame) return "";
+    const blob = await new Promise<Blob | null>((resolve) => frame.toBlob(resolve, "image/jpeg", 0.86));
+    if (!blob) return "";
+    const baseName = file.name.replace(/\.[^.]+$/, "") || "video";
+    const posterFile = new File([blob], `${baseName}-poster.jpg`, { type: "image/jpeg" });
+    const uploaded = await uploadEditorMediaFile(posterFile, "image", { signal: options?.signal });
+    return uploaded.url;
+  } catch {
+    return "";
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}

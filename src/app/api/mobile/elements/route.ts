@@ -7,6 +7,7 @@ import { listImportedElementAssets } from "@/lib/editor/importedElements.server"
 import { logger } from "@/lib/logging/logger";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
 import { resolveMobileLocale } from "@/lib/mobile/locale";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
 import { createMobilePublicMediaUrlResolver } from "@/lib/mobile/templateAssets";
 
 export const runtime = "nodejs";
@@ -48,15 +49,26 @@ export async function GET(request: NextRequest) {
       page,
       pageSize,
       query,
+      category: searchParams.get("category") || "",
     });
+
+    const categoryValue = searchParams.get("category") || searchParams.get("categoryValue") || "all";
+    // Seasonal boost: linked elements first, then elements in a linked category, then recency.
+    // Inside a single-category browse the category arm is a constant, so it is dropped.
+    const boost = await getActiveOccasionBoost();
+    const hasCategoryFilter = Boolean(categoryValue) && categoryValue.toLowerCase() !== "all";
 
     const result = await listImportedElementAssets({
       source: searchParams.get("source") || "all",
       kind: searchParams.get("kind") || "all",
+      // Browsing by category is how the elements strip works; "all" (or omitting it) keeps the
+      // existing search-only behaviour for clients that predate the taxonomy.
+      categoryValue,
       query,
       page,
       pageSize,
       locale,
+      boost: { ids: boost.elementIds, categoryKeys: hasCategoryFilter ? [] : boost.elementCategoryKeys },
     });
 
     const mediaUrlResolver = createMobilePublicMediaUrlResolver(request);

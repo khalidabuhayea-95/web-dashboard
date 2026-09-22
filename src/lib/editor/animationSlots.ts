@@ -91,6 +91,19 @@ export function emptyAnimationSlots(): EditorAnimationSlots {
   return { entrance: null, exit: null, loop: null };
 }
 
+/**
+ * Does this stored value SPEAK about the slots — i.e. name at least one of them, even as null?
+ * That is the difference between "this element has been through the slot editor and holds no
+ * animation" and "this element predates slots and its legacy fields still have to be migrated".
+ */
+export function hasExplicitAnimationSlots(value: unknown): boolean {
+  if (!value || typeof value !== "object") return false;
+  const raw = value as Record<string, unknown>;
+  return (Object.keys(SLOT_CATEGORY) as Array<keyof EditorAnimationSlots>).some(
+    (slot) => slot in raw
+  );
+}
+
 export function isEmptyAnimationSlots(slots: EditorAnimationSlots | null | undefined): boolean {
   if (!slots) return true;
   return !activeSlot(slots.entrance) && !activeSlot(slots.exit) && !activeSlot(slots.loop);
@@ -145,7 +158,13 @@ function legacyIsInfinite(fields: LegacyAnimationFields, type: string): boolean 
  */
 export function resolveElementAnimations(element: LegacyAnimationFields): EditorAnimationSlots {
   const stored = normalizeAnimationSlots(element.animations);
-  if (!isEmptyAnimationSlots(stored)) return stored;
+  // An `animations` object that NAMES its slots is the authoritative answer, even when every one
+  // of them is null. Migrating the legacy fields in that case resurrected an animation the user
+  // had just deleted: clearing the last slot wrote {entrance: null, exit: null, loop: null},
+  // which read as "no slots yet", so the old mediaAnimationType came back and the effect hopped
+  // into the other tab. Removing an imported layer's animation was therefore impossible — the two
+  // tabs just traded it back and forth. Absent (or `{}`) still means "never migrated".
+  if (hasExplicitAnimationSlots(element.animations) || !isEmptyAnimationSlots(stored)) return stored;
 
   const type = normalizeSpecAnimationType(element.mediaAnimationType);
   if (type === "NONE") return emptyAnimationSlots();

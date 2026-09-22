@@ -13,6 +13,7 @@
 import prisma from "@/lib/prisma";
 import { runAiTemplateRender } from "@/lib/aiTemplates/replicate.server";
 import { runMagicTool } from "@/lib/magicTools/run.server";
+import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
 
 export const AI_TOOL_KIND = { MAGIC: "magic", TEMPLATE: "template" } as const;
 export type AiToolKind = (typeof AI_TOOL_KIND)[keyof typeof AI_TOOL_KIND];
@@ -64,6 +65,8 @@ const MAGIC_SELECT = {
 } as const;
 
 const TEMPLATE_SELECT = {
+  // `id` is only read by the seasonal boost; templateToPublic never emits it.
+  id: true,
   slug: true,
   titleEn: true,
   titleAr: true,
@@ -140,7 +143,7 @@ function templateToPublic(row: TemplateRow): PublicAiTool {
  * behind a lock rather than hiding what an upgrade buys.
  */
 export async function buildAiToolsCatalog(): Promise<{ sections: AiToolSection[] }> {
-  const [magicTools, categories] = await Promise.all([
+  const [magicTools, categories, boost] = await Promise.all([
     prisma.magicTool.findMany({
       where: { published: true, afterUrl: { not: null } },
       orderBy: { sortOrder: "asc" },
@@ -159,6 +162,7 @@ export async function buildAiToolsCatalog(): Promise<{ sections: AiToolSection[]
         },
       },
     }),
+    getActiveOccasionBoost(),
   ]);
 
   const sections: AiToolSection[] = [];
@@ -173,16 +177,32 @@ export async function buildAiToolsCatalog(): Promise<{ sections: AiToolSection[]
     });
   }
 
+  // Seasonal boost: templates linked to an active occasion lead their category (a stable
+  // partition, so `sortOrder` still rules inside each half), and categories that are
+  // linked or hold a hoisted template move up right behind the Magic Tools.
+  const boostedSections: AiToolSection[] = [];
+  const otherSections: AiToolSection[] = [];
   for (const category of categories) {
     if (!category.templates.length) continue;
-    sections.push({
+    const templates = boost.hasAiBoost
+      ? [
+          ...category.templates.filter((template: TemplateRow) => boost.aiTemplateIdSet.has(template.id)),
+          ...category.templates.filter((template: TemplateRow) => !boost.aiTemplateIdSet.has(template.id)),
+        ]
+      : category.templates;
+    const hoisted =
+      boost.hasAiBoost &&
+      (boost.aiCategorySlugSet.has(category.slug) ||
+        category.templates.some((template: TemplateRow) => boost.aiTemplateHoistIdSet.has(template.id)));
+    (hoisted ? boostedSections : otherSections).push({
       id: `template:${category.slug}`,
       kind: AI_TOOL_KIND.TEMPLATE,
       titleEn: category.titleEn,
       titleAr: category.titleAr,
-      tools: category.templates.map(templateToPublic),
+      tools: templates.map(templateToPublic),
     });
   }
+  sections.push(...boostedSections, ...otherSections);
 
   return { sections };
 }

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { RefreshCw } from "lucide-react";
 
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
@@ -18,6 +19,27 @@ import {
 } from "@/lib/templates/templateSettings";
 
 const PAGE_SIZE = 10;
+
+/**
+ * Every category a template is filed under, primary first. Rows written before
+ * multi-category only carry the scalar pair.
+ */
+function resolveTemplatePlacements(template) {
+  const raw = Array.isArray(template?.categories) ? template.categories : [];
+  const pairs = raw
+    .map((entry) => ({
+      category: String(entry?.category || "").trim(),
+      subCategory: String(entry?.subCategory || "").trim(),
+    }))
+    .filter((entry) => entry.category);
+  if (pairs.length > 0) return pairs;
+  return [
+    {
+      category: String(template?.category || "general"),
+      subCategory: String(template?.subCategory || "general"),
+    },
+  ];
+}
 
 function parseTemplateData(raw) {
   if (!raw) return null;
@@ -214,6 +236,7 @@ export default function TemplatesClient() {
   const [deletingTemplateId, setDeletingTemplateId] = useState("");
   const [selectedTemplateIds, setSelectedTemplateIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [previewPopup, setPreviewPopup] = useState(null);
   const [sharePopup, setSharePopup] = useState(null);
   const [shareCopyState, setShareCopyState] = useState("idle");
@@ -316,6 +339,7 @@ export default function TemplatesClient() {
   }, [categoryFilter, subCategoryFilter, taxonomySettings]);
 
   const loadTemplates = useCallback(async () => {
+    setRefreshing(true);
     try {
       const query = new URLSearchParams();
       if (categoryFilter.trim()) query.set("category", categoryFilter.trim());
@@ -343,6 +367,8 @@ export default function TemplatesClient() {
       setStatus("");
     } catch (error) {
       setStatus(error.message || "Failed to load templates.");
+    } finally {
+      setRefreshing(false);
     }
   }, [categoryFilter, subCategoryFilter, currentPage, tagFilter]);
 
@@ -559,6 +585,21 @@ export default function TemplatesClient() {
             <div className="flex items-center gap-2">
               <Button
                 type="button"
+                variant="secondary"
+                onClick={loadTemplates}
+                disabled={refreshing}
+                className="inline-flex items-center gap-1.5"
+              >
+                <RefreshCw
+                  size={14}
+                  strokeWidth={2.25}
+                  className={refreshing ? "animate-spin" : undefined}
+                  aria-hidden="true"
+                />
+                {refreshing ? "Refreshing..." : "Refresh"}
+              </Button>
+              <Button
+                type="button"
                 variant="destructive"
                 onClick={handleDeleteSelected}
                 disabled={selectedVisibleCount === 0 || bulkDeleting || Boolean(deletingTemplateId)}
@@ -629,8 +670,7 @@ export default function TemplatesClient() {
                     />
                   </TableHeaderCell>
                   <TableHeaderCell className="w-20 whitespace-nowrap">Preview</TableHeaderCell>
-                  <TableHeaderCell className="w-24 whitespace-nowrap">Category</TableHeaderCell>
-                  <TableHeaderCell className="w-28 whitespace-nowrap">Sub Category</TableHeaderCell>
+                  <TableHeaderCell className="w-40 whitespace-nowrap">Categories</TableHeaderCell>
                   <TableHeaderCell className="w-24 whitespace-nowrap">Tags</TableHeaderCell>
                   <TableHeaderCell className="w-24 whitespace-nowrap">Status</TableHeaderCell>
                   <TableHeaderCell className="w-36 whitespace-nowrap">Updated</TableHeaderCell>
@@ -704,6 +744,14 @@ export default function TemplatesClient() {
                               {Number(template.pageCount)}p
                             </span>
                           ) : null}
+                          {template.hasVideo ? (
+                            <span
+                              className="absolute -right-1 -top-1 rounded-full border border-border bg-background px-1.5 text-[9px] font-semibold uppercase tracking-wide text-foreground"
+                              title="Contains a video layer"
+                            >
+                              Video
+                            </span>
+                          ) : null}
                         </button>
                       ) : (
                         <div
@@ -712,8 +760,19 @@ export default function TemplatesClient() {
                         />
                       )}
                     </TableCell>
-                    <TableCell className="whitespace-nowrap">{template.category || "general"}</TableCell>
-                    <TableCell className="whitespace-nowrap">{template.subCategory || "general"}</TableCell>
+                    <TableCell>
+                      <div className="space-y-0.5">
+                        {resolveTemplatePlacements(template).map((pair) => (
+                          <div
+                            key={`${pair.category}::${pair.subCategory}`}
+                            className="whitespace-nowrap text-xs"
+                          >
+                            {pair.category}
+                            <span className="text-muted-foreground"> · {pair.subCategory}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </TableCell>
                     <TableCell>
                       <div className="truncate">
                         {Array.isArray(template.tags) ? template.tags.join(", ") : ""}
@@ -747,6 +806,18 @@ export default function TemplatesClient() {
                         >
                           Share
                         </Button>
+                        {template.hasVideo || template.previewVideoUrl || template.preview?.url ? (
+                          // Previews are recorded by the editor's stage, so this opens the template
+                          // there with a flag the editor honours on load (Toolbar auto-generation).
+                          <Button
+                            as="a"
+                            href={`/editor-pro?templateId=${template.id}&updatedAt=${encodeURIComponent(template.updatedAt || "")}&regeneratePreview=1`}
+                            variant="secondary"
+                            title={`Open ${template.name} in the editor and record a fresh video preview`}
+                          >
+                            Regenerate preview
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           variant="destructive"

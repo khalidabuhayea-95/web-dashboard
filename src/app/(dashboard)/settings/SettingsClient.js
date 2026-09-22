@@ -23,6 +23,7 @@ import { Card, CardContent, CardHeader, CardSubtitle, CardTitle } from "@/compon
 import { Input, Label } from "@/components/ui/form";
 import { TEMPLATE_CATEGORY_SETTINGS } from "@/lib/templates/templateSettings";
 import BackgroundCategoriesSection from "./BackgroundCategoriesSection";
+import ElementCategoriesSection from "./ElementCategoriesSection";
 
 function createEmptySubCategory() {
   return { value: "", labelEn: "", labelAr: "", published: true };
@@ -970,6 +971,8 @@ export default function SettingsClient({ canEdit }) {
       </Card>
 
       <BackgroundCategoriesSection canEdit={canEdit} />
+
+      <ElementCategoriesSection canEdit={canEdit} />
     </div>
   );
 }

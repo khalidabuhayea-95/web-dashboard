@@ -59,9 +59,12 @@ import {
   type BuiltInShapeAsset,
 } from "@/lib/editor/builtinShapes";
 import { deriveReadableFontLabel } from "@/lib/editor/customFontLabel";
-import { uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
+import { uploadEditorMediaFile, uploadVideoPosterFromFile } from "@/lib/editor/mediaUpload";
 import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
-import { TEMPLATE_CATEGORY_SETTINGS } from "@/lib/templates/templateSettings";
+import {
+  MAX_TEMPLATE_CATEGORIES,
+  TEMPLATE_CATEGORY_SETTINGS,
+} from "@/lib/templates/templateSettings";
 import { DEFAULT_BACKGROUND_CATEGORY } from "@/lib/backgrounds/categorySettings";
 import {
   DEFAULT_ANIMATION_DURATION_MS,
@@ -88,6 +91,7 @@ import {
   type AnimationCategory,
 } from "@/lib/editor/animationSpec";
 import {
+  isEmptyAnimationSlots,
   makeAnimationSpec,
   resolveElementAnimations,
   type EditorAnimationSlots,
@@ -232,11 +236,14 @@ const RESIZE_PRESETS: ResizePresetGroup[] = [
   },
 ];
 
-// Preview-tile motion class per animation type. Keyed on the SPEC type names the catalog feeds
-// (see ANIMATION_CATALOG). Types that share a motion family reuse one keyframe class — e.g. every
-// zoom variant loops the same scale pulse, the gradient reveals reuse their hard-edged twin's
-// sweep. New effects added here MUST also get a glyph in AnimationSampleGlyph and (if the class is
-// new) a `@keyframes` in the panel's style block.
+// Preview-tile MOTION class per animation type. Keyed on the SPEC type names the catalog feeds (see
+// ANIMATION_CATALOG). Each class is driven by a `@keyframes` rule in this file's own styled-jsx
+// block, under `.editor-animation-panel` — that block is the only place they are styled, so grep
+// the whole file before concluding one is unused. Types that share a motion FAMILY deliberately
+// reuse one keyframe class: every zoom variant loops the same scale pulse, the gradient reveals
+// reuse their hard-edged twin's sweep. Sharing motion is fine; sharing a PICTURE is not, so each
+// type still gets its own glyph in AnimationSampleGlyph. A new effect needs a glyph here and, if
+// its class is new, a `@keyframes` in that style block or its tile will sit still.
 const ANIMATION_PREVIEW_CLASS: Record<string, string> = {
   NONE: "animation-sample-none",
   // ── original set ─────────────────────────────────────────────────────────
@@ -434,6 +441,21 @@ function AnimationSampleGlyph({ type }: { type: string }) {
           <line x1="23" y1="11" x2="23" y2="37" stroke="#6d28d9" strokeWidth="2" />
         </svg>
       );
+    // Gradient wipe — the same sweep, soft edge instead of a hard one. That soft edge is the only
+    // difference between the two effects, so it has to be the only difference between the icons.
+    case "GRADIENT_WIPE":
+      return (
+        <svg {...baseProps}>
+          <defs>
+            <linearGradient id="anim-wipe-soft" x1="0" y1="0" x2="1" y2="0">
+              <stop offset="0%" stopColor={purpleMid} stopOpacity="0" />
+              <stop offset="100%" stopColor={purpleMid} stopOpacity="0.95" />
+            </linearGradient>
+          </defs>
+          {renderAnimationSquare({ x: 11, y: 12, size: 24, fill: purpleSoft })}
+          <path d="M17 12h18v24H17z" fill="url(#anim-wipe-soft)" />
+        </svg>
+      );
     case "BLUR":
       return (
         <svg {...baseProps}>
@@ -475,13 +497,14 @@ function AnimationSampleGlyph({ type }: { type: string }) {
           {renderAnimationArrow("M13 35h15m0 0-3.5-3.5M28 35l-3.5 3.5", stroke)}
         </svg>
       );
+    // Tectonic is plates splitting apart, not another trail — the trail version was unreadable
+    // next to Drift and Pan at tile size.
     case "TECTONIC":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 8, y: 14, size: 16, fill: purpleSoft, opacity: 0.45 })}
-          {renderAnimationSquare({ x: 14, y: 14, size: 16, fill: purpleSoft, opacity: 0.7 })}
-          {renderAnimationSquare({ x: 20, y: 14, size: 16, fill: purpleMid })}
-          {renderAnimationArrow("M15 35h15m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+          {renderAnimationSquare({ x: 6, y: 13, size: 15, fill: purpleMid, radius: 5 })}
+          {renderAnimationSquare({ x: 27, y: 13, size: 15, fill: purpleMid, opacity: 0.72, radius: 5 })}
+          {renderAnimationArrow("M20 36H9m0 0 3.5-3.5M9 36l3.5 3.5M28 36h11m0 0-3.5-3.5M39 36l-3.5 3.5", stroke)}
         </svg>
       );
     case "TUMBLE":
@@ -511,10 +534,8 @@ function AnimationSampleGlyph({ type }: { type: string }) {
     case "STOMP":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 10, y: 10, size: 28, fill: "none", strokeColor: purpleSoft, radius: 10 })}
-          {renderAnimationSquare({ x: 14, y: 14, size: 20, fill: "none", strokeColor: purpleMid, radius: 8 })}
-          {renderAnimationSquare({ x: 18, y: 18, size: 12, fill: purpleMid, radius: 5 })}
-          {renderAnimationArrow("M10 10l-3-3M38 10l3-3M10 38l-3 3M38 38l3 3", stroke)}
+          {renderAnimationSquare({ x: 13, y: 15, size: 22, fill: purpleMid, radius: 7 })}
+          {renderAnimationArrow("M10 10l3.5 3.5M38 10l-3.5 3.5M10 38l3.5-3.5M38 38l-3.5-3.5", purpleSoft)}
         </svg>
       );
     case "ROTATE":
@@ -550,8 +571,16 @@ function AnimationSampleGlyph({ type }: { type: string }) {
         </svg>
       );
     // Zoom family — a core square with a ghost ring growing out of it, plus outward corner ticks.
-    case "ZOOM":
+    // Zoom fade — mobile draws this one apart from plain zoom: an oversized ghost frame
+    // settling into the solid one, which is the "starts big and fades in" it actually plays.
     case "ZOOM_FADE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 7, y: 7, size: 34, fill: "none", strokeColor: purplePale, radius: 10 })}
+          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: purpleMid, radius: 6 })}
+        </svg>
+      );
+    case "ZOOM":
     case "ZOOM_LOOP":
       return (
         <svg {...baseProps}>
@@ -581,11 +610,24 @@ function AnimationSampleGlyph({ type }: { type: string }) {
       );
     // Diagonal — travels along the bottom-left → top-right axis.
     case "DIAGONAL":
-    case "DIAGONAL_GRADIENT":
       return (
         <svg {...baseProps}>
           {renderAnimationSquare({ x: 9, y: 21, size: 16, fill: purpleSoft, opacity: 0.5 })}
           {renderAnimationSquare({ x: 21, y: 9, size: 16, fill: purpleMid })}
+          {renderAnimationArrow("M14 34 34 14m0 0-5 .3M34 14l-.3 5", stroke)}
+        </svg>
+      );
+    // Same diagonal travel, soft trailing edge — the gradient twin, as on mobile.
+    case "DIAGONAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          <defs>
+            <linearGradient id="anim-diagonal-soft" x1="0" y1="1" x2="1" y2="0">
+              <stop offset="0%" stopColor={purpleMid} stopOpacity="0.06" />
+              <stop offset="100%" stopColor={purpleMid} stopOpacity="0.95" />
+            </linearGradient>
+          </defs>
+          <rect x="9" y="9" width="28" height="28" rx="4" fill="url(#anim-diagonal-soft)" />
           {renderAnimationArrow("M14 34 34 14m0 0-5 .3M34 14l-.3 5", stroke)}
         </svg>
       );
@@ -602,7 +644,6 @@ function AnimationSampleGlyph({ type }: { type: string }) {
       );
     // Radial — a clock-sweep wedge fills the ring.
     case "RADIAL":
-    case "RADIAL_GRADIENT":
       return (
         <svg {...baseProps}>
           <circle cx="24" cy="24" r="13" fill="none" stroke={purpleSoft} strokeWidth="2.4" />
@@ -610,37 +651,114 @@ function AnimationSampleGlyph({ type }: { type: string }) {
           <circle cx="24" cy="24" r="2.4" fill={purple} />
         </svg>
       );
+    // The gradient twin of the clock sweep: the wedge trails off instead of ending on a hard edge.
+    case "RADIAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          <defs>
+            <linearGradient id="anim-wedge-soft" x1="0.2" y1="0" x2="1" y2="0.7">
+              <stop offset="0%" stopColor={purpleMid} stopOpacity="0.95" />
+              <stop offset="100%" stopColor={purpleMid} stopOpacity="0.28" />
+            </linearGradient>
+          </defs>
+          <circle cx="24" cy="24" r="13" fill="none" stroke={purpleSoft} strokeWidth="2.4" />
+          <path d="M24 24V11a13 13 0 0 1 11.3 6.5Z" fill="url(#anim-wedge-soft)" />
+          <line x1="24" y1="24" x2="24" y2="11" stroke={purpleSoft} strokeWidth="1.6" />
+          <circle cx="24" cy="24" r="2.4" fill={purple} />
+        </svg>
+      );
     // Circular — a filled disc grows out from the centre.
     case "CIRCUAL":
-    case "CIRCUAL_GRADIENT":
       return (
         <svg {...baseProps}>
           <circle cx="24" cy="24" r="14" fill="none" stroke={purpleSoft} strokeWidth="2" strokeDasharray="3 3" />
           <circle cx="24" cy="24" r="9" fill={purpleMid} />
         </svg>
       );
-    // Typewriter / one-word — text lines revealing left→right, with a caret.
+    // The gradient twin: same circle opening out, but with the soft edge that is the whole
+    // difference between them (mobile paints it with a radial gradient for the same reason).
+    case "CIRCUAL_GRADIENT":
+      return (
+        <svg {...baseProps}>
+          <defs>
+            <radialGradient id="anim-circle-soft">
+              <stop offset="0%" stopColor={purpleMid} stopOpacity="1" />
+              <stop offset="60%" stopColor={purpleMid} stopOpacity="0.75" />
+              <stop offset="100%" stopColor={purpleMid} stopOpacity="0" />
+            </radialGradient>
+          </defs>
+          <circle cx="24" cy="24" r="14" fill="none" stroke={purpleSoft} strokeWidth="2" strokeDasharray="3 3" />
+          <circle cx="24" cy="24" r="12" fill="url(#anim-circle-soft)" />
+        </svg>
+      );
+    // The text family gets FOUR icons, not one: mobile draws each of these separately, and the
+    // unit each effect reveals — a letter, a caret, a word, the whole line — is the only thing
+    // that tells them apart in the picker.
+    // Letters landing one at a time: a written glyph, its ghosted successor, then the caret.
     case "TYPEWRITER_CHARS":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationArrow("M12 32l5-16 5 16M13.6 26.8h6.8", purpleMid)}
+          {renderAnimationArrow("M27 16v16", purpleSoft)}
+          <rect x="33" y="14" width="2.6" height="20" rx="1.3" fill={pink} />
+        </svg>
+      );
+    // The caret IS the effect: a stable I-beam beside the text it is typing.
     case "TYPEWRITER_CURSOR":
+      return (
+        <svg {...baseProps}>
+          <rect x="10" y="20" width="13" height="3.2" rx="1.6" fill={purpleMid} opacity="0.9" />
+          <rect x="10" y="27" width="9" height="3.2" rx="1.6" fill={purpleSoft} opacity="0.75" />
+          <rect x="30" y="12" width="2.8" height="24" rx="1.4" fill={pink} />
+          {renderAnimationArrow("M27.4 12h8M27.4 36h8", pink)}
+        </svg>
+      );
+    // Whole words landing in turn: pills, not letters, with the next one still faint.
     case "TYPEWRITER_WORDS":
+      return (
+        <svg {...baseProps}>
+          <rect x="9" y="17" width="15" height="4" rx="2" fill={purpleMid} />
+          <rect x="27" y="17" width="10" height="4" rx="2" fill={purpleMid} opacity="0.45" />
+          <rect x="9" y="26" width="9" height="4" rx="2" fill={purpleMid} opacity="0.9" />
+          <rect x="21" y="26" width="16" height="4" rx="2" fill={purpleSoft} opacity="0.3" />
+          <rect x="39" y="15" width="2.4" height="18" rx="1.2" fill={pink} opacity="0.85" />
+        </svg>
+      );
+    // One word, all at once: a single pill and nothing staged behind it.
     case "ONE_WORD":
       return (
         <svg {...baseProps}>
-          <rect x="10" y="15" width="20" height="3.4" rx="1.7" fill={purpleMid} />
-          <rect x="10" y="22.5" width="14" height="3.4" rx="1.7" fill={purpleMid} opacity="0.8" />
-          <rect x="10" y="30" width="9" height="3.4" rx="1.7" fill={purpleSoft} opacity="0.6" />
-          <rect x={type === "TYPEWRITER_CURSOR" ? 26 : 21} y="29" width="2.4" height="6.4" rx="1" fill={pink} />
+          <rect x="10" y="21" width="28" height="6" rx="3" fill={purpleMid} opacity="0.9" />
         </svg>
       );
-    // Per-character families — three letter cells, the lead one lifted/emphasised.
+    // The per-character family also splits three ways, for the same reason as the text family:
+    // the letters RISE, GROW or WAVE, and mobile gives each its own icon.
+    // Letters rising — three arrows lifting to staggered heights.
     case "CH_POSITION_FADE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationArrow("M13 32V22M13 22l-3 3M13 22l3 3", purpleSoft)}
+          {renderAnimationArrow("M24 32V16M24 16l-3 3M24 16l3 3", purpleMid)}
+          {renderAnimationArrow("M35 32V25M35 25l-3 3M35 25l3 3", purpleSoft)}
+        </svg>
+      );
+    // Letters growing — the same cell at three sizes.
     case "CH_SCALE_FADE":
+      return (
+        <svg {...baseProps}>
+          {renderAnimationSquare({ x: 9, y: 22, size: 7, fill: purpleSoft, opacity: 0.5, radius: 2 })}
+          {renderAnimationSquare({ x: 19, y: 19, size: 11, fill: purpleMid, opacity: 0.8, radius: 3 })}
+          {renderAnimationSquare({ x: 32, y: 15, size: 15, fill: purpleMid, radius: 4 })}
+        </svg>
+      );
+    // Letters waving — dots riding a sine, which is exactly what the effect does per glyph.
     case "CH_WIGGLE_Y":
       return (
         <svg {...baseProps}>
-          <rect x="10" y="20" width="8" height="12" rx="2.5" fill={purpleSoft} opacity="0.55" />
-          <rect x="20" y="15" width="8" height="12" rx="2.5" fill={purpleMid} />
-          <rect x="30" y="20" width="8" height="12" rx="2.5" fill={purpleSoft} opacity="0.75" />
+          {renderAnimationArrow("M9 26c4-9 8-9 12 0s8 9 12 0", purpleSoft)}
+          <circle cx="12" cy="20" r="2.6" fill={purpleMid} />
+          <circle cx="21" cy="30" r="2.6" fill={purpleMid} opacity="0.85" />
+          <circle cx="30" cy="20" r="2.6" fill={purpleMid} opacity="0.7" />
         </svg>
       );
     // Wave — the block rides a sine curve.
@@ -720,6 +838,7 @@ interface StoredTemplate {
   status?: "draft" | "published";
   category?: string;
   subCategory?: string;
+  categories?: Array<{ category?: string; subCategory?: string }>;
   tags?: string[];
   updatedAt?: string;
   data?: unknown;
@@ -750,6 +869,66 @@ interface TaxonomyCategorySetting {
   labelAr: string;
   published?: boolean;
   subCategories: TaxonomySubCategorySetting[];
+}
+
+interface TemplateCategoryPairInput {
+  category: string;
+  subCategory: string;
+}
+
+function categoryPairsKey(pairs: TemplateCategoryPairInput[]): string {
+  return pairs.map((pair) => `${pair.category}::${pair.subCategory}`).join("|");
+}
+
+/**
+ * Drop placements whose category no longer exists, snap unknown sub categories to their
+ * parent's first one, dedupe, and guarantee at least one placement.
+ */
+function sanitizeCategoryPairs(
+  pairs: TemplateCategoryPairInput[],
+  settings: TaxonomyCategorySetting[]
+): TemplateCategoryPairInput[] {
+  const result: TemplateCategoryPairInput[] = [];
+  const seen = new Set<string>();
+
+  pairs.forEach((pair) => {
+    const setting = settings.find((item) => item.value === pair.category);
+    if (!setting) return;
+    const subCategories = Array.isArray(setting.subCategories) ? setting.subCategories : [];
+    const subCategory =
+      subCategories.find((item) => item.value === pair.subCategory)?.value ||
+      subCategories[0]?.value ||
+      "general";
+    const key = `${setting.value}::${subCategory}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push({ category: setting.value, subCategory });
+  });
+
+  if (result.length > 0) return result;
+  const fallback = settings[0];
+  if (!fallback) return [{ category: "general", subCategory: "general" }];
+  return [
+    {
+      category: fallback.value,
+      subCategory: fallback.subCategories?.[0]?.value || "general",
+    },
+  ];
+}
+
+function describeCategoryPair(
+  pair: TemplateCategoryPairInput,
+  settings: TaxonomyCategorySetting[]
+): { categoryLabel: string; subCategoryLabel: string } {
+  const setting = settings.find((item) => item.value === pair.category) || null;
+  const subCategory =
+    setting?.subCategories?.find((item) => item.value === pair.subCategory) || null;
+  // Arabic first everywhere the editor shows a taxonomy name — the catalogue is Arabic-facing
+  // and every category carries labelAr; labelEn is the fallback, the raw slug the last resort.
+  return {
+    categoryLabel: setting?.labelAr || setting?.labelEn || pair.category,
+    subCategoryLabel: subCategory?.labelAr || subCategory?.labelEn || pair.subCategory,
+  };
 }
 
 interface CustomFontVariantRecord {
@@ -821,6 +1000,43 @@ function buildTemplateLoadSignature(templateId: string, updatedAt = "") {
 const FONT_UPLOAD_ACCEPT =
   ".ttf,.otf,.woff,.woff2,font/ttf,font/otf,font/woff,font/woff2,application/font-woff,application/x-font-ttf,application/x-font-otf";
 const RECENT_BUILTIN_SHAPES_STORAGE_KEY = "editor-pro-recent-built-in-shapes";
+const LAST_TEMPLATE_CATEGORIES_STORAGE_KEY = "editor-pro-last-template-categories";
+/** What a template starts on before anyone picks anything (mirrors the editor store's default). */
+const DEFAULT_TEMPLATE_PLACEMENT = { category: "general", subCategory: "general" };
+
+/**
+ * The placements the user last chose BY HAND, used to seed the next new template.
+ *
+ * Templates arrive in batches — a dozen Ramadan stories in a row — and every one of them started
+ * back on general/general, so the same two dropdowns had to be re-picked each time.
+ */
+function readStoredTemplateCategories(): TemplateCategoryPairInput[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = window.localStorage.getItem(LAST_TEMPLATE_CATEGORIES_STORAGE_KEY);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((item) => ({
+        category: String(item?.category || "").trim().toLowerCase(),
+        subCategory: String(item?.subCategory || "").trim().toLowerCase(),
+      }))
+      .filter((pair) => Boolean(pair.category) && Boolean(pair.subCategory))
+      .slice(0, MAX_TEMPLATE_CATEGORIES);
+  } catch {
+    return [];
+  }
+}
+
+function writeStoredTemplateCategories(pairs: TemplateCategoryPairInput[]) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(LAST_TEMPLATE_CATEGORIES_STORAGE_KEY, JSON.stringify(pairs));
+  } catch {
+    // Storage unavailable — the placements simply are not remembered.
+  }
+}
 const BACKGROUND_LIBRARY_SOURCES = new Set(["freepik-background", "background-upload"]);
 
 function toNumber(value: unknown, fallback: number) {
@@ -1230,6 +1446,31 @@ function toEditorDesignFromTemplate(
   const pageId = `template-page-${template.id}`;
   const fabric = extractFabricData(template.data);
   const importMeta = readTemplateImportMeta(template.data);
+  // Multi-page imports: meta.import.pages lists the design's pages and every fabric object carries
+  // an importPageIndex — partition the built elements back into editor pages. `page` is the
+  // single-page counterpart. Both are read HERE, before the elements are built, because an element
+  // with no timeline window of its own has to last the whole page (see defaultTimelineEndMsFor).
+  const importPagesMeta = (() => {
+    const pages = (importMeta as { pages?: unknown } | null)?.pages;
+    return Array.isArray(pages) && pages.length > 1 ? (pages as Array<Record<string, unknown>>) : null;
+  })();
+  const importPageMeta = (() => {
+    const page = (importMeta as { page?: unknown } | null)?.page;
+    return page && typeof page === "object" ? (page as Record<string, unknown>) : null;
+  })();
+  // An imported page states its own length (a 40s video page, Canva's 5s default…). A layer with no
+  // window of its own must cover ALL of it — falling back to the editor's 15s constant made every
+  // layer of a 40s page disappear at 0:15 and the canvas go white.
+  const defaultTimelineEndMsFor = (item: Record<string, unknown>) => {
+    const pageIndex = Number(item.importPageIndex);
+    const perPage =
+      importPagesMeta && Number.isInteger(pageIndex) && pageIndex >= 0 && pageIndex < importPagesMeta.length
+        ? toNumber(importPagesMeta[pageIndex]?.durationMs, 0)
+        : 0;
+    const single = toNumber(importPageMeta?.durationMs, 0);
+    const imported = Math.max(perPage, single);
+    return imported > 0 ? imported : DEFAULT_PAGE_DURATION_MS;
+  };
   const isCanvaTemplate = isCanvaImportedTemplate(template.data);
   const layerTree = Array.isArray(importMeta?.layerTree) ? (importMeta.layerTree as Array<Record<string, unknown>>) : [];
   const layerZIndexByNodeId = new Map<string, number>();
@@ -1317,6 +1558,19 @@ function toEditorDesignFromTemplate(
         resolvedX = anchorX + localX * cos - localY * sin;
         resolvedY = anchorY + localX * sin + localY * cos;
       }
+      // Fabric's flipX/flipY mirror the object IN PLACE (its box does not move), while the editor
+      // mirrors about the element's origin — so a flipped import rendered one width to the LEFT
+      // of its frame (an 861px sticky-tape strip at x=307 drew at −554…307). Move the origin to
+      // the far edge, exactly as flipSelected does, so the mirrored box lands on the frame.
+      if (item.flipX || item.flipY) {
+        const flipRadians = (rotation * Math.PI) / 180;
+        const flipCos = Math.cos(flipRadians);
+        const flipSin = Math.sin(flipRadians);
+        const shiftX = item.flipX ? renderedWidth : 0;
+        const shiftY = item.flipY ? renderedHeight : 0;
+        resolvedX += shiftX * flipCos - shiftY * flipSin;
+        resolvedY += shiftX * flipSin + shiftY * flipCos;
+      }
 
       const importNodeId = String(item.importNodeId || "").trim();
       const treeZIndex =
@@ -1361,7 +1615,7 @@ function toEditorDesignFromTemplate(
         scaleY: signedScaleY,
         blendMode: toEditorBlendMode(item.blendMode),
         timelineStartMs: Math.max(0, toNumber(item.timelineStartMs, 0)),
-        timelineEndMs: Math.max(0, toNumber(item.timelineEndMs, DEFAULT_PAGE_DURATION_MS)),
+        timelineEndMs: Math.max(0, toNumber(item.timelineEndMs, defaultTimelineEndMsFor(item))),
         mediaAnimationType: normalizeAnimationType(item.mediaAnimationType || item.animationType || undefined),
         mediaAnimationMode: normalizeAnimationMode(item.mediaAnimationMode || item.animationMode || undefined),
         mediaAnimationInfinite: normalizeAnimationInfinite(
@@ -1422,6 +1676,34 @@ function toEditorDesignFromTemplate(
         fallbackReason: String(item.fallbackReason || ""),
       };
 
+      // Imported video layer (Canva extension background clips): flat fabric payloads carry
+      // `type: "video"` (or an image typed `layerType: "video"`) with the editor's own
+      // seconds-based trim fields; the mobile exporter reads the same object.
+      const importedLayerType = String(item.layerType || item.importKind || "").toLowerCase();
+      if (
+        (type === "video" || (type === "image" && importedLayerType === "video")) &&
+        typeof item.src === "string" &&
+        item.src
+      ) {
+        const videoDuration = Math.max(0, toNumber(item.videoDuration, toNumber(item.videoDurationSec, 0)));
+        const videoStart = Math.max(0, toNumber(item.videoStart, toNumber(item.videoTrimStartMs, 0) / 1000));
+        const rawVideoEnd = toNumber(item.videoEnd, toNumber(item.videoTrimEndMs, 0) / 1000);
+        const videoEnd = rawVideoEnd > videoStart ? rawVideoEnd : videoDuration;
+        // Poster = the clip's first frame (the Canva import ships it as `thumbnailUri`).
+        const posterSrc = String(item.posterSrc || item.thumbnailUri || item.poster || "").trim();
+        elements.push(
+          createElementFromAsset(pageId, {
+            ...common,
+            type: "video",
+            src: item.src,
+            videoStart,
+            videoEnd,
+            videoDuration,
+            ...(posterSrc ? { posterSrc } : {}),
+          })
+        );
+        return;
+      }
       if (type === "image" && typeof item.src === "string" && item.src) {
         const rasterOriginalSrc = String(item.rasterOriginalSrc || "").trim();
         const rasterPalette = Array.isArray(item.rasterPalette)
@@ -1650,35 +1932,33 @@ function toEditorDesignFromTemplate(
   );
   const isTimelineImport = derivedPageDurationMs > DEFAULT_PAGE_DURATION_MS;
 
-  // Multi-page imports: meta.import.pages lists the design's pages and every fabric object
-  // carries an importPageIndex — partition the built elements back into editor pages.
-  const importPagesMeta = (() => {
-    const meta = (template.data as Record<string, unknown> | null | undefined) ?? null;
-    const importMeta =
-      meta && typeof meta === "object"
-        ? ((meta as { meta?: { import?: { pages?: unknown } } }).meta?.import ?? null)
-        : null;
-    const pages = importMeta && typeof importMeta === "object" ? importMeta.pages : null;
-    return Array.isArray(pages) && pages.length > 1 ? (pages as Array<Record<string, unknown>>) : null;
-  })();
 
   const buildPage = (
     id: string,
     name: string,
     pageWidth: number,
     pageHeight: number,
-    pageElements: EditorElement[]
+    pageElements: EditorElement[],
+    sourceDurationMs = 0
   ): EditorDesign["pages"][number] => {
     const pageMaxEndMs = pageElements.reduce(
       (max, element) => Math.max(max, Number(element.timelineEndMs) || 0),
       0
     );
+    // An animated import states the source page's own length (Canva's is 5s unless re-timed), and
+    // that has to win over the editor's 15s default or an imported animation plays against the
+    // wrong clock — an exit timed to the page end would fire 10s late. Element windows still
+    // extend it: a layer must never be cut off by a shorter page.
+    const durationMs =
+      sourceDurationMs > 0
+        ? Math.max(sourceDurationMs, Math.round(pageMaxEndMs))
+        : Math.max(DEFAULT_PAGE_DURATION_MS, Math.round(pageMaxEndMs));
     return {
       id,
       name,
       width: pageWidth,
       height: pageHeight,
-      durationMs: Math.min(600000, Math.max(DEFAULT_PAGE_DURATION_MS, Math.round(pageMaxEndMs))),
+      durationMs: Math.min(600000, durationMs),
       background: {
         type: "color",
         color: backgroundColor,
@@ -1716,11 +1996,21 @@ function toEditorDesignFromTemplate(
         String(pageMeta?.name || `Page ${index + 1}`),
         Math.max(16, Math.round(toNumber(pageMeta?.width, width))),
         Math.max(16, Math.round(toNumber(pageMeta?.height, height))),
-        buckets[index]
+        buckets[index],
+        Math.max(0, toNumber(pageMeta?.durationMs, 0))
       )
     );
   } else {
-    editorPages = [buildPage(pageId, template.name || "Template", width, height, sortedElements)];
+    editorPages = [
+      buildPage(
+        pageId,
+        template.name || "Template",
+        width,
+        height,
+        sortedElements,
+        Math.max(0, toNumber(importPageMeta?.durationMs, 0))
+      ),
+    ];
   }
 
   const totalDurationMs = editorPages.reduce(
@@ -2097,11 +2387,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const activeTemplateId = useEditorStore((state) => state.activeTemplateId);
   const activeTemplateName = useEditorStore((state) => state.activeTemplateName);
   const activeTemplateStatus = useEditorStore((state) => state.activeTemplateStatus);
-  const activeTemplateCategory = useEditorStore((state) => state.activeTemplateCategory);
-  const activeTemplateSubCategory = useEditorStore((state) => state.activeTemplateSubCategory);
+  const activeTemplateCategories = useEditorStore((state) => state.activeTemplateCategories);
   const activeTemplateTags = useEditorStore((state) => state.activeTemplateTags);
   const selectedIds = useEditorStore((state) => state.selectedIds);
   const publishCandidateIds = useEditorStore((state) => state.publishCandidateIds);
+  const publishCategoryValue = useEditorStore((state) => state.publishCategoryValue);
+  const setPublishCategoryValue = useEditorStore((state) => state.setPublishCategoryValue);
   const resizeUseMagic = useEditorStore((state) => state.resizeUseMagic);
 
   const setSidebarTab = useEditorStore((state) => state.setSidebarTab);
@@ -2172,6 +2463,27 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [uploadingCustomFont, setUploadingCustomFont] = useState(false);
   const [taxonomySettings, setTaxonomySettings] = useState<TaxonomyCategorySetting[]>([]);
   const [taxonomyLoading, setTaxonomyLoading] = useState(false);
+  const [elementCategories, setElementCategories] = useState<Array<{ value: string; labelEn?: string; labelAr?: string; published?: boolean }>>([]);
+
+  // Element taxonomy for the Publish Elements queue — the same list the Freepik importer files
+  // under, so canvas-published assets land in real categories instead of the default bucket.
+  useEffect(() => {
+    let active = true;
+    (async () => {
+      try {
+        const response = await fetch("/api/settings/element-categories", { cache: "no-store" });
+        const payload = await response.json().catch(() => ({}));
+        if (!active || !response.ok) return;
+        const list = Array.isArray(payload?.settings) ? payload.settings : [];
+        setElementCategories(list.filter((item: { published?: boolean }) => item?.published !== false));
+      } catch (_error) {
+        // Without the list the select is empty and the server files under the default.
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, []);
   const templateQueryKey = useMemo(() => searchParams.toString(), [searchParams]);
   const templateIdFromQuery = useMemo(
     () => String(new URLSearchParams(templateQueryKey).get("templateId") || "").trim(),
@@ -2329,6 +2641,22 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     () => sharedSlotValue((spec) => spec?.intensity ?? 1),
     [sharedSlotValue]
   );
+  /**
+   * A slot can hold a type this tab does not offer — an imported Canva page animation, or a project
+   * authored before the three catalogs were split. The grid used to render only the tab's own list,
+   * so the picker looked completely unselected while the layer plainly had an animation and a
+   * duration. The value the layer actually carries is appended instead of hidden; nothing gates
+   * PLAYBACK on the catalogs, they only say where an effect can be picked.
+   */
+  const animationTypeChoices = useMemo(() => {
+    const listed = ANIMATION_CATALOG[animationSlot];
+    if (!selectedAnimationType || selectedAnimationType === "NONE") return listed;
+    return listed.includes(selectedAnimationType) ? listed : [...listed, selectedAnimationType];
+  }, [animationSlot, selectedAnimationType]);
+  const selectedTypeIsOffHere =
+    Boolean(selectedAnimationType) &&
+    selectedAnimationType !== "NONE" &&
+    !ANIMATION_CATALOG[animationSlot].includes(selectedAnimationType as string);
 
   /**
    * Writes a patch into the ACTIVE slot of every selected element, leaving the other two slots
@@ -2346,8 +2674,14 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         const current = slots[animationSlotKey];
         const nextType = patch.type ?? current?.type ?? "NONE";
         if (nextType === "NONE") {
+          const nextSlots = { ...slots, [animationSlotKey]: null };
           updateElement(element.id, {
-            animations: { ...slots, [animationSlotKey]: null },
+            animations: nextSlots,
+            // Clearing the LAST slot has to retire the legacy mirror too. Several readers still
+            // consult mediaAnimationType first — hasAnimatedElementContent, the mobile export —
+            // so leaving the imported FADE behind would keep a layer the user just cleared
+            // counting as animated everywhere outside this panel.
+            ...(isEmptyAnimationSlots(nextSlots) ? { mediaAnimationType: "NONE" } : {}),
           });
           return;
         }
@@ -2441,7 +2775,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       groups.set(categoryValue, {
         key: categoryValue,
         label:
-          String(category.labelEn || category.labelAr || categoryValue || "Backgrounds").trim() ||
+          String(category.labelAr || category.labelEn || categoryValue || "Backgrounds").trim() ||
           "Backgrounds",
         thumbnailUrl: String(category.thumbnailUrl || "").trim(),
         items: [],
@@ -2463,7 +2797,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       groups.set(groupKey, {
         key: groupKey,
         label:
-          String(matchedCategory?.labelEn || matchedCategory?.labelAr || groupKey || "Backgrounds").trim() ||
+          String(matchedCategory?.labelAr || matchedCategory?.labelEn || groupKey || "Backgrounds").trim() ||
           "Backgrounds",
         thumbnailUrl: String(matchedCategory?.thumbnailUrl || "").trim(),
         items: [item],
@@ -2518,34 +2852,120 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     return TEMPLATE_CATEGORY_SETTINGS as TaxonomyCategorySetting[];
   }, [taxonomySettings]);
 
-  const activeCategoryValue = useMemo(() => {
-    const fallback = templateCategorySettings[0]?.value || "general";
-    const normalized = String(activeTemplateCategory || "").trim().toLowerCase();
-    return (
-      templateCategorySettings.find((item) => item.value === normalized)?.value || fallback
-    );
-  }, [activeTemplateCategory, templateCategorySettings]);
+  // "Add a category" row. The raw inputs are free-form because the taxonomy loads late;
+  // the derived values below always resolve to something the current settings contain.
+  const [draftCategoryInput, setDraftCategoryInput] = useState("");
+  const [draftSubCategoryInput, setDraftSubCategoryInput] = useState("");
 
-  const activeCategoryConfig = useMemo(() => {
-    return (
-      templateCategorySettings.find((item) => item.value === activeCategoryValue) ||
-      templateCategorySettings[0] ||
-      null
-    );
-  }, [activeCategoryValue, templateCategorySettings]);
-
-  const activeSubCategoryOptions = useMemo(
-    () => (Array.isArray(activeCategoryConfig?.subCategories) ? activeCategoryConfig.subCategories : []),
-    [activeCategoryConfig]
+  const draftCategoryValue = useMemo(
+    () =>
+      templateCategorySettings.find((item) => item.value === draftCategoryInput)?.value ||
+      templateCategorySettings[0]?.value ||
+      "",
+    [draftCategoryInput, templateCategorySettings]
   );
 
-  const activeSubCategoryValue = useMemo(() => {
-    const fallback = activeSubCategoryOptions[0]?.value || "general";
-    const normalized = String(activeTemplateSubCategory || "").trim().toLowerCase();
-    return (
-      activeSubCategoryOptions.find((item) => item.value === normalized)?.value || fallback
-    );
-  }, [activeSubCategoryOptions, activeTemplateSubCategory]);
+  const draftSubCategoryOptions = useMemo(() => {
+    const setting = templateCategorySettings.find((item) => item.value === draftCategoryValue);
+    return Array.isArray(setting?.subCategories) ? setting.subCategories : [];
+  }, [draftCategoryValue, templateCategorySettings]);
+
+  const draftSubCategoryValue = useMemo(
+    () =>
+      draftSubCategoryOptions.find((item) => item.value === draftSubCategoryInput)?.value ||
+      draftSubCategoryOptions[0]?.value ||
+      "",
+    [draftSubCategoryInput, draftSubCategoryOptions]
+  );
+
+  const draftCategoryPairAlreadyAdded = useMemo(
+    () =>
+      activeTemplateCategories.some(
+        (pair) => pair.category === draftCategoryValue && pair.subCategory === draftSubCategoryValue
+      ),
+    [activeTemplateCategories, draftCategoryValue, draftSubCategoryValue]
+  );
+
+  const canAddDraftCategoryPair =
+    Boolean(draftCategoryValue) &&
+    Boolean(draftSubCategoryValue) &&
+    !draftCategoryPairAlreadyAdded &&
+    activeTemplateCategories.length < MAX_TEMPLATE_CATEGORIES;
+
+  /**
+   * Every placement edit the USER makes goes through here, so the choice is both applied and
+   * remembered. The taxonomy re-check below deliberately does not: snapping a placement onto a
+   * renamed category is not a choice, and remembering it would overwrite a real one.
+   */
+  const commitCategoryPairs = useCallback(
+    (categories: TemplateCategoryPairInput[]) => {
+      writeStoredTemplateCategories(categories);
+      setTemplateMeta({ categories });
+    },
+    [setTemplateMeta]
+  );
+
+  const addDraftCategoryPair = useCallback(() => {
+    if (!canAddDraftCategoryPair) return;
+    commitCategoryPairs([
+      ...activeTemplateCategories,
+      { category: draftCategoryValue, subCategory: draftSubCategoryValue },
+    ]);
+  }, [
+    activeTemplateCategories,
+    canAddDraftCategoryPair,
+    commitCategoryPairs,
+    draftCategoryValue,
+    draftSubCategoryValue,
+  ]);
+
+  const removeCategoryPair = useCallback(
+    (index: number) => {
+      // The primary placement is what the scalar columns mirror, so the list can never empty.
+      if (activeTemplateCategories.length <= 1) return;
+      commitCategoryPairs(activeTemplateCategories.filter((_, item) => item !== index));
+    },
+    [activeTemplateCategories, commitCategoryPairs]
+  );
+
+  /** Re-points one placement at another category, snapping its sub category to that parent's. */
+  const setCategoryPairCategory = useCallback(
+    (index: number, nextCategory: string) => {
+      const category = String(nextCategory || "").trim().toLowerCase();
+      const setting = templateCategorySettings.find((item) => item.value === category) || null;
+      const subCategory = setting?.subCategories?.[0]?.value || "general";
+      commitCategoryPairs(
+        activeTemplateCategories.map((pair, item) =>
+          item === index ? { category, subCategory } : pair
+        )
+      );
+    },
+    [activeTemplateCategories, commitCategoryPairs, templateCategorySettings]
+  );
+
+  const setCategoryPairSubCategory = useCallback(
+    (index: number, nextSubCategory: string) => {
+      const subCategory = String(nextSubCategory || "").trim().toLowerCase();
+      commitCategoryPairs(
+        activeTemplateCategories.map((pair, item) =>
+          item === index ? { ...pair, subCategory } : pair
+        )
+      );
+    },
+    [activeTemplateCategories, commitCategoryPairs]
+  );
+
+  const makeCategoryPairPrimary = useCallback(
+    (index: number) => {
+      const target = activeTemplateCategories[index];
+      if (!target) return;
+      commitCategoryPairs([
+        target,
+        ...activeTemplateCategories.filter((_, item) => item !== index),
+      ]);
+    },
+    [activeTemplateCategories, commitCategoryPairs]
+  );
 
   const customFontFamilies = useMemo(
     () => normalizeFontFamilyList(customFonts.map((font) => font.family)),
@@ -3023,10 +3443,14 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           );
           continue;
         }
+        // First frame as the layer's poster: instant on-canvas frame and a real thumbnail even
+        // when the clip has not decoded at capture time. Best-effort ("" on failure).
+        const posterSrc = await uploadVideoPosterFromFile(file);
         addVideoElement(uploaded.url, {
           name: file.name.replace(/\.[^.]+$/, "") || "Video",
           width: Math.min(960, activePage.width * 0.7),
           height: Math.min(540, activePage.height * 0.5),
+          ...(posterSrc ? { posterSrc } : {}),
         });
       } catch (_error) {
       }
@@ -3557,6 +3981,12 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       status: template.status === "published" ? "published" : "draft",
       category: String(template.category || "general"),
       subCategory: String(template.subCategory || "general"),
+      categories: Array.isArray(template.categories)
+        ? template.categories.map((entry) => ({
+            category: String(entry?.category || ""),
+            subCategory: String(entry?.subCategory || ""),
+          }))
+        : undefined,
       tags: Array.isArray(template.tags) ? template.tags : [],
       isPremium: Boolean((template as { isPremium?: boolean }).isPremium),
     });
@@ -3573,25 +4003,52 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     setTemplateMeta,
   ]);
 
+  // Seed a NEW template with the placements last chosen by hand. Only while the template is still
+  // untouched: it must never talk over a template loaded from the library, nor over a choice the
+  // user has already made in this session, which is what the ref guards.
+  const restoredLastCategoriesRef = useRef(false);
   useEffect(() => {
-    if (!activeTemplateCategory || activeTemplateCategory !== activeCategoryValue) {
-      setTemplateMeta({ category: activeCategoryValue });
+    if (restoredLastCategoriesRef.current) return;
+    if (templateIdFromQuery || activeTemplateId) return;
+    if (templateCategorySettings.length === 0) return;
+    const untouched =
+      activeTemplateCategories.length === 1 &&
+      activeTemplateCategories[0]?.category === DEFAULT_TEMPLATE_PLACEMENT.category &&
+      activeTemplateCategories[0]?.subCategory === DEFAULT_TEMPLATE_PLACEMENT.subCategory;
+    if (!untouched) return;
+    const stored = readStoredTemplateCategories();
+    if (stored.length === 0) {
+      restoredLastCategoriesRef.current = true;
+      return;
     }
-  }, [activeCategoryValue, activeTemplateCategory, setTemplateMeta]);
+    // A remembered category may have been renamed or deleted since, and sanitizing drops those.
+    // But the taxonomy also arrives in PIECES — the first render of this panel saw 6 categories
+    // where the settled list has 18 — so a pair missing from the list on hand is not necessarily
+    // gone, it is not there yet. Recognising none of them means waiting rather than burning the
+    // one-shot guard, which is what made the very first attempt silently give up.
+    const remembered = sanitizeCategoryPairs(stored, templateCategorySettings);
+    const storedKeys = new Set(stored.map((pair) => `${pair.category}/${pair.subCategory}`));
+    if (!remembered.some((pair) => storedKeys.has(`${pair.category}/${pair.subCategory}`))) return;
+    restoredLastCategoriesRef.current = true;
+    if (categoryPairsKey(remembered) === categoryPairsKey(activeTemplateCategories)) return;
+    setTemplateMeta({ categories: remembered });
+  }, [
+    activeTemplateCategories,
+    activeTemplateId,
+    setTemplateMeta,
+    templateCategorySettings,
+    templateIdFromQuery,
+  ]);
 
+  // The taxonomy loads after the template does, so placements are re-checked against it here:
+  // unknown categories are dropped, unknown sub categories snap to their parent's first, and
+  // the list never empties (the primary falls back to the first published category).
   useEffect(() => {
-    const normalizedActiveSubCategory = String(activeTemplateSubCategory || "")
-      .trim()
-      .toLowerCase();
-    const isValidSubCategory = activeSubCategoryOptions.some(
-      (item) => item.value === normalizedActiveSubCategory
-    );
-    if (!isValidSubCategory) {
-      setTemplateMeta({
-        subCategory: activeSubCategoryOptions[0]?.value || "general",
-      });
-    }
-  }, [activeSubCategoryOptions, activeTemplateSubCategory, setTemplateMeta]);
+    if (templateCategorySettings.length === 0) return;
+    const sanitized = sanitizeCategoryPairs(activeTemplateCategories, templateCategorySettings);
+    if (categoryPairsKey(sanitized) === categoryPairsKey(activeTemplateCategories)) return;
+    setTemplateMeta({ categories: sanitized });
+  }, [activeTemplateCategories, setTemplateMeta, templateCategorySettings]);
 
   useEffect(() => {
     if (!templateIdFromQuery) return;
@@ -4588,6 +5045,27 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             <div className="text-[11px] text-[#637087]">
                               {publishCandidateIds.length} selected for publish
                             </div>
+                            {/* Label above, full width: the queue panel is narrow, and the
+                                .select class carries 10px vertical padding — forcing a fixed
+                                height onto it clipped the option text. */}
+                            <div className="mt-2 space-y-1">
+                              <Label className="text-[11px] font-semibold text-[#5b6472]">Category</Label>
+                              <Select
+                                className="!py-1.5 !text-xs"
+                                value={publishCategoryValue}
+                                onChange={(event) => setPublishCategoryValue(event.target.value)}
+                                aria-label="Category for published elements"
+                              >
+                                <option value="">الافتراضي (عام)</option>
+                                {elementCategories.map((item) => (
+                                  <option key={item.value} value={item.value}>
+                                    {/* Arabic first: the catalogue this files into is Arabic-facing,
+                                        and every category carries labelAr. */}
+                                    {item.labelAr || item.labelEn || item.value}
+                                  </option>
+                                ))}
+                              </Select>
+                            </div>
                           </div>
                           <button
                             type="button"
@@ -4753,7 +5231,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
             {activeTab === "category" ? (
               <section className="space-y-3">
-                <div className="text-base font-semibold text-[#202a38]">Template category</div>
+                <div className="text-base font-semibold text-[#202a38]">Template categories</div>
 
                 <div className="space-y-2">
                   <Label className="text-xs font-semibold text-[#5b6472]">Template name</Label>
@@ -4765,45 +5243,135 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                 </div>
 
                 <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-[#5b6472]">Category</Label>
-                  <Select
-                    value={activeCategoryValue}
-                    onChange={(event) => {
-                      const nextCategory = String(event.target.value || "general").trim().toLowerCase();
-                      const categoryOption =
-                        templateCategorySettings.find((item) => item.value === nextCategory) || null;
-                      setTemplateMeta({
-                        category: nextCategory,
-                        subCategory: categoryOption?.subCategories?.[0]?.value || "general",
-                      });
-                    }}
-                    disabled={taxonomyLoading}
-                  >
-                    {templateCategorySettings.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.labelEn}
-                      </option>
-                    ))}
-                  </Select>
-                </div>
+                  <div className="flex items-center justify-between">
+                    <Label className="text-xs font-semibold text-[#5b6472]">Categories</Label>
+                    <span className="text-[11px] text-[#8b95a5]">
+                      {activeTemplateCategories.length}/{MAX_TEMPLATE_CATEGORIES}
+                    </span>
+                  </div>
+                  <p className="text-[11px] leading-4 text-[#8b95a5]">
+                    The template appears in every category listed here. The first one is used
+                    wherever a single category has to be shown.
+                  </p>
 
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold text-[#5b6472]">Sub category</Label>
-                  <Select
-                    value={activeSubCategoryValue}
-                    onChange={(event) =>
-                      setTemplateMeta({
-                        subCategory: String(event.target.value || "general").trim().toLowerCase(),
-                      })
-                    }
-                    disabled={activeSubCategoryOptions.length === 0}
-                  >
-                    {activeSubCategoryOptions.map((item) => (
-                      <option key={item.value} value={item.value}>
-                        {item.labelEn}
-                      </option>
-                    ))}
-                  </Select>
+                  <ul className="space-y-1">
+                    {activeTemplateCategories.map((pair, index) => {
+                      const labels = describeCategoryPair(pair, templateCategorySettings);
+                      const isPrimary = index === 0;
+                      return (
+                        <li
+                          key={`placement-${index}`}
+                          className="flex flex-wrap items-center gap-1.5 rounded-md border border-[#d3d8e1] bg-white px-2 py-1.5"
+                        >
+                          <div className="flex min-w-0 flex-1 gap-1">
+                            {/* Editable in place. With a single placement the row could not be
+                                removed (the list may never empty) and had no "Make primary"
+                                button, so the primary category was impossible to change without
+                                adding a second one first. */}
+                            <Select
+                              className="min-w-0 flex-1 !py-1 !text-xs"
+                              value={pair.category}
+                              aria-label={`Category for placement ${index + 1}`}
+                              onChange={(event) => setCategoryPairCategory(index, event.target.value)}
+                              disabled={taxonomyLoading}
+                            >
+                              {templateCategorySettings.map((item) => (
+                                <option key={item.value} value={item.value}>
+                                  {item.labelAr || item.labelEn || item.value}
+                                </option>
+                              ))}
+                            </Select>
+                            <Select
+                              className="min-w-0 flex-1 !py-1 !text-xs"
+                              value={pair.subCategory}
+                              aria-label={`Sub category for placement ${index + 1}`}
+                              onChange={(event) => setCategoryPairSubCategory(index, event.target.value)}
+                            >
+                              {(
+                                templateCategorySettings.find((item) => item.value === pair.category)
+                                  ?.subCategories || []
+                              ).map((item) => (
+                                <option key={item.value} value={item.value}>
+                                  {item.labelAr || item.labelEn || item.value}
+                                </option>
+                              ))}
+                            </Select>
+                          </div>
+                          {isPrimary ? (
+                            <span className="shrink-0 rounded-full bg-[#eef2f7] px-2 py-0.5 text-[10px] font-semibold text-[#334155]">
+                              Primary
+                            </span>
+                          ) : (
+                            <button
+                              type="button"
+                              className="shrink-0 text-[10px] font-semibold text-[#4b5565] underline-offset-2 hover:underline"
+                              onClick={() => makeCategoryPairPrimary(index)}
+                            >
+                              Make primary
+                            </button>
+                          )}
+                          <button
+                            type="button"
+                            aria-label={`Remove ${labels.categoryLabel} · ${labels.subCategoryLabel}`}
+                            className="shrink-0 rounded p-0.5 text-[#8b95a5] hover:text-[#c2410c] disabled:cursor-not-allowed disabled:opacity-40"
+                            disabled={activeTemplateCategories.length <= 1}
+                            onClick={() => removeCategoryPair(index)}
+                          >
+                            <X className="h-3.5 w-3.5" />
+                          </button>
+                        </li>
+                      );
+                    })}
+                  </ul>
+
+                  <div className="flex items-end gap-2">
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <Label className="text-[11px] text-[#8b95a5]">Category</Label>
+                      <Select
+                        value={draftCategoryValue}
+                        onChange={(event) => {
+                          const nextCategory = String(event.target.value || "").trim().toLowerCase();
+                          setDraftCategoryInput(nextCategory);
+                          setDraftSubCategoryInput("");
+                        }}
+                        disabled={taxonomyLoading}
+                      >
+                        {templateCategorySettings.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.labelAr || item.labelEn || item.value}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-1">
+                      <Label className="text-[11px] text-[#8b95a5]">Sub category</Label>
+                      <Select
+                        value={draftSubCategoryValue}
+                        onChange={(event) =>
+                          setDraftSubCategoryInput(String(event.target.value || "").trim().toLowerCase())
+                        }
+                        disabled={draftSubCategoryOptions.length === 0}
+                      >
+                        {draftSubCategoryOptions.map((item) => (
+                          <option key={item.value} value={item.value}>
+                            {item.labelAr || item.labelEn || item.value}
+                          </option>
+                        ))}
+                      </Select>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="secondary"
+                      className="shrink-0"
+                      disabled={!canAddDraftCategoryPair}
+                      onClick={addDraftCategoryPair}
+                    >
+                      Add
+                    </Button>
+                  </div>
+                  {draftCategoryPairAlreadyAdded ? (
+                    <p className="text-[11px] text-[#8b95a5]">Already added.</p>
+                  ) : null}
                 </div>
 
                 <div className="space-y-2">
@@ -5401,7 +5969,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
-                      {ANIMATION_CATALOG[animationSlot].map((type) => {
+                      {animationTypeChoices.map((type) => {
                         const active = selectedAnimationType === type;
                         return (
                           <button
@@ -5424,6 +5992,14 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         );
                       })}
                     </div>
+
+                    {selectedTypeIsOffHere ? (
+                      <div className="rounded-xl border border-[#f4c7cf] bg-[#fff6f8] px-3 py-2 text-[11px] text-[#9f5666]">
+                        This layer carries{" "}
+                        <strong>{getAnimationLabel(selectedAnimationType as string, "en", animationSlot)}</strong>, which
+                        this tab does not normally offer. It still plays. Pick another effect to replace it.
+                      </div>
+                    ) : null}
 
                     {String(primarySelectedElement?.sourceAnimationLabel || primarySelectedElement?.sourceAnimationName || "").trim() ? (
                       <div className="rounded-xl border border-[#d6dce6] bg-white px-3 py-2 text-[11px] text-[#64748b]">
@@ -5664,14 +6240,16 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           }
         }
 
+        /* One-shot Succession resolves out of a blur, which is what two of its three tabs play;
+           only an infinite one still pulses in scale. The tile shows the blur. */
         @keyframes sampleSuccession {
           0%,
           100% {
-            transform: scale(0.8);
-            opacity: 0.35;
+            filter: blur(2.4px);
+            opacity: 0.25;
           }
           50% {
-            transform: scale(1.08);
+            filter: blur(0);
             opacity: 1;
           }
         }

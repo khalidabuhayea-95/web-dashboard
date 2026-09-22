@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
+import { buildAssetBoostOrderBy } from "@/lib/editor/assetBoostOrder";
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 120;
@@ -32,6 +33,7 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
       author_id INTEGER,
       author_name TEXT,
       category_value TEXT,
+      content_hash TEXT,
       asset_url TEXT NOT NULL,
       thumbnail_url TEXT NOT NULL,
       width INTEGER,
@@ -48,6 +50,13 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
   `
     ALTER TABLE editor_element_assets
     ADD COLUMN IF NOT EXISTS category_value TEXT
+  `,
+  // Perceptual fingerprint of the artwork (see imageFingerprint.server.js). Freepik resells the
+  // same icon in several packs, so source_asset_id alone cannot keep the catalogue free of
+  // visually identical duplicates.
+  `
+    ALTER TABLE editor_element_assets
+    ADD COLUMN IF NOT EXISTS content_hash TEXT
   `,
   // Nayroz Pro flag. Also in prisma/migrations/20260827090000_add_catalog_premium_flags
   // and the @@ignore'd model in schema.prisma — all three must stay in sync.
@@ -74,6 +83,11 @@ const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
   `
     CREATE INDEX IF NOT EXISTS editor_element_assets_tags_ar_gin_idx
       ON editor_element_assets USING GIN (tags_ar)
+  `,
+  `
+    CREATE INDEX IF NOT EXISTS editor_element_assets_content_hash_idx
+      ON editor_element_assets(content_hash)
+      WHERE content_hash IS NOT NULL
   `,
 ];
 
@@ -341,6 +355,7 @@ function normalizeRow(row, locale = "en") {
     authorId: Number.isFinite(Number(row.author_id)) ? Number(row.author_id) : null,
     authorName: sanitizeText(row.author_name),
     categoryValue: sanitizeText(row.category_value),
+    contentHash: sanitizeText(row.content_hash),
     assetUrl: sanitizeText(row.asset_url),
     thumbnailUrl: sanitizeText(row.thumbnail_url),
     animatedVideoUrl: extractAnimatedVideoUrl(row.source_payload),
@@ -382,6 +397,7 @@ export async function upsertImportedElementAsset(input) {
   const authorId = Number.isFinite(Number(input?.authorId)) ? Number(input.authorId) : null;
   const authorName = sanitizeText(input?.authorName);
   const categoryValue = sanitizeText(input?.categoryValue || input?.category || input?.category_value).toLowerCase();
+  const contentHash = sanitizeText(input?.contentHash || input?.content_hash).toLowerCase();
   const assetUrl = sanitizeText(input?.assetUrl || input?.asset_url);
   const thumbnailUrl = sanitizeText(input?.thumbnailUrl || input?.thumbnail_url || assetUrl);
   if (!assetUrl || !thumbnailUrl) {
@@ -418,6 +434,7 @@ export async function upsertImportedElementAsset(input) {
       author_id,
       author_name,
       category_value,
+      content_hash,
       asset_url,
       thumbnail_url,
       width,
@@ -449,6 +466,7 @@ export async function upsertImportedElementAsset(input) {
       ${authorId},
       ${authorName || null},
       ${categoryValue || null},
+      ${contentHash || null},
       ${assetUrl},
       ${thumbnailUrl},
       ${width},
@@ -478,6 +496,7 @@ export async function upsertImportedElementAsset(input) {
       author_id = EXCLUDED.author_id,
       author_name = EXCLUDED.author_name,
       category_value = EXCLUDED.category_value,
+      content_hash = COALESCE(EXCLUDED.content_hash, editor_element_assets.content_hash),
       asset_url = EXCLUDED.asset_url,
       thumbnail_url = EXCLUDED.thumbnail_url,
       width = EXCLUDED.width,
@@ -569,6 +588,9 @@ export async function listImportedElementAssets(options = {}) {
   const safePage = Math.min(page, totalPages);
   const offset = (safePage - 1) * pageSize;
 
+  // Seasonal boost ordering — bound AFTER the count ran with the shared params, so the
+  // count statement never receives parameters it has no placeholders for.
+  const orderBySql = buildAssetBoostOrderBy(options.boost, nextParam);
   const limitParam = nextParam(pageSize);
   const offsetParam = nextParam(offset);
   const listSql = `
@@ -579,7 +601,7 @@ export async function listImportedElementAssets(options = {}) {
     ${kindSql}
     ${premiumSql}
     ${searchSql}
-    ORDER BY updated_at DESC
+    ${orderBySql}
     LIMIT ${limitParam}
     OFFSET ${offsetParam}
   `;
@@ -597,6 +619,113 @@ export async function listImportedElementAssets(options = {}) {
     totalPages,
     hasNextPage: safePage < totalPages,
     hasPrevPage: safePage > 1,
+  };
+}
+
+/**
+ * Which of these artwork fingerprints the catalogue already holds, as a Set of hashes.
+ *
+ * The importer asks BEFORE downloading and uploading, so a duplicate costs neither an R2 object
+ * nor a row — see the duplicate skip in runFreepikImportForOwner.
+ */
+export async function findExistingElementContentHashes(hashes = []) {
+  await ensureImportedElementsSchema();
+
+  const values = Array.from(
+    new Set(
+      (Array.isArray(hashes) ? hashes : [])
+        .map((value) => sanitizeText(value).toLowerCase())
+        .filter(Boolean)
+    )
+  );
+  if (values.length === 0) return new Set();
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT DISTINCT content_hash
+      FROM editor_element_assets
+      WHERE content_hash = ANY($1::text[])
+    `,
+    values
+  );
+
+  const found = new Set();
+  if (Array.isArray(rows)) {
+    rows.forEach((row) => {
+      const hash = sanitizeText(row?.content_hash).toLowerCase();
+      if (hash) found.add(hash);
+    });
+  }
+  return found;
+}
+
+/**
+ * Elements per category, keyed by category value. The Settings page needs it to say how many
+ * assets a Remove would take with it before asking the user to confirm.
+ */
+export async function countImportedElementAssetsByCategory(options = {}) {
+  await ensureImportedElementsSchema();
+
+  const source = sanitizeSourceFilter(options.source);
+  const params = [];
+  const sourceSql = source
+    ? (() => {
+        params.push(source);
+        return `WHERE source = $${params.length}`;
+      })()
+    : "";
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      SELECT COALESCE(NULLIF(TRIM(category_value), ''), '') AS category_value, COUNT(*)::int AS total
+      FROM editor_element_assets
+      ${sourceSql}
+      GROUP BY 1
+    `,
+    ...params
+  );
+
+  const counts = {};
+  if (Array.isArray(rows)) {
+    rows.forEach((row) => {
+      const key = sanitizeCategoryFilter(row?.category_value);
+      counts[key] = Number(row?.total || 0);
+    });
+  }
+
+  return counts;
+}
+
+/**
+ * Removes every element filed under the given categories, and hands back the storage URLs so the
+ * caller can clean up R2. Used when a category is deleted from Settings: the rows would otherwise
+ * survive under a key nothing lists any more.
+ */
+export async function deleteImportedElementAssetsByCategories(categoryValues = []) {
+  await ensureImportedElementsSchema();
+
+  const values = Array.from(
+    new Set(
+      (Array.isArray(categoryValues) ? categoryValues : [])
+        .map((value) => sanitizeCategoryFilter(value))
+        .filter(Boolean)
+    )
+  );
+  if (values.length === 0) return { deleted: 0, urls: [] };
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      DELETE FROM editor_element_assets
+      WHERE LOWER(COALESCE(NULLIF(TRIM(category_value), ''), '')) = ANY($1::text[])
+      RETURNING id, asset_url, thumbnail_url
+    `,
+    values
+  );
+
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    deleted: list.length,
+    urls: list.flatMap((row) => [row?.asset_url, row?.thumbnail_url]).filter(Boolean).map(String),
   };
 }
 
@@ -626,7 +755,7 @@ export async function deleteImportedElementAsset(options = {}) {
       DELETE FROM editor_element_assets
       WHERE id = $1::uuid
       ${ownerClause}
-      RETURNING id
+      RETURNING id, asset_url, thumbnail_url
     `,
     ...params
   );
@@ -638,6 +767,10 @@ export async function deleteImportedElementAsset(options = {}) {
   return {
     deleted: true,
     id: String(rows[0]?.id || id),
+    // Returned so the caller can clean up storage — the row is gone, and without these the
+    // objects behind it would be stranded in R2 with nothing left pointing at them.
+    assetUrl: String(rows[0]?.asset_url || ""),
+    thumbnailUrl: String(rows[0]?.thumbnail_url || ""),
   };
 }
 

@@ -15,6 +15,23 @@ import type { EditorElement } from "@/store/editorStore";
 
 export const PREVIEW_RENDER_FPS = 60;
 
+/**
+ * How many frames a second the template preview RECORDER actually captures.
+ *
+ * ★Deliberately half [PREVIEW_RENDER_FPS], which is the timeline's frame grid and stays at 60.
+ *
+ * Capturing at 60 does not buy a smoother preview, it buys a worse one. Template clips are 30fps
+ * sources, so half the captured frames can never be distinct — and redrawing the Konva stage and
+ * encoding those duplicates 60 times a second starves the `<video>` element that is decoding
+ * alongside it. Measured on a 13.2s 1080p clip, the capture loop held 60fps for the whole
+ * recording while the decoder fell from ~34 new frames a second to 7, so the preview started
+ * smooth and ended a slideshow. Capturing at 30 leaves the decoder the headroom to keep up.
+ *
+ * 30 is also what the mobile editor's own timeline runs at, so a recorded preview and the app
+ * play the same design at the same cadence.
+ */
+export const PREVIEW_CAPTURE_FPS = 30;
+
 export interface ElementRenderPose {
   x: number;
   y: number;
@@ -105,12 +122,29 @@ export interface AnimationState {
   isExiting: boolean;
 }
 
+/**
+ * `settled: true` asks for the design AT REST: the pose a layer holds once its entrance has
+ * finished and before any exit has begun. It exists because frame 0 is NOT the design — a page
+ * whose every layer carries a fade-in is fully transparent there, so the editor opened on a blank
+ * canvas and the thumbnail/poster captured from it were saved pure white. Canva never shows that:
+ * its editing canvas draws the settled design and only the player animates.
+ *
+ * For every family the settled visual IS the authored pose — an entrance has arrived, an exit has
+ * not started, a loop sits at its base phase — so the honest answer is to apply no animation at
+ * all. The recorder, the filmstrip and a scrubbed playhead must never pass it.
+ */
+export interface RenderPoseOptions {
+  settled?: boolean;
+}
+
 export function resolveAnimationStateAtFrame(
   element: EditorElement,
   currentFrame: number,
   fps: number,
-  pageDurationMs: number
+  pageDurationMs: number,
+  options?: RenderPoseOptions
 ): AnimationState | null {
+  if (options?.settled) return null;
   const slots = resolveElementAnimations(element);
   const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
   const sampleTimeMs = Math.min(
@@ -175,11 +209,59 @@ function resolveMotionPathOffset(
   return { x: Number(last.x) || 0, y: Number(last.y) || 0 };
 }
 
+const DEGREES_TO_RADIANS = Math.PI / 180;
+
+/**
+ * Keeps an animated layer turning and growing about its CENTRE.
+ *
+ * Konva rotates and scales a node about the point it is positioned at, which is the layer's
+ * top-left corner. The app renders through a Compose `graphicsLayer`, whose transform origin is the
+ * centre. Handing Konva the same numbers therefore produced a different picture: Spin swung the
+ * layer around its own corner in a wide arc instead of turning in place, and a zoom grew it towards
+ * the bottom-right instead of outwards.
+ *
+ * Rather than re-origin every node (which would change what x/y mean for dragging, the Transformer
+ * and every import), this returns the top-left offset that holds the centre still: where the centre
+ * sits under the authored rotation and scale, minus where it would sit under the animated ones.
+ * With no animation both terms are equal and the offset is zero, so nothing else moves.
+ */
+function centrePivotOffset(
+  width: number,
+  height: number,
+  fromRotationDegrees: number,
+  fromScaleX: number,
+  fromScaleY: number,
+  toRotationDegrees: number,
+  toScaleX: number,
+  toScaleY: number
+): { x: number; y: number } {
+  const halfWidth = Math.max(0, width) / 2;
+  const halfHeight = Math.max(0, height) / 2;
+  if (halfWidth === 0 && halfHeight === 0) return { x: 0, y: 0 };
+
+  const fromRadians = fromRotationDegrees * DEGREES_TO_RADIANS;
+  const toRadians = toRotationDegrees * DEGREES_TO_RADIANS;
+  const fromX = halfWidth * fromScaleX;
+  const fromY = halfHeight * fromScaleY;
+  const toX = halfWidth * toScaleX;
+  const toY = halfHeight * toScaleY;
+
+  return {
+    x:
+      (Math.cos(fromRadians) * fromX - Math.sin(fromRadians) * fromY) -
+      (Math.cos(toRadians) * toX - Math.sin(toRadians) * toY),
+    y:
+      (Math.sin(fromRadians) * fromX + Math.cos(fromRadians) * fromY) -
+      (Math.sin(toRadians) * toX + Math.cos(toRadians) * toY),
+  };
+}
+
 export function resolveAnimatedElementPoseAtFrame(
   element: EditorElement,
   currentFrame: number,
   fps: number,
-  pageDurationMs: number
+  pageDurationMs: number,
+  options?: RenderPoseOptions
 ): ElementRenderPose {
   const base: ElementRenderPose = {
     x: element.x,
@@ -191,14 +273,18 @@ export function resolveAnimatedElementPoseAtFrame(
     blurRadius: 0,
   };
 
-  // Motion paths compose additively with (or without) a preset animation.
-  const motionOffset = resolveMotionPathOffset(element, currentFrame, fps, pageDurationMs);
+  // Motion paths compose additively with (or without) a preset animation. A motion path IS the
+  // animation, so a settled render holds the authored position — the offsets are cumulative from
+  // it, which is exactly the place Canva's editing canvas shows before the path plays.
+  const motionOffset = options?.settled
+    ? null
+    : resolveMotionPathOffset(element, currentFrame, fps, pageDurationMs);
   if (motionOffset) {
     base.x += motionOffset.x;
     base.y += motionOffset.y;
   }
 
-  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs);
+  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs, options);
   if (!state) return base;
 
   const visual = resolveAnimationVisualState(
@@ -216,10 +302,22 @@ export function resolveAnimatedElementPoseAtFrame(
   // Phase 1 renders the reveal families through their alpha fallback: this surface has no mask
   // channel and no per-glyph text path yet, which is the documented behaviour for a surface
   // that can't honour revealMask / textReveal / glyphMotion.
+  const rotation = base.rotation + visual.rotationDeltaDegrees;
+  const pivot = centrePivotOffset(
+    element.width,
+    element.height,
+    base.rotation,
+    base.scaleX,
+    base.scaleY,
+    rotation,
+    scaleX,
+    scaleY
+  );
+
   return {
-    x: base.x + visual.translationX,
-    y: base.y + visual.translationY,
-    rotation: base.rotation + visual.rotationDeltaDegrees,
+    x: base.x + visual.translationX + pivot.x,
+    y: base.y + visual.translationY + pivot.y,
+    rotation,
     scaleX,
     scaleY,
     opacity: clamp(base.opacity * visual.alphaMultiplier, 0, 1),
@@ -244,9 +342,10 @@ export function resolveAnimatedElementEffectsAtFrame(
   element: EditorElement,
   currentFrame: number,
   fps: number,
-  pageDurationMs: number
+  pageDurationMs: number,
+  options?: RenderPoseOptions
 ): ElementRenderEffects | null {
-  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs);
+  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs, options);
   if (!state) return null;
   const visual = resolveAnimationVisualState(
     state.spec,

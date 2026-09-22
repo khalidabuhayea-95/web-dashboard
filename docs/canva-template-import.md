@@ -67,6 +67,9 @@ The script prints:
   - Primary: extract layer nodes (`[id^="LB"].DF_utQ`) from Canva page and convert to Fabric objects.
   - Secondary: crop visible Canva page frame (`[data-page-id]`) for thumbnail/fallback.
   - Fallback: one flattened image layer if layer extraction is unavailable.
+  - Background video: a page video clip is captured through a CDP Network session on the Canva tab
+    and uploaded with the design as a `layerType: "video"` object (poster frame kept as
+    `thumbnailUri`; falls back to the poster-only layer with a warning). See the extension README.
 
 ## Notes
 

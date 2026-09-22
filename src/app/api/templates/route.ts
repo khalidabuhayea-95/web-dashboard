@@ -2,6 +2,7 @@ import { randomBytes, randomUUID } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
 
+import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
 import { findDashboardUsersByIds } from "@/lib/auth/dashboardUsers.server";
 import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
@@ -24,10 +25,12 @@ import {
   mapTemplatePreview,
   normalizeCanvasSize,
   normalizeCategory,
+  normalizeCategoryFields,
   normalizeSlug,
   normalizeSubCategory,
   normalizeTags,
 } from "@/lib/templates/server";
+import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
 import {
   normalizeEditorProMobileFontData,
   validateEditorProMobilePublishCompatibility,
@@ -60,6 +63,7 @@ const TEMPLATE_LIST_SELECT: any = {
   pageCount: true,
   category: true,
   subCategory: true,
+  categories: true,
   tags: true,
   isPremium: true,
   thumbnailDataUrl: true,
@@ -120,6 +124,30 @@ async function ensureUniqueName(ownerId: string, baseName: string, excludeId?: s
   }
 
   return `${normalized} (${randomBytes(3).toString("hex")})`;
+}
+
+// Templates whose design carries a video layer — a captured Canva background clip or an uploaded
+// video. Read from the stored JSON with jsonb containment (it walks arrays), one predicate per
+// storage format: native `pages[].elements[]` vs the flat import `objects[]`. No column to keep
+// in sync; the list is paginated, so the scan is bounded to the page's ids.
+async function findTemplateIdsWithVideoLayers(ids: string[]): Promise<Set<string>> {
+  const safeIds = ids.map((id) => String(id || "").trim()).filter(Boolean);
+  if (safeIds.length === 0) return new Set();
+  try {
+    const rows = await prisma.$queryRaw<Array<{ id: string }>>`
+      SELECT id::text AS id
+      FROM "Template"
+      WHERE id::text IN (${Prisma.join(safeIds)})
+        AND (
+          data @> '{"pages":[{"elements":[{"type":"video"}]}]}'::jsonb
+          OR data @> '{"objects":[{"type":"video"}]}'::jsonb
+          OR data @> '{"objects":[{"layerType":"video"}]}'::jsonb
+        )`;
+    return new Set(rows.map((row: { id: string }) => String(row.id)));
+  } catch (error) {
+    logger.warn("Template video-layer lookup failed", { error: (error as Error)?.message });
+    return new Set();
+  }
 }
 
 function withTemplatePreview(template: any) {
@@ -185,7 +213,10 @@ function normalizePreviewFields(input: any) {
   const durationMs = Number(preview.durationMs);
   const version = Number(preview.version);
   const error = String(preview.error || "").trim();
-  const updatedAtRaw = preview.updatedAt;
+  // ★`generatedAt` is the name this field carries inside data.timeline.preview; `updatedAt` is the
+  // name it carries on the column and in the editor's PATCH body. Reading only one of the two is
+  // how a saved preview came back with a null timestamp.
+  const updatedAtRaw = preview.updatedAt ?? preview.generatedAt;
   const updatedAt =
     updatedAtRaw instanceof Date
       ? updatedAtRaw
@@ -235,42 +266,69 @@ function buildTemplatePreviewUpdate({
   }
 
   const nextPreviewVersion = existingTemplate ? Math.max(1, Number(existingTemplate.version || 0) + 1) : 1;
+
+  // ★Fall back to what is already stored, never to null.
+  //
+  // This runs on every save of a motion template and rebuilds all seven preview columns from
+  // `data.timeline.preview`. Defaulting the ones that object does not carry to null meant an
+  // ordinary save — an autosave twenty seconds after a recording finished — quietly erased the
+  // duration and timestamp of a preview that was otherwise perfectly good.
+  //
+  // The VIDEO itself had the same hole, one step further out: a save whose payload carried no
+  // preview object at all, or carried one with the URL missing (a cancelled or failed recording),
+  // set the URL to null and the status back to "queued". Previews are recorded by hand from the
+  // toolbar now, so nothing came along to replace it and the video simply vanished from the list
+  // and from the app. A save is not the place to throw one away: clearing a preview on purpose has
+  // its own route (PATCH with action "updatePreview" and a null preview), and a template that stops
+  // moving is handled above. So the stored row is the floor here, and only a template that has
+  // never had a preview falls through to "queued".
+  const storedPreviewUrl = String(existingTemplate?.previewVideoUrl || "").trim();
+
   if (!incomingPreview) {
     return {
-      previewVideoUrl: null,
+      previewVideoUrl: storedPreviewUrl || null,
       previewPosterUrl:
+        (storedPreviewUrl ? existingTemplate?.previewPosterUrl : null) ??
         thumbnailDataUrl ??
         existingTemplate?.previewPosterUrl ??
         existingTemplate?.thumbnailDataUrl ??
         null,
-      previewStatus: "queued",
-      previewDurationMs: null,
-      previewVersion: nextPreviewVersion,
+      previewStatus: storedPreviewUrl ? (existingTemplate?.previewStatus ?? "ready") : "queued",
+      previewDurationMs: storedPreviewUrl ? (existingTemplate?.previewDurationMs ?? null) : null,
+      // The version is what cache-busts the URL, so keeping the same file keeps its token too.
+      previewVersion: storedPreviewUrl
+        ? (existingTemplate?.previewVersion ?? nextPreviewVersion)
+        : nextPreviewVersion,
       previewError: null,
-      previewUpdatedAt: null,
+      previewUpdatedAt: storedPreviewUrl ? (existingTemplate?.previewUpdatedAt ?? null) : null,
     };
   }
 
+  const previewVideoUrl = incomingPreview.previewVideoUrl ?? (storedPreviewUrl || null);
+  const keepingStoredVideo = !incomingPreview.previewVideoUrl && Boolean(previewVideoUrl);
   return {
-    previewVideoUrl: incomingPreview?.previewVideoUrl ?? null,
+    previewVideoUrl,
     previewPosterUrl:
-      incomingPreview?.previewPosterUrl ??
+      incomingPreview.previewPosterUrl ??
+      (keepingStoredVideo ? (existingTemplate?.previewPosterUrl ?? null) : null) ??
       thumbnailDataUrl ??
       null,
     previewStatus:
-      incomingPreview?.previewStatus ??
-      "queued",
+      incomingPreview.previewStatus ??
+      (keepingStoredVideo ? (existingTemplate?.previewStatus ?? "ready") : "queued"),
     previewDurationMs:
-      incomingPreview?.previewDurationMs ??
+      incomingPreview.previewDurationMs ??
+      existingTemplate?.previewDurationMs ??
       null,
     previewVersion:
-      incomingPreview?.previewVersion ??
-      nextPreviewVersion,
+      incomingPreview.previewVersion ??
+      (keepingStoredVideo ? (existingTemplate?.previewVersion ?? nextPreviewVersion) : nextPreviewVersion),
     previewError:
-      incomingPreview?.previewError ??
+      incomingPreview.previewError ??
       null,
     previewUpdatedAt:
-      incomingPreview?.previewUpdatedAt ??
+      incomingPreview.previewUpdatedAt ??
+      existingTemplate?.previewUpdatedAt ??
       null,
   };
 }
@@ -281,13 +339,23 @@ function buildTemplatePreviewTimelinePatch(input: {
   posterUrl?: string | null;
   generatedAt?: Date | null;
   error?: string | null;
+  durationMs?: number | null;
+  version?: number | null;
 }) {
+  const durationMs = Number(input.durationMs);
+  const version = Number(input.version);
   return {
     status: String(input.status || "").trim() || "not_requested",
     url: String(input.url || "").trim() || null,
     posterUrl: String(input.posterUrl || "").trim() || null,
     generatedAt: input.generatedAt ? input.generatedAt.toISOString() : null,
     error: String(input.error || "").trim() || null,
+    // ★Carried in the JSON, not just the columns. An ordinary template save rebuilds every preview
+    // column from this object, so anything missing here is silently nulled on the next save — which
+    // is how a freshly recorded 13-second preview ended up reporting durationMs 0 to the app twenty
+    // seconds later, and the clients' loop timing with it.
+    durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
+    version: Number.isFinite(version) ? Math.max(0, Math.round(version)) : null,
   };
 }
 
@@ -297,6 +365,8 @@ function applyPreviewPatchToTemplateData(data: any, input: {
   posterUrl?: string | null;
   generatedAt?: Date | null;
   error?: string | null;
+  durationMs?: number | null;
+  version?: number | null;
 }) {
   const plainData = asPlainObject(data) || {};
   const timeline = asPlainObject(plainData.timeline) || {};
@@ -434,14 +504,22 @@ interface TemplateListWhereInput {
 
 function buildTemplateListWhere(input: TemplateListWhereInput): any {
   const { templateId, status, hasCategoryFilter, category, hasSubCategoryFilter, subCategory, tag, search } = input;
-  
-  return {
-    ...(status ? { status } : {}),
-    ...(templateId ? { id: templateId } : {}),
-    ...(hasCategoryFilter ? { category } : {}),
-    ...(hasSubCategoryFilter ? { subCategory } : {}),
-    ...(tag ? { tags: { array_contains: [tag] } } : {}),
-    ...(search
+
+  // The category filter matches ANY of a template's placements, so it is its own OR
+  // fragment and has to be AND-merged with the search OR rather than spread alongside it.
+  const categoryFilter = templateCategoryWhere({
+    category: hasCategoryFilter ? category : "",
+    subCategory: hasSubCategoryFilter ? subCategory : "",
+  });
+
+  return mergeTemplateWhere(
+    {
+      ...(status ? { status } : {}),
+      ...(templateId ? { id: templateId } : {}),
+      ...(tag ? { tags: { array_contains: [tag] } } : {}),
+    },
+    categoryFilter,
+    search
       ? {
           OR: [
             {
@@ -458,8 +536,8 @@ function buildTemplateListWhere(input: TemplateListWhereInput): any {
             },
           ],
         }
-      : {}),
-  };
+      : null
+  );
 }
 
 async function attachTemplateOwnerNames(templates: any[]): Promise<any[]> {
@@ -703,6 +781,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       });
     }
 
+    const videoTemplateIds = await findTemplateIdsWithVideoLayers(
+      templates.map((template) => String(template.id))
+    );
+    templates = templates.map((template) => ({
+      ...template,
+      hasVideo: videoTemplateIds.has(String(template.id)),
+    }));
     let templatesWithOwners = templates;
     try {
       templatesWithOwners = await attachTemplateOwnerNames(templates);
@@ -753,8 +838,6 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     const canvasSize = normalizeCanvasSize(body?.canvasSize);
     const pageCount = Math.max(1, extractEditorPages(data).length);
     const taxonomySettings = await getTemplateTaxonomySettings();
-    const category = normalizeCategory(body?.category, taxonomySettings);
-    const subCategory = normalizeSubCategory(body?.subCategory, category, taxonomySettings);
     const tags = normalizeTags(body?.tags);
     const incomingThumbnailValue =
       typeof body?.thumbnailDataUrl === "string"
@@ -781,6 +864,16 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       if (previewUpdateCanvaReferences.length > 0) {
         return createCanvaReferenceErrorResponse(previewUpdateCanvaReferences, "save");
       }
+
+      const categoryFields = normalizeCategoryFields(
+        {
+          category: body?.category,
+          subCategory: body?.subCategory,
+          categories: body?.categories,
+          existingCategories: existing.categories,
+        },
+        taxonomySettings
+      );
 
       const slug = await ensureUniqueSlug(requestedSlug || existing.slug, id);
       const uniqueName = await ensureUniqueName(existing.ownerId, name, id);
@@ -821,8 +914,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
             data,
             canvasSize,
             pageCount,
-            category,
-            subCategory,
+            ...categoryFields,
             tags,
             thumbnailDataUrl,
             ...(pageThumbnails ? { pageThumbnails } : {}),
@@ -858,6 +950,15 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
     if (previewCreateCanvaReferences.length > 0) {
       return createCanvaReferenceErrorResponse(previewCreateCanvaReferences, "save");
     }
+
+    const categoryFields = normalizeCategoryFields(
+      {
+        category: body?.category,
+        subCategory: body?.subCategory,
+        categories: body?.categories,
+      },
+      taxonomySettings
+    );
 
     const slug = await ensureUniqueSlug(requestedSlug);
     const uniqueName = await ensureUniqueName(session.userId, name);
@@ -898,8 +999,7 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
           data,
           canvasSize,
           pageCount,
-          category,
-          subCategory,
+          ...categoryFields,
           tags,
           thumbnailDataUrl,
           ...(pageThumbnails ? { pageThumbnails } : {}),
@@ -1033,6 +1133,8 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
             posterUrl: nextPreviewPatch.previewPosterUrl,
             generatedAt: nextPreviewPatch.previewUpdatedAt,
             error: nextPreviewPatch.previewError,
+            durationMs: nextPreviewPatch.previewDurationMs,
+            version: nextPreviewPatch.previewVersion,
           }),
         },
       });

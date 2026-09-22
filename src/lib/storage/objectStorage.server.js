@@ -352,18 +352,32 @@ export async function uploadObject({
   };
 }
 
-export async function getObject(bucket, key) {
+/**
+ * Download an object, optionally a byte range of it.
+ *
+ * `options.range` is passed through verbatim as the S3 `Range` parameter, so it must already be a
+ * well-formed HTTP range spec ("bytes=0-1023"). R2 answers a ranged GET with `ContentRange` set and
+ * `ContentLength` narrowed to the slice, which is what the public proxy turns into a 206.
+ *
+ * ★Ranged reads are not an optimisation here, they are a requirement: AVFoundation refuses to open
+ * an HTTP video asset from a server that cannot serve ranges, failing the whole load with
+ * -11850 "The server is not correctly configured". Every template video the iOS app renders comes
+ * through this function.
+ */
+export async function getObject(bucket, key, options = {}) {
   const safeBucket = String(bucket || "").trim();
   const safeKey = String(key || "").trim();
   if (!safeBucket || !safeKey) {
     throw new Error("Bucket and key are required for object download.");
   }
 
+  const range = String(options?.range || "").trim();
   const client = createStorageClient();
   return client.send(
     new GetObjectCommand({
       Bucket: safeBucket,
       Key: safeKey,
+      ...(range ? { Range: range } : {}),
     })
   );
 }

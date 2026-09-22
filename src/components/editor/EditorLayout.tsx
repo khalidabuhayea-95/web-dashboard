@@ -67,6 +67,7 @@ interface EditorLayoutProps {
 export default function EditorLayout({ canManagePremium = false }: EditorLayoutProps) {
   const showLeftSidebar = useEditorStore((state) => state.showLeftSidebar);
   const showRightSidebar = useEditorStore((state) => state.showRightSidebar);
+  const timelineCollapsed = useEditorStore((state) => state.timelineCollapsed);
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
   const setActivePageId = useEditorStore((state) => state.setActivePageId);
@@ -328,7 +329,9 @@ export default function EditorLayout({ canManagePremium = false }: EditorLayoutP
               <CanvasEditor />
             </ErrorBoundary>
           </div>
-          <PageBar />
+          {/* The page strip collapses together with the timeline — but only when a timeline is
+              actually on screen, otherwise there would be no control left to bring it back. */}
+          {showAnimationTimeline && timelineCollapsed ? null : <PageBar />}
           <PagesTimeline showTimeline={showAnimationTimeline} />
         </div>
 

@@ -34,6 +34,17 @@ If you update `manifest.json`, reloading the extension is required for permissio
 Notes:
 
 - Text and image items are imported as separate layers.
+- Page background videos (v1.22.9+): the poster frame is replaced by the real clip when it can be
+  captured. The worker opens a CDP `Network` session on the Canva tab (the `debugger` permission
+  already used for trusted page-switch clicks), forces the `<video>` to play for a few seconds to see
+  the signed `media.canva.com` requests, then downloads the file itself (whole file → byte ranges →
+  numbered segments → the player's own buffer, in that order). The clip travels as a multipart part
+  (`canva-ext-binary://` placeholder in the manifest) and lands in the template as
+  `{ type: "video", layerType: "video", src, thumbnailUri, videoStart, videoEnd, videoDuration }`.
+  Keep the Canva tab in the foreground (Chrome throttles media in background tabs); Chrome shows its
+  "is debugging this browser" banner while the capture runs. On any failure the import keeps the
+  poster frame and the warning names the reason (`no-video-element`, `no-media-requests`,
+  `download-failed`, `video-too-large:NMB`).
 - When a layer source is blocked/temporary, importer falls back to image-based handling for that item.
 - Extension logger is enabled in both popup and background worker:
   - Structured logs are written to browser console.

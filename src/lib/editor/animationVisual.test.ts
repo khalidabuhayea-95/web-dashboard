@@ -160,10 +160,37 @@ test("FADE's authored opacity curve plays", () => {
   assert.equal(curves.durationFrames, 35);
   const opacity = curves.channels.opacity;
   assert.ok(opacity);
-  // Authored 5→0, 25→1: hidden before frame 5, fully shown from 25 on.
+  // Authored 0→0, 35→1: the fade now spans the WHOLE duration (see the Canva test below). It used
+  // to wait until frame 5 and be fully opaque by 25, which is neither what Canva renders nor what
+  // anyone expects of a fade whose length they set.
   assert.equal(valueAtFrame(opacity, 0), 0);
-  assert.equal(valueAtFrame(opacity, 25), 1);
   assert.equal(valueAtFrame(opacity, 35), 1);
+  assert.ok(valueAtFrame(opacity, 25) < 1, "still rising at frame 25");
+  assert.ok(valueAtFrame(opacity, 2) > 0, "already rising at frame 2");
+});
+
+/**
+ * FADE reproduces Canva's تلاشي, measured on every frame of an MP4 they exported of their own
+ * render (1080x1920, 30fps, at their "متوسط" speed, which runs 15 frames). No blur, no movement —
+ * the vertical centroid of the title held within 0.06px of its settled place from the first frame
+ * that had any ink — just opacity, spanning the whole duration on an ease-out-sine.
+ */
+test("FADE follows Canva's own fade curve", () => {
+  const canva = [
+    0, 0.1, 0.206, 0.311, 0.415, 0.51, 0.601, 0.675,
+    0.747, 0.814, 0.877, 0.922, 0.959, 0.981, 0.996, 0.999,
+  ];
+  let worst = 0;
+  for (let frame = 0; frame < canva.length; frame += 1) {
+    const state = resolveAnimationVisualState(spec("FADE"), frame / (canva.length - 1), W, H);
+    worst = Math.max(worst, Math.abs(state.alphaMultiplier - canva[frame]));
+    // Opacity is the only channel that moves.
+    closeTo(state.translationX, 0);
+    closeTo(state.translationY, 0);
+    closeTo(state.scaleMultiplier, 1);
+    closeTo(state.blurRadiusPx, 0);
+  }
+  assert.ok(worst <= 0.02, `worst gap against Canva's frames is ${worst.toFixed(3)}`);
 });
 
 // ── visual state ──────────────────────────────────────────────────────────────
@@ -184,15 +211,90 @@ test("RISE settles to its resting pose at progress 1", () => {
   closeTo(state.alphaMultiplier, 1);
 });
 
-test("RISE offsets by max(16, height*0.22) at progress 0", () => {
+/**
+ * A one-shot RISE reproduces Canva's ارتقاء, measured frame by frame from an MP4 they exported of
+ * their own render: 80px of travel and opacity 0 -> 1, both on a quadratic ease-out, and the same
+ * 80px whatever the layer's size (their 162px title and their 56px caption both moved exactly that
+ * far). An INFINITE rise keeps the older height-proportional bob.
+ */
+test("a one-shot RISE starts 80px low and fully transparent", () => {
   const state = resolveAnimationVisualState(spec("RISE", { infinite: false }), 0, W, H);
+  closeTo(state.translationY, 80);
+  closeTo(state.alphaMultiplier, 0);
+});
+
+test("a one-shot RISE travels the same distance whatever the layer's size", () => {
+  const tiny = resolveAnimationVisualState(spec("RISE", { infinite: false }), 0, 10, 10);
+  const huge = resolveAnimationVisualState(spec("RISE", { infinite: false }), 0, 900, 700);
+  closeTo(tiny.translationY, 80);
+  closeTo(huge.translationY, 80);
+});
+
+test("a one-shot RISE follows Canva's quadratic ease-out", () => {
+  for (const u of [0.25, 0.5, 0.75]) {
+    const settle = 1 - (1 - u) * (1 - u);
+    const state = resolveAnimationVisualState(spec("RISE", { infinite: false }), u, W, H);
+    closeTo(state.alphaMultiplier, settle);
+    closeTo(state.translationY, (1 - settle) * 80);
+  }
+});
+
+test("an infinite RISE keeps its height-proportional bob", () => {
+  const state = resolveAnimationVisualState(spec("RISE", { infinite: true }), 0, W, H);
   closeTo(state.translationY, Math.max(16, H * 0.22));
   closeTo(state.alphaMultiplier, 0.12);
 });
 
+/**
+ * A one-shot SUCCESSION reproduces Canva's التتابع, measured on every frame of an MP4 they exported
+ * of their own render: the layer resolves out of a blur while the opacity rises DEAD STRAIGHT
+ * (worst gap 0.029 over the run), with the blur decaying as (1-p)^1.4 from a flat radius — their
+ * smaller subtitle peaked at a comparable blur, not a proportionally smaller one. It does not move
+ * and it does not scale: across six vertical slices of their title the half-ink times spanned 0.7s
+ * with no reading order, so the layer resolves as one piece rather than glyph by glyph.
+ * An INFINITE succession keeps the older scale-and-fade pulse.
+ */
+test("a one-shot SUCCESSION starts fully blurred and fully transparent", () => {
+  const state = resolveAnimationVisualState(spec("SUCCESSION", { infinite: false }), 0, W, H);
+  closeTo(state.alphaMultiplier, 0);
+  closeTo(state.blurRadiusPx, 32);
+  // No travel and no scale: the only channels are opacity and blur.
+  closeTo(state.translationX, 0);
+  closeTo(state.translationY, 0);
+  closeTo(state.scaleMultiplier, 1);
+});
+
+test("a one-shot SUCCESSION fades linearly while its blur decays faster", () => {
+  for (const u of [0.25, 0.5, 0.75]) {
+    const state = resolveAnimationVisualState(spec("SUCCESSION", { infinite: false }), u, W, H);
+    closeTo(state.alphaMultiplier, u);
+    closeTo(state.blurRadiusPx, 32 * Math.pow(1 - u, 1.4));
+  }
+});
+
+test("a one-shot SUCCESSION blurs the same amount whatever the layer's size", () => {
+  const tiny = resolveAnimationVisualState(spec("SUCCESSION", { infinite: false }), 0, 10, 10);
+  const huge = resolveAnimationVisualState(spec("SUCCESSION", { infinite: false }), 0, 900, 700);
+  closeTo(tiny.blurRadiusPx, 32);
+  closeTo(huge.blurRadiusPx, 32);
+});
+
+test("a one-shot SUCCESSION settles sharp and opaque", () => {
+  const state = resolveAnimationVisualState(spec("SUCCESSION", { infinite: false }), 1, W, H);
+  closeTo(state.alphaMultiplier, 1);
+  closeTo(state.blurRadiusPx, 0);
+});
+
+test("an infinite SUCCESSION keeps the older scale-and-fade pulse", () => {
+  const state = resolveAnimationVisualState(spec("SUCCESSION", { infinite: true }), 0, W, H);
+  closeTo(state.scaleMultiplier, 0.82);
+  closeTo(state.alphaMultiplier, 0.06);
+  closeTo(state.blurRadiusPx, 0);
+});
+
 test("amplitudes honour their min-px floor on tiny layers", () => {
-  const state = resolveAnimationVisualState(spec("RISE", { infinite: false }), 0, 10, 10);
-  closeTo(state.translationY, 16);
+  const state = resolveAnimationVisualState(spec("PAN", { infinite: false }), 0, 10, 10);
+  closeTo(state.translationX, 22);
 });
 
 test("PAN follows the direction vector", () => {
@@ -257,9 +359,18 @@ test("spec.easing is ignored on the authored path and honoured on the formula pa
   const b = resolveAnimationVisualState(spec("FADE", { easing: "EASE_IN" }), 0.5, W, H);
   closeTo(a.alphaMultiplier, b.alphaMultiplier);
 
-  const c = resolveAnimationVisualState(spec("RISE", { easing: "LINEAR" }), 0.5, W, H);
-  const d = resolveAnimationVisualState(spec("RISE", { easing: "EASE_IN" }), 0.5, W, H);
-  notCloseTo(c.translationY, d.translationY);
+  const c = resolveAnimationVisualState(spec("PAN", { easing: "LINEAR" }), 0.5, W, H);
+  const d = resolveAnimationVisualState(spec("PAN", { easing: "EASE_IN" }), 0.5, W, H);
+  notCloseTo(c.translationX, d.translationX);
+});
+
+test("a one-shot RISE is the deliberate exception: it carries Canva's own curve", () => {
+  // Canva's ease is none of ours, so RISE computes it from the raw progress instead of reading the
+  // spec. The editor exposes no easing control, so the setting is unreachable anyway.
+  const linear = resolveAnimationVisualState(spec("RISE", { easing: "LINEAR" }), 0.5, W, H);
+  const easeIn = resolveAnimationVisualState(spec("RISE", { easing: "EASE_IN" }), 0.5, W, H);
+  closeTo(linear.translationY, easeIn.translationY);
+  closeTo(linear.alphaMultiplier, easeIn.alphaMultiplier);
 });
 
 test("the glyph families emit the documented fallback", () => {

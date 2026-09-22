@@ -83,7 +83,7 @@ function sanitizeFreepikSelectedItems(value: any): any[] {
     .slice(0, 300);
 }
 
-function sanitizeBackgroundCategoryValue(value: any): string {
+function sanitizeCategoryValue(value: any): string {
   return String(value || "")
     .trim()
     .toLowerCase()
@@ -155,8 +155,14 @@ async function createFreepikIconsJob(
 ): Promise<NextResponse> {
   const type = "freepik-icons";
   const selectedItems = sanitizeFreepikSelectedItems(body?.selectedItems);
+  // Required for the same reason it is on backgrounds: an element that lands with no category is
+  // invisible in the app's strip and has to be re-filed by hand later.
+  const categoryValue = sanitizeCategoryValue(body?.categoryValue || body?.category);
   if (selectedItems.length === 0) {
     return handleBadRequest("At least one selected Freepik icon is required");
+  }
+  if (!categoryValue) {
+    return handleBadRequest("Element category is required");
   }
 
   const idempotencyKey = requestIdempotencyKey || sanitizeIdempotencyKey(body?.idempotencyKey);
@@ -182,6 +188,7 @@ async function createFreepikIconsJob(
     idempotencyKey,
     input: {
       selectedItems,
+      categoryValue,
       query: body?.query && typeof body.query === "object" ? body.query : {},
     },
   });
@@ -205,7 +212,7 @@ async function createFreepikBackgroundsJob(
 ): Promise<NextResponse> {
   const type = "freepik-backgrounds";
   const selectedItems = sanitizeFreepikSelectedItems(body?.selectedItems);
-  const categoryValue = sanitizeBackgroundCategoryValue(body?.categoryValue || body?.category);
+  const categoryValue = sanitizeCategoryValue(body?.categoryValue || body?.category);
   if (selectedItems.length === 0) {
     return handleBadRequest("At least one selected Freepik background is required");
   }

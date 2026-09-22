@@ -145,6 +145,12 @@ export interface EditorElement {
   points: number[];
   src: string;
   /**
+   * Video layers: still image of the clip's first frame (poster). Drawn until the video has
+   * decoded a frame and by every stage capture, so a video layer never rasterises empty into a
+   * thumbnail or preview poster. Set from the Canva import (`thumbnailUri`) or generated on upload.
+   */
+  posterSrc?: string;
+  /**
    * Original resolution-independent SVG source (`data:image/svg+xml`) for shapes placed from the
    * built-in catalog. `src` holds a rasterized PNG for crisp on-canvas display; this preserves the
    * vector so it can ship to mobile (assetKind:"vector") and stay sharp at any scale.
@@ -281,6 +287,12 @@ interface StageApi {
   exportPng: () => void;
   captureThumbnailDataUrl: () => string;
   /**
+   * The thumbnail a save ships (dashboard list + mobile cards): the active page at its FIRST
+   * frame — video layers are seeked to frame 0 for the capture and put back afterwards. "" from
+   * a hidden tab, where compositing is paused and a capture would be blank.
+   */
+  captureTemplateThumbnailDataUrl?: () => Promise<string>;
+  /**
    * Thumbnail for ANY page, including one never opened this session — renders it through the
    * hidden export stage without disturbing the visible canvas. Returns "" when unavailable.
    */
@@ -324,12 +336,19 @@ interface EditorClipboard {
   pasteCount: number;
 }
 
+/** One place a template sits in the taxonomy. The first pair is the primary placement. */
+export interface TemplateCategoryPair {
+  category: string;
+  subCategory: string;
+}
+
 interface TemplateMetaPatch {
   id?: string;
   name?: string;
   status?: TemplateLifecycleStatus;
   category?: string;
   subCategory?: string;
+  categories?: TemplateCategoryPair[];
   tags?: string[];
   isPremium?: boolean;
 }
@@ -345,14 +364,19 @@ interface EditorStore {
   previewGenerationActive: boolean;
   selectedIds: string[];
   publishCandidateIds: string[];
+  /** Element category the next Publish Elements run files its assets under. */
+  publishCategoryValue: string;
   importedElementsRefreshKey: number;
   clipboard: EditorClipboard | null;
   availableFontFamilies: string[];
   activeTemplateId: string;
   activeTemplateName: string;
   activeTemplateStatus: TemplateLifecycleStatus;
+  /** Primary placement — always mirrors activeTemplateCategories[0]. */
   activeTemplateCategory: string;
   activeTemplateSubCategory: string;
+  /** Every placement this template is filed under; at least one, primary first. */
+  activeTemplateCategories: TemplateCategoryPair[];
   activeTemplateTags: string[];
   /** Nayroz Pro-only template. Admin-set; see PATCH /api/templates action "setPremium". */
   activeTemplateIsPremium: boolean;
@@ -361,6 +385,8 @@ interface EditorStore {
   zoomPercent: number;
   showLeftSidebar: boolean;
   showRightSidebar: boolean;
+  /** Timeline strip collapsed to a slim scrub bar, giving the canvas back its height. */
+  timelineCollapsed: boolean;
   drawTool: DrawTool;
   drawStrokeWidth: number;
   drawColor: string;
@@ -376,6 +402,7 @@ interface EditorStore {
   setToolMode: (mode: ToolMode) => void;
   setShowLeftSidebar: (show: boolean) => void;
   setShowRightSidebar: (show: boolean) => void;
+  setTimelineCollapsed: (collapsed: boolean) => void;
   setDrawTool: (tool: DrawTool) => void;
   setDrawStrokeWidth: (value: number) => void;
   setDrawColor: (value: string) => void;
@@ -391,6 +418,7 @@ interface EditorStore {
   setPublishCandidateIds: (ids: string[]) => void;
   togglePublishCandidate: (id: string) => void;
   clearPublishCandidates: () => void;
+  setPublishCategoryValue: (value: string) => void;
   bumpImportedElementsRefreshKey: () => void;
   clearSelection: () => void;
   registerFontFamilies: (fontFamilies: string[]) => void;
@@ -747,6 +775,11 @@ function createFrameShapeFromMediaElement(element: EditorElement): FrameShape {
     };
   }
 
+  // A circle-masked image (mediaShape "circle" — the ellipse inscribed in its box) converts to
+  // the circle frame; it used to fall through to a square, so the photo changed shape on convert.
+  if (element.mediaShape === "circle") {
+    return { presetId: "frame-circle", kind: "circle" };
+  }
   const cornerRadius = Math.max(0, Number(element.cornerRadius || 0));
   return {
     presetId: cornerRadius > 0 ? "frame-rounded-square" : "frame-square",
@@ -863,6 +896,38 @@ function normalizeTemplateTags(tags: unknown): string[] {
     .filter(Boolean)
     .map((tag) => tag.toLowerCase());
   return Array.from(new Set(normalized));
+}
+
+function normalizeTemplateCategoryPairs(value: unknown): TemplateCategoryPair[] {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set<string>();
+  const pairs: TemplateCategoryPair[] = [];
+  value.forEach((entry) => {
+    const raw = entry as Partial<TemplateCategoryPair> | null;
+    const category = String(raw?.category || "").trim().toLowerCase();
+    if (!category) return;
+    const subCategory =
+      String(raw?.subCategory || "").trim().toLowerCase() || DEFAULT_TEMPLATE_SUBCATEGORY;
+    const key = `${category}::${subCategory}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    pairs.push({ category, subCategory });
+  });
+  return pairs;
+}
+
+/**
+ * Re-seat `pair` as the primary placement, keeping the rest of the list behind it. Used when a
+ * caller patches only the scalar category/subCategory — the other placements must survive.
+ */
+function withPrimaryCategoryPair(
+  pairs: TemplateCategoryPair[],
+  pair: TemplateCategoryPair
+): TemplateCategoryPair[] {
+  const rest = pairs.filter(
+    (item) => !(item.category === pair.category && item.subCategory === pair.subCategory)
+  );
+  return [pair, ...rest];
 }
 
 function normalizeElementTypeName(type: ElementType) {
@@ -1022,6 +1087,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   previewGenerationActive: false,
   selectedIds: [],
   publishCandidateIds: [],
+  publishCategoryValue: "",
   importedElementsRefreshKey: 0,
   clipboard: null,
   availableFontFamilies: [...DEFAULT_EDITOR_FONT_FAMILIES],
@@ -1030,6 +1096,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   activeTemplateStatus: "draft",
   activeTemplateCategory: DEFAULT_TEMPLATE_CATEGORY,
   activeTemplateSubCategory: DEFAULT_TEMPLATE_SUBCATEGORY,
+  activeTemplateCategories: [
+    { category: DEFAULT_TEMPLATE_CATEGORY, subCategory: DEFAULT_TEMPLATE_SUBCATEGORY },
+  ],
   activeTemplateTags: [],
   activeTemplateIsPremium: false,
   sidebarTab: "templates",
@@ -1037,6 +1106,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   zoomPercent: 100,
   showLeftSidebar: true,
   showRightSidebar: false,
+  timelineCollapsed: false,
   drawTool: "selection",
   drawStrokeWidth: 5,
   drawColor: "#111827",
@@ -1052,6 +1122,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setToolMode: (toolMode) => set({ toolMode }),
   setShowLeftSidebar: (showLeftSidebar) => set({ showLeftSidebar }),
   setShowRightSidebar: (showRightSidebar) => set({ showRightSidebar }),
+  setTimelineCollapsed: (timelineCollapsed) => set({ timelineCollapsed }),
   setDrawTool: (drawTool) => set({ drawTool }),
   setDrawStrokeWidth: (drawStrokeWidth) => set({ drawStrokeWidth: clamp(drawStrokeWidth, 1, 120) }),
   setDrawColor: (drawColor) => set({ drawColor }),
@@ -1118,6 +1189,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       return { publishCandidateIds: Array.from(next) };
     }),
   clearPublishCandidates: () => set({ publishCandidateIds: [] }),
+  setPublishCategoryValue: (value) =>
+    set({ publishCategoryValue: String(value || "").trim().toLowerCase() }),
   bumpImportedElementsRefreshKey: () =>
     set((state) => ({ importedElementsRefreshKey: state.importedElementsRefreshKey + 1 })),
   clearSelection: () => set({ selectedIds: [] }),
@@ -1126,30 +1199,55 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       availableFontFamilies: mergeFontFamilies(state.availableFontFamilies, fontFamilies),
     })),
   setTemplateMeta: (meta) =>
-    set((state) => ({
-      activeTemplateId:
-        typeof meta.id === "string" ? meta.id.trim() : state.activeTemplateId,
-      activeTemplateName:
-        typeof meta.name === "string" ? meta.name.trim() : state.activeTemplateName,
-      activeTemplateStatus:
-        meta.status === "published" || meta.status === "draft"
-          ? meta.status
-          : state.activeTemplateStatus,
-      activeTemplateCategory:
+    set((state) => {
+      // A patch can carry the full placement list, or just the scalar primary (the Category
+      // tab's two selects, and every legacy caller). Either way the two stay in sync:
+      // activeTemplateCategory/SubCategory is always activeTemplateCategories[0].
+      const patchedList = normalizeTemplateCategoryPairs(meta.categories);
+      const category =
         typeof meta.category === "string" && meta.category.trim()
           ? meta.category.trim().toLowerCase()
-          : state.activeTemplateCategory,
-      activeTemplateSubCategory:
+          : "";
+      const subCategory =
         typeof meta.subCategory === "string" && meta.subCategory.trim()
           ? meta.subCategory.trim().toLowerCase()
-          : state.activeTemplateSubCategory,
-      activeTemplateTags:
-        typeof meta.tags !== "undefined"
-          ? normalizeTemplateTags(meta.tags)
-          : state.activeTemplateTags,
-      activeTemplateIsPremium:
-        typeof meta.isPremium === "boolean" ? meta.isPremium : state.activeTemplateIsPremium,
-    })),
+          : "";
+
+      let categories = state.activeTemplateCategories;
+      if (patchedList.length > 0) {
+        categories = patchedList;
+      } else if (category || subCategory) {
+        categories = withPrimaryCategoryPair(state.activeTemplateCategories, {
+          category: category || state.activeTemplateCategory,
+          subCategory: subCategory || state.activeTemplateSubCategory,
+        });
+      }
+      if (categories.length === 0) {
+        categories = [
+          { category: DEFAULT_TEMPLATE_CATEGORY, subCategory: DEFAULT_TEMPLATE_SUBCATEGORY },
+        ];
+      }
+
+      return {
+        activeTemplateId:
+          typeof meta.id === "string" ? meta.id.trim() : state.activeTemplateId,
+        activeTemplateName:
+          typeof meta.name === "string" ? meta.name.trim() : state.activeTemplateName,
+        activeTemplateStatus:
+          meta.status === "published" || meta.status === "draft"
+            ? meta.status
+            : state.activeTemplateStatus,
+        activeTemplateCategories: categories,
+        activeTemplateCategory: categories[0].category,
+        activeTemplateSubCategory: categories[0].subCategory,
+        activeTemplateTags:
+          typeof meta.tags !== "undefined"
+            ? normalizeTemplateTags(meta.tags)
+            : state.activeTemplateTags,
+        activeTemplateIsPremium:
+          typeof meta.isPremium === "boolean" ? meta.isPremium : state.activeTemplateIsPremium,
+      };
+    }),
   clearTemplateMeta: () =>
     set({
       activeTemplateId: "",
@@ -1157,6 +1255,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       activeTemplateStatus: "draft",
       activeTemplateCategory: DEFAULT_TEMPLATE_CATEGORY,
       activeTemplateSubCategory: DEFAULT_TEMPLATE_SUBCATEGORY,
+      activeTemplateCategories: [
+        { category: DEFAULT_TEMPLATE_CATEGORY, subCategory: DEFAULT_TEMPLATE_SUBCATEGORY },
+      ],
       activeTemplateTags: [],
       activeTemplateIsPremium: false,
     }),
@@ -1600,8 +1701,13 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           type: "frame",
           name: element.name || (targetElement.type === "video" ? "Video frame" : "Image frame"),
           fill: "rgba(0,0,0,0)",
-          stroke: "rgba(0,0,0,0)",
-          strokeWidth: 0,
+          // The frame node draws its stroke along the mask path — the same place an image draws
+          // its border — so a real border carries over. A borderless image keeps the transparent
+          // zero stroke: the node falls back to `strokeWidth || 2`, which would otherwise paint
+          // the image's default stroke colour as an outline.
+          ...(Number(preparedElement.strokeWidth) > 0
+            ? { stroke: preparedElement.stroke, strokeWidth: Number(preparedElement.strokeWidth) }
+            : { stroke: "rgba(0,0,0,0)", strokeWidth: 0 }),
           frameShape: createFrameShapeFromMediaElement(preparedElement),
           frameContent: framePayload.content,
           frameContentTransform: normalizeFrameContentTransform(framePayload.transform),

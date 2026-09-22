@@ -113,6 +113,7 @@ async function runImportJobInternal(jobId) {
       result = await runFreepikImportForOwner({
         ownerId: claimed.ownerId,
         selectedItems: Array.isArray(input.selectedItems) ? input.selectedItems : [],
+        categoryValue: input.categoryValue,
         onProgress: async (message) => {
           await updateImportJobProgress(jobId, message);
         },

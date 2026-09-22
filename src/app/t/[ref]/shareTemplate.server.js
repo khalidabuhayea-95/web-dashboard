@@ -165,6 +165,7 @@ export const loadSharedTemplate = cache(async (rawRef) => {
       status: true,
       category: true,
       subCategory: true,
+      categories: true,
       canvasSize: true,
       thumbnailDataUrl: true,
       updatedAt: true,

@@ -54,6 +54,9 @@ Response:
 - `templatesBySubCategory`: grouped list
   - group fields: `category`, `categoryId`, `categoryValue`, `subCategory`, `subCategoryId`, `subCategoryValue`
   - `templates` entries are summary objects (no `project` payload)
+  - a template filed under several categories is repeated in each of its groups, and its flat
+    `category*`/`subCategory*` fields describe the group it is listed under (see
+    [Multi-category templates](#multi-category-templates))
   - if a generated MP4 preview exists, each template includes `previewVideoUrl` and `previewPosterUrl`
   - `previewVideoUrl` is a top-level alias for `preview.url`
   - `previewPosterUrl` is a top-level alias for `preview.posterUrl`
@@ -67,6 +70,8 @@ Response:
 - `template`: full mobile template object (includes `project`)
   - `category` and `subCategory` are localized labels
   - `categoryValue` and `subCategoryValue` are the stable taxonomy values
+  - `placements` lists every category the template is filed under (see
+    [Multi-category templates](#multi-category-templates))
   - `thumbnailUrl` is the single static preview image field
   - if a generated MP4 preview exists, use `template.preview.url` for motion-capable previews
   - use `template.preview.posterUrl` as the static fallback image when `template.preview.url` is present
@@ -166,7 +171,7 @@ Query params:
 - `subCategoryId` (required, GUID)
 - `query` (optional, name contains)
 - `tag` (optional, exact match)
-- `limit` (optional, default `100`, max `200`)
+- `templatesPerSubCategory` / `limit` (optional, default `10`, max `50`)
 
 Response:
 - `subCategories`
@@ -323,6 +328,48 @@ Status codes:
 ## Notes
 
 - Mobile app logic should use IDs (`template id`, `categoryId`, `subCategoryId`) and treat labels as display-only.
+
+## Seasonal boost (occasions)
+
+The dashboard keeps a calendar of Arabic and Islamic occasions (`/occasions`). Content linked
+to an occasion is surfaced first while the occasion's boost window is active
+(`boostLeadDays` before its start until its last day). Ordering is the only thing that
+changes — no payload field, no new endpoint, nothing hidden — so every shipped app build
+benefits without an update:
+
+- `/templates/by-subcategory`: linked templates lead their rail (in the order they were
+  linked), then the usual `updatedAt desc`. Drafts stay hidden for the public audience.
+- `/templates` and `/templates/search`: linked templates (and every template placed under a
+  linked category) are pinned to the front across pages; `total` and paging are unchanged.
+- `/templates/taxonomy`, `/element-categories`, `/background-categories`: categories linked to
+  the occasion move to the front of the list when the occasion has *Hoist linked categories*
+  on, so the app opens on the occasion.
+- `/elements` and `/background-categories/:id/images`: linked assets first, then assets in a
+  linked category, then recency.
+- `/ai-tools`: linked AI templates lead their category, and categories that are linked or hold a
+  linked template follow the Magic Tools section directly.
+
+Outside a boost window every route behaves exactly as documented above. Public responses
+are cached (`max-age=300`, `stale-while-revalidate=600`; catalog lists longer), plus a
+one-minute server-side snapshot, so a window starting or ending can take up to ~15 minutes
+to reach every client. Testers (`private, no-store`) see it within a minute.
+
+## Multi-category templates
+
+A template can be filed under several `{ category, subCategory }` placements at once, so the
+same design can appear in more than one rail (a wedding card under both *Invitations · Wedding*
+and *Events · Celebration*, say).
+
+- `placements[]` carries the full list, primary first. Each entry has `categoryId`,
+  `categoryValue`, `categoryLabel`, `subCategoryId`, `subCategoryValue` and `subCategoryLabel`.
+- The flat `category*` / `subCategory*` fields are unchanged and always populated, so a client
+  that ignores `placements` behaves exactly as before. In a grouped list they describe the group
+  the entry is listed under; elsewhere they describe the first placement that is still published.
+- Placements whose category or sub category is unpublished are omitted from `placements`, and a
+  template is visible as long as **one** of its placements survives the published taxonomy.
+- `categoryId` / `subCategoryId` filters match a template if **any** of its placements matches.
+- Pagination counts templates, not placements: `total` does not double-count a template that
+  appears in several groups.
 - Slug support on `:id` routes is compatibility-only and should not be used for new client logic.
 - Mobile request-signing helpers still exist in code, but the background-removal route is public for now.
 - Object removal now uses a single synchronous mobile endpoint instead of a create-and-poll job flow.

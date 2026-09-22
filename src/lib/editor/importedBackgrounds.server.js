@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
+import { buildAssetBoostOrderBy } from "@/lib/editor/assetBoostOrder";
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 120;
@@ -413,6 +414,9 @@ export async function listImportedBackgroundAssets(options = {}) {
   const safePage = Math.min(page, totalPages);
   const offset = (safePage - 1) * pageSize;
 
+  // Seasonal boost ordering — bound AFTER the count ran with the shared params, so the
+  // count statement never receives parameters it has no placeholders for.
+  const orderBySql = buildAssetBoostOrderBy(options.boost, nextParam);
   const limitParam = nextParam(pageSize);
   const offsetParam = nextParam(offset);
   const listSql = `
@@ -421,7 +425,7 @@ export async function listImportedBackgroundAssets(options = {}) {
     WHERE ${sourceSql}
     ${categorySql}
     ${premiumSql}
-    ORDER BY updated_at DESC
+    ${orderBySql}
     LIMIT ${limitParam}
     OFFSET ${offsetParam}
   `;
@@ -457,12 +461,13 @@ export async function listAllImportedBackgroundAssets(options = {}) {
 
   const sourceSql = source ? `source = ${nextParam(source)}` : "1=1";
   const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
+  const orderBySql = buildAssetBoostOrderBy(options.boost, nextParam);
   const listSql = `
     SELECT *
     FROM editor_background_assets
     WHERE ${sourceSql}
     ${categorySql}
-    ORDER BY updated_at DESC
+    ${orderBySql}
   `;
 
   const rows = await prisma.$queryRawUnsafe(listSql, ...params);
@@ -509,6 +514,42 @@ export async function countImportedBackgroundAssetsByCategory(options = {}) {
   return counts;
 }
 
+/**
+ * Removes every background filed under `categoryValues`, returning the storage URLs of the
+ * rows that were deleted so the caller can sweep them from R2.
+ *
+ * Used when a background category is deleted from the Categories page: without this the assets
+ * would survive in a category that no longer exists, invisible in the dashboard but still
+ * listed by the mobile endpoints.
+ */
+export async function deleteImportedBackgroundAssetsByCategories(categoryValues = []) {
+  await ensureImportedBackgroundsSchema();
+
+  const values = Array.from(
+    new Set(
+      (Array.isArray(categoryValues) ? categoryValues : [])
+        .map((value) => sanitizeCategoryFilter(value))
+        .filter(Boolean)
+    )
+  );
+  if (values.length === 0) return { deleted: 0, urls: [] };
+
+  const rows = await prisma.$queryRawUnsafe(
+    `
+      DELETE FROM editor_background_assets
+      WHERE LOWER(COALESCE(NULLIF(TRIM(category_value), ''), '')) = ANY($1::text[])
+      RETURNING id, asset_url, thumbnail_url
+    `,
+    values
+  );
+
+  const list = Array.isArray(rows) ? rows : [];
+  return {
+    deleted: list.length,
+    urls: list.flatMap((row) => [row?.asset_url, row?.thumbnail_url]).filter(Boolean).map(String),
+  };
+}
+
 export async function deleteImportedBackgroundAsset(options = {}) {
   await ensureImportedBackgroundsSchema();
 
@@ -535,7 +576,7 @@ export async function deleteImportedBackgroundAsset(options = {}) {
       DELETE FROM editor_background_assets
       WHERE id = $1::uuid
       ${ownerClause}
-      RETURNING id
+      RETURNING id, asset_url, thumbnail_url
     `,
     ...params
   );
@@ -547,6 +588,10 @@ export async function deleteImportedBackgroundAsset(options = {}) {
   return {
     deleted: true,
     id: String(rows[0]?.id || id),
+    // Returned so the caller can clean up storage — the row is gone, and without these the
+    // objects behind it would be stranded in R2 with nothing left pointing at them.
+    assetUrl: String(rows[0]?.asset_url || ""),
+    thumbnailUrl: String(rows[0]?.thumbnail_url || ""),
   };
 }
 

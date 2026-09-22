@@ -17,6 +17,7 @@ import {
   restorePublicObjectUrlFromClient,
   rewritePublicObjectUrlsForClient,
 } from "@/lib/storage/objectStorage.server";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 
 const IMPORTED_ELEMENTS_RATE_LIMIT = {
   limit: 120,
@@ -134,7 +135,12 @@ export async function DELETE(request: NextRequest) {
       return handleNotFound("Imported element");
     }
 
-    return NextResponse.json(result);
+    // Row first, then storage: the objects are only unreferenced once the row is gone.
+    const storage = await deleteStorageForUrls([result.assetUrl, result.thumbnailUrl], {
+      elementId: result.id,
+    });
+
+    return NextResponse.json({ ...result, deletedObjects: storage.deleted });
   } catch (error) {
     return handleApiError(
       error,

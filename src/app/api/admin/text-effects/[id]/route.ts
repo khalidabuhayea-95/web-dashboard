@@ -8,6 +8,7 @@ import {
   handleNotFound,
 } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import {
   MAX_TEXT_EFFECT_TITLE_LENGTH,
   normalizeTextEffectSpec,
@@ -138,7 +139,13 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
     if (!existing) return handleNotFound("Text effect");
 
     await prisma.textEffect.delete({ where: { id } });
-    logger.info("Text effect deleted", { userId: session.userId, slug: existing.slug });
+    // Row first, then storage: the images are only unreferenced once the row is gone.
+    const storage = await deleteStorageForUrls([existing.previewUrl], { slug: existing.slug });
+    logger.info("Text effect deleted", {
+      userId: session.userId,
+      slug: existing.slug,
+      deletedObjects: storage.deleted,
+    });
     return NextResponse.json({ ok: true, id, slug: existing.slug });
   } catch (error) {
     return handleApiError(error, "Failed to delete text effect");

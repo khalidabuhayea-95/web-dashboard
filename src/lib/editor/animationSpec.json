@@ -39,9 +39,11 @@
       "ASCEND",
       "BLOCK",
       "DISSOLVE",
+      "SUCCESSION",
       "WIPE",
       "GRADIENT_WIPE",
       "SLIDE",
+      "RISE",
       "ZOOM",
       "ZOOM_FADE",
       "CIRCUAL",
@@ -132,6 +134,7 @@
     {
       "type": "RISE",
       "tabs": [
+        "ENTRANCE",
         "EXIT",
         "LOOP"
       ],
@@ -149,7 +152,7 @@
         "en": "Rise"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }",
+        "kotlin": "        // One-shot RISE is Canva's ارتقاء, measured from their own export: 80px of travel and\n        // opacity 0 -> 1, both on a quadratic ease-out, the same distance at any layer size.\n        LayerAnimationType.RISE (one-shot) -> LayerAnimationVisualState(\n            translationY = -riseY * (1f - settle) * CANVA_RISE_TRAVEL_PX * intensity,\n            alphaMultiplier = settle.coerceIn(0f, 1f)\n        ) where settle = 1f - (1f - cycleProgress) * (1f - cycleProgress)\n        // An infinite RISE keeps the older height-proportional bob:\n        LayerAnimationType.RISE (infinite), LayerAnimationType.SHIFT -> LayerAnimationVisualState(\n            translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n            alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n        )",
         "sharesBranchWith": "SHIFT"
       }
     },
@@ -198,18 +201,18 @@
         "channels": {
           "opacity": [
             {
-              "frame": 5,
+              "frame": 0,
               "value": 0,
               "easing": [
-                0,
-                0,
-                0.41,
+                0.61,
+                1,
+                0.88,
                 1
               ],
               "hold": false
             },
             {
-              "frame": 25,
+              "frame": 35,
               "value": 1,
               "easing": null,
               "hold": false
@@ -351,6 +354,7 @@
     {
       "type": "SUCCESSION",
       "tabs": [
+        "ENTRANCE",
         "EXIT",
         "LOOP"
       ],
@@ -368,7 +372,7 @@
         "en": "Succession"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.SUCCESSION -> {\n            LayerAnimationVisualState(\n                scaleMultiplier = 0.82f + progress * 0.18f,\n                alphaMultiplier = (0.06f + progress * 0.94f).coerceIn(0f, 1f)\n            )\n        }"
+        "kotlin": "        // One-shot SUCCESSION is Canva's تتابع, measured from their own export: the layer\n        // resolves out of a flat 32px blur radius while the opacity rises dead straight.\n        LayerAnimationType.SUCCESSION (one-shot) -> LayerAnimationVisualState(\n            alphaMultiplier = cycleProgress.coerceIn(0f, 1f),\n            blurRadiusPx = maxOf(0f, CANVA_SUCCESSION_BLUR_PX * sharpen * intensity)\n        ) where sharpen = (1f - cycleProgress).pow(CANVA_SUCCESSION_BLUR_DECAY_EXPONENT)\n        // An infinite SUCCESSION keeps the older scale-and-fade pulse:\n        LayerAnimationType.SUCCESSION (infinite) -> LayerAnimationVisualState(\n            scaleMultiplier = 0.82f + progress * 0.18f,\n            alphaMultiplier = (0.06f + progress * 0.94f).coerceIn(0f, 1f)\n        )"
       }
     },
     {
