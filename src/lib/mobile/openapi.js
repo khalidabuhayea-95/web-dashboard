@@ -1168,6 +1168,10 @@ const schemas = {
           "CH_POSITION_FADE",
           "CH_SCALE_FADE",
           "CH_WIGGLE_Y",
+          "BLOCK",
+          "ASCEND",
+          "SHIFT",
+          "SKATE",
         ],
       },
       infinite: {
@@ -1203,13 +1207,75 @@ const schemas = {
           "EASE_IN_OUT",
         ],
       },
-      intensity: { type: "number" },
+      intensity: {
+        type: "number",
+        description:
+          "0..4. 1 is the picker's default. Canva imports store their Vd slider as 0.5 + Vd, the repeating-effect slider t as 0.5 + t, and Drift/Tectonic amplitude as px / 120.",
+      },
+      params: {
+        type: "object",
+        description:
+          "Exact Canva values written by the importer (docs/canva-animation-parity.md section 8.1). Finite numbers only; omitted when empty; unknown keys must be ignored. Absent = the type's plain formula, which is all a picker-made animation ever has. Picking a new effect drops them; editing duration or direction keeps them.",
+        additionalProperties: { type: "number" },
+        properties: {
+          concurrent: {
+            type: "number",
+            description:
+              "Loop slot: 1 = the loop runs alongside entrance/exit for the whole visible window and COMBINES with them (alpha/scale multiply, translation/rotation/blur add; mask, text reveal, glyph motion and bar come from the entrance/exit).",
+          },
+          phaseMs: { type: "number", description: "Loop slot: added to the layer-local clock of a concurrent loop." },
+          stackRotate: {
+            type: "number",
+            description: "Loop slot: an extra repeating Rotate on the same layer; value = cycle ms, negative = counter-clockwise.",
+          },
+          stackFlicker: { type: "number", description: "Loop slot: an extra repeating Flicker; value = cycle ms." },
+          stackPulse: { type: "number", description: "Loop slot: an extra repeating Pulse; value = cycle ms." },
+          stackWiggle: { type: "number", description: "Loop slot: an extra repeating Wiggle; value = cycle ms." },
+          stackFlickerT: { type: "number", description: "t = (Vd + 1) / 2 of the stacked Flicker (default 0.5)." },
+          stackWiggleT: { type: "number", description: "t = (Vd + 1) / 2 of the stacked Wiggle (default 0.5)." },
+          stackPhaseMs: { type: "number", description: "Clock offset for the stacked effects." },
+          r1From: { type: "number", description: "BREATHE/DRIFT/TECTONIC (concurrent): ramp start value (scale, or px)." },
+          r1To: { type: "number", description: "Ramp stage-1 end value." },
+          r1Start: { type: "number", description: "Ramp stage-1 start, layer-local ms." },
+          r1Dur: { type: "number", description: "Ramp stage-1 duration ms; <= 0 jumps to r1To." },
+          r1Ease: { type: "number", description: "Ramp stage-1 Canva easing id (1 linear, 4 easeInOutQuad)." },
+          r2To: { type: "number", description: "Ramp stage-2 end value (stage 2 runs r1To -> r2To)." },
+          r2Start: { type: "number", description: "Ramp stage-2 start, layer-local ms." },
+          r2Dur: { type: "number", description: "Ramp stage-2 duration ms; stage 2 exists only when present." },
+          r2Ease: { type: "number", description: "Ramp stage-2 Canva easing id." },
+          y1From: { type: "number", description: "BREATHE: vertical drift px at the ramp start (same timing as r1/r2)." },
+          y1To: { type: "number", description: "BREATHE: vertical drift px at the end of stage 1." },
+          y2To: { type: "number", description: "BREATHE: vertical drift px at the end of stage 2." },
+          fadeEase: { type: "number", description: "FADE: 1 = LINEAR in and out instead of the quadratic eases." },
+          unit: {
+            type: "number",
+            description: "FADE/BLUR/SUCCESSION/NEON writing style on text: 1 character, 2 word, 3 line (absent = whole element).",
+          },
+          fill: {
+            type: "number",
+            description: "Writing styles: 1 = stretch the per-unit schedule to fill the duration (an explicit Canva duration); else it only shrinks to fit.",
+          },
+          xh: { type: "number", description: "NEON/SCRAPBOOK/TUMBLE: Canva's sequence index (parity and hashes); replaces the layer index." },
+          seed: {
+            type: "number",
+            description: "WIGGLE, NEON units, stacked Wiggle: Canva's hash product P = w*h*max(top,1)*max(left,1); random(s) = abs(cos(s)*P) mod 1.",
+          },
+          startRotation: { type: "number", description: "TUMBLE: degrees; entrance start offset animated to 0, exit end offset animated from 0." },
+          travelX: { type: "number", description: "TUMBLE: px, same convention as startRotation." },
+          travelY: { type: "number", description: "TUMBLE: px, same convention as startRotation." },
+          startScale: { type: "number", description: "STOMP: the start scale s0." },
+          poses: { type: "number", description: "SCRAPBOOK: number of stamped poses g (2 or 3)." },
+          poseX: { type: "number", description: "SCRAPBOOK: x of the pose offset vector b, px." },
+          poseY: { type: "number", description: "SCRAPBOOK: y of the pose offset vector b, px." },
+          barColor: { type: "number", description: "BLOCK: bar colour as ARGB 0xAARRGGBB; absent = the text colour." },
+        },
+      },
     },
   },
   MobileLayerAnimations: {
     type: "object",
     description:
-      "The three independent animation slots. Entrance plays once as the layer appears, loop runs continuously in between, exit plays once as it leaves (reusing the entrance mapping in REVERSE). Slots are mutually exclusive at any instant, resolved exit -> entrance -> loop -> hold. Emitted ALONGSIDE the legacy single `animation` object, never instead of it: prefer `animations` when present and fall back to `animation`. Absent when no slot is set.",
+      "The three independent animation slots. Entrance plays once as the layer appears, loop runs continuously in between, exit plays once as it leaves (reusing the entrance mapping in REVERSE). Slots are mutually exclusive at any instant, resolved exit -> entrance -> loop -> hold — EXCEPT a loop whose params.concurrent is 1, which plays for the whole visible window alongside entrance/exit and composes with them. Emitted ALONGSIDE the legacy single `animation` object, never instead of it: prefer `animations` when present and fall back to `animation`. Absent when no slot is set.",
     properties: {
       entrance: { $ref: "#/components/schemas/MobileLayerAnimationSlot" },
       exit: { $ref: "#/components/schemas/MobileLayerAnimationSlot" },

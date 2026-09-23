@@ -91,8 +91,10 @@ import {
   type AnimationCategory,
 } from "@/lib/editor/animationSpec";
 import {
+  editAnimationSlotSpec,
+  hasExplicitAnimationSlots,
   isEmptyAnimationSlots,
-  makeAnimationSpec,
+  normalizeAnimationSlots,
   resolveElementAnimations,
   type EditorAnimationSlots,
 } from "@/lib/editor/animationSlots";
@@ -350,6 +352,7 @@ function renderAnimationSquare(options: {
 function AnimationSampleGlyph({ type }: { type: string }) {
   const purple = "#7c3aed";
   const purpleMid = "#8b5cf6";
+  const purpleLight = "#a78bfa";
   const purpleSoft = "#c4b5fd";
   const purplePale = "#e9ddff";
   const pink = "#fb7185";
@@ -360,42 +363,46 @@ function AnimationSampleGlyph({ type }: { type: string }) {
   const baseProps = { className, viewBox: "0 0 48 48", fill: "none" as const };
 
   switch (type) {
+    // Canva's Rise tile: the block on top of two fading ghost bands, arrow ↑ at the right.
     case "RISE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 16, y: 24, size: 16, fill: purpleMid, opacity: 0.28 })}
-          {renderAnimationSquare({ x: 16, y: 17, size: 16, fill: purpleMid, opacity: 0.52 })}
-          {renderAnimationSquare({ x: 16, y: 10, size: 16, fill: purpleMid })}
-          {renderAnimationArrow("M36 29v-11m0 0-3.5 3.5M36 18l3.5 3.5", stroke)}
+          {renderAnimationSquare({ x: 15, y: 22, size: 16, fill: purpleMid, opacity: 0.2, radius: 3.5 })}
+          {renderAnimationSquare({ x: 15, y: 16, size: 16, fill: purpleMid, opacity: 0.4, radius: 3.5 })}
+          {renderAnimationSquare({ x: 15, y: 10, size: 16, fill: purpleMid, radius: 3.5 })}
+          {renderAnimationArrow("M36 34V16m0 0-3.5 3.5M36 16l3.5 3.5", stroke)}
         </svg>
       );
+    // Canva's Pan tile: the block at the head of a three-stripe ghost trail, arrow → below.
     case "PAN":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 8, y: 12, size: 18, fill: purpleSoft, opacity: 0.55 })}
-          {renderAnimationSquare({ x: 14, y: 12, size: 18, fill: purpleSoft, opacity: 0.75 })}
-          {renderAnimationSquare({ x: 20, y: 12, size: 18, fill: purpleMid })}
-          {renderAnimationArrow("M16 35h14m0 0-3.5-3.5M30 35l-3.5 3.5", stroke)}
+          {renderAnimationSquare({ x: 8, y: 11, size: 18, fill: purpleSoft, opacity: 0.3, radius: 5 })}
+          {renderAnimationSquare({ x: 12, y: 11, size: 18, fill: purpleSoft, opacity: 0.5, radius: 5 })}
+          {renderAnimationSquare({ x: 16, y: 11, size: 18, fill: purpleSoft, opacity: 0.75, radius: 5 })}
+          {renderAnimationSquare({ x: 20, y: 11, size: 18, fill: purpleMid, radius: 5 })}
+          {renderAnimationArrow("M17 36h13m0 0-3.5-3.5M30 36l-3.5 3.5", stroke)}
         </svg>
       );
     // SHIFT is RISE mirrored — the block settles DOWNWARD, so the stack and arrow point down.
     case "SHIFT":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 16, y: 8, size: 16, fill: purpleMid, opacity: 0.28 })}
-          {renderAnimationSquare({ x: 16, y: 15, size: 16, fill: purpleMid, opacity: 0.52 })}
-          {renderAnimationSquare({ x: 16, y: 22, size: 16, fill: purpleMid })}
-          {renderAnimationArrow("M36 19v11m0 0-3.5-3.5M36 30l3.5-3.5", stroke)}
+          {renderAnimationSquare({ x: 15, y: 10, size: 16, fill: purpleMid, opacity: 0.2, radius: 3.5 })}
+          {renderAnimationSquare({ x: 15, y: 16, size: 16, fill: purpleMid, opacity: 0.4, radius: 3.5 })}
+          {renderAnimationSquare({ x: 15, y: 22, size: 16, fill: purpleMid, radius: 3.5 })}
+          {renderAnimationArrow("M36 14v18m0 0-3.5-3.5M36 32l3.5-3.5", stroke)}
         </svg>
       );
     // SKATE is PAN mirrored — the block glides in from the right, travelling left.
     case "SKATE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 24, y: 12, size: 18, fill: purpleSoft, opacity: 0.55 })}
-          {renderAnimationSquare({ x: 18, y: 12, size: 18, fill: purpleSoft, opacity: 0.75 })}
-          {renderAnimationSquare({ x: 12, y: 12, size: 18, fill: purpleMid })}
-          {renderAnimationArrow("M32 35H18m0 0 3.5-3.5M18 35l3.5 3.5", stroke)}
+          {renderAnimationSquare({ x: 22, y: 11, size: 18, fill: purpleSoft, opacity: 0.3, radius: 5 })}
+          {renderAnimationSquare({ x: 18, y: 11, size: 18, fill: purpleSoft, opacity: 0.5, radius: 5 })}
+          {renderAnimationSquare({ x: 14, y: 11, size: 18, fill: purpleSoft, opacity: 0.75, radius: 5 })}
+          {renderAnimationSquare({ x: 10, y: 11, size: 18, fill: purpleMid, radius: 5 })}
+          {renderAnimationArrow("M31 36H18m0 0 3.5-3.5M18 36l3.5 3.5", stroke)}
         </svg>
       );
     // ASCEND is the per-WORD rise: two word-bars lifting in, one leading the other.
@@ -416,29 +423,40 @@ function AnimationSampleGlyph({ type }: { type: string }) {
           <rect x="32" y="9" width="4" height="30" rx="1.5" fill={purpleSoft} opacity="0.55" />
         </svg>
       );
+    // Canva's Fade tile: one rounded block cut into four vertical stripes, light → solid.
     case "FADE":
       return (
         <svg {...baseProps}>
-          <rect x="10" y="11" width="9" height="24" rx="5" fill={purpleSoft} opacity="0.45" />
-          <rect x="16" y="11" width="9" height="24" rx="5" fill={purpleSoft} opacity="0.65" />
-          <rect x="22" y="11" width="9" height="24" rx="5" fill={purpleMid} opacity="0.82" />
-          <rect x="28" y="11" width="9" height="24" rx="5" fill={purpleMid} />
+          <path d="M18.6 13v22H17a4 4 0 0 1-4-4V17a4 4 0 0 1 4-4Z" fill={purpleMid} opacity="0.3" />
+          <rect x="18.4" y="13" width="5.7" height="22" fill={purpleMid} opacity="0.5" />
+          <rect x="23.9" y="13" width="5.7" height="22" fill={purpleMid} opacity="0.72" />
+          <path d="M29.4 13H31a4 4 0 0 1 4 4v14a4 4 0 0 1-4 4h-1.6Z" fill={purpleMid} />
         </svg>
       );
+    // Canva's Pop tile: a block with three nested inner squares and "(( ))" sound-wave arcs.
     case "POP":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 12, y: 12, size: 24, fill: purplePale, strokeColor: purpleSoft })}
-          {renderAnimationSquare({ x: 16, y: 16, size: 16, fill: purpleMid })}
-          {renderAnimationArrow("M6 24h3m30 0h3M24 6v3m0 30v3", pink)}
+          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: purpleMid, radius: 4 })}
+          {renderAnimationSquare({ x: 17.25, y: 17.25, size: 13.5, fill: purpleLight, radius: 3 })}
+          {renderAnimationSquare({ x: 19.5, y: 19.5, size: 9, fill: purpleSoft, radius: 2 })}
+          {renderAnimationSquare({ x: 21.5, y: 21.5, size: 5, fill: purplePale, radius: 1.2 })}
+          <path
+            d="M11.5 20.6a5 5 0 0 0 0 6.8M8.5 19.4a6.5 6.5 0 0 0 0 9.2M36.5 20.6a5 5 0 0 1 0 6.8M39.5 19.4a6.5 6.5 0 0 1 0 9.2"
+            fill="none"
+            stroke={purpleSoft}
+            strokeLinecap="round"
+            strokeWidth="1.6"
+          />
         </svg>
       );
+    // Canva's Wipe tile: solid left half, pale right half, the sweep bar standing at the split.
     case "WIPE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 11, y: 12, size: 24, fill: purpleSoft })}
-          <path d="M23 12h12v24H23z" fill={purpleMid} />
-          <line x1="23" y1="11" x2="23" y2="37" stroke="#6d28d9" strokeWidth="2" />
+          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleSoft, opacity: 0.6, radius: 4 })}
+          <path d="M24 13h-7a4 4 0 0 0-4 4v14a4 4 0 0 0 4 4h7Z" fill={purpleMid} />
+          <line x1="24" y1="9.5" x2="24" y2="38.5" stroke={purple} strokeWidth="1.8" strokeLinecap="round" />
         </svg>
       );
     // Gradient wipe — the same sweep, soft edge instead of a hard one. That soft edge is the only
@@ -448,126 +466,187 @@ function AnimationSampleGlyph({ type }: { type: string }) {
         <svg {...baseProps}>
           <defs>
             <linearGradient id="anim-wipe-soft" x1="0" y1="0" x2="1" y2="0">
-              <stop offset="0%" stopColor={purpleMid} stopOpacity="0" />
-              <stop offset="100%" stopColor={purpleMid} stopOpacity="0.95" />
+              <stop offset="0%" stopColor={purpleMid} stopOpacity="1" />
+              <stop offset="45%" stopColor={purpleMid} stopOpacity="1" />
+              <stop offset="100%" stopColor={purpleMid} stopOpacity="0" />
             </linearGradient>
           </defs>
-          {renderAnimationSquare({ x: 11, y: 12, size: 24, fill: purpleSoft })}
-          <path d="M17 12h18v24H17z" fill="url(#anim-wipe-soft)" />
+          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleSoft, opacity: 0.6, radius: 4 })}
+          <path d="M31 13H17a4 4 0 0 0-4 4v14a4 4 0 0 0 4 4h14Z" fill="url(#anim-wipe-soft)" />
         </svg>
       );
+    // Canva's Blur tile: nothing but a blurred block. An SVG filter, not a CSS one, so it also
+    // survives static rasterisers.
     case "BLUR":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleMid })}
-          <rect x="13" y="13" width="22" height="22" rx="8" fill={purpleMid} opacity="0.68" style={{ filter: "blur(3px)" }} />
+          <defs>
+            <filter id="anim-blur-soft" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="2.6" />
+            </filter>
+          </defs>
+          <rect x="14" y="14" width="20" height="20" rx="4" fill={purpleMid} filter="url(#anim-blur-soft)" />
         </svg>
       );
+    // Canva's Succession tile: the blurred block with four corner arrows pointing outward.
     case "SUCCESSION":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 13, y: 13, size: 22, fill: purpleMid, opacity: 0.18 })}
-          <rect x="13" y="13" width="22" height="22" rx="8" fill={purpleMid} opacity="0.5" style={{ filter: "blur(2px)" }} />
-          {renderAnimationArrow("M12 14l-3 3m0-3h3M36 14l3 3m-3 0h3M12 34l-3-3m0 3h3M36 34l3-3m-3 0h3", stroke)}
+          <defs>
+            <filter id="anim-succession-soft" x="-40%" y="-40%" width="180%" height="180%">
+              <feGaussianBlur stdDeviation="2.2" />
+            </filter>
+          </defs>
+          <rect x="15" y="15" width="18" height="18" rx="4" fill={purpleMid} filter="url(#anim-succession-soft)" />
+          {renderAnimationArrow("M12.5 12.5 8 8m0 0h3.6M8 8v3.6M35.5 12.5 40 8m0 0h-3.6M40 8v3.6M12.5 35.5 8 40m0 0h3.6M8 40v-3.6M35.5 35.5 40 40m0 0h-3.6M40 40v-3.6", stroke)}
         </svg>
       );
+    // Canva's Breathe tile: the nested block with four corner arrows pointing outward.
     case "BREATHE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 11, y: 11, size: 26, fill: "none", strokeColor: purpleSoft, radius: 10 })}
-          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: "none", strokeColor: purpleMid, radius: 8 })}
-          {renderAnimationSquare({ x: 19, y: 19, size: 10, fill: purpleMid, radius: 4 })}
-          {renderAnimationArrow("M10 10l-3-3m0 3V7M38 10l3-3v3h-3M10 38l-3 3h3v-3M38 38l3 3v-3h-3", stroke)}
+          {renderAnimationSquare({ x: 16, y: 16, size: 16, fill: purpleMid, radius: 3.5 })}
+          {renderAnimationSquare({ x: 18, y: 18, size: 12, fill: purpleLight, radius: 2.6 })}
+          {renderAnimationSquare({ x: 20, y: 20, size: 8, fill: purpleSoft, radius: 1.8 })}
+          {renderAnimationSquare({ x: 22, y: 22, size: 4, fill: purplePale, radius: 1 })}
+          {renderAnimationArrow("M13.5 13.5 9 9m0 0h3.4M9 9v3.4M34.5 13.5 39 9m0 0h-3.4M39 9v3.4M13.5 34.5 9 39m0 0h3.4M9 39v-3.4M34.5 34.5 39 39m0 0h-3.4M39 39v-3.4", stroke)}
         </svg>
       );
+    // Canva's Baseline tile: the block on top of three fading ghost bands that shorten as they
+    // sink (contiguous, no gaps), the baseline hugging the last band. The ghosts stack, so their
+    // opacities are chosen for the COMPOSITED bands: ≈0.6 / 0.4 / 0.2 over white.
     case "BASELINE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 16, y: 24, size: 16, fill: purpleMid, opacity: 0.28 })}
-          {renderAnimationSquare({ x: 16, y: 17, size: 16, fill: purpleMid, opacity: 0.52 })}
-          {renderAnimationSquare({ x: 16, y: 10, size: 16, fill: purpleMid })}
-          <line x1="10" y1="36" x2="38" y2="36" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          {renderAnimationSquare({ x: 16.5, y: 22.5, size: 15, fill: purpleMid, opacity: 0.2, radius: 3.2 })}
+          {renderAnimationSquare({ x: 16.5, y: 19, size: 15, fill: purpleMid, opacity: 0.25, radius: 3.2 })}
+          {renderAnimationSquare({ x: 16.5, y: 14.5, size: 15, fill: purpleMid, opacity: 0.33, radius: 3.2 })}
+          {renderAnimationSquare({ x: 16.5, y: 8.5, size: 15, fill: purpleMid, radius: 3.2 })}
+          <line x1="14" y1="39" x2="34" y2="39" stroke={stroke} strokeWidth="1.8" strokeLinecap="round" />
         </svg>
       );
+    // Canva's Drift tile: ONE pale slab — the travel range — with the block sitting on it right of
+    // centre (a wide pale margin to its left, a sliver to its right), arrow → below. Not a stripe
+    // trail: that is what tells it from Pan/Tectonic at a glance.
     case "DRIFT":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 10, y: 15, size: 18, fill: purpleSoft, opacity: 0.72 })}
-          {renderAnimationSquare({ x: 20, y: 15, size: 18, fill: purpleMid })}
-          {renderAnimationArrow("M13 35h15m0 0-3.5-3.5M28 35l-3.5 3.5", stroke)}
+          <rect x="8" y="11" width="30" height="18" rx="4" fill={purpleSoft} opacity="0.5" />
+          {renderAnimationSquare({ x: 17, y: 11, size: 18, fill: purpleMid, radius: 4 })}
+          {renderAnimationArrow("M17 36h13m0 0-3.5-3.5M30 36l-3.5 3.5", stroke)}
         </svg>
       );
-    // Tectonic is plates splitting apart, not another trail — the trail version was unreadable
-    // next to Drift and Pan at tile size.
+    // Canva's Tectonic tile: a three-stripe trail like Pan's, but cut unevenly — one wide pale
+    // stripe far from the block, two thin ones hugging it (≈ ½ / ⅙ / ⅙ of the block) — arrow → below.
+    // The ghosts stack, so the opacities are picked for the COMPOSITED stripes: ≈ .28 / .5 / .73.
     case "TECTONIC":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 6, y: 13, size: 15, fill: purpleMid, radius: 5 })}
-          {renderAnimationSquare({ x: 27, y: 13, size: 15, fill: purpleMid, opacity: 0.72, radius: 5 })}
-          {renderAnimationArrow("M20 36H9m0 0 3.5-3.5M9 36l3.5 3.5M28 36h11m0 0-3.5-3.5M39 36l-3.5 3.5", stroke)}
+          {renderAnimationSquare({ x: 6, y: 11, size: 18, fill: purpleSoft, opacity: 0.28, radius: 4 })}
+          {renderAnimationSquare({ x: 15.3, y: 11, size: 18, fill: purpleSoft, opacity: 0.32, radius: 4 })}
+          {renderAnimationSquare({ x: 18.2, y: 11, size: 18, fill: purpleSoft, opacity: 0.45, radius: 4 })}
+          {renderAnimationSquare({ x: 21, y: 11, size: 18, fill: purpleMid, radius: 4 })}
+          {renderAnimationArrow("M16 36h13m0 0-3.5-3.5M29 36l-3.5 3.5", stroke)}
         </svg>
       );
+    // Canva's Tumble tile: a fan of three ghost blocks behind the settled one, a clockwise arc above.
     case "TUMBLE":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 12, y: 13, size: 18, fill: purpleSoft, opacity: 0.65, rotate: -16 })}
-          {renderAnimationSquare({ x: 20, y: 15, size: 18, fill: purpleMid, rotate: 6 })}
-          {renderAnimationArrow("M12 11c4-4 12-5 18 0m0 0-1.5-3m1.5 3-3 1.5", stroke)}
+          {renderAnimationSquare({ x: 10, y: 18, size: 14, fill: purpleSoft, opacity: 0.45, radius: 3, rotate: -38 })}
+          {renderAnimationSquare({ x: 13.5, y: 19.5, size: 14, fill: purpleSoft, opacity: 0.65, radius: 3, rotate: -25 })}
+          {renderAnimationSquare({ x: 17, y: 21, size: 14, fill: purpleSoft, opacity: 0.85, radius: 3, rotate: -12 })}
+          {renderAnimationSquare({ x: 21, y: 22, size: 14, fill: purpleMid, radius: 3 })}
+          {renderAnimationArrow("M24 11c4-2 9-1 12 6.5m0 0 .6-4.2M36 17.5l-3.3-2.6", stroke)}
         </svg>
       );
+    // Canva's Neon tile: the lit block, its unlit outline behind it to the lower-right, spark ticks.
     case "NEON":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 18, y: 18, size: 12, fill: purpleMid })}
-          {renderAnimationSquare({ x: 15, y: 15, size: 18, fill: "none", strokeColor: purpleMid })}
-          {renderAnimationSquare({ x: 20, y: 20, size: 12, fill: "none", strokeColor: pinkSoft, radius: 4 })}
-          {renderAnimationArrow("M9 22h3m-1.5-1.5V23.5M36 22h3m-1.5-1.5V23.5", pink)}
+          {renderAnimationSquare({ x: 21, y: 21, size: 13, fill: "none", strokeColor: purpleSoft, radius: 3 })}
+          {renderAnimationSquare({ x: 15, y: 15, size: 13, fill: purpleMid, radius: 3 })}
+          {renderAnimationArrow("M8.5 24h2.5M9.4 20.4l1.8 1.8M9.4 27.6l1.8-1.8M37 24h2.5M38.8 20.4 37 22.2M38.8 27.6 37 25.8", purple)}
         </svg>
       );
+    // Canva's Scrapbook tile: two pale stamps on the diagonal behind the settled block — the one
+    // above-left leans clockwise, the one below-right counter-clockwise; the block itself is square.
     case "SCRAPBOOK":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 11, y: 12, size: 18, fill: purpleSoft, opacity: 0.7, rotate: -18 })}
-          {renderAnimationSquare({ x: 20, y: 16, size: 18, fill: purpleMid, rotate: 2 })}
+          {renderAnimationSquare({ x: 13, y: 11, size: 13, fill: purpleSoft, opacity: 0.8, radius: 3, rotate: 20 })}
+          {renderAnimationSquare({ x: 23.5, y: 22.5, size: 12.5, fill: purpleSoft, opacity: 0.8, radius: 3, rotate: -20 })}
+          {renderAnimationSquare({ x: 17, y: 16.5, size: 15, fill: purpleMid, radius: 3.5 })}
         </svg>
       );
+    // Canva's Stomp tile: the landed block inside two concentric outlines, corner arrows pointing in.
     case "STOMP":
       return (
         <svg {...baseProps}>
-          {renderAnimationSquare({ x: 13, y: 15, size: 22, fill: purpleMid, radius: 7 })}
-          {renderAnimationArrow("M10 10l3.5 3.5M38 10l-3.5 3.5M10 38l3.5-3.5M38 38l-3.5-3.5", purpleSoft)}
+          {renderAnimationSquare({ x: 12.6, y: 12.6, size: 22.8, fill: "none", strokeColor: purplePale, radius: 6.8 })}
+          {renderAnimationSquare({ x: 15.5, y: 15.5, size: 17, fill: "none", strokeColor: purpleSoft, radius: 4.8 })}
+          {renderAnimationSquare({ x: 18.5, y: 18.5, size: 11, fill: purpleMid, radius: 2.8 })}
+          {renderAnimationArrow("M7 7l5 5m0 0h-3.4M12 12V8.6M41 7l-5 5m0 0h3.4M36 12V8.6M7 41l5-5m0 0h-3.4M12 36v3.4M41 41l-5-5m0 0h3.4M36 36v3.4", stroke)}
         </svg>
       );
+    // Canva's Rotate tile: the disc with two clockwise arcs chasing each other around it.
     case "ROTATE":
       return (
         <svg {...baseProps}>
-          <circle cx="24" cy="24" r="12" fill={purpleMid} />
-          {renderAnimationArrow("M13 13c2-2.5 5.5-4 9.5-4m0 0-2.5-2m2.5 2-1.2 3", stroke)}
-          {renderAnimationArrow("M35 35c-2 2.5-5.5 4-9.5 4m0 0 2.5 2m-2.5-2 1.2-3", stroke)}
+          <circle cx="24" cy="24" r="11" fill={purpleMid} />
+          {renderAnimationArrow("M8.2 21.2A16 16 0 0 1 29.5 9m0 0-2.6-3.1M29.5 9l-3.9.7M39.8 26.8A16 16 0 0 1 18.5 39m0 0 2.6 3.1M18.5 39l3.9-.7", stroke)}
         </svg>
       );
+    // Canva's Flicker tile: the disc cut into four vertical stripes, light on the left to solid on
+    // the right — the same ramp as the Fade square, on a disc.
     case "FLICKER":
       return (
         <svg {...baseProps}>
-          <path d="M24 10c7.7 0 14 6.3 14 14s-6.3 14-14 14V10Z" fill={purpleMid} />
-          <path d="M24 10c-7.7 0-14 6.3-14 14s6.3 14 14 14V10Z" fill={purpleSoft} />
+          <defs>
+            <clipPath id="anim-flicker-disc">
+              <circle cx="24" cy="24" r="12" />
+            </clipPath>
+          </defs>
+          <g clipPath="url(#anim-flicker-disc)">
+            <rect x="12" y="12" width="6.2" height="24" fill={purpleMid} opacity="0.3" />
+            <rect x="18" y="12" width="6.2" height="24" fill={purpleMid} opacity="0.5" />
+            <rect x="24" y="12" width="6.2" height="24" fill={purpleMid} opacity="0.72" />
+            <rect x="30" y="12" width="6.2" height="24" fill={purpleMid} />
+          </g>
         </svg>
       );
+    // Canva's Pulse tile: a bullseye of four rings with corner arrows pointing outward.
     case "PULSE":
       return (
         <svg {...baseProps}>
-          <circle cx="24" cy="24" r="13" fill="none" stroke={purpleSoft} strokeWidth="4" />
-          <circle cx="24" cy="24" r="8.5" fill="none" stroke={purpleMid} strokeWidth="4" />
-          <circle cx="24" cy="24" r="4.5" fill={purpleSoft} />
-          {renderAnimationArrow("M10 10l-3-3M38 10l3-3M10 38l-3 3M38 38l3 3", stroke)}
+          <circle cx="24" cy="24" r="9" fill={purpleMid} />
+          <circle cx="24" cy="24" r="6.6" fill={purpleLight} />
+          <circle cx="24" cy="24" r="4.4" fill={purpleSoft} />
+          <circle cx="24" cy="24" r="2.2" fill={purplePale} />
+          {renderAnimationArrow("M13 13 8.5 8.5m0 0h3.6M8.5 8.5v3.6M35 13l4.5-4.5m0 0h-3.6M39.5 8.5v3.6M13 35l-4.5 4.5m0 0h3.6M8.5 39.5v-3.6M35 35l4.5 4.5m0 0h-3.6M39.5 39.5v-3.6", stroke)}
         </svg>
       );
+    // Canva's Wiggle tile: the disc with a tangential squiggle at its upper-right and lower-left.
     case "WIGGLE":
       return (
         <svg {...baseProps}>
-          <circle cx="24" cy="24" r="12" fill={purpleMid} />
-          <path d="M9 17c2 1 2 5 4 6 1 1 1 3-1 4" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
-          <path d="M39 31c-2-1-2-5-4-6-1-1-1-3 1-4" fill="none" stroke={stroke} strokeWidth="2" strokeLinecap="round" />
+          <circle cx="24" cy="24" r="9.5" fill={purpleMid} />
+          <path
+            d="M0 0c1-2 3-2 4 0s3 2 4 0 3-2 4 0"
+            fill="none"
+            stroke={stroke}
+            strokeLinecap="round"
+            strokeWidth="1.8"
+            transform="translate(30.5 8.5) rotate(45)"
+          />
+          <path
+            d="M0 0c1-2 3-2 4 0s3 2 4 0 3-2 4 0"
+            fill="none"
+            stroke={stroke}
+            strokeLinecap="round"
+            strokeWidth="1.8"
+            transform="translate(10 29) rotate(45)"
+          />
         </svg>
       );
     // Zoom family — a core square with a ghost ring growing out of it, plus outward corner ticks.
@@ -1616,6 +1695,13 @@ function toEditorDesignFromTemplate(
         blendMode: toEditorBlendMode(item.blendMode),
         timelineStartMs: Math.max(0, toNumber(item.timelineStartMs, 0)),
         timelineEndMs: Math.max(0, toNumber(item.timelineEndMs, defaultTimelineEndMsFor(item))),
+        // The explicit three-slot object the Canva importer stores ({entrance, exit, loop}) is the
+        // authoritative animation — resolveElementAnimations falls back to the legacy
+        // mediaAnimation* mirror below ONLY when it is absent. This mapping used to copy the
+        // mirror alone, so a RISE entrance + ROTATE loop opened in the editor as RISE by itself.
+        ...(hasExplicitAnimationSlots(item.animations)
+          ? { animations: normalizeAnimationSlots(item.animations) }
+          : {}),
         mediaAnimationType: normalizeAnimationType(item.mediaAnimationType || item.animationType || undefined),
         mediaAnimationMode: normalizeAnimationMode(item.mediaAnimationMode || item.animationMode || undefined),
         mediaAnimationInfinite: normalizeAnimationInfinite(
@@ -2685,13 +2771,13 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
           });
           return;
         }
-        // Picking a NEW type resets the slot to that type's own defaults; tweaking a control
-        // keeps the rest of the spec as-is.
-        const base = current && current.type === nextType ? current : { type: nextType };
+        // Picking a NEW type resets the slot to that type's own defaults (and drops an import's
+        // Canva params, which belonged to the old type); tweaking a control keeps the rest of the
+        // spec as-is, params included.
         updateElement(element.id, {
           animations: {
             ...slots,
-            [animationSlotKey]: makeAnimationSpec({ ...base, ...patch, type: nextType }, animationSlot),
+            [animationSlotKey]: editAnimationSlotSpec(current, { ...patch, type: nextType }, animationSlot),
           },
         });
         appliedAnimation = true;
@@ -6054,14 +6140,23 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
         .editor-animation-panel .animation-sample-pop {
           animation-name: samplePop;
+          animation-direction: normal;
+          animation-duration: 1.7s;
+          animation-timing-function: ease-out;
         }
 
         .editor-animation-panel .animation-sample-wipe {
           animation-name: sampleWipe;
+          animation-direction: normal;
+          animation-duration: 1.7s;
+          animation-timing-function: cubic-bezier(0.2, 0.7, 0.3, 1);
         }
 
         .editor-animation-panel .animation-sample-blur {
           animation-name: sampleBlur;
+          animation-direction: normal;
+          animation-duration: 1.7s;
+          animation-timing-function: ease-out;
         }
 
         .editor-animation-panel .animation-sample-succession {
@@ -6070,35 +6165,54 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
         .editor-animation-panel .animation-sample-breathe {
           animation-name: sampleBreathe;
-          animation-duration: 1.8s;
+          animation-duration: 2.4s;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-baseline {
           animation-name: sampleBaseline;
+          animation-direction: normal;
+          animation-duration: 1.7s;
+          animation-timing-function: cubic-bezier(0.16, 1, 0.3, 1);
         }
 
         .editor-animation-panel .animation-sample-drift {
           animation-name: sampleDrift;
+          animation-duration: 2.6s;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-tectonic {
           animation-name: sampleTectonic;
+          animation-duration: 3s;
         }
 
         .editor-animation-panel .animation-sample-tumble {
           animation-name: sampleTumble;
+          animation-direction: normal;
+          animation-duration: 1.8s;
+          animation-timing-function: cubic-bezier(0.22, 0.8, 0.3, 1);
         }
 
         .editor-animation-panel .animation-sample-neon {
           animation-name: sampleNeon;
+          animation-direction: normal;
+          animation-duration: 2.2s;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-scrapbook {
           animation-name: sampleScrapbook;
+          animation-direction: normal;
+          animation-duration: 2s;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-stomp {
           animation-name: sampleStomp;
+          animation-direction: normal;
+          animation-duration: 1.7s;
+          animation-timing-function: cubic-bezier(0.6, 0, 0.9, 0.4);
         }
 
         .editor-animation-panel .animation-sample-rotate {
@@ -6110,18 +6224,22 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
         .editor-animation-panel .animation-sample-flicker {
           animation-name: sampleFlicker;
-          animation-duration: 0.9s;
+          animation-duration: 1.1s;
           animation-direction: normal;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-pulse {
           animation-name: samplePulse;
-          animation-duration: 1.4s;
+          animation-duration: 1.35s;
+          animation-direction: normal;
+          animation-timing-function: linear;
         }
 
         .editor-animation-panel .animation-sample-wiggle {
           animation-name: sampleWiggle;
-          animation-duration: 1.15s;
+          animation-duration: 1.6s;
+          animation-direction: normal;
         }
 
         @keyframes sampleFade {
@@ -6203,45 +6321,54 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         }
 
         @keyframes samplePop {
-          0%,
-          100% {
-            transform: scale(0.84);
-            opacity: 0.74;
+          0% {
+            transform: scale(0.2);
+            opacity: 0.4;
           }
-          50% {
-            transform: scale(1.08);
+          15% {
+            opacity: 1;
+          }
+          40% {
+            transform: scale(1.22);
+          }
+          55% {
+            transform: scale(0.92);
+          }
+          70% {
+            transform: scale(1.05);
+          }
+          82%,
+          100% {
+            transform: scale(1);
             opacity: 1;
           }
         }
 
         @keyframes sampleWipe {
-          0%,
-          100% {
-            transform: scaleX(0.72);
-            opacity: 0.65;
+          0% {
+            clip-path: inset(0 100% 0 0);
           }
-          50% {
-            transform: scaleX(1);
-            opacity: 1;
+          60%,
+          100% {
+            clip-path: inset(0 0 0 0);
           }
         }
 
         @keyframes sampleBlur {
-          0%,
-          100% {
-            transform: scale(0.96);
-            opacity: 0.45;
-            filter: blur(1.8px);
+          0% {
+            opacity: 0;
+            filter: blur(5px);
           }
-          50% {
-            transform: scale(1);
+          65%,
+          100% {
             opacity: 1;
-            filter: blur(0px);
+            filter: blur(0);
           }
         }
 
-        /* One-shot Succession resolves out of a blur, which is what two of its three tabs play;
-           only an infinite one still pulses in scale. The tile shows the blur. */
+        /* Succession resolves out of a blur (the loop tab additionally pulses scale, which the
+           tile does not show). Scrapbook holds three discrete stamps: the paired percentages are
+           0.01 % apart on purpose, so each pose snaps instead of tweening. */
         @keyframes sampleSuccession {
           0%,
           100% {
@@ -6255,121 +6382,129 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         }
 
         @keyframes sampleBreathe {
-          0%,
-          100% {
+          0% {
             transform: scale(0.9);
-            opacity: 0.85;
           }
-          50% {
+          100% {
             transform: scale(1.04);
-            opacity: 1;
           }
         }
 
         @keyframes sampleBaseline {
-          0%,
+          0% {
+            transform: translateY(14px);
+            clip-path: inset(0 0 14px 0);
+          }
+          60%,
           100% {
-            transform: translateY(3px) scale(0.94);
-          }
-          45% {
-            transform: translateY(-7px) scale(1.01);
-          }
-          65% {
-            transform: translateY(-2px) scale(0.98);
+            transform: translateY(0);
+            clip-path: inset(0 0 0 0);
           }
         }
 
         @keyframes sampleDrift {
-          0%,
-          100% {
-            transform: translateX(-4px) translateY(1px);
-            opacity: 0.62;
+          0% {
+            transform: translateX(-6px);
           }
-          50% {
-            transform: translateX(6px) translateY(-1px);
-            opacity: 1;
+          100% {
+            transform: translateX(6px);
           }
         }
 
         @keyframes sampleTectonic {
-          0%,
-          100% {
-            transform: translateX(-8px) scaleX(0.88);
-            opacity: 0.6;
+          0% {
+            transform: translateX(-7px);
           }
-          50% {
-            transform: translateX(5px) scaleX(1);
-            opacity: 1;
+          100% {
+            transform: translateX(3.5px);
           }
         }
 
         @keyframes sampleTumble {
-          0%,
-          100% {
-            transform: rotate(-14deg) translateY(1px) scale(0.94);
-            opacity: 0.7;
+          0% {
+            transform: translate(-16px, 4px) rotate(-150deg);
+            opacity: 0;
           }
-          50% {
-            transform: rotate(10deg) translateY(-3px) scale(1.03);
+          20% {
+            opacity: 1;
+          }
+          65%,
+          100% {
+            transform: translate(0, 0) rotate(0deg);
             opacity: 1;
           }
         }
 
         @keyframes sampleNeon {
-          0%,
-          100% {
-            transform: scale(0.95);
-            opacity: 0.84;
-            filter: drop-shadow(0 0 0 rgba(251, 113, 133, 0));
+          0% {
+            opacity: 0;
           }
-          50% {
-            transform: scale(1.04);
+          13.6%,
+          18.2% {
             opacity: 1;
-            filter: drop-shadow(0 0 5px rgba(251, 113, 133, 0.45));
+          }
+          22.7%,
+          27.2% {
+            opacity: 0;
+          }
+          27.3%,
+          36.3% {
+            opacity: 1;
+          }
+          36.4%,
+          59.1% {
+            opacity: 0;
+          }
+          72.7%,
+          100% {
+            opacity: 1;
           }
         }
 
         @keyframes sampleScrapbook {
           0%,
-          100% {
-            transform: rotate(-7deg) translateX(-2px);
+          28% {
+            transform: translate(4px, 0) rotate(5deg);
           }
-          50% {
-            transform: rotate(5deg) translateX(3px);
+          28.01%,
+          56% {
+            transform: translate(0, 4px) rotate(-4.5deg);
+          }
+          56.01%,
+          84% {
+            transform: translate(4px, 0) rotate(3.5deg);
+          }
+          84.01%,
+          100% {
+            transform: translate(0, 0) rotate(0deg);
           }
         }
 
         @keyframes sampleStomp {
-          0%,
-          100% {
-            transform: scale(0.82);
-            opacity: 0.7;
+          0% {
+            transform: scale(2.4);
+            opacity: 0;
           }
-          35% {
-            transform: scale(1.08);
+          30% {
             opacity: 1;
           }
-          55% {
-            transform: scale(0.96);
+          55%,
+          100% {
+            transform: scale(1);
+            opacity: 1;
           }
         }
 
         @keyframes sampleFlicker {
-          0%,
+          0% {
+            opacity: 1;
+          }
+          41%,
+          59% {
+            opacity: 0.35;
+          }
           100% {
             opacity: 1;
-          }
-          20% {
-            opacity: 0.4;
-          }
-          40% {
-            opacity: 1;
-          }
-          60% {
-            opacity: 0.25;
-          }
-          80% {
-            opacity: 0.9;
           }
         }
 
@@ -6383,25 +6518,41 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         }
 
         @keyframes samplePulse {
-          0%,
+          0% {
+            transform: scale(1);
+          }
+          16.7% {
+            transform: scale(1.15);
+          }
+          83.3% {
+            transform: scale(0.85);
+          }
           100% {
-            transform: scale(0.92);
-          }
-          30% {
-            transform: scale(1.05);
-          }
-          60% {
-            transform: scale(0.96);
+            transform: scale(1);
           }
         }
 
         @keyframes sampleWiggle {
-          0%,
-          100% {
-            transform: rotate(-6deg);
+          0% {
+            transform: translate(0, 0) rotate(0deg);
           }
-          50% {
-            transform: rotate(6deg);
+          18% {
+            transform: translate(3px, -2px) rotate(5deg);
+          }
+          36% {
+            transform: translate(-2.5px, 2.5px) rotate(-3deg);
+          }
+          54% {
+            transform: translate(2px, 3px) rotate(6deg);
+          }
+          72% {
+            transform: translate(-3px, -1px) rotate(-4deg);
+          }
+          88% {
+            transform: translate(1.5px, -2.5px) rotate(3deg);
+          }
+          100% {
+            transform: translate(0, 0) rotate(0deg);
           }
         }
 

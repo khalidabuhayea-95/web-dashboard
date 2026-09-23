@@ -549,7 +549,9 @@ function mapLayerAnimation(item, slots) {
       delayMs: Math.max(0, Math.round(numberOr(item?.mediaAnimationDelayMs, 0))),
       direction: mapLayerAnimationDirection(item?.mediaAnimationDirection),
       easing: mapLayerAnimationEasing(item?.mediaAnimationEasing),
-      intensity: clamp(numberOr(item?.mediaAnimationIntensity, 1), 0, 2),
+      // 0..4 like the slots (docs/canva-animation-parity.md §3/§8.1): Drift/Tectonic carry their
+      // amplitude on intensity, and the app's own clamp is 0.1..4.
+      intensity: clamp(numberOr(item?.mediaAnimationIntensity, 1), 0, 4),
     };
   }
 
@@ -562,7 +564,7 @@ function mapLayerAnimation(item, slots) {
     delayMs: Math.max(0, Math.round(numberOr(fallback?.delayMs, 0))),
     direction: mapLayerAnimationDirection(fallback?.direction),
     easing: mapLayerAnimationEasing(fallback?.easing),
-    intensity: clamp(numberOr(fallback?.intensity, 1), 0, 2),
+    intensity: clamp(numberOr(fallback?.intensity, 1), 0, 4),
   };
 }
 
@@ -633,8 +635,26 @@ function mapAnimationSlotSpec(spec, category) {
     delayMs: Math.max(0, Math.round(numberOr(spec.delayMs, defaults.delayMs))),
     direction: normalizeSpecDirection(spec.direction ?? defaults.direction),
     easing: normalizeSpecEasing(spec.easing ?? defaults.easing),
-    intensity: clamp(numberOr(spec.intensity, defaults.intensity), 0, 2),
+    // 0..4, not 0..2: a Canva import stores Drift/Tectonic's amplitude on intensity
+    // (amplitude_px = 120 × intensity, docs/canva-animation-parity.md §3), and a single drifting
+    // element on a story page is 270 px → 2.25. Clamping at 2 silently shortened it.
+    intensity: clamp(numberOr(spec.intensity, defaults.intensity), 0, 4),
+    ...mapAnimationSlotParams(spec.params),
   };
+}
+
+/**
+ * The importer's exact Canva values on a slot (docs/canva-animation-parity.md §8.1): every FINITE
+ * number is emitted as-is, and the key is omitted when none is left — the app's model treats an
+ * absent map as empty and ignores keys it does not know.
+ */
+function mapAnimationSlotParams(params) {
+  if (!params || typeof params !== "object" || Array.isArray(params)) return {};
+  const finite = {};
+  for (const [key, value] of Object.entries(params)) {
+    if (typeof value === "number" && Number.isFinite(value)) finite[key] = value;
+  }
+  return Object.keys(finite).length > 0 ? { params: finite } : {};
 }
 
 /**

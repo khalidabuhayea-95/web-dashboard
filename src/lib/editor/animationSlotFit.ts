@@ -3,15 +3,20 @@
  *
  * Canva's effects do not line up one-for-one with ours, so the importer maps each of its presets
  * onto the closest thing we have. That mapping ignored WHICH tab the result belongs to, and the
- * three tabs are not interchangeable: Pan, Drift, Tectonic, Stomp and Tumble are Loop and Exit
- * effects here, never entrances. A Canva entrance mapped onto one of those therefore landed in the
- * Entrance slot holding an effect that tab does not offer. The editor could not show it as
- * selected, and the app was handed an entrance it does not list either.
+ * three tabs are not interchangeable: Drift and Tectonic are Loop and Exit effects here, never
+ * entrances, and the typewriter family only ever enters. A Canva entrance mapped onto one of those
+ * therefore landed in the Entrance slot holding an effect that tab does not offer. The editor could
+ * not show it as selected, and the app was handed an entrance it does not list either.
  *
  * So the mapping happens in two steps now: the importer picks the closest effect by FEEL, and this
  * picks the closest effect that tab actually offers. Playback is not gated on the catalogs — an old
  * project holding one of these still renders — so this runs at IMPORT time only. It never rewrites
  * a choice a designer made by hand, because the picker can only ever offer legal types.
+ *
+ * Canva's own enter/exit family (docs/canva-animation-parity.md §7) is offered in the tabs Canva
+ * offers it in, so Pan, Blur, Baseline, Tumble, Neon, Scrapbook and Stomp are entrances in their
+ * own right and Pop, Baseline, Neon and Scrapbook are exits: an imported Canva animation keeps its
+ * own effect there instead of being swapped for a look-alike.
  */
 import { ANIMATION_CATALOG, type AnimationCategory } from "./animationSpec";
 
@@ -23,18 +28,15 @@ import { ANIMATION_CATALOG, type AnimationCategory } from "./animationSpec";
  * because the impact is the part worth keeping. A drop arrives as Ascend, the per-word rise.
  */
 const ENTRANCE_SUBSTITUTES: Record<string, string> = {
-  // RISE and SUCCESSION are not here any more: the Entrance tab offers both now, so a Canva Rise
-  // or Succession keeps its own effect instead of being swapped for ASCEND, which is the per-WORD
-  // rise — a different motion, and one that does nothing at all on a layer that is not text.
+  // The Canva family is not here: the Entrance tab offers Rise, Pan, Succession, Blur, Baseline,
+  // Tumble, Neon, Scrapbook and Stomp now, so an imported Canva entrance keeps its own effect
+  // instead of being swapped for a look-alike (ASCEND is the per-WORD rise — a different motion,
+  // and one that does nothing at all on a layer that is not text).
   DROP: "ASCEND",
   SHIFT: "SLIDE",
   SKATE: "SLIDE",
-  PAN: "SLIDE",
   DRIFT: "SLIDE",
   TECTONIC: "SLIDE",
-  STOMP: "POP",
-  TUMBLE: "POP",
-  SCRAPBOOK: "POP",
   PULSE: "POP",
   BOUNCE: "POP",
   WAVE: "POP",
@@ -45,23 +47,18 @@ const ENTRANCE_SUBSTITUTES: Record<string, string> = {
   RANDOM: "POP",
   BREATHE: "ZOOM",
   ZOOM_LOOP: "ZOOM",
-  NEON: "DISSOLVE",
-  BLUR: "DISSOLVE",
   FLICKER: "DISSOLVE",
-  BASELINE: "CH_POSITION_FADE",
   CH_WIGGLE_Y: "CH_POSITION_FADE",
 };
 
 const EXIT_SUBSTITUTES: Record<string, string> = {
-  POP: "ZOOM",
+  // Pop, Baseline, Neon and Scrapbook are exits now (Canva offers them on the way out), so they
+  // keep their own effect and are not listed here.
   BREATHE: "ZOOM",
-  SCRAPBOOK: "ZOOM",
   PULSE: "ZOOM",
   BOUNCE: "ZOOM",
   ZOOM_LOOP: "ZOOM",
   DROP: "RISE",
-  BASELINE: "ASCEND",
-  NEON: "DISSOLVE",
   FLICKER: "DISSOLVE",
   WAVE: "FADE",
   SHAKE: "FADE",
@@ -161,8 +158,13 @@ export function fitImportedAnimationsToCategories(data: unknown): number {
 
     const layer = node as Record<string, unknown>;
 
-    // The three-slot shape: each slot is fitted against its own tab.
-    const slots = layer.animations as Record<string, { type?: unknown }> | null | undefined;
+    // The three-slot shape: each slot is fitted against its own tab. A spec's `params` are Canva's
+    // exact numbers FOR ITS TYPE (docs/canva-animation-parity.md §8.1): they stay with a type that
+    // is kept and go with one that is swapped for a look-alike, which would misread them.
+    const slots = layer.animations as
+      | Record<string, { type?: unknown; params?: unknown }>
+      | null
+      | undefined;
     if (slots && typeof slots === "object" && !Array.isArray(slots)) {
       for (const [slot, category] of [
         ["entrance", "ENTRANCE"],
@@ -174,6 +176,7 @@ export function fitImportedAnimationsToCategories(data: unknown): number {
         const fitted = fitAnimationTypeToCategory(spec.type, category);
         if (fitted !== String(spec.type || "").trim().toUpperCase()) {
           spec.type = fitted;
+          delete spec.params;
           changed += 1;
         }
       }

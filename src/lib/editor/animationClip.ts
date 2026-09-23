@@ -7,10 +7,31 @@
  * so GRADIENT_* reads like its hard twin here (documented parity gap, not a bug).
  */
 export type ClipMaskKind = "WIPE" | "CIRCLE" | "RADIAL";
+
+/**
+ * The edge a WIPE band grows out of, in the layer's own (content) space. Absent = LEFT. Canva's
+ * Wipe grows from the edge the motion starts at, its Baseline reveals the part of the content
+ * inside the layer's home box and its Block hides the text behind a bar, so those masks name an
+ * edge AND set `anchored` (docs/canva-animation-parity.md §8.3 item 2).
+ */
+export type RevealEdge = "LEFT" | "RIGHT" | "TOP" | "BOTTOM";
+
 export interface ClipMask {
   kind: ClipMaskKind;
   progress: number;
   startAngleDegrees?: number;
+  edge?: RevealEdge;
+  /**
+   * The edge is absolute. Without it a text renderer mirrors LEFT/RIGHT for right-to-left text, so
+   * the legacy typewriter/word/line reveals uncover Arabic from the right — the app's rule too.
+   */
+  anchored?: boolean;
+}
+
+function mirroredForRtl(edge: RevealEdge): RevealEdge {
+  if (edge === "LEFT") return "RIGHT";
+  if (edge === "RIGHT") return "LEFT";
+  return edge;
 }
 
 interface Ctx2D {
@@ -24,16 +45,31 @@ interface Ctx2D {
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
 
 /**
- * Draws the reveal region for [mask] into [ctx]. [rtl] flips a WIPE so Arabic uncovers from the
- * right, matching the content-derived direction the mobile renderer uses.
+ * Draws the reveal region for [mask] into [ctx]. A WIPE grows out of its `edge` (LEFT when absent);
+ * for right-to-left text ([rtl]) LEFT and RIGHT swap unless the mask is `anchored`, so a legacy
+ * reveal uncovers Arabic from the right while Canva's Wipe, Baseline and Block keep their edge.
+ * Media layers pass `rtl = false`.
  */
 export function drawRevealClip(ctx: Ctx2D, mask: ClipMask, w: number, h: number, rtl: boolean): void {
   const p = clamp01(mask.progress);
   switch (mask.kind) {
     case "WIPE": {
-      const revealed = p * w;
-      if (rtl) ctx.rect(w - revealed, 0, revealed, h);
-      else ctx.rect(0, 0, revealed, h);
+      const base: RevealEdge = mask.edge ?? "LEFT";
+      const edge: RevealEdge = rtl && !mask.anchored ? mirroredForRtl(base) : base;
+      switch (edge) {
+        case "LEFT":
+          ctx.rect(0, 0, p * w, h);
+          return;
+        case "RIGHT":
+          ctx.rect(w - p * w, 0, p * w, h);
+          return;
+        case "TOP":
+          ctx.rect(0, 0, w, p * h);
+          return;
+        case "BOTTOM":
+          ctx.rect(0, h - p * h, w, p * h);
+          return;
+      }
       return;
     }
     case "CIRCLE": {

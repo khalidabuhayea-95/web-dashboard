@@ -3,16 +3,18 @@
  *
  * `__fixtures__/mobileAnimationGolden.json` is generated FROM the mobile Kotlin runtime — every
  * LayerAnimationType sampled across { infinite×{f,t} } × { exiting×{f,t} } × 5 progresses × 2
- * sizes (2000 rows). This test feeds the identical grid through the web port and asserts every
- * field matches. If a formula, an easing, a reveal mask, a glyph channel or the new BLOCK bar
- * drifts from mobile, exactly one row fails and names the type.
+ * sizes (2000 rows), at layerIndex GOLDEN_LAYER_INDEX. This test feeds the identical grid through
+ * the web port and asserts every field matches. If a formula, an easing, a reveal mask (its
+ * anchored edge included), a glyph channel or the BLOCK bar drifts from mobile, exactly one row
+ * fails and names the type.
  *
  * CAVEAT — the fixture is a SNAPSHOT, so it only proves parity with mobile as of its capture.
- * Mobile added DISSOLVE's blur (LayerAnimationVisualRuntime.withNayrozAnimationBlur) AFTER this
- * file was generated, and the stale rows kept passing against a web port that had no blur at all —
- * a green suite hid a real difference for weeks. Those DISSOLVE `blur` values were recomputed from
- * that Kotlin formula on 2026-09-22; every other column is still mobile's own output. Regenerate
- * the whole fixture from the mobile runtime whenever its animation code changes.
+ * Mobile once added DISSOLVE's blur AFTER a capture and the stale rows kept passing against a web
+ * port that had no blur at all — a green suite hid a real difference for weeks. Regenerate the
+ * whole fixture from the mobile runtime whenever its animation code changes: a throwaway JUnit
+ * test in the mobile repo (shared/src/androidUnitTest/.../tmpgolden/) that walks this exact grid
+ * through resolveLayerAnimationVisualState(playback, w, h, layerIndex) and dumps raw rows, then a
+ * script that rounds every number to 4 dp (last regenerated 2026-09-23, Canva parity pass).
  */
 import test from "node:test";
 import assert from "node:assert/strict";
@@ -27,13 +29,32 @@ import golden from "./__fixtures__/mobileAnimationGolden.json";
 
 const TOL = 0.005; // golden is rounded to 4dp; real drift is >>this.
 
+/**
+ * The z-index every golden row was sampled at (TmpGoldenTest on the mobile side passes the same
+ * constant). Index parity steers TUMBLE's side, SCRAPBOOK's stamp signs and NEON's intro/outro
+ * schedule, so both platforms must be fed the identical value.
+ */
+const GOLDEN_LAYER_INDEX = 0;
+
 type GoldenRow = {
   k: string;
   s: number; sx: number; sy: number; rot: number; tx: number; ty: number; a: number; blur: number;
-  mask: null | { kind: string; progress: number; featherFraction?: number; startAngleDegrees?: number };
+  mask: null | {
+    kind: string;
+    progress: number;
+    featherFraction?: number;
+    startAngleDegrees?: number;
+    edge?: string;
+    anchored?: boolean;
+  };
   text: null | { progress: number; mode: string; durationMs: number };
   glyph: null | { type: string; progress: number; durationMs: number };
-  bar: null | { leftFraction: number; widthFraction: number };
+  bar: null | {
+    leftFraction: number;
+    widthFraction: number;
+    topFraction?: number;
+    heightFraction?: number;
+  };
 };
 
 function near(a: number, b: number, what: string) {
@@ -82,7 +103,8 @@ for (const [type, typeRows] of byType) {
         Number(progress),
         Number(w),
         Number(h),
-        exiting === "true"
+        exiting === "true",
+        GOLDEN_LAYER_INDEX
       );
       const at = `${row.k}`;
       near(st.scaleMultiplier, row.s, `${at} scale`);
@@ -106,6 +128,16 @@ for (const [type, typeRows] of byType) {
         } else {
           near((st.revealMask as { featherFraction: number }).featherFraction, row.mask.featherFraction!, `${at} mask.feather`);
         }
+        if (row.mask.kind === "WIPE") {
+          // Mobile always carries an edge (LEFT by default); the web leaves the default implicit.
+          const webEdge = (st.revealMask as { edge?: string }).edge ?? "LEFT";
+          assert.equal(webEdge, row.mask.edge, `${at} mask.edge`);
+          // §8.3 item 2: rows generated after the anchored-mask change carry the flag.
+          if (row.mask.anchored !== undefined) {
+            const webAnchored = Boolean((st.revealMask as { anchored?: boolean }).anchored);
+            assert.equal(webAnchored, row.mask.anchored, `${at} mask.anchored`);
+          }
+        }
       }
       // textReveal
       if (row.text === null) assert.equal(st.textReveal, null, `${at} text: mobile null`);
@@ -123,10 +155,11 @@ for (const [type, typeRows] of byType) {
         near(st.glyphMotion!.progress, row.glyph.progress, `${at} glyph.progress`);
       }
       // overlayBar (BLOCK)
+      // §8.3 item 3 added topFraction/heightFraction (the full-box bar); older rows lack them.
       compareObj(
         st.overlayBar as unknown as Record<string, number> | null,
         row.bar as unknown as Record<string, number> | null,
-        ["leftFraction", "widthFraction"],
+        row.bar ? Object.keys(row.bar).filter((key) => key.endsWith("Fraction")) : [],
         `${at} bar`
       );
     }

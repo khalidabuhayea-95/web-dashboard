@@ -21,6 +21,9 @@ import {
   buildFabricData,
   createImportedTemplate,
   normalizeCanvasInput,
+  resolveImportCanvasScale,
+  scaleEditorDataLayerTree,
+  scaleFabricDataToCanvas,
 } from "@/lib/tools/canvaImportTemplate";
 import { hydrateFabricRasterPalettes } from "@/lib/tools/rasterPalette.server";
 import {
@@ -1574,13 +1577,6 @@ export async function POST(request) {
   try {
   const rawImageDataUrl = String(body?.imageDataUrl || "");
   const rawThumbnailDataUrl = String(body?.thumbnailDataUrl || body?.imageDataUrl || "");
-  const rawFabricData = normalizeFabricDataOrigins(body?.fabricData);
-  const editorData = body?.editorData;
-  const sourceUrl = String(body?.sourceUrl || "").trim();
-  const title = parseTitle(body?.title);
-  const canvaKeywords = Array.isArray(body?.canvaKeywords) ? body.canvaKeywords : [];
-  const requestedName = String(body?.name || "").trim() || title;
-  const requestedSlug = String(body?.slug || "").trim();
   const dimensions = normalizeCanvasInput({
     width: body?.canvasWidth,
     height: body?.canvasHeight,
@@ -1588,6 +1584,18 @@ export async function POST(request) {
     sourceHeight: body?.sourceHeight,
     maxDimension: body?.maxDimension || 1920,
   });
+  // The extension lays layers out in the Canva page's own pixels; when the clamp above shrinks
+  // the canvas, the layers (and the layer-tree bounds describing them) must shrink with it, or
+  // the stored template holds page-sized geometry on a smaller canvas — off-centre and clipped in
+  // the editor and the app alike (see scaleFabricDataToCanvas). A no-op when nothing was clamped.
+  const canvasScale = resolveImportCanvasScale(dimensions);
+  const rawFabricData = scaleFabricDataToCanvas(normalizeFabricDataOrigins(body?.fabricData), canvasScale);
+  const editorData = scaleEditorDataLayerTree(body?.editorData, canvasScale);
+  const sourceUrl = String(body?.sourceUrl || "").trim();
+  const title = parseTitle(body?.title);
+  const canvaKeywords = Array.isArray(body?.canvaKeywords) ? body.canvaKeywords : [];
+  const requestedName = String(body?.name || "").trim() || title;
+  const requestedSlug = String(body?.slug || "").trim();
   const hasRawFabricData =
     rawFabricData &&
     typeof rawFabricData === "object" &&

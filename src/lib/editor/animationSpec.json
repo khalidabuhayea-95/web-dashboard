@@ -49,7 +49,14 @@
       "CIRCUAL",
       "CIRCUAL_GRADIENT",
       "RADIAL",
-      "RADIAL_GRADIENT"
+      "RADIAL_GRADIENT",
+      "PAN",
+      "BLUR",
+      "BASELINE",
+      "TUMBLE",
+      "NEON",
+      "SCRAPBOOK",
+      "STOMP"
     ],
     "exit": [
       "NONE",
@@ -75,7 +82,11 @@
       "SHIFT",
       "SKATE",
       "ASCEND",
-      "BLOCK"
+      "BLOCK",
+      "POP",
+      "BASELINE",
+      "NEON",
+      "SCRAPBOOK"
     ],
     "loop": [
       "NONE",
@@ -139,45 +150,54 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 900,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "UP",
-        "easing": "SOFT_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "صعود",
+        "ar": "ارتقاء",
         "en": "Rise"
       },
       "formula": {
-        "kotlin": "        // One-shot RISE is Canva's ارتقاء, measured from their own export: 80px of travel and\n        // opacity 0 -> 1, both on a quadratic ease-out, the same distance at any layer size.\n        LayerAnimationType.RISE (one-shot) -> LayerAnimationVisualState(\n            translationY = -riseY * (1f - settle) * CANVA_RISE_TRAVEL_PX * intensity,\n            alphaMultiplier = settle.coerceIn(0f, 1f)\n        ) where settle = 1f - (1f - cycleProgress) * (1f - cycleProgress)\n        // An infinite RISE keeps the older height-proportional bob:\n        LayerAnimationType.RISE (infinite), LayerAnimationType.SHIFT -> LayerAnimationVisualState(\n            translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n            alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n        )",
+        "kotlin": "        // RISE settles upward, SHIFT downward — the same reveal, mirrored, which is exactly what\n        // the direction vector expresses. The `takeIf` fallbacks matter: a spec carrying\n        // direction=DEFAULT resolves to a ZERO vector, and multiplying by it would leave the\n        // effect motionless. RISE historically ignored direction entirely and always rose, so UP\n        // is its fallback and its rendering is unchanged. (A one-shot RISE is Canva's ارتقاء and\n        // never reaches here — see resolveCanvaOneShotVisualState; this is the loop bob.)\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }",
         "sharesBranchWith": "SHIFT"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // RISE (default UP) and PAN (default RIGHT) are one tween: 80px in from the start side on\n        // easeOutQuad with the opacity; out on easeInQuad, still travelling the same way. SHIFT\n        // (DOWN) and SKATE (LEFT) are the same tween mirrored.\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT,\n        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val start = canvaStartOffset(direction)\n            if (entering) {\n                val e = canvaEaseOutQuad(p)\n                LayerAnimationVisualState(\n                    alphaMultiplier = e,\n                    translationX = start.x * CANVA_RISE_TRAVEL_PX * (1f - e),\n                    translationY = start.y * CANVA_RISE_TRAVEL_PX * (1f - e)\n                )\n            } else {\n                val e = canvaEaseInQuad(u)\n                LayerAnimationVisualState(\n                    alphaMultiplier = 1f - e,\n                    translationX = -start.x * CANVA_RISE_TRAVEL_PX * e,\n                    translationY = -start.y * CANVA_RISE_TRAVEL_PX * e\n                )\n            }\n        }",
+        "sharesBranchWith": "SHIFT, PAN, SKATE"
       }
     },
     {
       "type": "PAN",
       "tabs": [
+        "ENTRANCE",
         "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 900,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "RIGHT",
-        "easing": "SOFT_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تمرير",
+        "ar": "تأرجح",
         "en": "Pan"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }",
+        "kotlin": "        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }",
         "sharesBranchWith": "SKATE"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // RISE (default UP) and PAN (default RIGHT) are one tween: 80px in from the start side on\n        // easeOutQuad with the opacity; out on easeInQuad, still travelling the same way. SHIFT\n        // (DOWN) and SKATE (LEFT) are the same tween mirrored.\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT,\n        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val start = canvaStartOffset(direction)\n            if (entering) {\n                val e = canvaEaseOutQuad(p)\n                LayerAnimationVisualState(\n                    alphaMultiplier = e,\n                    translationX = start.x * CANVA_RISE_TRAVEL_PX * (1f - e),\n                    translationY = start.y * CANVA_RISE_TRAVEL_PX * (1f - e)\n                )\n            } else {\n                val e = canvaEaseInQuad(u)\n                LayerAnimationVisualState(\n                    alphaMultiplier = 1f - e,\n                    translationX = -start.x * CANVA_RISE_TRAVEL_PX * e,\n                    translationY = -start.y * CANVA_RISE_TRAVEL_PX * e\n                )\n            }\n        }",
+        "sharesBranchWith": "RISE, SHIFT, SKATE"
       }
     },
     {
@@ -187,105 +207,49 @@
         "EXIT"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "EASE_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
-      "authoredCurves": {
-        "durationFrames": 35,
-        "fps": 25,
-        "durationMs": 1400,
-        "channels": {
-          "opacity": [
-            {
-              "frame": 0,
-              "value": 0,
-              "easing": [
-                0.61,
-                1,
-                0.88,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 35,
-              "value": 1,
-              "easing": null,
-              "hold": false
-            }
-          ]
-        }
-      },
+      "authoredCurves": null,
       "label": {
         "ar": "تلاشي",
         "en": "Fade"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.FADE -> {\n            val alpha = (0.04f + progress * 0.96f).coerceIn(0f, 1f)\n            LayerAnimationVisualState(alphaMultiplier = alpha)\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // easeOutQuad in, easeInQuad out — or LINEAR both ways when the importer says Canva faded\n        // linearly (`fadeEase` 1: Tectonic's fades, Drift on video pages).\n        LayerAnimationType.FADE -> {\n            val linear = animation.param(CanvaAnimationParams.FADE_EASE) == 1.0\n            LayerAnimationVisualState(\n                alphaMultiplier = when {\n                    entering && linear -> p\n                    entering -> canvaEaseOutQuad(p)\n                    linear -> 1f - u\n                    else -> 1f - canvaEaseInQuad(u)\n                },\n                glyphMotion = writingStyle\n            )\n        }"
       }
     },
     {
       "type": "POP",
       "tabs": [
-        "ENTRANCE"
+        "ENTRANCE",
+        "EXIT"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "EASE_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
-      "authoredCurves": {
-        "durationFrames": 35,
-        "fps": 25,
-        "durationMs": 1400,
-        "channels": {
-          "scale": [
-            {
-              "frame": 5,
-              "value": 0,
-              "easing": [
-                0.167,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 20,
-              "value": 1,
-              "easing": null,
-              "hold": false
-            }
-          ],
-          "rotation": [
-            {
-              "frame": 5,
-              "value": -180,
-              "easing": [
-                0,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 20,
-              "value": 0,
-              "easing": null,
-              "hold": false
-            }
-          ]
-        }
-      },
+      "authoredCurves": null,
       "label": {
         "ar": "انبثاق",
         "en": "Pop"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.POP -> LayerAnimationVisualState(\n            scaleMultiplier = 0.7f + progress * 0.3f,\n            alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n        )"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // Scale only — no opacity, no spin. In overshoots to ~1.28 on elasticOut; out collapses\n        // to 0 on elasticIn: `1 + (0 - 1) · elasticIn(u)`.\n        LayerAnimationType.POP -> LayerAnimationVisualState(\n            scaleMultiplier = if (entering) canvaElasticOut(p) else 1f - canvaElasticIn(u)\n        )"
       }
     },
     {
@@ -295,60 +259,50 @@
         "EXIT"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "RIGHT",
-        "easing": "EASE_OUT",
-        "intensity": 1,
-        "supportsInfinite": true
-      },
-      "authoredCurves": {
-        "durationFrames": 35,
-        "fps": 25,
-        "durationMs": 1400,
-        "channels": {
-          "maskProgress": [
-            {
-              "frame": 5,
-              "value": 0,
-              "easing": null,
-              "hold": false
-            },
-            {
-              "frame": 20,
-              "value": 1,
-              "easing": null,
-              "hold": false
-            }
-          ]
-        }
-      },
-      "label": {
-        "ar": "مسح",
-        "en": "Wipe"
-      }
-    },
-    {
-      "type": "BLUR",
-      "tabs": [
-        "EXIT",
-        "LOOP"
-      ],
-      "default": {
-        "durationMs": 900,
-        "delayMs": 0,
-        "direction": "DEFAULT",
-        "easing": "SOFT_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "نعومة",
-        "en": "Soften"
+        "ar": "المسح",
+        "en": "Wipe"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.WIPE -> {\n            if (abs(vector.x) > 0f) {\n                LayerAnimationVisualState(\n                    scaleXMultiplier = progress.coerceAtLeast(0.001f),\n                    translationX = if (vector.x < 0f) width * (1f - progress) else 0f,\n                    revealMask = LayerRevealMaskSpec.Wipe(progress = progress)\n                )\n            } else {\n                LayerAnimationVisualState(\n                    scaleYMultiplier = progress.coerceAtLeast(0.001f),\n                    translationY = if (vector.y < 0f) height * (1f - progress) else 0f,\n                    revealMask = LayerRevealMaskSpec.Wipe(progress = progress)\n                )\n            }\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // A pure clip reveal; the content never moves. In: the HOME-box band grows from the edge\n        // the motion starts at, on easeOutCubic over the WHOLE duration — Canva caps only its\n        // default window, never an explicit one, and the importer computes that window (§8.0).\n        // Out: the band keeps sweeping the same way (the trailing part disappears first) on\n        // easeInCubic, and the opacity drops to 0 only at the very end. The band is ANCHORED:\n        // its edge comes from the direction, so text renderers never mirror it for RTL.\n        LayerAnimationType.WIPE -> if (entering) {\n            LayerAnimationVisualState(\n                revealMask = LayerRevealMaskSpec.Wipe(\n                    progress = canvaEaseOutCubic(p),\n                    edge = canvaTrailingEdge(direction),\n                    anchored = true\n                )\n            )\n        } else {\n            val e = canvaEaseInCubic(u)\n            LayerAnimationVisualState(\n                alphaMultiplier = if (u >= 1f) 0f else 1f,\n                revealMask = LayerRevealMaskSpec.Wipe(\n                    progress = 1f - e,\n                    edge = canvaLeadingEdge(direction),\n                    anchored = true\n                )\n            )\n        }"
+      }
+    },
+    {
+      "type": "BLUR",
+      "tabs": [
+        "ENTRANCE",
+        "EXIT",
+        "LOOP"
+      ],
+      "default": {
+        "durationMs": 500,
+        "delayMs": 0,
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
+        "intensity": 1,
+        "supportsInfinite": true
+      },
+      "authoredCurves": null,
+      "label": {
+        "ar": "تمويه",
+        "en": "Blur"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.BLUR -> {\n            LayerAnimationVisualState(\n                alphaMultiplier = (0.05f + progress * 0.95f).coerceIn(0f, 1f),\n                scaleXMultiplier = 0.92f + progress * 0.08f,\n                scaleYMultiplier = 0.92f + progress * 0.08f\n            )\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        LayerAnimationType.BLUR -> if (entering) {\n            val e = canvaEaseOutQuad(p)\n            LayerAnimationVisualState(\n                alphaMultiplier = e,\n                blurRadiusPx = CANVA_BLUR_RADIUS_PX * (1f - e),\n                glyphMotion = writingStyle\n            )\n        } else {\n            val e = canvaEaseInQuad(u)\n            LayerAnimationVisualState(\n                alphaMultiplier = 1f - e,\n                blurRadiusPx = CANVA_BLUR_RADIUS_PX * e,\n                glyphMotion = writingStyle\n            )\n        }"
       }
     },
     {
@@ -359,20 +313,23 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 950,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "SOFT_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تتابع",
+        "ar": "التتابع",
         "en": "Succession"
       },
       "formula": {
-        "kotlin": "        // One-shot SUCCESSION is Canva's تتابع, measured from their own export: the layer\n        // resolves out of a flat 32px blur radius while the opacity rises dead straight.\n        LayerAnimationType.SUCCESSION (one-shot) -> LayerAnimationVisualState(\n            alphaMultiplier = cycleProgress.coerceIn(0f, 1f),\n            blurRadiusPx = maxOf(0f, CANVA_SUCCESSION_BLUR_PX * sharpen * intensity)\n        ) where sharpen = (1f - cycleProgress).pow(CANVA_SUCCESSION_BLUR_DECAY_EXPONENT)\n        // An infinite SUCCESSION keeps the older scale-and-fade pulse:\n        LayerAnimationType.SUCCESSION (infinite) -> LayerAnimationVisualState(\n            scaleMultiplier = 0.82f + progress * 0.18f,\n            alphaMultiplier = (0.06f + progress * 0.94f).coerceIn(0f, 1f)\n        )"
+        "kotlin": "        // The loop pulse; a one-shot Succession is Canva's blur-and-grow (resolveCanvaOneShotVisualState).\n        LayerAnimationType.SUCCESSION -> LayerAnimationVisualState(\n            scaleMultiplier = 0.82f + progress * 0.18f,\n            alphaMultiplier = (0.06f + progress * 0.94f).coerceIn(0f, 1f)\n        )"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // `s0 = 0.9 - 0.3 · Vd` (default .75): resolves out of a blur while it fades and grows.\n        LayerAnimationType.SUCCESSION -> {\n            val s0 = 0.9f - 0.3f * vd\n            if (entering) {\n                val e = canvaEaseOutQuad(p)\n                LayerAnimationVisualState(\n                    alphaMultiplier = e,\n                    blurRadiusPx = CANVA_SUCCESSION_BLUR_PX * (1f - e),\n                    scaleMultiplier = s0 + (1f - s0) * e,\n                    glyphMotion = writingStyle\n                )\n            } else {\n                val e = canvaEaseInQuad(u)\n                LayerAnimationVisualState(\n                    alphaMultiplier = 1f - e,\n                    blurRadiusPx = CANVA_SUCCESSION_BLUR_PX * e,\n                    scaleMultiplier = 1f - (1f - s0) * e,\n                    glyphMotion = writingStyle\n                )\n            }\n        }"
       }
     },
     {
@@ -381,42 +338,47 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 1500,
+        "durationMs": 10000,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "SOFT_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تنفس",
+        "ar": "ظهور بطيء",
         "en": "Breathe"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.BREATHE -> LayerAnimationVisualState(\n            scaleMultiplier = 1f + pingPong * 0.06f * intensity,\n            alphaMultiplier = (0.86f + pingPong * 0.14f).coerceIn(0f, 1f)\n        )"
+        "kotlin": "        // Canva's Breathe (§3): scale = lerp(A, B, t) LINEAR with A = 1 - 0.10·intensity and\n        // B = 1 + 0.03·intensity (their default slider gives 0.90 → 1.03). No opacity of its own.\n        LayerAnimationType.BREATHE -> LayerAnimationVisualState(\n            scaleMultiplier = canvaLerp(1f - 0.10f * intensity, 1f + 0.03f * intensity, ramp)\n        )"
       }
     },
     {
       "type": "BASELINE",
       "tabs": [
+        "ENTRANCE",
+        "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 1300,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "UP",
-        "easing": "SOFT_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "أساس",
+        "ar": "Baseline",
         "en": "Baseline"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.BASELINE -> {\n            val bounceWave = abs(sin(cycleProgress * PI.toFloat() * 2f))\n            LayerAnimationVisualState(\n                translationY = -bounceWave * maxOf(10f, height * 0.1f) * intensity,\n                scaleYMultiplier = 1f - bounceWave * 0.06f * intensity,\n                scaleXMultiplier = 1f + bounceWave * 0.04f * intensity\n            )\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // The content slides into its own box while the box clips it. Our matte travels WITH the\n        // layer, so the HOME-box band is expressed in CONTENT space: the part of the content that\n        // is inside the box is its LEADING part (dir up → a band from the content's TOP edge), and\n        // on the way out its TRAILING part. Opacity is 1 from t = 0; the outro animates only its\n        // first 60% and holds hidden after. Anchored, like WIPE: the edge is absolute.\n        LayerAnimationType.BASELINE -> {\n            val start = canvaStartOffset(direction)\n            val size = if (start.y != 0f) height else width\n            if (entering) {\n                val e = canvaEaseOutExpo(p)\n                LayerAnimationVisualState(\n                    translationX = start.x * size * (1f - e),\n                    translationY = start.y * size * (1f - e),\n                    revealMask = LayerRevealMaskSpec.Wipe(\n                        progress = e,\n                        edge = canvaLeadingEdge(direction),\n                        anchored = true\n                    )\n                )\n            } else {\n                val e = canvaEaseInSine((u / 0.6f).coerceAtMost(1f))\n                LayerAnimationVisualState(\n                    alphaMultiplier = if (u < 0.6f) 1f else 0f,\n                    translationX = -start.x * size * e,\n                    translationY = -start.y * size * e,\n                    revealMask = LayerRevealMaskSpec.Wipe(\n                        progress = 1f - e,\n                        edge = canvaTrailingEdge(direction),\n                        anchored = true\n                    )\n                )\n            }\n        }"
       }
     },
     {
@@ -426,10 +388,10 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 900,
+        "durationMs": 10000,
         "delayMs": 0,
         "direction": "RIGHT",
-        "easing": "SOFT_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
@@ -439,7 +401,7 @@
         "en": "Drift"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.DRIFT -> {\n            LayerAnimationVisualState(\n                translationX = vector.x * (1f - progress) * driftX * intensity,\n                translationY = vector.y * (1f - progress) * driftY * intensity,\n                alphaMultiplier = (0.1f + progress * 0.9f).coerceIn(0f, 1f)\n            )\n        }"
+        "kotlin": "        // Canva's Drift (§3): translate = lerp(-vec, +vec, t) LINEAR across the untimed window,\n        // ending at +vec, NOT at home. Amplitude rides on intensity (120px per unit; the importer\n        // stores m / 120) since the runtime cannot see the page. The loop ping-pongs the ramp.\n        LayerAnimationType.DRIFT -> {\n            val amplitude = CANVA_CONTINUOUS_AMPLITUDE_PX * intensity\n            LayerAnimationVisualState(\n                translationX = vector.x * canvaLerp(-amplitude, amplitude, ramp),\n                translationY = vector.y * canvaLerp(-amplitude, amplitude, ramp)\n            )\n        }"
       }
     },
     {
@@ -449,55 +411,61 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 950,
+        "durationMs": 10000,
         "delayMs": 0,
-        "direction": "RIGHT",
-        "easing": "SOFT_OUT",
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تكتوني",
+        "ar": "حركة تكتونية",
         "en": "Tectonic"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.TECTONIC -> {\n            LayerAnimationVisualState(\n                translationX = vector.x * (1f - progress) * maxOf(28f, width * 0.34f) * intensity,\n                scaleXMultiplier = 0.9f + progress * 0.1f,\n                alphaMultiplier = (0.08f + progress * 0.92f).coerceIn(0f, 1f)\n            )\n        }"
+        "kotlin": "        // Canva's Tectonic (§3): translateX = lerp(-d, +d/2, t) LINEAR, `d = 120px · intensity`;\n        // LEFT flips the sign (Canva flips it for elements right of the page centre).\n        LayerAnimationType.TECTONIC -> {\n            val d = CANVA_CONTINUOUS_AMPLITUDE_PX * intensity *\n                (if (direction == LayerAnimationDirection.LEFT) -1f else 1f)\n            LayerAnimationVisualState(translationX = canvaLerp(-d, d / 2f, ramp))\n        }"
       }
     },
     {
       "type": "TUMBLE",
       "tabs": [
+        "ENTRANCE",
         "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 950,
+        "durationMs": 500,
         "delayMs": 0,
-        "direction": "CLOCKWISE",
-        "easing": "SOFT_OUT",
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تدحرج",
+        "ar": "دوران",
         "en": "Tumble"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.TUMBLE -> {\n            LayerAnimationVisualState(\n                rotationDeltaDegrees = (1f - progress) * 26f * rotationSpin(animation.direction) * intensity,\n                translationX = rotationSpin(animation.direction) * (1f - progress) *\n                    maxOf(18f, width * 0.18f) * intensity,\n                translationY = -(1f - progress) * maxOf(18f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.08f + progress * 0.92f).coerceIn(0f, 1f)\n            )\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // With the importer's `startRotation` / `travelX` / `travelY` (Canva's `juf`, page size and\n        // element rotation included): the entrance starts at that offset and eases to rest on\n        // easeOutCubic; the exit eases from rest to it on easeInCubic (the reverse flag is baked\n        // into the exit's own params). Without them: starts rotated k° (≈ -180° ± a per-layer\n        // hash) a page-height away, from the LEFT when the motion is RIGHT (or auto on an even\n        // layer), from the RIGHT otherwise.\n        LayerAnimationType.TUMBLE -> {\n            val startRotation = animation.param(CanvaAnimationParams.START_ROTATION)\n            val paramTravelX = animation.param(CanvaAnimationParams.TRAVEL_X)\n            val paramTravelY = animation.param(CanvaAnimationParams.TRAVEL_Y)\n            if (startRotation != null || paramTravelX != null || paramTravelY != null) {\n                val k = (startRotation ?: 0.0).toFloat()\n                val tx = (paramTravelX ?: 0.0).toFloat()\n                val ty = (paramTravelY ?: 0.0).toFloat()\n                if (entering) {\n                    val e = canvaEaseOutCubic(p)\n                    LayerAnimationVisualState(\n                        alphaMultiplier = e,\n                        rotationDeltaDegrees = k * (1f - e),\n                        translationX = tx * (1f - e),\n                        translationY = ty * (1f - e)\n                    )\n                } else {\n                    val e = canvaEaseInCubic(u)\n                    LayerAnimationVisualState(\n                        alphaMultiplier = 1f - e,\n                        rotationDeltaDegrees = k * e,\n                        translationX = tx * e,\n                        translationY = ty * e\n                    )\n                }\n            } else {\n                val k = (if (even) canvaLerp(-90f, -270f, vd) else canvaLerp(-270f, -90f, vd)) +\n                    canvaTumbleHashDegrees(sequenceIndex, width, height)\n                val fromLeft = when (animation.direction) {\n                    LayerAnimationDirection.RIGHT -> true\n                    LayerAnimationDirection.LEFT -> false\n                    else -> even\n                }\n                val travelX = if (fromLeft) -CANVA_TUMBLE_TRAVEL_PX else CANVA_TUMBLE_TRAVEL_PX\n                if (entering) {\n                    val e = canvaEaseOutCubic(p)\n                    LayerAnimationVisualState(\n                        alphaMultiplier = e,\n                        rotationDeltaDegrees = k * (1f - e),\n                        translationX = travelX * (1f - e)\n                    )\n                } else {\n                    val e = canvaEaseInCubic(u)\n                    LayerAnimationVisualState(\n                        alphaMultiplier = 1f - e,\n                        rotationDeltaDegrees = -k * e,\n                        translationX = -travelX * e\n                    )\n                }\n            }\n        }"
       }
     },
     {
       "type": "NEON",
       "tabs": [
+        "ENTRANCE",
+        "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 1200,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "SOFT_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
@@ -508,51 +476,63 @@
       },
       "formula": {
         "kotlin": "        LayerAnimationType.NEON -> LayerAnimationVisualState(\n            scaleMultiplier = 1f + pingPong * 0.05f * intensity,\n            alphaMultiplier = (0.8f + pingPong * 0.2f + sin(cycleProgress * PI.toFloat() * 6f) * 0.04f)\n                .coerceIn(0.72f, 1f)\n        )"
+      },
+      "canvaOneShot": {
+        "kotlin": "        LayerAnimationType.NEON -> LayerAnimationVisualState(\n            alphaMultiplier = if (entering) canvaNeonIntroOpacity(p, vd, even) else canvaNeonOutroOpacity(u, vd, even),\n            glyphMotion = writingStyle\n        )"
       }
     },
     {
       "type": "SCRAPBOOK",
       "tabs": [
+        "ENTRANCE",
+        "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 500,
         "delayMs": 0,
-        "direction": "LEFT",
-        "easing": "SOFT_IN_OUT",
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "قصاصة",
+        "ar": "سجل قصاصات",
         "en": "Scrapbook"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.SCRAPBOOK -> LayerAnimationVisualState(\n            rotationDeltaDegrees = wave * 6.5f * intensity,\n            translationX = wave * maxOf(5f, width * 0.024f) * intensity,\n            translationY = cos(cycleProgress * PI.toFloat() * 2f) * maxOf(3f, height * 0.018f) * intensity\n        )"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // Discrete stamps on Canva's own clock (`jtf`) — no tweening between poses — ending at\n        // rest; the tilt flips with the parity. Out is a hard cut to nothing.\n        LayerAnimationType.SCRAPBOOK -> if (entering) {\n            val pose = canvaScrapbookPose(\n                progress = p,\n                durationMs = animation.durationMs,\n                poses = animation.param(CanvaAnimationParams.POSES)?.let { floor(it).toInt() } ?: CANVA_SCRAPBOOK_POSES,\n                bx = animation.param(CanvaAnimationParams.POSE_X) ?: 0.0,\n                by = animation.param(CanvaAnimationParams.POSE_Y) ?: 0.0,\n                sign = if (even) 1.0 else -1.0\n            )\n            LayerAnimationVisualState(\n                translationX = pose.translationX,\n                translationY = pose.translationY,\n                rotationDeltaDegrees = pose.rotationDegrees\n            )\n        } else {\n            LayerAnimationVisualState(alphaMultiplier = if (u > 0f) 0f else 1f)\n        }"
       }
     },
     {
       "type": "STOMP",
       "tabs": [
+        "ENTRANCE",
         "EXIT",
         "LOOP"
       ],
       "default": {
-        "durationMs": 900,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "SOFT_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "دمغ",
+        "ar": "سقوط هوائي",
         "en": "Stomp"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.STOMP -> {\n            LayerAnimationVisualState(\n                scaleMultiplier = 0.78f + progress * 0.22f,\n                rotationDeltaDegrees = (1f - progress) * 18f * rotationSpin(animation.direction) * intensity,\n                alphaMultiplier = (0.1f + progress * 0.9f).coerceIn(0f, 1f)\n            )\n        }"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // Slams down from `s0` (the importer's `startScale` = Canva's `max(pageW / w · 1.5, 4)`,\n        // else the story-width stand-in) on easeInQuart, fading in over the first 40%; out is a\n        // plain easeOutQuad fade.\n        LayerAnimationType.STOMP -> if (entering) {\n            val s0 = animation.param(CanvaAnimationParams.START_SCALE)?.toFloat()\n                ?: maxOf(4f, CANVA_STOMP_PAGE_WIDTH_PX / width)\n            LayerAnimationVisualState(\n                scaleMultiplier = s0 + (1f - s0) * canvaEaseInQuart(p),\n                alphaMultiplier = canvaEaseInQuart((p / 0.4f).coerceAtMost(1f))\n            )\n        } else {\n            LayerAnimationVisualState(alphaMultiplier = 1f - canvaEaseOutQuad(u))\n        }"
       }
     },
     {
@@ -561,7 +541,7 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 5600,
+        "durationMs": 20300,
         "delayMs": 0,
         "direction": "CLOCKWISE",
         "easing": "LINEAR",
@@ -570,8 +550,8 @@
       },
       "authoredCurves": null,
       "label": {
-        "ar": "دوران",
-        "en": "Spin"
+        "ar": "تدوير",
+        "en": "Rotate"
       },
       "formula": {
         "kotlin": "        LayerAnimationType.ROTATE -> LayerAnimationVisualState(\n            rotationDeltaDegrees = cycleProgress * 360f * rotationSpin(animation.direction) * intensity\n        )"
@@ -583,119 +563,20 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 1100,
         "delayMs": 0,
         "direction": "DEFAULT",
         "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
-      "authoredCurves": {
-        "durationFrames": 35,
-        "fps": 25,
-        "durationMs": 1400,
-        "channels": {
-          "opacity": [
-            {
-              "frame": 0,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 4.429,
-              "value": 0.3,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 8.857,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 13.286,
-              "value": 0.3,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 17.714,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 22.142,
-              "value": 0.3,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 26.571,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 31,
-              "value": 0.3,
-              "easing": [
-                0.6,
-                0,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 35,
-              "value": 1,
-              "easing": null,
-              "hold": false
-            }
-          ]
-        }
-      },
+      "authoredCurves": null,
       "label": {
-        "ar": "وميض",
+        "ar": "ومض",
         "en": "Flicker"
+      },
+      "formula": {
+        "kotlin": "        // Canva's repeating effects (§4, §8.3): each cycle is one `durationMs`, computed from the\n        // raw cycle progress, with Canva's slider t = clamp(intensity − .5, 0, 1) — see\n        // canvaFlickerOpacity / canvaPulseScale / canvaWigglePose.\n        LayerAnimationType.FLICKER -> LayerAnimationVisualState(\n            alphaMultiplier = canvaFlickerOpacity(cycleProgress, animation.durationMs.toDouble(), canvaSliderT(intensity))\n        )"
       }
     },
     {
@@ -704,86 +585,20 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 1800,
+        "durationMs": 900,
         "delayMs": 0,
         "direction": "DEFAULT",
-        "easing": "SOFT_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
-      "authoredCurves": {
-        "durationFrames": 45,
-        "fps": 25,
-        "durationMs": 1800,
-        "channels": {
-          "scale": [
-            {
-              "frame": 0,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.48,
-                1.178
-              ],
-              "hold": false
-            },
-            {
-              "frame": 3,
-              "value": 1.5,
-              "easing": [
-                0.167,
-                0.133,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 10,
-              "value": 1,
-              "easing": [
-                0.167,
-                0.167,
-                0.833,
-                0.833
-              ],
-              "hold": false
-            },
-            {
-              "frame": 20,
-              "value": 1,
-              "easing": [
-                0.6,
-                0,
-                0.48,
-                1.178
-              ],
-              "hold": false
-            },
-            {
-              "frame": 23,
-              "value": 1.5,
-              "easing": [
-                0.167,
-                0.133,
-                0.4,
-                1
-              ],
-              "hold": false
-            },
-            {
-              "frame": 30,
-              "value": 1,
-              "easing": null,
-              "hold": false
-            }
-          ]
-        }
-      },
+      "authoredCurves": null,
       "label": {
-        "ar": "نبض",
+        "ar": "تقليص العنصر وتمديده",
         "en": "Pulse"
+      },
+      "formula": {
+        "kotlin": "        LayerAnimationType.PULSE -> LayerAnimationVisualState(\n            scaleMultiplier = canvaPulseScale(cycleProgress)\n        )"
       }
     },
     {
@@ -792,20 +607,20 @@
         "LOOP"
       ],
       "default": {
-        "durationMs": 1400,
+        "durationMs": 18200,
         "delayMs": 0,
-        "direction": "LEFT",
-        "easing": "SOFT_IN_OUT",
+        "direction": "DEFAULT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": true
       },
       "authoredCurves": null,
       "label": {
-        "ar": "تمايل",
+        "ar": "اهتزاز سريع بالاتجاهين",
         "en": "Wiggle"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.WIGGLE -> LayerAnimationVisualState(\n            rotationDeltaDegrees = wave * 4.5f * intensity,\n            translationX = wave * maxOf(3f, width * 0.018f) * intensity\n        )"
+        "kotlin": "        LayerAnimationType.WIGGLE -> {\n            val pose = canvaWigglePose(\n                cycleProgress = cycleProgress,\n                cycleMs = animation.durationMs.toDouble(),\n                t = canvaSliderT(intensity),\n                seed = animation.param(CanvaAnimationParams.SEED),\n                width = width,\n                height = height\n            )\n            LayerAnimationVisualState(\n                translationX = pose.translationX,\n                translationY = pose.translationY,\n                rotationDeltaDegrees = pose.rotationDegrees\n            )\n        }"
       }
     },
     {
@@ -828,7 +643,12 @@
         "en": "Shift"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }"
+        "kotlin": "        // RISE settles upward, SHIFT downward — the same reveal, mirrored, which is exactly what\n        // the direction vector expresses. The `takeIf` fallbacks matter: a spec carrying\n        // direction=DEFAULT resolves to a ZERO vector, and multiplying by it would leave the\n        // effect motionless. RISE historically ignored direction entirely and always rose, so UP\n        // is its fallback and its rendering is unchanged. (A one-shot RISE is Canva's ارتقاء and\n        // never reaches here — see resolveCanvaOneShotVisualState; this is the loop bob.)\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT -> {\n            val riseY = vector.y.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SHIFT) 1f else -1f\n            LayerAnimationVisualState(\n                translationY = -riseY * (1f - progress) * maxOf(16f, height * 0.22f) * intensity,\n                alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f)\n            )\n        }",
+        "sharesBranchWith": "RISE"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // RISE (default UP) and PAN (default RIGHT) are one tween: 80px in from the start side on\n        // easeOutQuad with the opacity; out on easeInQuad, still travelling the same way. SHIFT\n        // (DOWN) and SKATE (LEFT) are the same tween mirrored.\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT,\n        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val start = canvaStartOffset(direction)\n            if (entering) {\n                val e = canvaEaseOutQuad(p)\n                LayerAnimationVisualState(\n                    alphaMultiplier = e,\n                    translationX = start.x * CANVA_RISE_TRAVEL_PX * (1f - e),\n                    translationY = start.y * CANVA_RISE_TRAVEL_PX * (1f - e)\n                )\n            } else {\n                val e = canvaEaseInQuad(u)\n                LayerAnimationVisualState(\n                    alphaMultiplier = 1f - e,\n                    translationX = -start.x * CANVA_RISE_TRAVEL_PX * e,\n                    translationY = -start.y * CANVA_RISE_TRAVEL_PX * e\n                )\n            }\n        }",
+        "sharesBranchWith": "RISE, PAN, SKATE"
       }
     },
     {
@@ -851,7 +671,12 @@
         "en": "Skate"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }"
+        "kotlin": "        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val panX = vector.x.takeIf { it != 0f }\n                ?: if (animation.type == LayerAnimationType.SKATE) -1f else 1f\n            LayerAnimationVisualState(\n                translationX = panX * (1f - progress) * maxOf(22f, width * 0.28f) * intensity,\n                alphaMultiplier = (0.16f + progress * 0.84f).coerceIn(0f, 1f)\n            )\n        }",
+        "sharesBranchWith": "PAN"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // RISE (default UP) and PAN (default RIGHT) are one tween: 80px in from the start side on\n        // easeOutQuad with the opacity; out on easeInQuad, still travelling the same way. SHIFT\n        // (DOWN) and SKATE (LEFT) are the same tween mirrored.\n        LayerAnimationType.RISE,\n        LayerAnimationType.SHIFT,\n        LayerAnimationType.PAN,\n        LayerAnimationType.SKATE -> {\n            val start = canvaStartOffset(direction)\n            if (entering) {\n                val e = canvaEaseOutQuad(p)\n                LayerAnimationVisualState(\n                    alphaMultiplier = e,\n                    translationX = start.x * CANVA_RISE_TRAVEL_PX * (1f - e),\n                    translationY = start.y * CANVA_RISE_TRAVEL_PX * (1f - e)\n                )\n            } else {\n                val e = canvaEaseInQuad(u)\n                LayerAnimationVisualState(\n                    alphaMultiplier = 1f - e,\n                    translationX = -start.x * CANVA_RISE_TRAVEL_PX * e,\n                    translationY = -start.y * CANVA_RISE_TRAVEL_PX * e\n                )\n            }\n        }",
+        "sharesBranchWith": "RISE, SHIFT, PAN"
       }
     },
     {
@@ -874,7 +699,8 @@
         "en": "Ascend"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )"
+        "kotlin": "        // The character effects animate each GLYPH, never the layer, so the layer-level\n        // state stays neutral and the whole effect rides on [glyphMotion]. As with the\n        // typewriters, the Wipe is only for surfaces that can't address glyphs; a renderer\n        // that honours [glyphMotion] must ignore it rather than apply both.\n        LayerAnimationType.CH_POSITION_FADE,\n        LayerAnimationType.CH_SCALE_FADE,\n        // ASCEND rides the same path: the glyph motion is the effect on text, and the Wipe is the\n        // fallback for surfaces with no glyphs to move (media layers, curved text).\n        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
+        "sharesBranchWith": "CH_POSITION_FADE, CH_SCALE_FADE"
       }
     },
     {
@@ -884,20 +710,23 @@
         "EXIT"
       ],
       "default": {
-        "durationMs": 1200,
+        "durationMs": 500,
         "delayMs": 0,
         "direction": "RIGHT",
-        "easing": "EASE_IN_OUT",
+        "easing": "LINEAR",
         "intensity": 1,
         "supportsInfinite": false
       },
       "authoredCurves": null,
       "label": {
-        "ar": "شريط",
+        "ar": "Block",
         "en": "Block"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.BLOCK -> {\n            val travel = 1f + BLOCK_WIDTH_FRACTION\n            val left = -BLOCK_WIDTH_FRACTION + progress * travel\n            val swept = (left / 1f).coerceIn(0f, 1f)\n            LayerAnimationVisualState(\n                revealMask = LayerRevealMaskSpec.Wipe(progress = swept),\n                overlayBar = LayerOverlayBarSpec(\n                    leftFraction = left,\n                    widthFraction = BLOCK_WIDTH_FRACTION\n                )\n            )\n        }"
+        "kotlin": "        // Never reached: every BLOCK frame — entrance, exit and loop — is Canva's bar, resolved by\n        // resolveCanvaOneShotVisualState above. Kept for the exhaustive `when`.\n        LayerAnimationType.BLOCK -> LayerAnimationVisualState()"
+      },
+      "canvaOneShot": {
+        "kotlin": "        // Canva's text-only bar (`esf`): the FULL layer box, offset along the motion axis by\n        // s = x < .5 ? −1 + easeInQuart(2x) : easeOutQuart(2x − 1) — in from the far side,\n        // covering the box at x = .5, out the other side — visible while x < 1 and clipped to the\n        // layer box. The text switches ON at the midpoint entering and OFF at it exiting; the hide\n        // is an anchored Wipe at 0/1 so the bar is untouched, and the alpha stays 1.\n        LayerAnimationType.BLOCK -> {\n            val x = if (entering) cycleProgress.coerceIn(0f, 1f) else u\n            val s = if (x < 0.5f) -1f + canvaEaseInQuart(2f * x) else canvaEaseOutQuart(2f * x - 1f)\n            val shown = if (entering) x >= 0.5f else x < 0.5f\n            val color = animation.param(CanvaAnimationParams.BAR_COLOR)?.let { it.toLong() and 0xFFFFFFFFL }\n            val bar = if (x < 1f) {\n                when (direction) {\n                    LayerAnimationDirection.LEFT -> LayerOverlayBarSpec(leftFraction = -s, topFraction = 0f, colorArgb = color)\n                    LayerAnimationDirection.DOWN -> LayerOverlayBarSpec(leftFraction = 0f, topFraction = s, colorArgb = color)\n                    LayerAnimationDirection.UP -> LayerOverlayBarSpec(leftFraction = 0f, topFraction = -s, colorArgb = color)\n                    else -> LayerOverlayBarSpec(leftFraction = s, topFraction = 0f, colorArgb = color)\n                }\n            } else {\n                null\n            }\n            LayerAnimationVisualState(\n                revealMask = LayerRevealMaskSpec.Wipe(progress = if (shown) 1f else 0f, anchored = true),\n                overlayBar = bar\n            )\n        }"
       }
     },
     {
@@ -917,7 +746,7 @@
         "en": "Static"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.STATIC -> LayerAnimationVisualState()"
+        "kotlin": "        // --- Nayroz-parity effects ---\n        LayerAnimationType.STATIC -> LayerAnimationVisualState()"
       }
     },
     {
@@ -939,7 +768,7 @@
         "en": "One word"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.ONE_WORD -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(LayerAnimationType.ONE_WORD, progress, animation.durationMs)\n        )"
+        "kotlin": "        // كلمة واحدة — their -Word Typing One: one WORD at a time, each replacing the last.\n        // Their art animates nothing but per-word opacity, so the layer itself stays put and\n        // the whole effect rides on [glyphMotion]. The Wipe is only for surfaces that cannot\n        // address words (media layers, the export canvas, curved text).\n        LayerAnimationType.ONE_WORD -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(LayerAnimationType.ONE_WORD, progress, animation.durationMs)\n        )"
       }
     },
     {
@@ -961,7 +790,7 @@
         "en": "Typewriter (letters)"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.TYPEWRITER_CHARS ->\n            typewriterVisualState(progress, TextRevealMode.CHARS, animation.durationMs)"
+        "kotlin": "        // Typewriter: a text renderer reveals glyphs progressively via [textReveal]\n        // (chars/words stepped, cursor smooth). The alpha fade + Wipe mask stay as\n        // fallbacks for curved/multi-line text, media layers, and export.\n        // A glyph pops in whole, so there is NO layer-level fade on the text path —\n        // the alpha here is only a fallback for renderers that can't do a glyph\n        // reveal (curved text, the native export canvas), where the Wipe mask serves\n        // media layers.\n        LayerAnimationType.TYPEWRITER_CHARS ->\n            typewriterVisualState(progress, TextRevealMode.CHARS, animation.durationMs)"
       }
     },
     {
@@ -2187,8 +2016,8 @@
         "en": "Letters rise"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
-        "sharesBranchWith": "ASCEND"
+        "kotlin": "        // The character effects animate each GLYPH, never the layer, so the layer-level\n        // state stays neutral and the whole effect rides on [glyphMotion]. As with the\n        // typewriters, the Wipe is only for surfaces that can't address glyphs; a renderer\n        // that honours [glyphMotion] must ignore it rather than apply both.\n        LayerAnimationType.CH_POSITION_FADE,\n        LayerAnimationType.CH_SCALE_FADE,\n        // ASCEND rides the same path: the glyph motion is the effect on text, and the Wipe is the\n        // fallback for surfaces with no glyphs to move (media layers, curved text).\n        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
+        "sharesBranchWith": "CH_SCALE_FADE, ASCEND"
       }
     },
     {
@@ -2210,8 +2039,8 @@
         "en": "Letters grow"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
-        "sharesBranchWith": "ASCEND"
+        "kotlin": "        // The character effects animate each GLYPH, never the layer, so the layer-level\n        // state stays neutral and the whole effect rides on [glyphMotion]. As with the\n        // typewriters, the Wipe is only for surfaces that can't address glyphs; a renderer\n        // that honours [glyphMotion] must ignore it rather than apply both.\n        LayerAnimationType.CH_POSITION_FADE,\n        LayerAnimationType.CH_SCALE_FADE,\n        // ASCEND rides the same path: the glyph motion is the effect on text, and the Wipe is the\n        // fallback for surfaces with no glyphs to move (media layers, curved text).\n        LayerAnimationType.ASCEND -> LayerAnimationVisualState(\n            revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n            glyphMotion = GlyphMotionSpec(animation.type, progress, animation.durationMs)\n        )",
+        "sharesBranchWith": "CH_POSITION_FADE, ASCEND"
       }
     },
     {
@@ -2233,35 +2062,54 @@
         "en": "Letter wave"
       },
       "formula": {
-        "kotlin": "        LayerAnimationType.CH_WIGGLE_Y -> LayerAnimationVisualState(\n            glyphMotion = GlyphMotionSpec(animation.type, cycleProgress, animation.durationMs)\n        )\n    }\n    // Exit: fade the whole layer out with the reverse progress so it fully\n    // disappears once the exit animation finishes (on top of its motion).\n    return if (playbackState.isExiting) {\n        base.copy(alphaMultiplier = (base.alphaMultiplier * cycleProgress).coerceIn(0f, 1f))\n    } else {\n        base\n    }\n}\n\n/**\n * The typewriter family. [textReveal] drives the real per-glyph reveal on a text\n * renderer; the fade + Wipe mask are only fallbacks for surfaces that can't do that\n * (curved text, media layers, the native export canvas).\n */\nprivate fun typewriterVisualState(\n    progress: Float,\n    mode: TextRevealMode,\n    durationMs: Long\n): LayerAnimationVisualState = LayerAnimationVisualState(\n    alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f),\n    revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n    textReveal = TextRevealSpec(progress, mode, durationMs)\n)\n\n/**\n * Evaluates an Andalusi-ported effect at [progress] (0..1 across its authored length),\n * reading their keyframes directly. Their translations are authored as a fraction of a\n * 700px comp, so they scale to the real layer here.\n */\nprivate fun evaluateAndalusiSpec(\n    spec: AndalusiEffectSpec,\n    type: LayerAnimationType,\n    progress: Float,\n    width: Float,\n    height: Float\n): LayerAnimationVisualState {\n    val frame = progress.coerceIn(0f, 1f) * spec.durationFrames\n    return LayerAnimationVisualState(\n        scaleMultiplier = spec.scale?.valueAt(frame) ?: 1f,\n        scaleXMultiplier = spec.scaleX?.valueAt(frame) ?: 1f,\n        scaleYMultiplier = spec.scaleY?.valueAt(frame) ?: 1f,\n        rotationDeltaDegrees = spec.rotation?.valueAt(frame) ?: 0f,\n        translationX = (spec.translateX?.valueAt(frame) ?: 0f) * width,\n        translationY = (spec.translateY?.valueAt(frame) ?: 0f) * height,\n        alphaMultiplier = (spec.opacity?.valueAt(frame) ?: 1f).coerceIn(0f, 1f),\n        revealMask = spec.maskProgress\n            ?.valueAt(frame)\n            ?.coerceIn(0f, 1f)\n            ?.let { andalusiRevealMask(type, it) }\n    )\n}\n\n/** Which matte Andalusi's art uses for each reveal family. */\nprivate fun andalusiRevealMask(type: LayerAnimationType, progress: Float): LayerRevealMaskSpec? =\n    when (type) {"
+        "kotlin": "        // The wave is a loop with no opacity at all in their art, and nothing about it\n        // survives without glyphs — a media layer simply sits still, as WAVE already\n        // covers whole-layer floating.\n        LayerAnimationType.CH_WIGGLE_Y -> LayerAnimationVisualState(\n            glyphMotion = GlyphMotionSpec(animation.type, cycleProgress, animation.durationMs)\n        )"
       }
     }
   ],
   "runtime": {
-    "variables": "val animation = playbackState.animation ?: return LayerAnimationVisualState()\nval intensity = animation.intensity.coerceIn(0.4f, 2.4f)\nval width = layerWidthPx.coerceAtLeast(1f)\nval height = layerHeightPx.coerceAtLeast(1f)\nval direction = if (animation.direction == LayerAnimationDirection.DEFAULT) {",
+    "variables": "    val animation = playbackState.animation ?: return LayerAnimationVisualState()\n    // Wide enough for the importer's `intensity = amplitude / 120` on DRIFT/TECTONIC (0.1..4);\n    // the picker itself always writes 1.\n    val intensity = animation.intensity.coerceIn(0.1f, 4f)\n    val width = layerWidthPx.coerceAtLeast(1f)\n    val height = layerHeightPx.coerceAtLeast(1f)\n    val direction = if (animation.direction == LayerAnimationDirection.DEFAULT) {\n        animation.type.preset().direction\n    } else {\n        animation.direction\n    }\n    val vector = resolveAnimationVector(direction)\n    val cycleProgress = playbackState.progress.coerceIn(0f, 1f)\n    val oneShotProgress = applyLayerAnimationEasing(cycleProgress, animation.easing)\n    val cycleWave = applyLayerAnimationEasing(pingPongProgress(cycleProgress), animation.easing)\n    val progress = if (animation.infinite) cycleWave else oneShotProgress\n    val wave = sin(cycleProgress * 2f * PI.toFloat())\n    val pingPong = pingPongProgress(cycleProgress)\n    // Canva's continuous presets (BREATHE / DRIFT / TECTONIC): one loop cycle is their untimed\n    // A → B → A ramp, LINEAR and triangular (not the raised cosine), so a picked loop cycles\n    // seamlessly; a one-shot slot plays the single A → B ramp.\n    val ramp = if (animation.infinite) 1f - abs(2f * cycleProgress - 1f) else cycleProgress",
     "helpers": {
-      "resolveAnimationVector": "fun resolveAnimationVector(direction: LayerAnimationDirection): Offset =\n    when (direction) {\n        LayerAnimationDirection.LEFT -> Offset(-1f, 0f)\n        LayerAnimationDirection.RIGHT -> Offset(1f, 0f)\n        LayerAnimationDirection.DOWN -> Offset(0f, 1f)\n        LayerAnimationDirection.UP -> Offset(0f, -1f)\n        else -> Offset(0f, 0f)\n    }",
-      "rotationSpin": "fun rotationSpin(direction: LayerAnimationDirection): Float =\n    when (direction) {\n        LayerAnimationDirection.COUNTERCLOCKWISE,\n        LayerAnimationDirection.LEFT -> -1f\n        else -> 1f\n    }",
-      "pingPongProgress": "fun pingPongProgress(progress: Float): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return (0.5f - cos(clamped * PI.toFloat() * 2f) / 2f).coerceIn(0f, 1f)\n}",
-      "applyLayerAnimationEasing": "fun applyLayerAnimationEasing(\n    progress: Float,\n    easing: LayerAnimationEasing\n): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return when (easing) {\n        LayerAnimationEasing.LINEAR,\n        LayerAnimationEasing.DEFAULT -> clamped\n        LayerAnimationEasing.SOFT_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_IN -> clamped * clamped\n        LayerAnimationEasing.EASE_IN_OUT -> {\n            if (clamped < 0.5f) {\n                4f * clamped * clamped * clamped\n            } else {\n                val inverse = -2f * clamped + 2f\n                1f - (inverse * inverse * inverse / 2f)\n            }\n        }\n        LayerAnimationEasing.SOFT_IN_OUT -> 0.5f - cos(PI.toFloat() * clamped) / 2f\n    }\n}\n\nprivate data class Offset(\n    val x: Float,\n    val y: Float\n)",
-      "typewriterVisualState": "fun typewriterVisualState(\n    progress: Float,\n    mode: TextRevealMode,\n    durationMs: Long\n): LayerAnimationVisualState = LayerAnimationVisualState(\n    alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f),\n    revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n    textReveal = TextRevealSpec(progress, mode, durationMs)\n)\n\n/**\n * Evaluates an Andalusi-ported effect at [progress] (0..1 across its authored length),\n * reading their keyframes directly. Their translations are authored as a fraction of a\n * 700px comp, so they scale to the real layer here.\n */"
+      "resolveAnimationVector": "private fun resolveAnimationVector(direction: LayerAnimationDirection): Offset =\n    when (direction) {\n        LayerAnimationDirection.LEFT -> Offset(-1f, 0f)\n        LayerAnimationDirection.RIGHT -> Offset(1f, 0f)\n        LayerAnimationDirection.DOWN -> Offset(0f, 1f)\n        LayerAnimationDirection.UP -> Offset(0f, -1f)\n        else -> Offset(0f, 0f)\n    }",
+      "rotationSpin": "private fun rotationSpin(direction: LayerAnimationDirection): Float =\n    when (direction) {\n        LayerAnimationDirection.COUNTERCLOCKWISE,\n        LayerAnimationDirection.LEFT -> -1f\n        else -> 1f\n    }",
+      "pingPongProgress": "private fun pingPongProgress(progress: Float): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return (0.5f - cos(clamped * PI.toFloat() * 2f) / 2f).coerceIn(0f, 1f)\n}",
+      "applyLayerAnimationEasing": "private fun applyLayerAnimationEasing(\n    progress: Float,\n    easing: LayerAnimationEasing\n): Float {\n    val clamped = progress.coerceIn(0f, 1f)\n    return when (easing) {\n        LayerAnimationEasing.LINEAR,\n        LayerAnimationEasing.DEFAULT -> clamped\n        LayerAnimationEasing.SOFT_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_OUT -> {\n            val inverse = 1f - clamped\n            1f - inverse * inverse * inverse\n        }\n        LayerAnimationEasing.EASE_IN -> clamped * clamped\n        LayerAnimationEasing.EASE_IN_OUT -> {\n            if (clamped < 0.5f) {\n                4f * clamped * clamped * clamped\n            } else {\n                val inverse = -2f * clamped + 2f\n                1f - (inverse * inverse * inverse / 2f)\n            }\n        }\n        LayerAnimationEasing.SOFT_IN_OUT -> 0.5f - cos(PI.toFloat() * clamped) / 2f\n    }\n}",
+      "typewriterVisualState": "/**\n * The typewriter family. [textReveal] drives the real per-glyph reveal on a text\n * renderer; the fade + Wipe mask are only fallbacks for surfaces that can't do that\n * (curved text, media layers, the native export canvas).\n */\nprivate fun typewriterVisualState(\n    progress: Float,\n    mode: TextRevealMode,\n    durationMs: Long\n): LayerAnimationVisualState = LayerAnimationVisualState(\n    alphaMultiplier = (0.12f + progress * 0.88f).coerceIn(0f, 1f),\n    revealMask = LayerRevealMaskSpec.Wipe(progress = progress),\n    textReveal = TextRevealSpec(progress, mode, durationMs)\n)"
+    },
+    "canva": {
+      "source": "docs/canva-animation-parity.md (web dashboard) — Canva's own tween builders",
+      "easings": "// ---- Canva's easings, exact (§1) ----------------------------------------------------------\n\ninternal fun canvaEaseInQuad(u: Float): Float = u * u\ninternal fun canvaEaseOutQuad(u: Float): Float = u * (2f - u)\ninternal fun canvaEaseInOutQuad(u: Float): Float =\n    if (u < 0.5f) 2f * u * u else (4f - 2f * u) * u - 1f\ninternal fun canvaEaseInCubic(u: Float): Float = u * u * u\ninternal fun canvaEaseOutCubic(u: Float): Float = (u - 1f).pow(3) + 1f\ninternal fun canvaEaseInQuart(u: Float): Float = u * u * u * u\ninternal fun canvaEaseOutQuart(u: Float): Float = 1f - (1f - u).pow(4)\n/**\n * `1 − 2^(−10u)`, pinned to 1 at u = 1: the bare formula ends at 1 − 2⁻¹⁰, and a tween that has\n * ENDED returns its END value in Canva (§2), so BASELINE must land exactly home — the timeline\n * holds the entrance's last frame, and the 1/1024 it left behind was a permanent sub-pixel\n * offset plus a hairline of clipped content on every Baseline layer at rest.\n */\ninternal fun canvaEaseOutExpo(u: Float): Float = if (u >= 1f) 1f else 1f - 2f.pow(-10f * u)\ninternal fun canvaEaseInSine(u: Float): Float = 1f - cos(u * PI.toFloat() / 2f)\n\n/** `-2^(10(u-1)/amp) · sin((u - 1.1)·5π)`, pinned to 0 and 1 at the ends. */\ninternal fun canvaElasticIn(u: Float, amplitude: Float = 1f): Float = when {\n    u <= 0f -> 0f\n    u >= 1f -> 1f\n    else -> -(2f.pow(10f * (u - 1f) / amplitude)) * sin((u - 1.1f) * 5f * PI.toFloat())\n}\n\n/** `2^(-10u/amp) · sin((u - 0.1)·5π) + 1`, pinned to 0 and 1 at the ends; overshoots to ~1.28. */\ninternal fun canvaElasticOut(u: Float, amplitude: Float = 1f): Float = when {\n    u <= 0f -> 0f\n    u >= 1f -> 1f\n    else -> 2f.pow(-10f * u / amplitude) * sin((u - 0.1f) * 5f * PI.toFloat()) + 1f\n}\n\ninternal fun canvaLerp(from: Float, to: Float, t: Float): Float = from + (to - from) * t",
+      "constants": "// ---- Constants the runtime substitutes for the page Canva can see and we cannot -------------\n\n/** RISE / PAN travel, flat px — measured identical on a 162px title and a 56px caption. */\ninternal const val CANVA_RISE_TRAVEL_PX = 80f\n\n/** BLUR's peak Gaussian radius, design px. */\ninternal const val CANVA_BLUR_RADIUS_PX = 32f\n\n/** SUCCESSION's peak Gaussian radius, design px. */\ninternal const val CANVA_SUCCESSION_BLUR_PX = 24f\n\n/** TUMBLE travels from `max(pageW, pageH)` away — the standard story height stands in. */\ninternal const val CANVA_TUMBLE_TRAVEL_PX = 1920f\n\n/** STOMP starts at `max(4, pageW · 1.5 / w)` — the standard story width stands in (1080 · 1.5). */\ninternal const val CANVA_STOMP_PAGE_WIDTH_PX = 1620f\n\n/** SCRAPBOOK stamps three poses when the element sits near the page centre — assumed (`poses` overrides). */\ninternal const val CANVA_SCRAPBOOK_POSES = 3\n\n/** SCRAPBOOK's stamp offset, design px. */\ninternal const val CANVA_SCRAPBOOK_OFFSET_PX = 50f\n\n/** DRIFT / TECTONIC amplitude per unit of intensity; the importer stores `intensity = m / 120`. */\ninternal const val CANVA_CONTINUOUS_AMPLITUDE_PX = 120f\n\n/** FLICKER's hold at the dim value, ms. */\ninternal const val CANVA_FLICKER_HOLD_MS = 200f\n\n/** WIGGLE at Canva's default slider (t = .5): 55 steps and `lerp(.5, 1.8, .5)` amplitude. */\ninternal const val CANVA_WIGGLE_STEPS = 55\ninternal const val CANVA_WIGGLE_AMPLITUDE = 1.15f",
+      "hashes": "// ---- Per-layer hashes (Canva hashes the element's geometry; we hash what both platforms have) ---\n\n/** Even/odd of the layer's z-index — Canva's element-index parity. Negative-safe. */\ninternal fun canvaLayerParityEven(layerIndex: Int): Boolean = layerIndex.mod(2) == 0\n\n/** TUMBLE's pseudo-random start angle: `|cos(idx) · w · h| mod 360`, computed in doubles like the web. */\ninternal fun canvaTumbleHashDegrees(layerIndex: Int, width: Float, height: Float): Float =\n    (abs(cos(layerIndex.toDouble()) * width.toDouble() * height.toDouble()) % 360.0).toFloat()\n\n/** WIGGLE's per-step random: `|cos(seed) · w · h| mod 1`, computed in doubles like the web. */\ninternal fun canvaWiggleHash(seed: Int, width: Float, height: Float): Float =\n    canvaWiggleRandom(seed, null, width, height).toFloat()\n\n/**\n * Canva's `rqf` random for step [step]: `|cos(s) · P| mod 1` with the importer's hash product\n * P = [seed] (w·h·max(top,1)·max(left,1) of the element), or — for a picker-made animation, which\n * carries no seed — the layer's own `w · h`, so both platforms still agree frame for frame.\n */\ninternal fun canvaWiggleRandom(step: Int, seed: Double?, width: Float, height: Float): Double =\n    if (seed != null) {\n        abs(cos(step.toDouble()) * seed) % 1.0\n    } else {\n        abs(cos(step.toDouble()) * width.toDouble() * height.toDouble()) % 1.0\n    }",
+      "directionHelpers": "// ---- Direction helpers -------------------------------------------------------------------------\n\n/** Canva's Vd slider (0..1, default .5) rides on `intensity = 0.5 + Vd`. */\ninternal fun canvaIntensitySlider(intensity: Float): Float = (intensity - 0.5f).coerceIn(0f, 1f)\n\nprivate data class CanvaVector(val x: Float, val y: Float)\n\n/** The spec's direction, or the type's own preset direction when the spec's is not an axis. */\nprivate fun canvaAxisDirection(type: LayerAnimationType, direction: LayerAnimationDirection): LayerAnimationDirection =\n    when (direction) {\n        LayerAnimationDirection.UP,\n        LayerAnimationDirection.DOWN,\n        LayerAnimationDirection.LEFT,\n        LayerAnimationDirection.RIGHT -> direction\n        else -> type.preset().direction\n    }\n\n/**\n * Where the element STARTS relative to home for a motion in [direction] — Canva's `urf`: the\n * direction is the way the element MOVES, so UP starts BELOW (+y is down).\n */\nprivate fun canvaStartOffset(direction: LayerAnimationDirection): CanvaVector = when (direction) {\n    LayerAnimationDirection.UP -> CanvaVector(0f, 1f)\n    LayerAnimationDirection.DOWN -> CanvaVector(0f, -1f)\n    LayerAnimationDirection.LEFT -> CanvaVector(1f, 0f)\n    LayerAnimationDirection.RIGHT -> CanvaVector(-1f, 0f)\n    else -> CanvaVector(0f, 0f)\n}\n\n/** The layer edge in the direction of motion (motion RIGHT → the RIGHT edge). */\nprivate fun canvaLeadingEdge(direction: LayerAnimationDirection): WipeEdge = when (direction) {\n    LayerAnimationDirection.UP -> WipeEdge.TOP\n    LayerAnimationDirection.DOWN -> WipeEdge.BOTTOM\n    LayerAnimationDirection.LEFT -> WipeEdge.LEFT\n    else -> WipeEdge.RIGHT\n}\n\n/** The layer edge the motion starts from (motion RIGHT → the LEFT edge). */\nprivate fun canvaTrailingEdge(direction: LayerAnimationDirection): WipeEdge = when (direction) {\n    LayerAnimationDirection.UP -> WipeEdge.BOTTOM\n    LayerAnimationDirection.DOWN -> WipeEdge.TOP\n    LayerAnimationDirection.LEFT -> WipeEdge.RIGHT\n    else -> WipeEdge.LEFT\n}\n\n/**\n * True for the presets whose one-shot entrance AND exit are Canva's own tweens (§2). SHIFT and\n * SKATE are our mirrors of RISE and PAN (the same tween, direction DOWN / LEFT), so they ride\n * the same branch and stay exact mirrors now that RISE/PAN are Canva's. BLOCK (§8.3) plays\n * Canva's bar in every slot, a loop included.\n */\ninternal fun LayerAnimationType.isCanvaEnterExitPreset(): Boolean = when (this) {\n    LayerAnimationType.RISE,\n    LayerAnimationType.SHIFT,\n    LayerAnimationType.PAN,\n    LayerAnimationType.SKATE,\n    LayerAnimationType.FADE,\n    LayerAnimationType.POP,\n    LayerAnimationType.WIPE,\n    LayerAnimationType.BLUR,\n    LayerAnimationType.SUCCESSION,\n    LayerAnimationType.BASELINE,\n    LayerAnimationType.TUMBLE,\n    LayerAnimationType.NEON,\n    LayerAnimationType.SCRAPBOOK,\n    LayerAnimationType.STOMP,\n    LayerAnimationType.BLOCK -> true\n    else -> false\n}",
+      "neon": "// ---- NEON: a sign flickering on, as Canva's linear opacity tween list --------------------------\n\nprivate class CanvaNeonTween(val delay: Float, val duration: Float, val from: Float, val to: Float) {\n    val end: Float get() = delay + duration\n}\n\n/**\n * Canva's tween-list rule: the LAST tween (by delay) whose delay ≤ t owns the property — before\n * its delay its start value, after its end its end value, between them the linear ramp. Before\n * the very first tween, that tween's start value shows.\n */\nprivate fun List<CanvaNeonTween>.valueAt(t: Float): Float {\n    val active = lastOrNull { it.delay <= t } ?: return first().from\n    val local = if (active.duration <= 0f) 1f else ((t - active.delay) / active.duration).coerceIn(0f, 1f)\n    return active.from + (active.to - active.from) * local\n}\n\n/**\n * Intro opacity at [p]. `c = intro / lerp(10, 26, Vd)`, `n = floor(lerp(1, 4, Vd))`; the list is\n * built in units of `c`. Should the list overrun the intro (it does at the slider's low end), the\n * whole list is fitted to it so the layer is always fully on at p = 1. (The per-UNIT flicker of a\n * writing style is Canva's literal `Esf` — see [canvaNeonUnitIntro].)\n */\ninternal fun canvaNeonIntroOpacity(p: Float, vd: Float, parityEven: Boolean): Float {\n    val steps = canvaLerp(10f, 26f, vd)\n    val n = floor(canvaLerp(1f, 4f, vd)).toInt()\n    val tweens = mutableListOf<CanvaNeonTween>()\n    var f = 0f\n    for (i in 0 until n) {\n        if (i % 2 == 0) {\n            tweens += CanvaNeonTween(delay = f, duration = 3f, from = 0f, to = 1f)\n            tweens += CanvaNeonTween(delay = f + 4f, duration = 1f, from = if (parityEven) 1f else 0f, to = 0f)\n            f += 5f\n        } else {\n            val hold = if (parityEven) 1f else 0.75f\n            tweens += CanvaNeonTween(delay = f + 1f, duration = 1f, from = hold, to = hold)\n            tweens += CanvaNeonTween(delay = f + 3f, duration = 1f, from = 0f, to = 0f)\n            f += 4f\n        }\n    }\n    tweens += if (parityEven) {\n        CanvaNeonTween(delay = f + 4f, duration = 3f, from = 0f, to = 1f)\n    } else {\n        CanvaNeonTween(delay = f + 5f, duration = 4f, from = 0f, to = 1f)\n    }\n    val span = maxOf(steps, tweens.maxOf { it.end })\n    return tweens.valueAt(p.coerceIn(0f, 1f) * span).coerceIn(0f, 1f)\n}\n\n/**\n * Outro opacity at [u]. `d = outro / lerp(4, 8, Vd)` (default outro / 6); the schedule is fitted\n * to the outro should it overrun, so the layer is always off at u = 1.\n */\ninternal fun canvaNeonOutroOpacity(u: Float, vd: Float, parityEven: Boolean): Float {\n    val steps = canvaLerp(4f, 8f, vd)\n    return if (parityEven) {\n        val x = u.coerceIn(0f, 1f) * maxOf(steps, 5f)\n        when {\n            x < 1.1f -> 1f\n            x < 3f -> 0f\n            x < 5f -> 0.5f\n            else -> 0f\n        }\n    } else {\n        val x = u.coerceIn(0f, 1f) * maxOf(steps, 4.1f)\n        when {\n            x < 1f -> 1f\n            x < 3f -> canvaLerp(1f, 0.5f, (x - 1f) / 2f)\n            x < 4f -> 0.5f\n            x < 4.1f -> canvaLerp(0.5f, 0f, (x - 4f) / 0.1f)\n            else -> 0f\n        }\n    }\n}",
+      "repeating": "// ---- Repeating effects (§4, §8.3), one cycle = one `durationMs` ---------------------------------\n\n/**\n * FLICKER (Canva's `owf`): opacity 1 → b over `a`, hold b for 200ms, b → 1 over `a` (LINEAR), with\n * `b = lerp(.6, .1, t)` and `a = max(0, (cycle − 200) / 2)`. [t] is Canva's `(Vd + 1) / 2`, which\n * the slot carries as `clamp(intensity − .5, 0, 1)` (a stacked flicker as `stackFlickerT`); the\n * picker's intensity 1 is Canva's default t = .5 (b = .35).\n */\ninternal fun canvaFlickerOpacity(cycleProgress: Float, cycleMs: Double, t: Double): Float {\n    val cycle = max(1.0, cycleMs)\n    val b = canvaLerpD(0.6, 0.1, t)\n    val a = max(0.0, (cycle - CANVA_FLICKER_HOLD_MS) / 2.0)\n    val ms = canvaExactProgress(cycleProgress) * cycle\n    val dim = CanvaTween(delay = 0.0, duration = a, from = 1.0, to = b)\n    val recover = CanvaTween(delay = a + CANVA_FLICKER_HOLD_MS, duration = a, from = b, to = 1.0)\n    return (if (ms >= recover.delay) recover.valueAt(ms) else dim.valueAt(ms)).toFloat()\n}\n\n/**\n * PULSE: scale 1 → 1.15 over `q` (LINEAR), 1.15 → .85 over `a` (easeOutQuad), .85 → 1 over `q`\n * (LINEAR) with `q = a / 4`, so the cycle splits 1/6 : 2/3 : 1/6 whatever its length.\n */\ninternal fun canvaPulseScale(cycleProgress: Float): Float {\n    val c = cycleProgress.coerceIn(0f, 1f)\n    return when {\n        c < 1f / 6f -> canvaLerp(1f, 1.15f, c * 6f)\n        c < 5f / 6f -> canvaLerp(1.15f, 0.85f, canvaEaseOutQuad((c - 1f / 6f) * 1.5f))\n        else -> canvaLerp(0.85f, 1f, (c - 5f / 6f) * 6f)\n    }\n}\n\ninternal data class CanvaWigglePose(val translationX: Float, val translationY: Float, val rotationDegrees: Float)\n\n/**\n * WIGGLE, Canva's `rwf` step for step: `n = floor(lerp(10, 100, t))` steps of `g = cycle / (n + 1)`\n * with amplitude `lerp(.5, 1.8, t)`. Step i tweens the translation to\n * `(lerp(−20, 20, r(i + 2)), lerp(−20, 20, r(i + 3))) · amp` over g from `g·i` (easeInOutQuad), and —\n * for every step but the last — the rotation to `lerp(−10, 15, r(i + 1)) · amp` over g from\n * `g/2 + g·i`; after the n steps one more tween returns everything to 0 from `g·n`. Evaluated with\n * the latest-started-tween rule, so between rotation tweens the previous one's end holds. [t] is\n * `clamp(intensity − .5, 0, 1)` (default .5 → 55 steps of 325ms over 18.2s); `r` is\n * [canvaWiggleRandom] of the importer's `seed`, or of the layer size without one.\n */\ninternal fun canvaWigglePose(\n    cycleProgress: Float,\n    cycleMs: Double,\n    t: Double,\n    seed: Double?,\n    width: Float,\n    height: Float\n): CanvaWigglePose {\n    val n = floor(canvaLerpD(10.0, 100.0, t)).toInt()\n    val amp = canvaLerpD(0.5, 1.8, t)\n    val cycle = max(1.0, cycleMs)\n    val g = cycle / (n + 1)\n    val tau = canvaExactProgress(cycleProgress) * cycle\n    fun r(step: Int) = canvaWiggleRandom(step, seed, width, height)\n    fun targetX(i: Int) = canvaLerpD(-20.0, 20.0, r(i + 2)) * amp\n    fun targetY(i: Int) = canvaLerpD(-20.0, 20.0, r(i + 3)) * amp\n    fun targetRotation(i: Int) = canvaLerpD(-10.0, 15.0, r(i + 1)) * amp\n\n    // Translation: step i (0 until n) at g·i, then the return at g·n — the latest started wins.\n    var step = n\n    while (step > 0 && tau < g * step) step--\n    val fromX = if (step == 0) 0.0 else targetX(step - 1)\n    val fromY = if (step == 0) 0.0 else targetY(step - 1)\n    val toX = if (step == n) 0.0 else targetX(step)\n    val toY = if (step == n) 0.0 else targetY(step)\n    val x = CanvaTween(g * step, g, fromX, toX, CANVA_EASE_IN_OUT_QUAD).valueAt(tau)\n    val y = CanvaTween(g * step, g, fromY, toY, CANVA_EASE_IN_OUT_QUAD).valueAt(tau)\n\n    // Rotation: tweens j = 0 .. n − 2 at g/2 + g·j (the last step has none), then the return at g·n.\n    val rotation = if (tau >= g * n) {\n        CanvaTween(g * n, g, if (n >= 2) targetRotation(n - 2) else 0.0, 0.0, CANVA_EASE_IN_OUT_QUAD).valueAt(tau)\n    } else {\n        var j = n - 2\n        while (j > 0 && tau < g / 2 + g * j) j--\n        CanvaTween(\n            g / 2 + g * j,\n            g,\n            if (j == 0) 0.0 else targetRotation(j - 1),\n            targetRotation(j),\n            CANVA_EASE_IN_OUT_QUAD\n        ).valueAt(tau)\n    }\n    return CanvaWigglePose(x.toFloat(), y.toFloat(), rotation.toFloat())\n}\n",
+      "params": "/**\n * The keys of [LayerAnimationSpec.params] — docs/canva-animation-parity.md §8.1 in the web\n * dashboard, which is the single source of truth. Only the Canva importer writes them; a spec\n * the picker builds never carries any, and an absent key always means \"the behaviour the picker\n * already gets\". Unknown keys are ignored.\n */\nobject CanvaAnimationParams {\n    /** Loop slot: 1 = runs alongside the entrance/exit for the whole visible window (§8.2). */\n    const val CONCURRENT = \"concurrent\"\n\n    /** Loop slot: added to the layer-local clock of a concurrent loop. */\n    const val PHASE_MS = \"phaseMs\"\n\n    /** Loop slot: extra repeating effects on the same layer, value = cycle ms (rotate < 0 = CCW). */\n    const val STACK_ROTATE = \"stackRotate\"\n    const val STACK_FLICKER = \"stackFlicker\"\n    const val STACK_PULSE = \"stackPulse\"\n    const val STACK_WIGGLE = \"stackWiggle\"\n\n    /** Loop slot: t = (Vd + 1) / 2 of the stacked flicker / wiggle. */\n    const val STACK_FLICKER_T = \"stackFlickerT\"\n    const val STACK_WIGGLE_T = \"stackWiggleT\"\n\n    /** Loop slot: clock offset for the stacked effects. */\n    const val STACK_PHASE_MS = \"stackPhaseMs\"\n\n    /** BREATHE / DRIFT / TECTONIC (concurrent): the time-based ramp, ms layer-local, eases per §1 ids. */\n    const val R1_FROM = \"r1From\"\n    const val R1_TO = \"r1To\"\n    const val R1_START = \"r1Start\"\n    const val R1_DUR = \"r1Dur\"\n    const val R1_EASE = \"r1Ease\"\n    const val R2_TO = \"r2To\"\n    const val R2_START = \"r2Start\"\n    const val R2_DUR = \"r2Dur\"\n    const val R2_EASE = \"r2Ease\"\n\n    /** BREATHE: vertical drift (px) on the same ramp timing. */\n    const val Y1_FROM = \"y1From\"\n    const val Y1_TO = \"y1To\"\n    const val Y2_TO = \"y2To\"\n\n    /** FADE: 1 = LINEAR in and out. */\n    const val FADE_EASE = \"fadeEase\"\n\n    /** FADE / BLUR / SUCCESSION / NEON: the writing style — 1 character, 2 word, 3 line. */\n    const val UNIT = \"unit\"\n\n    /** Same types: 1 = stretch the unit schedule to fill the duration (an explicit Canva duration). */\n    const val FILL = \"fill\"\n\n    /** NEON / SCRAPBOOK / TUMBLE: Canva's sequence index XH (parity, hashes); replaces layerIndex. */\n    const val XH = \"xh\"\n\n    /** WIGGLE, NEON units, stacked wiggle: Canva's hash product P = w·h·max(top,1)·max(left,1). */\n    const val SEED = \"seed\"\n\n    /** TUMBLE: start offset (entrance) / end offset (exit) — degrees, px, px. */\n    const val START_ROTATION = \"startRotation\"\n    const val TRAVEL_X = \"travelX\"\n    const val TRAVEL_Y = \"travelY\"\n\n    /** STOMP: the starting scale s0. */\n    const val START_SCALE = \"startScale\"\n\n    /** SCRAPBOOK: g (2 or 3) and the b vector (px). */\n    const val POSES = \"poses\"\n    const val POSE_X = \"poseX\"\n    const val POSE_Y = \"poseY\"\n\n    /** BLOCK: ARGB 0xAARRGGBB as a number; absent = the text colour. */\n    const val BAR_COLOR = \"barColor\"\n}\n\n/** A finite param, or null when absent (or not a number the runtime can use). */\ninternal fun LayerAnimationSpec.param(key: String): Double? = params[key]?.takeIf { it.isFinite() }\n\n/** True for a LOOP slot the importer marked as running alongside the entrance and exit (§8.2). */\nfun LayerAnimationSpec.isCanvaConcurrentLoop(): Boolean = param(CanvaAnimationParams.CONCURRENT) == 1.0\n\n/** Canva's element index for parity / hashes: the spec's `xh` when present, else the layer's z-index. */\ninternal fun LayerAnimationSpec.canvaSequenceIndex(layerIndex: Int): Int =\n    param(CanvaAnimationParams.XH)?.let { floor(it).toInt() } ?: layerIndex\n\n/**\n * [LayerAnimationSpec.intensity] as the DOUBLE the importer wrote.\n *\n * ★The model stores intensity as a Float, but Canva's `t`/`Vd` feed `floor(lerp(…))` step counts\n * (WIGGLE's n, NEON's n) whose boundaries sit exactly on \"nice\" slider values: 1.2 read as a Float\n * is 1.2000000477, which floors WIGGLE to 73 steps where Canva (and the web, which keeps the JSON\n * double) floor to 72. Snapping to six decimals recovers the JSON value for every intensity the\n * importer writes (0.5 + t with a short t) on both platforms identically.\n */\ninternal fun canvaExactIntensity(intensity: Float): Double =\n    (intensity.toDouble() * 1_000_000.0).roundToLong() / 1_000_000.0\n\n/** Canva's Vd / t from the spec intensity: `clamp(intensity − .5, 0, 1)` in double precision. */\ninternal fun canvaSliderT(intensity: Float): Double = (canvaExactIntensity(intensity) - 0.5).coerceIn(0.0, 1.0)\n\n/**\n * A Float progress as the decimal DOUBLE the web holds for the same instant — same snapping as\n * [canvaExactIntensity], so a schedule sampled at p = 0.3 lands on τ = 0.3 · D exactly on both\n * platforms instead of one Float ulp away (which matters only at a tween's boundary, where it\n * decides which tween has started).\n */\ninternal fun canvaExactProgress(progress: Float): Double =\n    (progress.coerceIn(0f, 1f).toDouble() * 1_000_000.0).roundToLong() / 1_000_000.0\n",
+      "tweens": "/*\n * Canva's tween machinery, ported literally and in DOUBLE precision (docs/canva-animation-parity.md\n * §8 in the web dashboard): `aqf` evaluates one tween, `Xpf` picks the latest-started tween, `Zqf`\n * fits a schedule into a window (floors included), `Fqf`/`Gqf` drop overlapping tweens, and `bqf`\n * is the easing table by id (§1). The web runs the same functions over JS numbers — also IEEE\n * doubles — so both runtimes land on the same floors and pick the same winners.\n */\n\n/** Canva's easing ids (`bv`, §1). 16–22 exist in Canva and are linear there too. */\ninternal const val CANVA_EASE_LINEAR = 1\ninternal const val CANVA_EASE_IN_QUAD = 2\ninternal const val CANVA_EASE_OUT_QUAD = 3\ninternal const val CANVA_EASE_IN_OUT_QUAD = 4\ninternal const val CANVA_EASE_IN_CUBIC = 5\ninternal const val CANVA_EASE_OUT_CUBIC = 6\ninternal const val CANVA_EASE_IN_QUART = 7\ninternal const val CANVA_EASE_OUT_QUART = 8\ninternal const val CANVA_EASE_OUT_EXPO = 9\ninternal const val CANVA_EASE_IN_SINE = 10\ninternal const val CANVA_EASE_ELASTIC_IN = 11\ninternal const val CANVA_EASE_ELASTIC_OUT = 12\ninternal const val CANVA_EASE_ELASTIC_IN_07 = 13\ninternal const val CANVA_EASE_ELASTIC_OUT_07 = 14\ninternal const val CANVA_EASE_IN_OUT_CUBIC = 15\n\n/** Canva's easing [id] at u ∈ [0, 1] (`bqf`, §1). Unknown ids are linear, as in Canva. */\ninternal fun canvaEase(id: Int, u: Double): Double = when (id) {\n    CANVA_EASE_IN_QUAD -> u * u\n    CANVA_EASE_OUT_QUAD -> u * (2.0 - u)\n    CANVA_EASE_IN_OUT_QUAD -> if (u < 0.5) 2.0 * u * u else (4.0 - 2.0 * u) * u - 1.0\n    CANVA_EASE_IN_CUBIC -> u.pow(3)\n    CANVA_EASE_OUT_CUBIC -> (u - 1.0).pow(3) + 1.0\n    CANVA_EASE_IN_QUART -> u.pow(4)\n    CANVA_EASE_OUT_QUART -> -((u - 1.0).pow(4) - 1.0)\n    CANVA_EASE_OUT_EXPO -> -(2.0.pow(u * -10.0)) + 1.0\n    CANVA_EASE_IN_SINE -> 1.0 - cos(u * (PI / 2.0))\n    CANVA_EASE_ELASTIC_IN -> canvaElasticInD(u, 1.0)\n    CANVA_EASE_ELASTIC_OUT -> canvaElasticOutD(u, 1.0)\n    CANVA_EASE_ELASTIC_IN_07 -> canvaElasticInD(u, 0.7)\n    CANVA_EASE_ELASTIC_OUT_07 -> canvaElasticOutD(u, 0.7)\n    CANVA_EASE_IN_OUT_CUBIC -> if (u < 0.5) 4.0 * u.pow(3) else 1.0 - (-2.0 * u + 2.0).pow(3) / 2.0\n    else -> u\n}\n\nprivate fun canvaElasticInD(u: Double, amplitude: Double): Double = when {\n    u == 0.0 -> 0.0\n    u == 1.0 -> 1.0\n    else -> -(2.0.pow(10.0 * (u - 1.0) * (1.0 / amplitude))) * sin((u - 1.1) * 5.0 * PI)\n}\n\nprivate fun canvaElasticOutD(u: Double, amplitude: Double): Double = when {\n    u == 0.0 -> 0.0\n    u == 1.0 -> 1.0\n    else -> 2.0.pow(-10.0 * u * (1.0 / amplitude)) * sin((u - 0.1) * 5.0 * PI) + 1.0\n}\n\n/** Canva's `cv`: `a + (b − a)·t`, in double precision. */\ninternal fun canvaLerpD(from: Double, to: Double, t: Double): Double = from + (to - from) * t\n\n/** One Canva tween of ONE property: [from] → [to] over [delay, delay + duration] on easing [easing]. */\ninternal class CanvaTween(\n    val delay: Double,\n    val duration: Double,\n    val from: Double,\n    val to: Double,\n    val easing: Int = CANVA_EASE_LINEAR\n) {\n    /**\n     * Canva's `aqf`: before the delay the START value, once the tween has run its duration its\n     * exact END value (so a curve that never quite reaches 1 — easeOutExpo — still lands), eased\n     * in between. A zero or negative duration jumps straight to the end.\n     */\n    fun valueAt(t: Double): Double {\n        if (t < delay) return from\n        val elapsed = t - delay\n        return if (elapsed >= duration) to else from + (to - from) * canvaEase(easing, elapsed / duration)\n    }\n\n    /**\n     * Canva's `Zqf` against a window that starts at [windowDelay]: delay and duration scaled by\n     * [factor] and FLOORED, the delay never negative and the duration never below 1ms.\n     */\n    fun fitted(factor: Double, windowDelay: Double = 0.0): CanvaTween = CanvaTween(\n        delay = max(0.0, floor(windowDelay + (delay - windowDelay) * factor)),\n        duration = max(1.0, floor(duration * factor)),\n        from = from,\n        to = to,\n        easing = easing\n    )\n\n    val end: Double get() = delay + duration\n}\n\n/**\n * Canva's `Xpf` over one property's tweens: the LAST tween (by delay) that has started owns the\n * property — so between two tweens the earlier one's END value holds — and before the very first\n * tween its START value shows. [tweensByDelayDesc] must be sorted by delay, DESCENDING and stable\n * (Canva's `Rpf` sort); [canvaSortedForEvaluation] does exactly that. Empty lists read [fallback].\n */\ninternal fun canvaLatestTweenValue(t: Double, tweensByDelayDesc: List<CanvaTween>, fallback: Double = 0.0): Double {\n    if (tweensByDelayDesc.isEmpty()) return fallback\n    var chosen = tweensByDelayDesc[0]\n    for (tween in tweensByDelayDesc) {\n        chosen = tween\n        if (t >= tween.delay) return tween.valueAt(t)\n    }\n    return chosen.valueAt(t)\n}\n\n/** Canva's `Rpf` sort: by delay, descending, stable (ties keep their order). */\ninternal fun List<CanvaTween>.canvaSortedForEvaluation(): List<CanvaTween> = sortedByDescending { it.delay }\n\n/** JavaScript's `Math.round(x * 1E3) / 1E3` (half-up, unlike Kotlin's half-even `round`). */\nprivate fun canvaRound3(x: Double): Double = floor(x * 1000.0 + 0.5) / 1000.0\n\n/**\n * Canva's `Fqf` for two tweens of the same property: do their windows overlap (3-decimal rounding,\n * touching ends do NOT overlap)?\n */\ninternal fun canvaTweensOverlap(a: CanvaTween, b: CanvaTween): Boolean {\n    val c = canvaRound3(b.delay)\n    val d = canvaRound3(a.delay + a.duration)\n    return canvaRound3(a.delay) < canvaRound3(b.delay + b.duration) && c < d\n}\n\n/**\n * Canva's `Gqf`: walks the list from its END and keeps a tween only if it overlaps none already\n * kept — later tweens win over earlier ones they collide with. The result is in reverse order,\n * exactly as Canva's `reduceRight` leaves it (it only matters for stable ties, of which the\n * dedupe leaves none).\n */\ninternal fun List<CanvaTween>.canvaDeduped(): List<CanvaTween> {\n    val kept = ArrayList<CanvaTween>(size)\n    for (index in indices.reversed()) {\n        val candidate = this[index]\n        if (kept.none { canvaTweensOverlap(candidate, it) }) kept += candidate\n    }\n    return kept\n}\n\n/**\n * The time-based ramp of Canva's continuous presets (§8.2): before [start1] the ramp sits at\n * [from1]; the second segment (when [twoSegment]) owns everything from [start2]; each segment\n * eases to its end over its duration and a duration ≤ 0 jumps straight to its end value.\n */\ninternal fun canvaRampValue(\n    tau: Double,\n    from1: Double,\n    to1: Double,\n    start1: Double,\n    dur1: Double,\n    ease1: Int,\n    twoSegment: Boolean,\n    to2: Double,\n    start2: Double,\n    dur2: Double,\n    ease2: Int\n): Double = when {\n    tau < start1 -> from1\n    twoSegment && tau >= start2 -> canvaRampSegment(to1, to2, tau - start2, dur2, ease2)\n    else -> canvaRampSegment(from1, to1, tau - start1, dur1, ease1)\n}\n\nprivate fun canvaRampSegment(from: Double, to: Double, elapsed: Double, duration: Double, ease: Int): Double =\n    if (duration <= 0.0 || elapsed >= duration) to else from + (to - from) * canvaEase(ease, elapsed / duration)\n\n/** `τ mod m` for a positive [modulus], never negative (a phase can put τ before 0). */\ninternal fun canvaFloorMod(value: Double, modulus: Double): Double {\n    if (modulus <= 0.0) return 0.0\n    val r = value - modulus * floor(value / modulus)\n    return if (r >= modulus) 0.0 else r\n}\n",
+      "writingStyles": "/*\n * Canva's text writing styles — per character (1), word (2) or line (3) — for FADE, BLUR,\n * SUCCESSION and NEON (docs/canva-animation-parity.md §8.4 in the web dashboard).\n *\n * Two pure halves, both ported literally from Canva's bundle so the web can mirror them byte for\n * byte: [canvaTextUnits] is `crf` (which unit each grapheme belongs to), and [CanvaUnitSchedule]\n * is the per-unit tween lists of `Crf` / `gsf` / `ttf` (`ptf`, `qtf`, `rtf`, `stf`) / `Gsf`\n * (`Esf`, `Fsf`), fitted into the slot by `$qf` / `Zqf` / `Yqf` (NEON also deduped by `Gqf`) and\n * evaluated with `Xpf`'s hold rule at τ = rawProgress · durationMs. Renderers only ask two\n * questions: which unit is this glyph, and what does that unit look like now.\n */\n\n// ---- Units: Canva's `crf` -----------------------------------------------------------------------\n\n/**\n * Every grapheme of a text with its Canva unit. Built by [canvaTextUnits]; the renderers draw per\n * grapheme (the clip unit) with the visual of its unit.\n */\nclass CanvaTextUnitMap internal constructor(\n    /** The real graphemes in text order — the paragraph separators are not graphemes. */\n    val graphemes: List<String>,\n    /** UTF-16 offset of each grapheme in the source text. */\n    val graphemeStarts: IntArray,\n    /** Whitespace graphemes occupy a unit but draw nothing. */\n    val graphemeIsBlank: BooleanArray,\n    /** Canva's unit index (`trb`) of each grapheme. */\n    val unitOfGrapheme: IntArray,\n    /** N = the last item's unit + 1 — the per-paragraph pseudo newline items count too. */\n    val unitCount: Int\n) {\n    /** UTF-16 end offset (exclusive) of grapheme [index]. */\n    fun graphemeEnd(index: Int): Int = graphemeStarts[index] + graphemes[index].length\n}\n\nprivate const val ZERO_WIDTH_JOINER = 0x200D\n\n/**\n * The grapheme rule of §8.4, identical on every platform: a base code point plus every following\n * combining mark (Unicode Mn / Mc / Me, see [isCanvaCombiningMark]); a ZERO WIDTH JOINER attaches\n * to the cluster before it AND pulls the next code point in; variation selectors attach. Nothing\n * else joins (emoji modifiers, regional-indicator pairs and Hangul jamo split) — deliberately\n * simple, so that the web's port splits exactly the same way. Returns the UTF-16 start of every\n * cluster followed by [text]'s length.\n */\ninternal fun canvaGraphemeBoundaries(text: String): IntArray {\n    val bounds = ArrayList<Int>(text.length + 1)\n    var index = 0\n    var joinNext = false\n    while (index < text.length) {\n        val codePoint = canvaCodePointAt(text, index)\n        val attaches = bounds.isNotEmpty() && (\n            joinNext ||\n                codePoint == ZERO_WIDTH_JOINER ||\n                isCanvaCombiningMark(codePoint) ||\n                isCanvaVariationSelector(codePoint)\n            )\n        if (!attaches) bounds += index\n        joinNext = codePoint == ZERO_WIDTH_JOINER\n        index += if (codePoint >= 0x10000) 2 else 1\n    }\n    bounds += text.length\n    return bounds.toIntArray()\n}\n\n/** [text] split by the §8.4 grapheme rule (use on a single paragraph, or see [canvaTextUnits]). */\nfun canvaGraphemes(text: String): List<String> {\n    val bounds = canvaGraphemeBoundaries(text)\n    return List(bounds.size - 1) { text.substring(bounds[it], bounds[it + 1]) }\n}\n\nprivate fun canvaCodePointAt(text: String, index: Int): Int {\n    val high = text[index]\n    if (high.isHighSurrogate() && index + 1 < text.length) {\n        val low = text[index + 1]\n        if (low.isLowSurrogate()) return ((high.code - 0xD800) shl 10) + (low.code - 0xDC00) + 0x10000\n    }\n    return high.code\n}\n\nprivate fun isCanvaVariationSelector(codePoint: Int): Boolean =\n    codePoint in 0xFE00..0xFE0F || codePoint in 0xE0100..0xE01EF\n\n/** Unicode White_Space (the property, not Java's `isWhitespace`): Canva's `asi = /\\s/` on an item. */\nprivate fun isCanvaWhiteSpace(codePoint: Int): Boolean =\n    codePoint in 0x09..0x0D || codePoint == 0x20 || codePoint == 0x85 || codePoint == 0xA0 ||\n        codePoint == 0x1680 || codePoint in 0x2000..0x200A || codePoint == 0x2028 ||\n        codePoint == 0x2029 || codePoint == 0x202F || codePoint == 0x205F || codePoint == 0x3000\n\n/**\n * Canva's `$ri` CJK test (Han, CJK punctuation, Hiragana, Katakana and friends), code point for\n * code point: U+4E00–9FCC, U+3000–303F, U+3041–3096, U+309D–309F, U+1B001, U+1F200,\n * U+30A1–30FA, U+30FD–30FF, U+31F0–31FF, U+32D0–32FE, U+3300–3357, U+FF66–FF6F, U+FF71–FF9D, U+1B000.\n */\nprivate fun isCanvaCjk(codePoint: Int): Boolean =\n    codePoint in 0x4E00..0x9FCC || codePoint in 0x3000..0x303F ||\n        codePoint in 0x3041..0x3096 || codePoint in 0x309D..0x309F ||\n        codePoint == 0x1B001 || codePoint == 0x1F200 ||\n        codePoint in 0x30A1..0x30FA || codePoint in 0x30FD..0x30FF || codePoint in 0x31F0..0x31FF ||\n        codePoint in 0x32D0..0x32FE || codePoint in 0x3300..0x3357 || codePoint in 0xFF66..0xFF6F ||\n        codePoint in 0xFF71..0xFF9D || codePoint == 0x1B000\n\n/** Canva tests the whole item string with an unanchored regex: ANY code point decides. */\nprivate inline fun String.anyCanvaCodePoint(predicate: (Int) -> Boolean): Boolean {\n    var index = 0\n    while (index < length) {\n        val codePoint = canvaCodePointAt(this, index)\n        if (predicate(codePoint)) return true\n        index += if (codePoint >= 0x10000) 2 else 1\n    }\n    return false\n}\n\n/**\n * Canva's `crf` for writing style [unit] (1 character, 2 word, 3 line):\n *\n * * paragraphs = `(text + \"\\n\").split(\"\\n\")` minus the last piece; every paragraph contributes a\n *   PSEUDO newline item (whitespace, not CJK) followed by its graphemes;\n * * word index: w₀ = 0, wⱼ = wⱼ₋₁ + 1 when item j−1 is whitespace or CJK, or its CJK-ness differs\n *   from item j's; unit: character uⱼ = j, word uⱼ = wⱼ, line u₀ = 0 and uⱼ = uⱼ₋₁ + 1 when item\n *   j−1's line is lower than item j's;\n * * N = the last item's unit + 1. Whitespace and pseudo items occupy units but draw nothing, so the\n *   first real unit starts one stagger step late — Canva does the same.\n *\n * [graphemeLines] gives the line of every grapheme (in [CanvaTextUnitMap.graphemes] order) from\n * the renderer's own layout; null means one line. A paragraph's pseudo item takes the line of the\n * paragraph's first grapheme; an EMPTY paragraph's pseudo item takes the line of the item before\n * it (Canva's `qrf` only starts a line on a visible character, never on a newline).\n */\nfun canvaTextUnits(text: String, unit: Int, graphemeLines: IntArray? = null): CanvaTextUnitMap {\n    val paragraphs = (text + \"\\n\").split(\"\\n\").dropLast(1)\n    val graphemes = ArrayList<String>()\n    val starts = ArrayList<Int>()\n    val blanks = ArrayList<Boolean>()\n    val units = ArrayList<Int>()\n\n    var items = 0\n    var previousWhitespace = false\n    var previousCjk = false\n    var previousLine = 0\n    var word = 0\n    var unitIndex = 0\n\n    fun advance(whitespace: Boolean, cjk: Boolean, line: Int): Int {\n        if (items > 0) {\n            if (previousWhitespace || previousCjk || previousCjk != cjk) word++\n            unitIndex = when (unit) {\n                1 -> items\n                2 -> word\n                3 -> if (previousLine < line) unitIndex + 1 else unitIndex\n                else -> 0\n            }\n        }\n        previousWhitespace = whitespace\n        previousCjk = cjk\n        previousLine = line\n        items++\n        return unitIndex\n    }\n\n    fun lineOf(graphemeIndex: Int): Int = graphemeLines?.getOrNull(graphemeIndex) ?: 0\n\n    var paragraphOffset = 0\n    for (paragraph in paragraphs) {\n        val bounds = canvaGraphemeBoundaries(paragraph)\n        val clusterCount = bounds.size - 1\n        val pseudoLine = when {\n            clusterCount > 0 -> lineOf(graphemes.size)\n            items > 0 -> previousLine\n            else -> 0\n        }\n        advance(whitespace = true, cjk = false, line = pseudoLine)\n        for (k in 0 until clusterCount) {\n            val grapheme = paragraph.substring(bounds[k], bounds[k + 1])\n            val whitespace = grapheme.anyCanvaCodePoint(::isCanvaWhiteSpace)\n            val cjk = grapheme.anyCanvaCodePoint(::isCanvaCjk)\n            val u = advance(whitespace, cjk, lineOf(graphemes.size))\n            graphemes += grapheme\n            starts += paragraphOffset + bounds[k]\n            blanks += whitespace\n            units += u\n        }\n        paragraphOffset += paragraph.length + 1\n    }\n    return CanvaTextUnitMap(\n        graphemes = graphemes,\n        graphemeStarts = starts.toIntArray(),\n        graphemeIsBlank = blanks.toBooleanArray(),\n        unitOfGrapheme = units.toIntArray(),\n        unitCount = unitIndex + 1\n    )\n}\n\n// ---- Per-unit tween lists -------------------------------------------------------------------------\n\n/**\n * One unit's look at one instant (§8.4): its own alpha, its blur in EMs of the glyph's font size\n * (0.2 at most — read as em, inferred from Canva's 32px whole-element blur, not measured) and its\n * scale about the glyph's own centre.\n */\ndata class CanvaUnitVisual(val alpha: Float, val blurEm: Float, val scale: Float) {\n    /** Drawn exactly like plain text. */\n    val isAtRest: Boolean get() = alpha >= 0.999f && blurEm <= 0.0001f && abs(scale - 1f) <= 0.0001f\n}\n\nprivate val CanvaUnitRest = CanvaUnitVisual(alpha = 1f, blurEm = 0f, scale = 1f)\n\n/** True for the four presets Canva animates per unit. */\nfun LayerAnimationType.hasCanvaWritingStyles(): Boolean = when (this) {\n    LayerAnimationType.FADE,\n    LayerAnimationType.BLUR,\n    LayerAnimationType.SUCCESSION,\n    LayerAnimationType.NEON -> true\n    else -> false\n}\n\n/**\n * The per-unit schedule of one writing-style slot, resolved once for a text of [unitCount] units\n * and evaluated per frame. Everything but the progress is a key: renderers cache one of these per\n * text and rebuild it only when [matches] says the spec or the unit count moved.\n *\n * * FADE (`Crf`): unit u tweens opacity over 500ms from 125·u — easeOutQuad in, easeInQuad out.\n * * BLUR (`gsf`): opacity + blur .2 over 400ms from 100·u.\n * * SUCCESSION (`ttf`): as BLUR plus scale `.8 − .4·Vd` (`ptf`/`qtf`), and the element scale\n *   `.9 − .3·Vd` over the units' whole span (`rtf`/`stf`).\n * * NEON (`Gsf`): each unit runs Canva's own flicker lists (`Esf` / `Fsf`, 500ms, parity from its\n *   unit index) from an offset that starts at 100 and moves by `lerp(−100, 300, r(u))` at every new\n *   unit, `r(s) = |cos(s)·seed| mod 1` (seed absent → P = 1).\n *\n * `$qf`/`Yqf`/`Zqf` then fit the lists into the slot window [0, durationMs]: the factor is\n * `window / (latest tween end)`, clamped to ≤ 1 unless [fill] (NEON always fits), and every delay\n * and duration is scaled and FLOORED (`Zqf`). Vd = `clamp(intensity − .5, 0, 1)`.\n */\nclass CanvaUnitSchedule(\n    val type: LayerAnimationType,\n    val fill: Boolean,\n    val intensity: Float,\n    val seed: Double?,\n    val durationMs: Long,\n    val isExiting: Boolean,\n    val unitCount: Int\n) {\n    private val window = durationMs.coerceAtLeast(1L).toDouble()\n    private val vd = canvaSliderT(intensity)\n    private val count = unitCount.coerceAtLeast(1)\n\n    private val staggerMs = if (type == LayerAnimationType.FADE) 125.0 else 100.0\n    private val tweenMs = if (type == LayerAnimationType.FADE) 500.0 else 400.0\n\n    /** `Yqf` + `$qf`: the fit (or fill) factor of the FADE / BLUR / SUCCESSION lists. */\n    private val factor: Double = run {\n        val latestEnd = (0.0 + staggerMs * (count - 1)) + tweenMs\n        val raw = window / latestEnd\n        if (fill) raw else min(1.0, raw)\n    }\n    private val unitDuration = max(1.0, floor(tweenMs * factor))\n\n    private fun unitDelay(unit: Int): Double = max(0.0, floor(0.0 + ((0.0 + staggerMs * unit) - 0.0) * factor))\n\n    private val unitScaleFrom = 0.8 - 0.4 * vd\n    private val elementScaleFrom = 0.9 - (0.9 - 0.6) * vd\n\n    /** NEON: every unit's fitted, deduped and sorted list, built once. */\n    private val neonLists: Array<List<CanvaTween>> by lazy { buildNeonLists() }\n\n    fun matches(\n        type: LayerAnimationType,\n        fill: Boolean,\n        intensity: Float,\n        seed: Double?,\n        durationMs: Long,\n        isExiting: Boolean,\n        unitCount: Int\n    ): Boolean = this.type == type && this.fill == fill && this.intensity == intensity && this.seed == seed &&\n        this.durationMs == durationMs && this.isExiting == isExiting && this.unitCount == unitCount\n\n    /** Unit [unitIndex]'s look at [rawProgress] (the slot's own clock: p entering, u exiting). */\n    fun visual(unitIndex: Int, rawProgress: Float): CanvaUnitVisual {\n        val tau = canvaExactProgress(rawProgress) * window\n        val unit = unitIndex.coerceIn(0, count - 1)\n        return when (type) {\n            LayerAnimationType.FADE -> {\n                val tween = unitTween(unit, from = 0.0, to = 1.0)\n                CanvaUnitVisual(alpha = tween.valueAt(tau).toFloat(), blurEm = 0f, scale = 1f)\n            }\n            LayerAnimationType.BLUR,\n            LayerAnimationType.SUCCESSION -> {\n                val alpha = unitTween(unit, from = 0.0, to = 1.0).valueAt(tau)\n                val blur = unitTween(unit, from = 0.2, to = 0.0).valueAt(tau)\n                val scale = if (type == LayerAnimationType.SUCCESSION) {\n                    unitTween(unit, from = unitScaleFrom, to = 1.0).valueAt(tau)\n                } else {\n                    1.0\n                }\n                CanvaUnitVisual(alpha = alpha.toFloat(), blurEm = blur.toFloat(), scale = scale.toFloat())\n            }\n            LayerAnimationType.NEON -> CanvaUnitVisual(\n                alpha = canvaLatestTweenValue(tau, neonLists[unit], fallback = if (isExiting) 1.0 else 0.0)\n                    .toFloat().coerceIn(0f, 1f),\n                blurEm = 0f,\n                scale = 1f\n            )\n            else -> CanvaUnitRest\n        }\n    }\n\n    /**\n     * SUCCESSION's element scale (`rtf` / `stf`) — every other type is 1: `.9 − .3·Vd` → 1 on\n     * easeOutQuad (out: 1 → it on easeInQuad) over [first unit's delay, last unit's delay + its\n     * duration], evaluated like any tween.\n     */\n    fun elementScale(rawProgress: Float): Float {\n        if (type != LayerAnimationType.SUCCESSION) return 1f\n        val tau = canvaExactProgress(rawProgress) * window\n        val firstDelay = unitDelay(0)\n        val lastDelay = unitDelay(count - 1)\n        val span = lastDelay - firstDelay + unitDuration\n        val tween = if (isExiting) {\n            CanvaTween(firstDelay, span, 1.0, elementScaleFrom, CANVA_EASE_IN_QUAD)\n        } else {\n            CanvaTween(firstDelay, span, elementScaleFrom, 1.0, CANVA_EASE_OUT_QUAD)\n        }\n        return tween.valueAt(tau).toFloat()\n    }\n\n    /** A FADE / BLUR / SUCCESSION unit tween, entering ([from] → [to]) or exiting ([to] → [from]). */\n    private fun unitTween(unit: Int, from: Double, to: Double): CanvaTween = if (isExiting) {\n        CanvaTween(unitDelay(unit), unitDuration, to, from, CANVA_EASE_IN_QUAD)\n    } else {\n        CanvaTween(unitDelay(unit), unitDuration, from, to, CANVA_EASE_OUT_QUAD)\n    }\n\n    private fun buildNeonLists(): Array<List<CanvaTween>> {\n        val random = seed ?: 1.0\n        val offsets = DoubleArray(count)\n        var offset = 100.0\n        offsets[0] = offset\n        for (m in 1 until count) {\n            offset += canvaLerpD(-100.0, 300.0, abs(cos(m.toDouble()) * random) % 1.0)\n            offsets[m] = offset\n        }\n        val raw = Array(count) { unit ->\n            val delay = max(0.0, 0.0 + offsets[unit])\n            if (isExiting) {\n                canvaNeonUnitOutro(delay, duration = 500.0, vd = vd, xh = unit)\n            } else {\n                canvaNeonUnitIntro(delay, duration = 500.0, vd = vd, xh = unit)\n            }\n        }\n        var latestEnd = 0.0\n        raw.forEach { list -> list.forEach { tween -> latestEnd = max(latestEnd, tween.delay + tween.duration) } }\n        // Gsf calls $qf with no modes: NEON always FITS, whatever the stored duration.\n        val neonFactor = min(1.0, window / (latestEnd - 0.0))\n        return Array(count) { unit ->\n            raw[unit].map { it.fitted(neonFactor) }.canvaDeduped().canvaSortedForEvaluation()\n        }\n    }\n}\n\n/** Canva's `Esf` — NEON's intro flicker for one unit (LINEAR opacity tweens, hold rule applies). */\ninternal fun canvaNeonUnitIntro(delay: Double, duration: Double, vd: Double, xh: Int): List<CanvaTween> {\n    val c = duration / canvaLerpD(10.0, 26.0, vd)\n    val steps = floor(canvaLerpD(1.0, 4.0, vd)).toInt()\n    val even = xh % 2 == 0\n    fun tween(from: Double, to: Double, at: Double, length: Double) = CanvaTween(at, length, from, to, CANVA_EASE_LINEAR)\n    var f = delay\n    val list = ArrayList<CanvaTween>()\n    for (h in 0 until steps) {\n        if (h % 2 == 0) {\n            list += tween(0.0, 1.0, f, c * 3)\n            list += if (even) tween(1.0, 0.0, f + c * 4, c) else tween(0.0, 0.0, f + c * 4, c)\n            f += c * 5\n        } else {\n            list += if (even) tween(1.0, 1.0, f + c * 1, c) else tween(0.75, 0.75, f + c * 1, c)\n            list += tween(0.0, 0.0, f + c * 3, c)\n            f += c * 4\n        }\n    }\n    list += if (!even) tween(0.0, 1.0, f + c * 5, c * 4) else tween(0.0, 1.0, f + c * 4, c * 3)\n    return list\n}\n\n/** Canva's `Fsf` — NEON's outro flicker for one unit. */\ninternal fun canvaNeonUnitOutro(delay: Double, duration: Double, vd: Double, xh: Int): List<CanvaTween> {\n    fun tween(from: Double, to: Double, at: Double, length: Double) = CanvaTween(at, length, from, to, CANVA_EASE_LINEAR)\n    if (duration <= 0.0) return listOf(tween(1.0, 0.0, delay, 0.0))\n    val d = duration / canvaLerpD(4.0, 8.0, vd)\n    return if (xh % 2 == 0) {\n        listOf(\n            tween(1.0, 1.0, delay + 1, 1.0),\n            tween(0.0, 0.0, delay + 1 + d * 1.1, max(0.0, d * 0.9 - 1)),\n            tween(0.5, 0.5, delay + d * 3, d),\n            tween(0.0, 0.0, delay + d * 5, d)\n        )\n    } else {\n        listOf(\n            tween(1.0, 0.5, delay + d, d * 2),\n            tween(0.5, 0.0, delay + d * 4, d * 0.1)\n        )\n    }\n}\n\n// ---- The pure entry points the renderers and the web golden share -------------------------------\n\n/**\n * Unit [unitIndex] of [unitCount]'s look for writing style [unit] of a [type] slot at [rawProgress]\n * — p while entering, u (0 → 1 over the outro) while exiting. Neutral for any other type/unit.\n */\nfun canvaUnitVisual(\n    type: LayerAnimationType,\n    unit: Int,\n    fill: Boolean,\n    intensity: Float,\n    seed: Double?,\n    durationMs: Long,\n    isExiting: Boolean,\n    rawProgress: Float,\n    unitIndex: Int,\n    unitCount: Int\n): CanvaUnitVisual {\n    if (unit !in 1..3 || !type.hasCanvaWritingStyles()) return CanvaUnitRest\n    return CanvaUnitSchedule(type, fill, intensity, seed, durationMs, isExiting, unitCount)\n        .visual(unitIndex, rawProgress)\n}\n\n/** SUCCESSION's element scale for the same inputs (1 for every other type). */\nfun canvaUnitElementScale(\n    type: LayerAnimationType,\n    unit: Int,\n    fill: Boolean,\n    intensity: Float,\n    seed: Double?,\n    durationMs: Long,\n    isExiting: Boolean,\n    rawProgress: Float,\n    unitCount: Int\n): Float {\n    if (unit !in 1..3 || !type.hasCanvaWritingStyles()) return 1f\n    return CanvaUnitSchedule(type, fill, intensity, seed, durationMs, isExiting, unitCount)\n        .elementScale(rawProgress)\n}\n\n// ---- Renderer plumbing ----------------------------------------------------------------------------\n\n/** The UTF-16 start of every real grapheme of [text], in [canvaTextUnits] order. */\nfun canvaGraphemeStarts(text: String): IntArray {\n    val starts = ArrayList<Int>(text.length)\n    var paragraphOffset = 0\n    for (paragraph in (text + \"\\n\").split(\"\\n\").dropLast(1)) {\n        val bounds = canvaGraphemeBoundaries(paragraph)\n        for (k in 0 until bounds.size - 1) starts += paragraphOffset + bounds[k]\n        paragraphOffset += paragraph.length + 1\n    }\n    return starts.toIntArray()\n}\n\n/**\n * The unit map and schedule of ONE text as a renderer draws it, cached across frames: the map is\n * rebuilt only when the text, the writing style or (line mode only) the layout changes, the\n * schedule only when the spec's keys or the unit count do. Single-threaded, like the renderers.\n *\n * [lineOfOffset] maps a UTF-16 offset to its line in the renderer's OWN layout — line units come\n * from what is drawn, never from an estimate — and is only consulted for writing style 3.\n */\nclass CanvaUnitTextCache {\n    private var text: String? = null\n    private var unit = 0\n    private var layoutKey: Any? = null\n    private var map: CanvaTextUnitMap? = null\n    private var schedule: CanvaUnitSchedule? = null\n\n    fun unitMap(text: String, unit: Int, layoutKey: Any?, lineOfOffset: ((Int) -> Int)?): CanvaTextUnitMap {\n        val key = if (unit == 3) layoutKey else null\n        val cached = map\n        if (cached != null && this.text == text && this.unit == unit && this.layoutKey === key) return cached\n        val lines = if (unit == 3 && lineOfOffset != null) {\n            canvaGraphemeStarts(text).let { starts -> IntArray(starts.size) { lineOfOffset(starts[it]) } }\n        } else {\n            null\n        }\n        return canvaTextUnits(text, unit, lines).also {\n            this.text = text\n            this.unit = unit\n            this.layoutKey = key\n            map = it\n        }\n    }\n\n    fun schedule(motion: GlyphMotionSpec, unitCount: Int): CanvaUnitSchedule? =\n        motion.canvaSchedule(unitCount, reuse = schedule)?.also { schedule = it }\n}\n",
+      "composition": "/*\n * Canva runs its continuous presets and repeating effects ALONGSIDE the entrance and exit, not\n * after them (docs/canva-animation-parity.md §8.2 in the web dashboard). A loop slot the importer\n * marks `concurrent` is attached to the playback state by the timeline resolver and composed here,\n * inside [resolveLayerAnimationVisualState], so every renderer call site stays unchanged.\n */\n\n/**\n * Canva's `$pf` combine: alpha and the scales MULTIPLY, translation, rotation and blur ADD. The\n * structural channels (reveal mask, overlay bar, glyph motion, text reveal) stay this state's —\n * only the primary (entrance → hold → exit) state ever carries them.\n */\ninternal fun LayerAnimationVisualState.composedWith(other: LayerAnimationVisualState): LayerAnimationVisualState = copy(\n    scaleMultiplier = scaleMultiplier * other.scaleMultiplier,\n    scaleXMultiplier = scaleXMultiplier * other.scaleXMultiplier,\n    scaleYMultiplier = scaleYMultiplier * other.scaleYMultiplier,\n    rotationDeltaDegrees = rotationDeltaDegrees + other.rotationDeltaDegrees,\n    translationX = translationX + other.translationX,\n    translationY = translationY + other.translationY,\n    alphaMultiplier = alphaMultiplier * other.alphaMultiplier,\n    blurRadiusPx = blurRadiusPx + other.blurRadiusPx\n)\n\n/**\n * [primary] with the concurrent [loop] (and the stack it carries) composed on top.\n *\n * * Loop clock τ = [windowLocalMs] + `phaseMs`; with ramp params BREATHE/DRIFT/TECTONIC read\n *   [canvaContinuousRampVisual], anything else plays its LOOP formula at `(τ mod durationMs) /\n *   durationMs`.\n * * Stack: every `stack*` key plays its repeating effect at τs = [windowLocalMs] + `stackPhaseMs`\n *   on its own cycle.\n * * When the primary draws per writing-style unit (its [GlyphMotionSpec.canva] is set), what the\n *   LAYER keeps once a text renderer takes over alpha/blur/scale per unit is exactly the loop and\n *   stack contribution — stored on the spec as its rest values.\n */\ninternal fun composeCanvaConcurrentLoop(\n    primary: LayerAnimationVisualState,\n    loop: LayerAnimationSpec,\n    windowLocalMs: Long,\n    width: Float,\n    height: Float,\n    layerIndex: Int\n): LayerAnimationVisualState {\n    val tau = windowLocalMs.toDouble() + (loop.param(CanvaAnimationParams.PHASE_MS) ?: 0.0)\n    var rest = canvaConcurrentLoopVisual(loop, tau, width, height, layerIndex)\n    val stackTau = windowLocalMs.toDouble() + (loop.param(CanvaAnimationParams.STACK_PHASE_MS) ?: 0.0)\n    canvaStackedEffects(loop, stackTau, width, height).forEach { rest = rest.composedWith(it) }\n    val composed = primary.composedWith(rest)\n    val glyph = primary.glyphMotion\n    val canva = glyph?.canva ?: return composed\n    return composed.copy(\n        glyphMotion = glyph.copy(\n            canva = canva.copy(\n                restAlpha = rest.alphaMultiplier,\n                restScale = rest.scaleMultiplier,\n                restBlurPx = rest.blurRadiusPx\n            )\n        )\n    )\n}\n\n/** The concurrent loop on its own at loop time [tau]. */\ninternal fun canvaConcurrentLoopVisual(\n    loop: LayerAnimationSpec,\n    tau: Double,\n    width: Float,\n    height: Float,\n    layerIndex: Int\n): LayerAnimationVisualState {\n    canvaContinuousRampVisual(loop, tau)?.let { return it }\n    val cycle = loop.durationMs.coerceAtLeast(1L).toDouble()\n    val progress = (canvaFloorMod(tau, cycle) / cycle).toFloat().coerceIn(0f, 1f)\n    return resolvePrimaryLayerAnimationVisualState(\n        LayerTimelinePlaybackState(\n            isVisible = true,\n            localMs = canvaFloorMod(tau, cycle).toLong(),\n            progress = progress,\n            animation = loop.copy(infinite = true)\n        ),\n        width,\n        height,\n        layerIndex\n    )\n}\n\n/**\n * BREATHE / DRIFT / TECTONIC with the importer's time-based ramp (r1…, optionally r2…), or null\n * when the loop carries none. BREATHE ramps the scale (and the y drift from y1…/y2…), DRIFT the\n * translation along its axis (UP/DOWN → y, otherwise x), TECTONIC the x translation.\n */\ninternal fun canvaContinuousRampVisual(loop: LayerAnimationSpec, tau: Double): LayerAnimationVisualState? {\n    when (loop.type) {\n        LayerAnimationType.BREATHE, LayerAnimationType.DRIFT, LayerAnimationType.TECTONIC -> Unit\n        else -> return null\n    }\n    val to1 = loop.param(CanvaAnimationParams.R1_TO) ?: return null\n    val from1 = loop.param(CanvaAnimationParams.R1_FROM) ?: to1\n    val start1 = loop.param(CanvaAnimationParams.R1_START) ?: 0.0\n    val dur1 = loop.param(CanvaAnimationParams.R1_DUR) ?: 0.0\n    val ease1 = loop.param(CanvaAnimationParams.R1_EASE)?.toInt() ?: CANVA_EASE_LINEAR\n    val twoSegment = loop.param(CanvaAnimationParams.R2_DUR) != null\n    val to2 = loop.param(CanvaAnimationParams.R2_TO) ?: to1\n    val start2 = loop.param(CanvaAnimationParams.R2_START) ?: 0.0\n    val dur2 = loop.param(CanvaAnimationParams.R2_DUR) ?: 0.0\n    val ease2 = loop.param(CanvaAnimationParams.R2_EASE)?.toInt() ?: CANVA_EASE_LINEAR\n    fun ramp(from: Double, to: Double, second: Double) =\n        canvaRampValue(tau, from, to, start1, dur1, ease1, twoSegment, second, start2, dur2, ease2)\n\n    val value = ramp(from1, to1, to2).toFloat()\n    return when (loop.type) {\n        LayerAnimationType.BREATHE -> {\n            val y1To = loop.param(CanvaAnimationParams.Y1_TO)\n            val y1From = loop.param(CanvaAnimationParams.Y1_FROM)\n            val drift = if (y1To == null && y1From == null) {\n                0f\n            } else {\n                val to = y1To ?: 0.0\n                ramp(y1From ?: 0.0, to, loop.param(CanvaAnimationParams.Y2_TO) ?: to).toFloat()\n            }\n            LayerAnimationVisualState(scaleMultiplier = value, translationY = drift)\n        }\n        LayerAnimationType.DRIFT -> when (loop.direction) {\n            LayerAnimationDirection.UP, LayerAnimationDirection.DOWN -> LayerAnimationVisualState(translationY = value)\n            else -> LayerAnimationVisualState(translationX = value)\n        }\n        else -> LayerAnimationVisualState(translationX = value)\n    }\n}\n\n/**\n * The repeating effects stacked on a loop slot (`stackRotate` / `stackFlicker` / `stackPulse` /\n * `stackWiggle`, each valued in cycle ms) at stack time [tau]. A stacked ROTATE turns clockwise\n * unless its cycle is negative; FLICKER/WIGGLE take their `t` from `stackFlickerT` /\n * `stackWiggleT` (Canva's default 0.5 when absent); a stacked WIGGLE hashes the loop's `seed`.\n */\ninternal fun canvaStackedEffects(\n    loop: LayerAnimationSpec,\n    tau: Double,\n    width: Float,\n    height: Float\n): List<LayerAnimationVisualState> {\n    val effects = ArrayList<LayerAnimationVisualState>(4)\n    fun progressOf(cycle: Double): Float = (canvaFloorMod(tau, cycle) / cycle).toFloat().coerceIn(0f, 1f)\n    loop.param(CanvaAnimationParams.STACK_ROTATE)?.takeIf { it != 0.0 }?.let { signed ->\n        val cycle = abs(signed)\n        effects += LayerAnimationVisualState(\n            rotationDeltaDegrees = progressOf(cycle) * 360f * (if (signed < 0.0) -1f else 1f)\n        )\n    }\n    loop.param(CanvaAnimationParams.STACK_FLICKER)?.takeIf { it > 0.0 }?.let { cycle ->\n        val t = (loop.param(CanvaAnimationParams.STACK_FLICKER_T) ?: 0.5).coerceIn(0.0, 1.0)\n        effects += LayerAnimationVisualState(alphaMultiplier = canvaFlickerOpacity(progressOf(cycle), cycle, t))\n    }\n    loop.param(CanvaAnimationParams.STACK_PULSE)?.takeIf { it > 0.0 }?.let { cycle ->\n        effects += LayerAnimationVisualState(scaleMultiplier = canvaPulseScale(progressOf(cycle)))\n    }\n    loop.param(CanvaAnimationParams.STACK_WIGGLE)?.takeIf { it > 0.0 }?.let { cycle ->\n        val t = (loop.param(CanvaAnimationParams.STACK_WIGGLE_T) ?: 0.5).coerceIn(0.0, 1.0)\n        val pose = canvaWigglePose(\n            cycleProgress = progressOf(cycle),\n            cycleMs = cycle,\n            t = t,\n            seed = loop.param(CanvaAnimationParams.SEED),\n            width = width,\n            height = height\n        )\n        effects += LayerAnimationVisualState(\n            translationX = pose.translationX,\n            translationY = pose.translationY,\n            rotationDeltaDegrees = pose.rotationDegrees\n        )\n    }\n    return effects\n}\n"
     },
     "notes": [
-      "Effects with authoredCurves=null are analytic formulas, verbatim from LayerAnimationVisualRuntime.kt.",
-      "width/height are the LAYER size in px. intensity = spec.intensity. vector = resolveAnimationVector(spec.direction).",
-      "Time bases: progress is eased AND ping-ponged when infinite; cycleProgress is raw 0..1; pingPong is the raised-cosine mirror, NOT eased.",
-      "A DEFAULT direction resolves to a ZERO vector; direction-aware reveals (RISE/SHIFT/PAN/SKATE) fall back to their own axis so they never go motionless.",
-      "BLOCK adds an overlayBar channel (a painted bar in the layer text colour); ASCEND is per-WORD glyph motion. Both need a renderer that honours those channels.",
+      "Effects with authoredCurves=null are analytic formulas, verbatim from LayerAnimationVisualRuntime.kt (formula.kotlin = the LOOP / legacy branch).",
+      "canvaOneShot.kotlin is the ONE-SHOT branch from LayerAnimationCanvaRuntime.kt: Canva's intro tween while entering (p = raw progress) and outro tween while exiting (u = 1 - progress), returned WITHOUT the generic alpha x progress exit fade.",
+      "width/height are the LAYER size in px. intensity = spec.intensity clamped 0.1..4. vector = resolveAnimationVector(spec.direction). layerIndex = the layer's z-index in its page (0 = bottom).",
+      "Time bases: progress is eased AND ping-ponged (raised cosine) when infinite; cycleProgress is raw 0..1; pingPong is the raised-cosine mirror, NOT eased; ramp is the TRIANGULAR 0->1->0 mirror when infinite (Canva's continuous presets) and raw progress otherwise.",
+      "BREATHE/DRIFT/TECTONIC: one loop cycle is Canva's A -> B -> A ramp (LINEAR); DRIFT/TECTONIC amplitude = 120px x intensity; BREATHE A = 1 - .10 x intensity, B = 1 + .03 x intensity.",
+      "ROTATE/FLICKER/PULSE/WIGGLE: one cycle per durationMs. FLICKER: b = lerp(.6, .1, t), a = max(0, (cycle - 200) / 2); WIGGLE: Canva's rwf with n = floor(lerp(10, 100, t)), amp = lerp(.5, 1.8, t), g = cycle / (n + 1), r(s) = |cos(s) * seed| mod 1 (no seed: the layer's w * h); t = clamp(intensity - .5, 0, 1), the picker's intensity 1 = Canva's default t = .5.",
+      "A DEFAULT direction resolves to the type's preset direction; direction-aware reveals (RISE/SHIFT/PAN/SKATE) fall back to their own axis so they never go motionless.",
+      "Wipe masks carry an `edge` (LEFT default / RIGHT / TOP / BOTTOM) and `anchored`: the band grows from that edge; text renderers mirror LEFT/RIGHT for RTL text ONLY when anchored is false (Canva's WIPE / BASELINE / BLOCK set it), media never mirrors.",
+      "BLOCK (Canva's esf) adds an overlayBar channel: the layer's own box offset by (leftFraction, topFraction) of its size, clipped to the box, painted in params.barColor or the text colour; the text is hidden by an anchored Wipe at 0/1. ASCEND is per-WORD glyph motion. Both need a renderer that honours those channels.",
+      "params (docs/canva-animation-parity.md section 8.1) ride on each spec and are omitted when empty: a loop with params.concurrent = 1 is attached to the playback state and composed with the entrance/exit (alpha/scale multiply, translation/rotation/blur add); ramps r1*/r2* drive BREATHE/DRIFT/TECTONIC; stack* keys add repeating effects; unit/fill give FADE/BLUR/SUCCESSION/NEON Canva's writing styles through glyphMotion.canva (see runtime.canva.writingStyles).",
       "Layer payload: animations{entrance,exit,loop}. Legacy single animation still migrates (infinite->loop, one-shot->entrance). A LOOP slot MUST be infinite=true."
     ]
   },
   "_meta": {
-    "source": "nayroz mobile shared module — generated from runtime values",
+    "source": "nayroz mobile shared module — generated from runtime values by AnimationSpecExportTest",
     "counts": {
       "types": 50,
       "offeredInSomeTab": 46,
-      "withAuthoredCurves": 19,
-      "withFormula": 31
+      "withAuthoredCurves": 14,
+      "withFormula": 36,
+      "withCanvaOneShot": 15
     }
   }
 }

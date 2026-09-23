@@ -27,6 +27,8 @@ const STILL = new Set(["NONE", "STATIC"]);
 /** Reveal families: these drive a mask channel rather than a transform. */
 const MASK_TYPES = new Set([
   "WIPE",
+  // Canva's Baseline clips the content to its home box while it slides in — a mask, plus motion.
+  "BASELINE",
   "GRADIENT_WIPE",
   "RADIAL",
   "RADIAL_GRADIENT",
@@ -34,6 +36,23 @@ const MASK_TYPES = new Set([
   "CIRCUAL_GRADIENT",
   "DIAGONAL",
   "DIAGONAL_GRADIENT",
+]);
+
+/**
+ * Canva effects whose `intensity` is Canva's الكثافة slider (Vd), not an amplitude: Tumble reads it
+ * into its start angle, and the rest ignore it altogether — Rise and Pan (with their SHIFT and
+ * SKATE mirrors) travel a flat 80 px, Scrapbook's stamps and Baseline's slide are fixed pixels and
+ * the layer's own size. Wiggle reads Canva's repeating-effect slider t = intensity − 0.5 into its
+ * step count and amplitude (§8.3 item 7). See docs/canva-animation-parity.md §2, §4 and §8.
+ */
+const CANVA_SLIDER_TYPES = new Set(["TUMBLE", "WIGGLE"]);
+const CANVA_INTENSITY_FREE_TYPES = new Set([
+  "RISE",
+  "SHIFT",
+  "PAN",
+  "SKATE",
+  "SCRAPBOOK",
+  "BASELINE",
 ]);
 
 /** Text families: these drive per-glyph reveal, with an alpha/mask fallback. */
@@ -129,6 +148,11 @@ for (const entry of ANIMATION_TYPES) {
       const authored = Boolean(entry.authoredCurves);
       if (authored) {
         assert.ok(Math.abs(tripled - moved) < 1e-6, `${type}: authored curves must ignore intensity`);
+      } else if (CANVA_INTENSITY_FREE_TYPES.has(type)) {
+        assert.ok(Math.abs(tripled - moved) < 1e-6, `${type}: Canva's formula must ignore intensity`);
+      } else if (CANVA_SLIDER_TYPES.has(type)) {
+        // Canva's slider is not an amplitude here; it only has to stay finite.
+        assert.ok(Number.isFinite(tripled), `${type}: intensity 3 produced a non-finite state`);
       } else {
         assert.ok(tripled > moved, `${type}: intensity 3 did not increase amplitude`);
       }
@@ -186,13 +210,15 @@ for (const entry of ANIMATION_TYPES) {
 
   test(`${type}: is fully hidden when an exit finishes`, () => {
     const gone = resolveAnimationVisualState(makeAnimationSpec({ type }), 0, W, H, true);
-    // Two legitimate ways to be gone, exactly as the mobile source does it: faded out, OR a matte
-    // closed over the layer. The reveal family (WIPE/RADIAL/CIRCUAL/…) deliberately keeps alpha=1
-    // and closes its mask instead — fading AND closing isn't the authored behaviour.
+    // Three legitimate ways to be gone, exactly as the sources do it: faded out, a matte closed
+    // over the layer, OR scaled to nothing. The reveal family (WIPE/RADIAL/CIRCUAL/…) deliberately
+    // keeps alpha=1 and closes its mask instead — fading AND closing isn't the authored behaviour —
+    // and Canva's Pop leaves by shrinking to zero with its opacity untouched.
     const maskClosed = gone.revealMask != null && (gone.revealMask as { progress: number }).progress <= 0.01;
+    const shrunk = gone.scaleMultiplier <= 0.01;
     assert.ok(
-      gone.alphaMultiplier <= 0.01 || maskClosed,
-      `${type}: exit left the layer visible (alpha=${gone.alphaMultiplier}, mask=${JSON.stringify(gone.revealMask)})`
+      gone.alphaMultiplier <= 0.01 || maskClosed || shrunk,
+      `${type}: exit left the layer visible (alpha=${gone.alphaMultiplier}, scale=${gone.scaleMultiplier}, mask=${JSON.stringify(gone.revealMask)})`
     );
   });
 }

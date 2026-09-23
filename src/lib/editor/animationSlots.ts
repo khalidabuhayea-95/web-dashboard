@@ -11,6 +11,12 @@
  *
  * Exit reuses the ENTRANCE visual mapping run in reverse (progress 1 = shown → 0 = gone), and
  * sets isExiting so the visual runtime fades the layer fully out on top of its motion.
+ *
+ * ONE exception (docs/canva-animation-parity.md §8.2): a loop whose params say `concurrent: 1`
+ * (an imported Canva repeating effect or continuous preset) is NOT a slot in that race. The
+ * entrance → hold → exit state resolves as if there were no loop, and the loop rides along on the
+ * playback state for the whole visible window with its own clock (`windowMs`, ms since the window
+ * start); resolvePlaybackVisualState composes the two.
  */
 import {
   getAnimationDefaults,
@@ -19,7 +25,7 @@ import {
   normalizeSpecEasing,
   type AnimationCategory,
 } from "./animationSpec";
-import type { AnimationSpecInput } from "./animationVisual";
+import { isConcurrentLoop, type AnimationSpecInput } from "./animationVisual";
 
 export interface LayerAnimations {
   entrance: AnimationSpecInput | null;
@@ -34,13 +40,37 @@ export interface PlaybackState {
   progress: number;
   animation: AnimationSpecInput | null;
   isExiting: boolean;
+  /**
+   * A concurrent loop (§8.2) that plays alongside [animation] whenever the layer is visible; null
+   * when the loop slot is empty or an ordinary (mutually exclusive) loop.
+   */
+  concurrentLoop?: AnimationSpecInput | null;
+  /** Ms since the layer's window start, undelayed — the concurrent loop's clock base. */
+  windowMs?: number;
 }
 
 function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
-/** Builds a spec, filling anything unset from the type's own defaults. */
+/**
+ * The finite numeric entries of a stored `params` object (§8.1), or undefined when there are none —
+ * the key is then omitted, exactly as the app omits an empty map. Unknown keys are kept (they
+ * round-trip) and simply ignored by the runtime.
+ */
+export function normalizeAnimationParams(value: unknown): Record<string, number> | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const params: Record<string, number> = {};
+  for (const [key, raw] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof raw === "number" && Number.isFinite(raw)) params[key] = raw;
+  }
+  return Object.keys(params).length > 0 ? params : undefined;
+}
+
+/**
+ * Builds a spec, filling anything unset from the type's own defaults. `params` are carried over
+ * as given — a picker creating a NEW effect passes none, an edit of the current spec keeps them.
+ */
 export function makeAnimationSpec(
   input: Partial<AnimationSpecInput> & { type: unknown },
   category?: AnimationCategory
@@ -50,6 +80,7 @@ export function makeAnimationSpec(
   const durationMs = Number.isFinite(input.durationMs as number)
     ? Math.max(1, Number(input.durationMs))
     : Math.max(1, defaults.durationMs);
+  const params = normalizeAnimationParams(input.params);
   return {
     type,
     // Only a LOOP runs infinite; an entrance/exit is always one-shot.
@@ -66,7 +97,25 @@ export function makeAnimationSpec(
     intensity: Number.isFinite(input.intensity as number)
       ? Number(input.intensity)
       : defaults.intensity,
+    ...(params ? { params } : {}),
   };
+}
+
+/**
+ * The spec the animation panel writes into a slot for [patch]. Picking a NEW type starts from that
+ * type's own defaults — and without `params`, which were Canva's numbers for the OLD type (§8.1);
+ * tweaking a control (duration, direction, intensity…) of the current type keeps everything else,
+ * params included.
+ */
+export function editAnimationSlotSpec(
+  current: AnimationSpecInput | null,
+  patch: Partial<AnimationSpecInput> & { type?: string },
+  category: AnimationCategory
+): AnimationSpecInput {
+  const nextType = patch.type ?? current?.type ?? "NONE";
+  const base: Partial<AnimationSpecInput> =
+    current && current.type === nextType ? current : { type: nextType };
+  return makeAnimationSpec({ ...base, ...patch, type: nextType }, category);
 }
 
 function activeSlot(spec: AnimationSpecInput | null): AnimationSpecInput | null {
@@ -226,16 +275,23 @@ export function resolveTimelinePlaybackState(
 
   const entrance = activeSlot(animations.entrance);
   const exit = activeSlot(animations.exit);
-  const loop = activeSlot(animations.loop);
+  const loopSlot = activeSlot(animations.loop);
+  // A concurrent loop (§8.2) leaves the race below and rides along on every visible state.
+  const concurrentLoop = loopSlot && isConcurrentLoop(loopSlot) ? loopSlot : null;
+  const loop = concurrentLoop ? null : loopSlot;
+  const withLoop = (state: PlaybackState): PlaybackState =>
+    concurrentLoop && state.isVisible
+      ? { ...state, concurrentLoop, windowMs: localMs }
+      : state;
 
   if (!isVisible || (!entrance && !exit && !loop)) {
-    return {
+    return withLoop({
       isVisible,
       localMs: isVisible ? localMs : 0,
       progress: isVisible ? 1 : 0,
       animation: null,
       isExiting: false,
-    };
+    });
   }
 
   const layerDurationMs = Math.max(1, safeEnd - safeStart);
@@ -252,13 +308,19 @@ export function resolveTimelinePlaybackState(
   // Exit — plays the reveal in reverse.
   if (exit && exitDur > 0 && localMs >= exitStart) {
     const p = clamp((localMs - exitStart) / exitDur, 0, 1);
-    return { isVisible: true, localMs, progress: 1 - p, animation: exit, isExiting: true };
+    return withLoop({ isVisible: true, localMs, progress: 1 - p, animation: exit, isExiting: true });
   }
   // Entrance — plays once at the start.
   if (entrance && entDur > 0 && localMs < entDur) {
     const delayed = Math.max(0, localMs - entrance.delayMs);
     const p = clamp(delayed / Math.max(1, entrance.durationMs), 0, 1);
-    return { isVisible: true, localMs: delayed, progress: p, animation: entrance, isExiting: false };
+    return withLoop({
+      isVisible: true,
+      localMs: delayed,
+      progress: p,
+      animation: entrance,
+      isExiting: false,
+    });
   }
   // Loop — the continuous middle (honors the loop's own delay, after the entrance).
   if (loop) {
@@ -268,5 +330,5 @@ export function resolveTimelinePlaybackState(
     return { isVisible: true, localMs: delayedMs, progress: p, animation: loop, isExiting: false };
   }
   // Past the entrance with no loop — hold the entrance's final (shown) frame.
-  return { isVisible: true, localMs, progress: 1, animation: entrance, isExiting: false };
+  return withLoop({ isVisible: true, localMs, progress: 1, animation: entrance, isExiting: false });
 }

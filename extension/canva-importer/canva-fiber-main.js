@@ -151,46 +151,177 @@
           return null;
         }
       };
-      const extractAnimation = (el) => {
-        const anim = el && el.animation;
-        if (!anim || typeof anim !== "object") return null;
-        // Track CONTAINER found structurally (was anim.Sv, now anim.Tv — names rotate): the first
-        // object-valued prop whose children include a track ({durationUs > 0}).
-        let container = null;
-        for (const key of Object.keys(anim)) {
-          const v = anim[key];
-          if (!v || typeof v !== "object" || Array.isArray(v)) continue;
-          for (const kk of Object.keys(v)) {
-            const t = v[kk];
-            if (t && typeof t === "object" && Number(t.durationUs) > 0) {
-              container = v;
-              break;
+      // ── canva-animation-extract:start ─────────────────────────────────────────────────────────
+      // (this block is kept IDENTICAL in canva-fiber-main.js, background.js and canva-scraper.js;
+      // extension/canva-importer/test/animation-mapping.test.mjs evaluates it between the markers)
+      //
+      // Canva keeps `element.animation = { type: "sequenced"|"independent", animation: <presetId>,
+      // <config> }`. The config prop is MINIFIED and rotates between deploys (Sv → Tv → Xw), so it
+      // is found STRUCTURALLY: the object-valued prop that holds the track records. Inside it (see
+      // docs/canva-animation-parity.md §1): `qg` = intro track {durationUs?}, `Bf` = outro track
+      // {durationUs?, reverse?}, `direction` 1 auto / 2 up / 3 down / 4 left / 5 right (the way the
+      // element MOVES), `Vd` intensity 0..1 (default .5), `scale` Breathe/Photo-zoom slider (signed,
+      // .1..1), `ID` text writing style (1 char / 2 word / 3 line / 5 whole element), `NV` timing
+      // mode (1 custom duration, 2 sync with captions), `color` Block bar colour. A track WITHOUT
+      // durationUs is Canva's DEFAULT timing (tile clicked, speed never touched): the leg is still
+      // PRESENT. Canva's scheduler (background.js, §8.5) derives every window from the page, so the
+      // record keeps the config exactly as stored — `config`, legs and raw µs, nothing defaulted.
+      // Repeating effects (rotate / flicker / pulse / wiggle) are NOT presets: they live on the
+      // element itself as a tiny record (`element.Sz.ref`, names rotate) — see extractRepeating.
+      const isPlainObject = (v) => Boolean(v) && typeof v === "object" && !Array.isArray(v);
+      // Observable-style model fields expose their value through get().
+      const unwrapCanvaValue = (v) => (v && typeof v.get === "function" ? v.get() : v);
+      const numericArrayCount = (t) =>
+        Object.keys(t).filter((a) => Array.isArray(t[a]) && t[a].length >= 2).length;
+      const looksLikeTrack = (t) =>
+        isPlainObject(t) && ("durationUs" in t || "reverse" in t || numericArrayCount(t) >= 2);
+      const CONFIG_SCALAR_KEYS = ["direction", "Vd", "scale", "ID", "NV", "color"];
+      const IN_TRACK_KEYS = ["qg", "Wf", "in", "enter", "intro"];
+      const OUT_TRACK_KEYS = ["Bf", "tf", "sf", "out", "exit", "outro"];
+      const findAnimationConfig = (anim) => {
+        const candidates = Object.keys(anim)
+          .map((key) => anim[key])
+          .filter((v) => isPlainObject(v));
+        if (!candidates.length) return null;
+        return (
+          candidates.find((v) => Object.keys(v).some((kk) => looksLikeTrack(v[kk]))) ||
+          candidates.find((v) => CONFIG_SCALAR_KEYS.some((k) => k in v)) ||
+          candidates.find((v) => Object.keys(v).some((kk) => isPlainObject(v[kk]))) ||
+          (candidates.length === 1 ? candidates[0] : null)
+        );
+      };
+      // Tracks are classified by SHAPE: ≥2 numeric arrays = keyframe track (custom motion path or a
+      // loop); anything else is a plain intro/outro record — possibly EMPTY, i.e. default-timed.
+      // Intro/outro resolve by known names first, then `reverse` marks the outro, then by order.
+      const classifyTracks = (config) => {
+        const out = { inTrack: null, outTrack: null, kfCandidate: null };
+        if (!isPlainObject(config)) return out;
+        const plain = [];
+        for (const kk of Object.keys(config)) {
+          const t = config[kk];
+          if (!isPlainObject(t)) continue;
+          if (numericArrayCount(t) >= 2) {
+            out.kfCandidate = t;
+            continue;
+          }
+          plain.push({ key: kk, track: t });
+        }
+        const inPlain = plain.find((p) => IN_TRACK_KEYS.includes(p.key)) || null;
+        const outPlain =
+          plain.find((p) => OUT_TRACK_KEYS.includes(p.key)) ||
+          plain.find((p) => p !== inPlain && "reverse" in p.track) ||
+          null;
+        const rest = plain.filter((p) => p !== inPlain && p !== outPlain);
+        const resolvedIn = inPlain || rest.shift() || null;
+        const resolvedOut = outPlain || rest.shift() || null;
+        out.inTrack = resolvedIn ? resolvedIn.track : null;
+        out.outTrack = resolvedOut ? resolvedOut.track : null;
+        return out;
+      };
+      // null / undefined are ABSENT, not zero (Number(null) is 0).
+      const finiteOr = (v, fallback) =>
+        v === null || v === undefined || !Number.isFinite(Number(v)) ? fallback : Number(v);
+      // Canva direction: 1 auto, 2 up, 3 down, 4 left, 5 right. Older page configs carried words.
+      const readCanvaDirection = (v) => {
+        if (Number.isFinite(Number(v)) && Number(v) > 0) return Number(v);
+        const byWord = { auto: 1, up: 2, down: 3, left: 4, right: 5 };
+        return byWord[String(v || "").trim().toLowerCase()] || undefined;
+      };
+      // The config exactly as Canva stores it, under Canva's own key names: a leg is present
+      // (`{}` = default timing) or absent, a stored duration keeps its raw µs (a speed preset writes
+      // 500 000 / c, and Canva checks that equality to the last bit), scalars stay raw.
+      const normalizeAnimationConfig = (config, inTrack, outTrack) => {
+        if (!isPlainObject(config)) return undefined;
+        const out = {};
+        const readLeg = (track, withReverse) => {
+          const leg = {};
+          const us = unwrapCanvaValue(track.durationUs);
+          if (us !== null && us !== undefined && Number.isFinite(Number(us))) leg.durationUs = Number(us);
+          if (withReverse && unwrapCanvaValue(track.reverse) === true) leg.reverse = true;
+          return leg;
+        };
+        if (inTrack) out.qg = readLeg(inTrack, false);
+        if (outTrack) out.Bf = readLeg(outTrack, true);
+        const direction = readCanvaDirection(unwrapCanvaValue(config.direction));
+        if (direction) out.direction = direction;
+        for (const key of ["Vd", "scale", "ID", "NV"]) {
+          const value = unwrapCanvaValue(config[key]);
+          if (value !== null && value !== undefined && value !== "" && Number.isFinite(Number(value))) out[key] = Number(value);
+        }
+        const color = unwrapCanvaValue(config.color);
+        if (typeof color === "string" && color) out.color = color;
+        return out;
+      };
+      // Repeating-effect record: `{ rotate?: {direction, Vd}, R2a?: {Vd}, BJa?: {Vd}, N5a?: {Vd} }`
+      // (the flicker / pulse / wiggle keys are minified and may rotate). Each entry is a tiny object
+      // whose only numeric field is Vd (-1..1, default 0); rotate also carries direction 1 cw / 2 ccw.
+      const REPEATING_KEY_MAP = {
+        rotate: "rotate",
+        R2a: "flicker",
+        BJa: "pulse",
+        N5a: "wiggle",
+        flicker: "flicker",
+        pulse: "pulse",
+        wiggle: "wiggle",
+      };
+      // A record is `{ Vd }` plus at most `direction` and a boolean flag (flicker is stored as
+      // `{ Vd, Ezp: false }` live — see test/fixtures/canva-live-records-2026-09-22.json), never
+      // anything larger or nested.
+      const isVdRecord = (v) => {
+        if (!isPlainObject(v)) return false;
+        const keys = Object.keys(v);
+        if (keys.length > 3) return false;
+        return keys.every(
+          (k) => k === "direction" || typeof v[k] === "number" || typeof v[k] === "boolean"
+        );
+      };
+      const readVd = (rec, fallback) => {
+        if (Number.isFinite(Number(rec.Vd))) return Number(rec.Vd);
+        const numeric = Object.keys(rec).filter((k) => k !== "direction" && typeof rec[k] === "number");
+        return numeric.length === 1 ? rec[numeric[0]] : fallback;
+      };
+      const extractRepeating = (el) => {
+        if (!el || typeof el !== "object") return null;
+        for (const key of Object.keys(el)) {
+          if (key === "animation") continue;
+          try {
+            const holder = el[key];
+            if (!isPlainObject(holder)) continue;
+            const rec = isPlainObject(holder.ref) ? holder.ref : holder;
+            const keys = Object.keys(rec);
+            if (!keys.length || keys.length > 4) continue;
+            if (!keys.every((k) => isVdRecord(rec[k]))) continue;
+            // Anchor on a known effect name (or the known holder name) so a random small numeric
+            // record elsewhere on the element cannot masquerade as a repeating effect.
+            if (!keys.some((k) => k in REPEATING_KEY_MAP) && key !== "Sz") continue;
+            const repeating = {};
+            const unknownKeys = [];
+            for (const k of keys) {
+              const name = REPEATING_KEY_MAP[k];
+              if (!name) {
+                unknownKeys.push(k);
+                continue;
+              }
+              const Vd = Math.max(-1, Math.min(1, readVd(rec[k], 0)));
+              repeating[name] =
+                name === "rotate" ? { direction: finiteOr(rec[k].direction, 1), Vd } : { Vd };
             }
+            if (unknownKeys.length) repeating.unknownKeys = unknownKeys;
+            return Object.keys(repeating).length ? repeating : null;
+          } catch (_e) {
+            /* observable getters can throw — keep scanning */
           }
-          if (container) break;
         }
-        // classify tracks by SHAPE: ≥2 numeric arrays = keyframe/loop track; else plain duration
-        // tracks — entrance/exit resolved by known names first (Wf=in; tf/sf=out), else by order.
-        let inTrack = null;
-        let outTrack = null;
-        let kfCandidate = null;
-        if (container) {
-          const plain = [];
-          for (const kk of Object.keys(container)) {
-            const t = container[kk];
-            if (!t || typeof t !== "object" || !(Number(t.durationUs) > 0)) continue;
-            const arrayCount = Object.keys(t).filter((a) => Array.isArray(t[a]) && t[a].length >= 2).length;
-            if (arrayCount >= 2) kfCandidate = t;
-            else plain.push({ key: kk, track: t });
-          }
-          const inPlain = plain.find((p) => ["Wf", "in", "enter"].includes(p.key)) || plain[0] || null;
-          const outPlain =
-            plain.find((p) => ["tf", "sf", "out", "exit"].includes(p.key)) ||
-            plain.find((p) => p !== inPlain) ||
-            null;
-          inTrack = inPlain ? inPlain.track : null;
-          outTrack = outPlain && outPlain !== inPlain ? outPlain.track : null;
-        }
+        return null;
+      };
+      const extractAnimation = (el) => {
+        const repeating = extractRepeating(el);
+        const anim = el && el.animation;
+        // `{ type: "none" }` is what "مسح الرسوم المتحركة" (clear) leaves behind: NO animation, even
+        // when a stale preset id or config rides along — never read a preset out of it.
+        const hasAnim = isPlainObject(anim) && anim.type !== "none";
+        const config = hasAnim ? findAnimationConfig(anim) : null;
+        const { inTrack, outTrack, kfCandidate } = classifyTracks(config);
         const motionPath = kfCandidate ? decodeMotionPath(kfCandidate) : null;
         const loopTrack = motionPath ? null : kfCandidate;
         let mode;
@@ -209,21 +340,258 @@
           durationMs = usToMs(outTrack.durationUs);
           easingRaw = outTrack.easing;
         }
-        const canvaPreset = Number.isFinite(Number(anim.animation)) ? Number(anim.animation) : null;
-        if (canvaPreset === null && !mode && !motionPath) return null;
+        const canvaPreset =
+          hasAnim && Number.isFinite(Number(anim.animation)) ? Number(anim.animation) : null;
+        if (canvaPreset === null && !mode && !motionPath && !repeating) return null;
+        const direction = config ? readCanvaDirection(config.direction) : undefined;
+        const Vd =
+          config && Number.isFinite(Number(config.Vd))
+            ? Math.max(0, Math.min(1, Number(config.Vd)))
+            : undefined;
+        const scale =
+          config && Number.isFinite(Number(config.scale)) && Number(config.scale) !== 0
+            ? Number(config.scale)
+            : undefined;
+        const writingStyle =
+          config && Number.isFinite(Number(config.ID)) && Number(config.ID) > 0
+            ? Number(config.ID)
+            : undefined;
+        const timingMode =
+          config && Number.isFinite(Number(config.NV)) && Number(config.NV) > 0
+            ? Number(config.NV)
+            : undefined;
+        const color = config && typeof config.color === "string" && config.color ? config.color : undefined;
+        const normalizedConfig = normalizeAnimationConfig(config, inTrack, outTrack);
         return {
           canvaPreset,
-          family: typeof anim.type === "string" ? anim.type : undefined,
+          family: hasAnim && typeof anim.type === "string" ? anim.type : undefined,
+          // Canva's own config (undefined = the element stores none — a freshly clicked tile).
+          ...(normalizedConfig ? { config: normalizedConfig } : {}),
           mode,
+          // Leg PRESENCE is separate from timing: a default-timed leg is present with no duration.
+          hasIn: Boolean(inTrack),
+          hasOut: Boolean(outTrack),
           inMs: inTrack ? usToMs(inTrack.durationUs) : undefined,
           outMs: outTrack ? usToMs(outTrack.durationUs) : undefined,
           loopMs: loopTrack ? usToMs(loopTrack.durationUs) : undefined,
           durationMs,
           delayMs: usToMs(el.startUs),
           easing: Number.isFinite(Number(easingRaw)) ? Number(easingRaw) : undefined,
+          ...(outTrack && outTrack.reverse === true ? { reverse: true } : {}),
+          ...(direction ? { direction } : {}),
+          ...(Vd !== undefined ? { Vd } : {}),
+          ...(scale !== undefined ? { scale } : {}),
+          ...(writingStyle ? { writingStyle } : {}),
+          ...(timingMode ? { timingMode } : {}),
+          ...(color ? { color } : {}),
+          ...(repeating ? { repeating } : {}),
           ...(motionPath ? { motionPath } : {}),
         };
       };
+      // What Canva's scheduler reads straight off an element (docs §8.5), on the element's model entry:
+      // its raw `startUs` / `durationUs` — UNDEFINED when Canva left them unset (the element is then
+      // untimed; 0 is a real, timed value, so never coerce), the raw record type (`animationType`:
+      // "sequenced" / "independent" / "none", undefined when the element has no animation field at
+      // all, which is exactly when a page animation applies to it), a text's largest font size (the
+      // Stomp page's headline), Canva's layout width `wb` (its font scale) and whether a photo or
+      // video fills the element (the photo page presets).
+      const readRawMicros = (v) => {
+        const value = unwrapCanvaValue(v);
+        return value === null || value === undefined || value === "" || !Number.isFinite(Number(value))
+          ? undefined
+          : Number(value);
+      };
+      const fillHasMedia = (fill) =>
+        isPlainObject(fill) &&
+        fill.dropTarget !== false &&
+        Boolean((isPlainObject(fill.image) && fill.image.media) || isPlainObject(fill.video));
+      const readScheduleFacts = (el) => {
+        const facts = {};
+        if (!el || typeof el !== "object") return facts;
+        const startUs = readRawMicros(el.startUs);
+        const durationUs = readRawMicros(el.durationUs);
+        if (startUs !== undefined) facts.startUs = startUs;
+        if (durationUs !== undefined) facts.durationUs = durationUs;
+        const anim = el.animation;
+        if (anim === null || anim === undefined) {
+          facts.animationState = "absent";
+        } else {
+          if (isPlainObject(anim) && typeof anim.type === "string") facts.animationType = anim.type;
+          facts.animationState = facts.animationType === "none" ? "none" : "present";
+        }
+        try {
+          const items = el.text && el.text.stream && el.text.stream.attrs && el.text.stream.attrs.items;
+          let maxFontSize = 0;
+          if (Array.isArray(items)) {
+            for (const item of items) {
+              if (!item || typeof item !== "object") continue;
+              for (const k of Object.keys(item)) {
+                const bag = item[k];
+                if (bag && typeof bag === "object" && Number(bag["font-size"]) > maxFontSize) {
+                  maxFontSize = Number(bag["font-size"]);
+                }
+              }
+            }
+          }
+          if (maxFontSize > 0) facts.maxFontSize = maxFontSize;
+        } catch (_e) {
+          /* font sizes are a bonus */
+        }
+        if (Number(el.wb) > 0) facts.layoutWidth = Number(el.wb);
+        if (fillHasMedia(el.fill) || (Array.isArray(el.paths) && el.paths.some((p) => p && fillHasMedia(p.fill)))) {
+          facts.hasMediaFill = true;
+        }
+        return facts;
+      };
+      // Every element under a page's element array, in Canva's paint order (a group before its own
+      // contents), each with the LB id of the group that holds it: group children are scheduled right
+      // after their group, and their geometry and timing are relative to it.
+      const collectCanvaElements = (rootArray) => {
+        const out = [];
+        const seenElements = new Set();
+        const walk = (items, depth, parentId) => {
+          if (!Array.isArray(items) || depth > 10) return;
+          for (const el of items) {
+            if (!el || typeof el !== "object" || seenElements.has(el)) continue;
+            seenElements.add(el);
+            out.push({ el, parentId });
+            const ownId = typeof el.id === "string" && /^LB/.test(el.id) ? el.id : parentId;
+            for (const key in el) {
+              try {
+                const val = el[key];
+                if (Array.isArray(val) && val.some((it) => it && typeof it === "object" && "type" in it)) {
+                  walk(val, depth + 1, ownId);
+                }
+              } catch (_e) {
+                /* observable getters can throw */
+              }
+            }
+          }
+        };
+        walk(rootArray, 0, undefined);
+        return out;
+      };
+      // The animation part of an element's model entry (every walk spreads it into its own entry).
+      const readAnimationEntry = (el, parentId) => ({
+        ...(parentId ? { parentId } : {}),
+        ...readScheduleFacts(el),
+        animation: extractAnimation(el),
+      });
+      // Page-level animation ("Animate page"): ONE preset for the whole page, stored as
+      // page.animation = <id> from the PAGE enum (a separate enum from the element presets), with its
+      // config as a sibling prop (today `Xw`, found by name first, then structurally). An absent config
+      // means Canva's default (an outro only when a next page exists); a stored one — even `{}` —
+      // replaces it whole, so `config` travels only when the page really stores one.
+      const looksLikeAnimationConfig = (candidate) => {
+        if (!isPlainObject(candidate)) return false;
+        const keys = Object.keys(candidate);
+        if (!keys.length || keys.length > 16 || "transparency" in candidate) return false;
+        let known = 0;
+        for (const key of keys) {
+          const value = candidate[key];
+          // A leg is a track record — or an empty `{}` (default timing) under a known leg name.
+          const isLeg =
+            looksLikeTrack(value) ||
+            (isPlainObject(value) && !Object.keys(value).length && (IN_TRACK_KEYS.includes(key) || OUT_TRACK_KEYS.includes(key)));
+          if (isLeg || CONFIG_SCALAR_KEYS.includes(key)) {
+            known += 1;
+          } else if (value !== null && value !== undefined && typeof value === "object") {
+            return false;
+          }
+        }
+        return known > 0;
+      };
+      const readPageAnimation = (obj) => {
+        try {
+          if (!obj || typeof obj !== "object") return null;
+          const preset = Number(unwrapCanvaValue(obj.animation));
+          if (!Number.isFinite(preset) || preset <= 0) return null;
+          const result = { preset };
+          let config = unwrapCanvaValue(obj.Xw);
+          if (!isPlainObject(config)) {
+            config = null;
+            for (const key of Object.keys(obj)) {
+              if (key === "animation") continue;
+              let candidate;
+              try {
+                candidate = unwrapCanvaValue(obj[key]);
+              } catch (_e) {
+                continue;
+              }
+              if (looksLikeAnimationConfig(candidate)) {
+                config = candidate;
+                break;
+              }
+            }
+          }
+          if (config) {
+            const { inTrack, outTrack } = classifyTracks(config);
+            result.config = normalizeAnimationConfig(config, inTrack, outTrack);
+            const direction = readCanvaDirection(unwrapCanvaValue(config.direction));
+            const scale = Number(unwrapCanvaValue(config.scale));
+            const Vd = Number(unwrapCanvaValue(config.Vd));
+            const writingStyle = Number(unwrapCanvaValue(config.ID));
+            const color = unwrapCanvaValue(config.color);
+            if (direction) result.direction = direction;
+            if (Number.isFinite(scale) && scale !== 0) result.scale = scale;
+            if (Number.isFinite(Vd)) result.Vd = Math.max(0, Math.min(1, Vd));
+            if (Number.isFinite(writingStyle) && writingStyle > 0) result.writingStyle = writingStyle;
+            if (typeof color === "string" && color) result.color = color;
+            result.hasIn = Boolean(inTrack);
+            result.hasOut = Boolean(outTrack);
+            if (inTrack) result.inMs = usToMs(unwrapCanvaValue(inTrack.durationUs));
+            if (outTrack) {
+              result.outMs = usToMs(unwrapCanvaValue(outTrack.durationUs));
+              if (unwrapCanvaValue(outTrack.reverse) === true) result.reverse = true;
+            }
+          }
+          return result;
+        } catch (_e) {
+          return null;
+        }
+      };
+      // The design's pages in order: doc.pages is an ARRAY on older Canva models but an iterable keyed
+      // COLLECTION on current ones (spreading yields the page objects; [key, page] pairs unwrapped).
+      const listCanvaPages = (doc) => {
+        try {
+          const raw = doc && doc.pages;
+          let pages = Array.isArray(raw)
+            ? raw
+            : raw && typeof raw === "object" && typeof raw[Symbol.iterator] === "function"
+              ? [...raw]
+              : [];
+          if (pages.length && Array.isArray(pages[0]) && pages[0].length === 2 && pages[0][1] && typeof pages[0][1] === "object") {
+            pages = pages.map((entry) => entry[1]);
+          }
+          return pages.filter((page) => page && typeof page === "object");
+        } catch (_e) {
+          return [];
+        }
+      };
+      // A page's own length (raw µs; undefined when the author never re-timed it — Canva then plays
+      // its nominal 5 s) and design size (Drift / Tectonic / Tumble / Stomp read it).
+      const readPageDurationUs = (obj) => {
+        const us = obj ? readRawMicros(obj.durationUs) : undefined;
+        return us !== undefined && us > 0 ? us : undefined;
+      };
+      const readPageSize = (obj) => {
+        try {
+          if (!obj || typeof obj !== "object") return null;
+          for (const candidate of [obj.dimensions, obj.size, obj]) {
+            const value = unwrapCanvaValue(candidate);
+            if (!value || typeof value !== "object") continue;
+            const width = Number(unwrapCanvaValue(value.width));
+            const height = Number(unwrapCanvaValue(value.height));
+            if (Number.isFinite(width) && Number.isFinite(height) && width > 0 && height > 0) {
+              return { width, height };
+            }
+          }
+        } catch (_e) {
+          /* best-effort */
+        }
+        return null;
+      };
+// ── canva-animation-extract:end ───────────────────────────────────────────────────────────
       const extractText = (el) => {
         try {
           const stream = el.text && el.text.stream;
@@ -592,7 +960,7 @@
       // zOrder: Canva's element array order IS the paint order (index 0 = bottom). Stamped
       // EXPLICITLY because the model crosses executeScript arg serialization, which SORTS object
       // keys alphabetically — Object.keys() insertion order does NOT survive the boundary.
-      const mapElement = (el, zOrder) => ({
+      const mapElement = (el, zOrder, parentId) => ({
         zOrder,
         type: typeof el.type === "string" ? el.type : "",
         left: num(el.left),
@@ -601,9 +969,10 @@
         height: num(el.height),
         rotation: num(el.rotation),
         transparency: num(el.transparency),
-        startUs: num(el.startUs),
-        durationUs: num(el.durationUs),
-        animation: extractAnimation(el),
+        // parentId, raw startUs / durationUs (UNDEFINED when Canva left them unset — never 0),
+        // animationState / animationType, maxFontSize, layoutWidth, hasMediaFill, animation:
+        // everything Canva's scheduler reads (see the shared canva-animation-extract block).
+        ...readAnimationEntry(el, parentId),
         text: el.type === "text" ? extractText(el) : null,
         image: el.type === "rect" ? extractImage(el) : null,
         shape: el.type === "shape" ? extractShape(el) : null,
@@ -617,35 +986,11 @@
       const buildElementMap = (rootArray) => {
         const out = {};
         if (!Array.isArray(rootArray)) return out;
-        const localElements = [];
-        const localCollected = new Set();
-        const collectLocal = (items, depth) => {
-          if (!Array.isArray(items) || depth > 10) return;
-          for (const el of items) {
-            if (!el || typeof el !== "object" || localCollected.has(el)) continue;
-            localCollected.add(el);
-            localElements.push(el);
-            for (const key in el) {
-              try {
-                const val = el[key];
-                if (
-                  Array.isArray(val) &&
-                  val.some((it) => it && typeof it === "object" && "type" in it)
-                ) {
-                  collectLocal(val, depth + 1);
-                }
-              } catch (_e) {
-                /* ignore */
-              }
-            }
-          }
-        };
-        collectLocal(rootArray, 0);
         let zOrder = 0;
-        for (const el of localElements) {
+        for (const { el, parentId } of collectCanvaElements(rootArray)) {
           const id = String((el && el.id) || "");
           if (!id || !/^LB/.test(id)) continue;
-          out[id] = mapElement(el, zOrder++);
+          out[id] = mapElement(el, zOrder++, parentId);
         }
         return out;
       };
@@ -893,13 +1238,10 @@
             },
           ];
         };
-        // Page-level animation ("Animate page"): ONE preset for the whole page, stored as
-        // page.animation = <preset id> — the SAME enum as element presets (Canva's "General" group
-        // is identical in both panels). Elements then carry no animation of their own, which is why
-        // a page-animated design imported completely static. `Xw` holds the user's overrides
-        // (direction/scale/colour) and stays empty while the preset's own defaults are in use.
         // A Canva page's own length. Unset on a page the author never re-timed, where Canva
         // still plays it as its nominal 5s (what the editor's 0:05 shows), so that is the default.
+        // (Page animation, page size and the page list come from the shared
+        // canva-animation-extract block: readPageAnimation / readPageSize / listCanvaPages.)
         const readPageDurationMs = (obj, fillRecord) => {
           try {
             const us = Number(unwrapObservable(obj && obj.durationUs));
@@ -912,30 +1254,11 @@
             return 5000;
           }
         };
-        const readPageAnimation = (obj) => {
-          try {
-            if (!obj) return null;
-            const preset = Number(unwrapObservable(obj.animation));
-            if (!Number.isFinite(preset) || preset <= 0) return null;
-            const result = { preset };
-            const config = unwrapObservable(obj.Xw);
-            if (config && typeof config === "object") {
-              const direction = unwrapObservable(config.direction);
-              const scale = Number(unwrapObservable(config.scale));
-              if (typeof direction === "string" && direction) result.direction = direction.slice(0, 24);
-              if (Number.isFinite(scale) && scale > 0) result.scale = scale;
-            }
-            return result;
-          } catch (_e) {
-            return null;
-          }
-        };
         if (pageObj) {
-          const livePages = Array.isArray(doc.pages)
-            ? doc.pages
-            : doc.pages && typeof doc.pages[Symbol.iterator] === "function"
-              ? [...doc.pages]
-              : [];
+          const livePages = listCanvaPages(doc);
+          // Canva's page scheduler needs to know whether a page follows (its default page outro and
+          // the last-page rule depend on it).
+          if (livePages.length) result.__pageCount = livePages.length;
           // The walk finds a serialized copy of the page (same id, plain `elements` array) with no
           // live Vb.ctx.bxf — the fill only exists on the live page from doc.pages.
           const pageFill = readPageFill(livePages[0]) || readPageFill(pageObj);
@@ -944,6 +1267,11 @@
           if (pageAnimation) result.__pageAnimation = pageAnimation;
           result.__pageDurationMs =
             readPageDurationMs(livePages[0], pageFill) || readPageDurationMs(pageObj, pageFill);
+          const pageDimensions = readPageSize(livePages[0]) || readPageSize(pageObj) || readPageSize(doc);
+          if (pageDimensions) {
+            result.__pageWidth = pageDimensions.width;
+            result.__pageHeight = pageDimensions.height;
+          }
           const outClips = findClipsOnPageObj(pageObj) || clipsFromFill(pageFill, livePages[0] || pageObj);
           if (outClips && outClips.some((c) => c.video)) {
             result.__background = { clips: outClips, posters };
@@ -1063,6 +1391,7 @@
                 fill: pageFillForPage,
                 animation: readPageAnimation(pageRoot) || readPageAnimation(findPageObjIn(pageRoot)),
                 durationMs: readPageDurationMs(pageRoot, pageFillForPage),
+                ...(readPageSize(pageRoot) || readPageSize(findPageObjIn(pageRoot)) || {}),
               });
             }
             if (pages.some((p) => Object.keys(p.elements).length > 0)) {

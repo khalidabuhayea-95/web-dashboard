@@ -6,9 +6,10 @@
  * Everything here (catalog order, per-type defaults, labels, authored keyframes) is read from
  * that file so the two clients cannot silently drift.
  *
- * The 27 analytic effects (`formula.kotlin` in the JSON) are ported by hand in
- * `animationVisual.ts` — Kotlin can't be executed here. The 19 keyframe effects
- * (`authoredCurves`) are played straight from this data by `animationCurves.ts`.
+ * The analytic effects (`formula.kotlin` in the JSON, `_meta.counts.withFormula` of them) are
+ * ported by hand in `animationVisual.ts` — Kotlin can't be executed here. The keyframe effects
+ * (`authoredCurves`) are played straight from this data by `animationCurves.ts`. The Canva
+ * family is analytic on both platforms (docs/canva-animation-parity.md).
  */
 import rawSpec from "./animationSpec.json";
 import type { AuthoredKeyframe } from "./animationCurves";
@@ -67,6 +68,8 @@ export interface AnimationTypeSpec {
   authoredCurves: AuthoredCurves | null;
   label: { ar: string; en: string; exit?: { ar: string; en: string } };
   formula?: { kotlin: string; sharesBranchWith?: string };
+  /** The Canva enter/exit family's ONE-SHOT branch (LayerAnimationCanvaRuntime.kt), verbatim. */
+  canvaOneShot?: { kotlin: string; sharesBranchWith?: string };
 }
 
 interface RawSpec {

@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import type { EditorElement } from "@/store/editorStore";
+import { getAnimationDefaults } from "./animationSpec";
+import { applyAnimationEasing } from "./animationVisual";
 import {
   PREVIEW_RENDER_FPS,
   resolveAnimatedElementPoseAtFrame,
@@ -55,9 +57,6 @@ function createElement(overrides: Partial<EditorElement> = {}): EditorElement {
   };
 }
 
-function softOut(progress: number) {
-  return 1 - Math.pow(1 - progress, 4);
-}
 
 test("frame 0 keeps animation progress at the true initial pose", () => {
   const element = createElement({
@@ -84,8 +83,36 @@ test("frame 0 keeps animation progress at the true initial pose", () => {
   assert.equal(stateAtStart.progress, 0);
   assert.ok(stateAtFrameOne.progress > stateAtStart.progress);
 
+  // `progress` is the EASED value, on the easing the spec gives the type by default.
   const normalizedFrameOne = frameToSampleTimeMs(1, PREVIEW_RENDER_FPS) / 1200;
-  assert.ok(Math.abs(stateAtFrameOne.progress - softOut(normalizedFrameOne)) < 1e-6);
+  const eased = applyAnimationEasing(normalizedFrameOne, getAnimationDefaults("RISE").easing);
+  assert.ok(Math.abs(stateAtFrameOne.progress - eased) < 1e-6);
+  assert.ok(Math.abs(stateAtFrameOne.cycleProgress - normalizedFrameOne) < 1e-6);
+});
+
+// Canva's Tumble, Scrapbook and Neon differ by the element's index on the page (parity and a size
+// hash), so the renderer hands the runtime each layer's index; the app reads the same one.
+test("the layer's index in its page reaches the runtime", () => {
+  const element = createElement({
+    width: 200,
+    height: 100,
+    animations: {
+      entrance: { type: "TUMBLE", durationMs: 500, delayMs: 0, infinite: false },
+      exit: null,
+      loop: null,
+    },
+  } as Partial<EditorElement>);
+  const bottom = resolveAnimatedElementPoseAtFrame(element, 0, PREVIEW_RENDER_FPS, 5000, {
+    layerIndex: 0,
+  });
+  const above = resolveAnimatedElementPoseAtFrame(element, 0, PREVIEW_RENDER_FPS, 5000, {
+    layerIndex: 1,
+  });
+  const unspecified = resolveAnimatedElementPoseAtFrame(element, 0, PREVIEW_RENDER_FPS, 5000);
+  // An even index tumbles in from the left, an odd one from the right; omitted means 0.
+  assert.ok(bottom.x < element.x, "the bottom layer starts off to the left");
+  assert.ok(above.x > element.x, "the next layer starts off to the right");
+  assert.equal(unspecified.x, bottom.x);
 });
 
 test("animation delay holds progress at zero until delay has elapsed", () => {
@@ -303,4 +330,77 @@ test("a settled render holds a motion path at its authored position", () => {
   });
   assert.equal(settled.x, element.x);
   assert.equal(settled.y, element.y);
+});
+
+// ── Round 2 (docs/canva-animation-parity.md §8.2/§8.4) ──────────────────────────────────────────
+
+import {
+  elementPlaysCanvaUnits,
+  isCurvedTextElement,
+  resolveAnimatedElementEffectsAtFrame,
+} from "./previewRuntime";
+
+// A frame index at [ms] on the render grid.
+const frameAt = (ms: number) => Math.round((ms / 1000) * PREVIEW_RENDER_FPS);
+
+test("a concurrent loop composes with the entrance in the rendered pose (§8.2)", () => {
+  const element = createElement({
+    timelineStartMs: 0,
+    timelineEndMs: 4000,
+    animations: {
+      entrance: { type: "FADE", durationMs: 1000, delayMs: 0, infinite: false },
+      exit: null,
+      loop: {
+        type: "ROTATE",
+        durationMs: 2000,
+        delayMs: 0,
+        infinite: true,
+        direction: "CLOCKWISE",
+        params: { concurrent: 1 },
+      },
+    },
+  } as unknown as Partial<EditorElement>);
+  // 500 ms: the fade is half in AND the loop has already turned a quarter.
+  const pose = resolveAnimatedElementPoseAtFrame(element, frameAt(500), PREVIEW_RENDER_FPS, 4000);
+  assert.ok(Math.abs(pose.opacity - 0.75) < 1e-6, `opacity ${pose.opacity}`);
+  assert.ok(Math.abs(pose.rotation - 90) < 1e-6, `rotation ${pose.rotation}`);
+  // A loop that is not concurrent waits for the entrance, as before.
+  const exclusive = createElement({
+    ...element,
+    animations: {
+      ...(element as unknown as { animations: Record<string, unknown> }).animations,
+      loop: { type: "ROTATE", durationMs: 2000, delayMs: 0, infinite: true, direction: "CLOCKWISE" },
+    },
+  } as unknown as Partial<EditorElement>);
+  assert.equal(resolveAnimatedElementPoseAtFrame(exclusive, frameAt(500), PREVIEW_RENDER_FPS, 4000).rotation, 0);
+});
+
+test("a text layer played per unit leaves the whole-element fade to its units (§8.4)", () => {
+  const animations = {
+    entrance: { type: "FADE", durationMs: 1000, delayMs: 0, infinite: false, params: { unit: 2 } },
+    exit: null,
+    loop: null,
+  };
+  const text = createElement({ type: "text", text: "hello world", animations } as unknown as Partial<EditorElement>);
+  const pose = resolveAnimatedElementPoseAtFrame(text, frameAt(250), PREVIEW_RENDER_FPS, 4000);
+  assert.equal(pose.opacity, 1, "the units carry the fade, not the layer");
+  const effects = resolveAnimatedElementEffectsAtFrame(text, frameAt(250), PREVIEW_RENDER_FPS, 4000);
+  assert.equal(effects?.glyphMotion?.unit, 2);
+  assert.ok(Math.abs((effects?.glyphMotion?.rawProgress ?? 0) - 0.25) < 1e-6);
+  // A photo — or curved text — has no units: Canva's whole-element fallback plays instead.
+  const image = createElement({ type: "image", animations } as unknown as Partial<EditorElement>);
+  const imagePose = resolveAnimatedElementPoseAtFrame(image, frameAt(250), PREVIEW_RENDER_FPS, 4000);
+  assert.ok(Math.abs(imagePose.opacity - 0.25 * (2 - 0.25)) < 1e-6, `image opacity ${imagePose.opacity}`);
+  const curved = createElement({
+    type: "text",
+    text: "hello world",
+    textCurveEnabled: true,
+    textCurveAmount: 40,
+    animations,
+  } as unknown as Partial<EditorElement>);
+  assert.equal(isCurvedTextElement(curved), true);
+  assert.ok(resolveAnimatedElementPoseAtFrame(curved, frameAt(250), PREVIEW_RENDER_FPS, 4000).opacity < 1);
+  assert.equal(elementPlaysCanvaUnits(curved, effects?.glyphMotion), false);
+  assert.equal(elementPlaysCanvaUnits(text, effects?.glyphMotion), true);
+  assert.equal(elementPlaysCanvaUnits(text, { type: "FADE", progress: 0.5, durationMs: 500 }), false);
 });

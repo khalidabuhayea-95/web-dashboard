@@ -53,10 +53,12 @@ import {
 } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 import {
+  elementPlaysCanvaUnits,
   frameToSampleTimeMs,
   getDurationFrames,
   getFrameAlignedPlayheadFrame,
   getPlayheadMsForFrame,
+  isCurvedTextElement,
   resolveAnimatedElementPoseAtFrame,
   resolveAnimatedElementEffectsAtFrame,
   type RenderPoseOptions,
@@ -66,6 +68,7 @@ import {
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
 import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
+import CanvaUnitText from "@/components/editor/CanvaUnitText";
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import {
   clearTextBoxMeasurementCache,
@@ -2219,17 +2222,20 @@ function CanvasPageSceneImpl({
       ) : null}
 
       <Group clipX={0} clipY={0} clipWidth={page.width} clipHeight={page.height}>
-        {elements.map((element) => {
+        {elements.map((element, layerIndex) => {
           if (!isElementVisibleAtPlayhead(element, playheadMs, pageDurationMs)) {
             return null;
           }
 
+          // The layer's index in the page (0 = bottom) is part of Canva's Tumble, Scrapbook and
+          // Neon — their parity and size hash — and the app reads the same index.
+          const layerPoseOptions: RenderPoseOptions = { ...poseOptions, layerIndex };
           const pose = resolveAnimatedElementPoseAtFrame(
             element,
             playheadFrame,
             previewFps,
             pageDurationMs,
-            poseOptions
+            layerPoseOptions
           );
           // The layer's own static blur (Blur control) and any animation blur share one filter
           // pass — take the stronger of the two so a blurred layer animating a blur doesn't
@@ -2251,7 +2257,7 @@ function CanvasPageSceneImpl({
             playheadFrame,
             previewFps,
             pageDurationMs,
-            poseOptions
+            layerPoseOptions
           );
           // The layer you are working on keeps its plain node so the Transformer and the inline text
           // editor are never wrapped — but only while the timeline is at REST. During playback it has
@@ -2467,6 +2473,34 @@ function CanvasPageSceneImpl({
               // at rest so the Konva Transformer and the inline-edit path are never wrapped, and joins
               // in as soon as playback starts.
               const textFx = effects;
+              // Canva's writing styles (docs/canva-animation-parity.md §8.4): FADE, BLUR, SUCCESSION
+              // or NEON played per character, word or line on the renderer's own wrapped lines. The
+              // pose already leaves the slot's whole-element alpha/blur/scale to the units.
+              if (textFx?.glyphMotion && elementPlaysCanvaUnits(element, textFx.glyphMotion)) {
+                return (
+                  <CanvaUnitText
+                    key={element.id}
+                    nodeProps={commonProps}
+                    motion={textFx.glyphMotion}
+                    style={{
+                      text: element.text,
+                      width: element.width,
+                      height: element.height,
+                      fontSize: element.fontSize,
+                      fontFamily: resolveCssFontFamily(element.fontFamily),
+                      fontStyle: konvaFontStyle,
+                      lineHeight: element.lineHeight,
+                      align: element.align,
+                      direction: direction === "rtl" ? "rtl" : "ltr",
+                      letterSpacing: element.letterSpacing || 0,
+                      fill: element.color || element.fill,
+                      ...(textStrokeWidthPx > 0 && String(element.stroke || "").trim()
+                        ? { stroke: element.stroke, strokeWidth: textStrokeWidthPx }
+                        : {}),
+                    }}
+                  />
+                );
+              }
               // Per-WORD motion (ASCEND rises each word in, ONE_WORD shows one at a time). Rendered
               // as one <Text> per word at a measured x — words shape correctly split (unlike
               // per-CHAR, which would break Arabic). Single line only; multi-line falls through to
@@ -2569,16 +2603,29 @@ function CanvasPageSceneImpl({
                       <Text {...localTextProps} />
                     </Group>
                     {bar ? (
-                      // BLOCK's bar rides ON TOP of the swept text (outside the clip), in the text's
-                      // own colour — the thing doing the uncovering.
-                      <Rect
-                        x={bar.leftFraction * element.width}
-                        y={0}
-                        width={bar.widthFraction * element.width}
-                        height={element.height}
-                        fill={element.color || element.fill}
+                      // BLOCK's bar rides ON TOP of the text (outside the text's clip): the whole
+                      // layer box sliding across, clipped to that box, in the imported bar colour
+                      // or else the text's own (docs/canva-animation-parity.md §8.3 item 3).
+                      <Group
                         listening={false}
-                      />
+                        clipX={0}
+                        clipY={0}
+                        clipWidth={element.width}
+                        clipHeight={element.height}
+                      >
+                        <Rect
+                          x={bar.leftFraction * element.width}
+                          y={bar.topFraction * element.height}
+                          width={bar.widthFraction * element.width}
+                          height={bar.heightFraction * element.height}
+                          fill={
+                            bar.colorArgb !== undefined
+                              ? argbToCssColor(bar.colorArgb)
+                              : element.color || element.fill
+                          }
+                          listening={false}
+                        />
+                      </Group>
                     ) : null}
                   </Group>
                 );
@@ -2862,11 +2909,14 @@ const TEXT_TRANSFORMER_ANCHORS = TRANSFORMER_ANCHORS.filter(
 
 /** Curved text is laid out along a path built from the box, so its box is never re-fitted. */
 function isCurvedText(element: EditorElement) {
-  return (
-    element.type === "text" &&
-    Boolean(element.textCurveEnabled) &&
-    Math.abs(Number(element.textCurveAmount) || 0) > 0.5
-  );
+  return isCurvedTextElement(element);
+}
+
+/** An imported ARGB colour (0xAARRGGBB, BLOCK's `barColor` param) as a CSS colour. */
+function argbToCssColor(argb: number): string {
+  const value = Math.trunc(argb) >>> 0;
+  const alpha = ((value >>> 24) & 0xff) / 255;
+  return `rgba(${(value >>> 16) & 0xff}, ${(value >>> 8) & 0xff}, ${value & 0xff}, ${alpha})`;
 }
 
 // Zoom a template opens at. A full-bleed 1080x1920 story only fits a laptop viewport well below
@@ -3341,11 +3391,12 @@ export default function CanvasEditor() {
   const releaseImperativePoses = useCallback(() => {
     if (!imperativePoseDirtyRef.current) return false;
     const restoreFrame = lastRenderedFrameRef.current;
-    const restoreOptions: RenderPoseOptions = { settled: activePageTimelineAtRest };
     let layer: Konva.Layer | null = null;
-    for (const element of elements) {
+    for (let layerIndex = 0; layerIndex < elements.length; layerIndex += 1) {
+      const element = elements[layerIndex];
       const node = nodeRefs.current[element.id];
       if (!node) continue;
+      const restoreOptions: RenderPoseOptions = { settled: activePageTimelineAtRest, layerIndex };
       applyPoseToNode(
         node,
         resolveAnimatedElementPoseAtFrame(
@@ -3382,16 +3433,19 @@ export default function CanvasEditor() {
       const pending: Array<{ node: Konva.Node; pose: ElementRenderPose }> = [];
       const visibleIds: string[] = [];
 
-      for (const element of elements) {
+      for (let layerIndex = 0; layerIndex < elements.length; layerIndex += 1) {
+        const element = elements[layerIndex];
         if (!isElementVisibleAtPlayhead(element, pageMs, activePageDurationMs)) continue;
         visibleIds.push(element.id);
 
+        const layerPoseOptions: RenderPoseOptions = { layerIndex };
         if (
           resolveAnimatedElementEffectsAtFrame(
             element,
             frame,
             previewRenderFps,
-            activePageDurationMs
+            activePageDurationMs,
+            layerPoseOptions
           )
         ) {
           return releaseImperativePoses();
@@ -3401,7 +3455,8 @@ export default function CanvasEditor() {
           element,
           frame,
           previewRenderFps,
-          activePageDurationMs
+          activePageDurationMs,
+          layerPoseOptions
         );
         if (pose.blurRadius > 0) return releaseImperativePoses();
 

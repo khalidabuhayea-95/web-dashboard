@@ -42,21 +42,41 @@ test("a tab's own effects are left exactly as they are", () => {
 });
 
 test("the Canva effects we ported keep their own effect in every tab", () => {
-  // The Entrance tab offers Rise and Succession now, so nothing is substituted: an imported Canva
-  // entrance keeps the effect it was authored with, in the slot it belongs to.
+  // Canva's enter/exit family is offered wherever Canva offers it (docs/canva-animation-parity.md
+  // §7), so nothing is substituted: an imported Canva animation keeps the effect it was authored
+  // with, in the slot it belongs to.
   for (const category of CATEGORIES) {
-    assert.equal(fitAnimationTypeToCategory("RISE", category), "RISE");
-    assert.equal(fitAnimationTypeToCategory("SUCCESSION", category), "SUCCESSION");
+    for (const type of [
+      "RISE",
+      "PAN",
+      "SUCCESSION",
+      "BLUR",
+      "BASELINE",
+      "TUMBLE",
+      "NEON",
+      "SCRAPBOOK",
+      "STOMP",
+    ]) {
+      assert.equal(fitAnimationTypeToCategory(type, category), type, `${type} in ${category}`);
+    }
   }
+  // Fade, Pop and Wipe enter and exit as themselves; only a loop of them is substituted.
+  for (const type of ["FADE", "POP", "WIPE"]) {
+    assert.equal(fitAnimationTypeToCategory(type, "ENTRANCE"), type);
+    assert.equal(fitAnimationTypeToCategory(type, "EXIT"), type);
+  }
+  assert.equal(fitAnimationTypeToCategory("POP", "EXIT"), "POP", "Pop is an exit now, not a Zoom");
 });
 
-test("travel and impact effects arrive by the nearest entrance of the same feel", () => {
-  assert.equal(fitAnimationTypeToCategory("PAN", "ENTRANCE"), "SLIDE");
+test("the continuous and loop-only effects arrive by the nearest entrance of the same feel", () => {
   assert.equal(fitAnimationTypeToCategory("DRIFT", "ENTRANCE"), "SLIDE");
   assert.equal(fitAnimationTypeToCategory("TECTONIC", "ENTRANCE"), "SLIDE");
-  assert.equal(fitAnimationTypeToCategory("STOMP", "ENTRANCE"), "POP");
-  assert.equal(fitAnimationTypeToCategory("TUMBLE", "ENTRANCE"), "POP");
+  assert.equal(fitAnimationTypeToCategory("SHIFT", "ENTRANCE"), "SLIDE");
+  assert.equal(fitAnimationTypeToCategory("PULSE", "ENTRANCE"), "POP");
   assert.equal(fitAnimationTypeToCategory("BREATHE", "ENTRANCE"), "ZOOM");
+  assert.equal(fitAnimationTypeToCategory("FLICKER", "ENTRANCE"), "DISSOLVE");
+  assert.equal(fitAnimationTypeToCategory("BREATHE", "EXIT"), "ZOOM");
+  assert.equal(fitAnimationTypeToCategory("FLICKER", "EXIT"), "DISSOLVE");
 });
 
 test("NONE stays NONE and an unknown effect lands on the tab's fallback", () => {
@@ -102,13 +122,13 @@ test("an imported design has each of its animations refitted in place", () => {
   const changed = fitImportedAnimationsToCategories(design);
   const [a, b, c, d] = design.pages[0].elements as any[];
 
-  assert.equal(a.mediaAnimationType, "POP", "an entrance must come from the Entrance tab");
+  assert.equal(a.mediaAnimationType, "TUMBLE", "the Entrance tab offers Tumble now, so it is kept");
   assert.equal(b.mediaAnimationType, "RISE", "the Entrance tab offers Rise now, so it is kept");
   assert.equal(c.mediaAnimationType, "FADE", "an effect that already fits is untouched");
-  assert.equal(d.animations.entrance.type, "SLIDE");
+  assert.equal(d.animations.entrance.type, "SLIDE", "Drift is never an entrance");
   assert.equal(d.animations.loop.type, "PAN");
   assert.equal(d.animations.entrance.durationMs, 800, "timing is not touched, only the effect");
-  assert.equal(changed, 3);
+  assert.equal(changed, 2);
 });
 
 test("an in-and-out import keeps only the entrance when the fit is not an exit effect", () => {
@@ -131,11 +151,56 @@ test("an in-and-out import keeps only the entrance when the fit is not an exit e
   assert.equal(layer.mediaAnimationMode, "IN_OUT");
   assert.equal(layer.mediaAnimationOutDurationMs, 600);
 
-  const popOut = { elements: [{ mediaAnimationType: "SCRAPBOOK", mediaAnimationMode: "IN_OUT", mediaAnimationOutDurationMs: 600 }] };
-  fitImportedAnimationsToCategories(popOut);
-  const popped = popOut.elements[0] as any;
-  // Scrapbook enters as a pop, which is NOT an exit effect, so the exit leg is dropped.
-  assert.equal(popped.mediaAnimationType, "POP");
-  assert.equal(popped.mediaAnimationMode, "IN");
-  assert.equal(popped.mediaAnimationOutDurationMs, undefined);
+  const typed = { elements: [{ mediaAnimationType: "TYPEWRITER_CHARS", mediaAnimationMode: "IN_OUT", mediaAnimationOutDurationMs: 600 }] };
+  fitImportedAnimationsToCategories(typed);
+  const typewriter = typed.elements[0] as any;
+  // A typewriter only ever enters — it is NOT an exit effect, so the exit leg is dropped.
+  assert.equal(typewriter.mediaAnimationType, "TYPEWRITER_CHARS");
+  assert.equal(typewriter.mediaAnimationMode, "IN");
+  assert.equal(typewriter.mediaAnimationOutDurationMs, undefined);
+
+  // Scrapbook enters AND exits as itself now (Canva offers it both ways), so both legs survive.
+  const stamped = { elements: [{ mediaAnimationType: "SCRAPBOOK", mediaAnimationMode: "IN_OUT", mediaAnimationOutDurationMs: 600 }] };
+  assert.equal(fitImportedAnimationsToCategories(stamped), 0);
+  const scrapbook = stamped.elements[0] as any;
+  assert.equal(scrapbook.mediaAnimationType, "SCRAPBOOK");
+  assert.equal(scrapbook.mediaAnimationMode, "IN_OUT");
+  assert.equal(scrapbook.mediaAnimationOutDurationMs, 600);
+});
+
+// §8.1: `params` are Canva's exact numbers for the spec's OWN type — Tumble's start pose, a
+// writing style, a concurrent loop's ramp. A kept type keeps them; a substituted one drops them,
+// since the look-alike would misread (or ignore) every one of them.
+test("a refitted slot keeps its params when its type is kept and drops them when it is swapped", () => {
+  const design = {
+    elements: [
+      {
+        id: "a",
+        animations: {
+          entrance: { type: "TUMBLE", durationMs: 500, params: { startRotation: -170, travelX: -1920 } },
+          exit: { type: "FADE", durationMs: 500, params: { unit: 2, fill: 1 } },
+          loop: { type: "BREATHE", durationMs: 8000, params: { concurrent: 1, r1From: 0.9, r1To: 1.03 } },
+        },
+      },
+      {
+        id: "b",
+        animations: {
+          entrance: { type: "DRIFT", durationMs: 800, params: { fadeEase: 1 } },
+          exit: null,
+          loop: { type: "FADE", durationMs: 900, params: { concurrent: 1 } },
+        },
+      },
+    ],
+  };
+
+  const changed = fitImportedAnimationsToCategories(design);
+  const [a, b] = design.elements as any[];
+  assert.deepEqual(a.animations.entrance.params, { startRotation: -170, travelX: -1920 });
+  assert.deepEqual(a.animations.exit.params, { unit: 2, fill: 1 });
+  assert.deepEqual(a.animations.loop.params, { concurrent: 1, r1From: 0.9, r1To: 1.03 });
+  assert.equal(b.animations.entrance.type, "SLIDE");
+  assert.equal("params" in b.animations.entrance, false, "a swapped entrance loses its params");
+  assert.equal(b.animations.loop.type, "PULSE");
+  assert.equal("params" in b.animations.loop, false, "a swapped loop is no longer concurrent");
+  assert.equal(changed, 2);
 });

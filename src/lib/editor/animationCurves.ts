@@ -1,6 +1,7 @@
 /**
- * Keyframe player for the animation spec's `authoredCurves` — the 19 effects ported from
- * After Effects art (see docs/specs/animation-spec.md in the mobile repo).
+ * Keyframe player for the animation spec's `authoredCurves` — the effects ported from
+ * After Effects art (see docs/specs/animation-spec.md in the mobile repo). The Canva family
+ * (Fade, Pop, Wipe, Flicker, Pulse included) is analytic and never comes through here.
  *
  * Contract, per the spec:
  *  • Keyframes are FRAME-based at the channel's `fps` (25 for all current art).

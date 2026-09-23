@@ -4,12 +4,17 @@ import { resolveTimelineWindow } from "@/lib/editor/animationTimeline";
 import {
   resolveElementAnimations,
   resolveTimelinePlaybackState,
+  type PlaybackState,
 } from "@/lib/editor/animationSlots";
+import { canvaUnitsApplyToText } from "@/lib/editor/animationCanvaUnits";
 import {
   applyAnimationEasing,
+  composeVisualStates,
   pingPongProgress,
-  resolveAnimationVisualState,
+  resolvePlaybackVisualParts,
   type AnimationSpecInput,
+  type AnimationVisualState,
+  type GlyphMotionSpec,
 } from "@/lib/editor/animationVisual";
 import type { EditorElement } from "@/store/editorStore";
 
@@ -120,6 +125,8 @@ export interface AnimationState {
   progress: number;
   cycleProgress: number;
   isExiting: boolean;
+  /** The whole playback state, including a concurrent loop riding along (§8.2). */
+  playback: PlaybackState;
 }
 
 /**
@@ -135,6 +142,42 @@ export interface AnimationState {
  */
 export interface RenderPoseOptions {
   settled?: boolean;
+  /**
+   * The layer's index in its page, 0 = bottom. Canva's Tumble, Scrapbook and Neon differ by
+   * element parity (and Tumble hashes it against the layer size), and both platforms read the
+   * same index for it — see resolveAnimationVisualState. Omitted = 0.
+   */
+  layerIndex?: number;
+}
+
+function layerIndexOf(options?: RenderPoseOptions): number {
+  const index = Number(options?.layerIndex);
+  return Number.isFinite(index) && index > 0 ? Math.floor(index) : 0;
+}
+
+/** The element's full playback state at [currentFrame] — null for a settled render. */
+function resolvePlaybackAtFrame(
+  element: EditorElement,
+  currentFrame: number,
+  fps: number,
+  pageDurationMs: number,
+  options?: RenderPoseOptions
+): PlaybackState | null {
+  if (options?.settled) return null;
+  const slots = resolveElementAnimations(element);
+  const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
+  const sampleTimeMs = Math.min(
+    Math.max(0, Number(pageDurationMs) || 0),
+    frameToSampleTimeMs(currentFrame, fps)
+  );
+  return resolveTimelinePlaybackState(
+    false,
+    timelineWindow.startMs,
+    timelineWindow.endMs,
+    slots,
+    sampleTimeMs,
+    pageDurationMs
+  );
 }
 
 export function resolveAnimationStateAtFrame(
@@ -144,21 +187,8 @@ export function resolveAnimationStateAtFrame(
   pageDurationMs: number,
   options?: RenderPoseOptions
 ): AnimationState | null {
-  if (options?.settled) return null;
-  const slots = resolveElementAnimations(element);
-  const timelineWindow = resolveTimelineWindow(element, pageDurationMs);
-  const sampleTimeMs = Math.min(
-    Math.max(0, Number(pageDurationMs) || 0),
-    frameToSampleTimeMs(currentFrame, fps)
-  );
-  const playback = resolveTimelinePlaybackState(
-    false,
-    timelineWindow.startMs,
-    timelineWindow.endMs,
-    slots,
-    sampleTimeMs,
-    pageDurationMs
-  );
+  const playback = resolvePlaybackAtFrame(element, currentFrame, fps, pageDurationMs, options);
+  if (!playback) return null;
   const spec = playback.animation;
   if (!playback.isVisible || !spec || spec.type === "NONE") return null;
 
@@ -166,7 +196,57 @@ export function resolveAnimationStateAtFrame(
   const progress = spec.infinite
     ? applyAnimationEasing(pingPongProgress(cycleProgress), spec.easing)
     : applyAnimationEasing(cycleProgress, spec.easing);
-  return { spec, progress, cycleProgress, isExiting: playback.isExiting };
+  return { spec, progress, cycleProgress, isExiting: playback.isExiting, playback };
+}
+
+/** Curved text is laid out along a path, so nothing per-glyph can be drawn on it. */
+export function isCurvedTextElement(element: EditorElement): boolean {
+  return (
+    element.type === "text" &&
+    Boolean(element.textCurveEnabled) &&
+    Math.abs(Number(element.textCurveAmount) || 0) > 0.5
+  );
+}
+
+/**
+ * Whether the canvas plays [motion] — a Canva writing style (§8.4) — per unit on [element]: flat
+ * text only, and never a Succession on text too short for Canva to split. Otherwise the resolver's
+ * whole-element state is the fallback, exactly as Canva falls back on non-text elements.
+ */
+export function elementPlaysCanvaUnits(
+  element: EditorElement,
+  motion: GlyphMotionSpec | null | undefined
+): boolean {
+  if (!motion || motion.unit === undefined) return false;
+  if (element.type !== "text" || isCurvedTextElement(element)) return false;
+  return canvaUnitsApplyToText(motion.type, String(element.text ?? ""));
+}
+
+/**
+ * The composed visual at [currentFrame] (§8.2: the active slot plus any concurrent loop), or null
+ * when nothing animates. When the canvas draws a writing style per unit, the slot's own
+ * whole-element alpha, blur and scale are left to the units (§8.4) and only the rest composes.
+ */
+function resolveElementVisualAtFrame(
+  element: EditorElement,
+  currentFrame: number,
+  fps: number,
+  pageDurationMs: number,
+  options?: RenderPoseOptions
+): AnimationVisualState | null {
+  const playback = resolvePlaybackAtFrame(element, currentFrame, fps, pageDurationMs, options);
+  if (!playback || !playback.isVisible) return null;
+  if (!playback.animation && !playback.concurrentLoop) return null;
+  const parts = resolvePlaybackVisualParts(
+    playback,
+    Math.max(1, element.width),
+    Math.max(1, element.height),
+    layerIndexOf(options)
+  );
+  const primary = elementPlaysCanvaUnits(element, parts.primary.glyphMotion)
+    ? { ...parts.primary, alphaMultiplier: 1, blurRadiusPx: 0, scaleMultiplier: 1 }
+    : parts.primary;
+  return parts.concurrent ? composeVisualStates(primary, parts.concurrent) : primary;
 }
 
 // Keyframed position offset (Canva custom "create an animation" motion paths). The element's
@@ -284,16 +364,8 @@ export function resolveAnimatedElementPoseAtFrame(
     base.y += motionOffset.y;
   }
 
-  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs, options);
-  if (!state) return base;
-
-  const visual = resolveAnimationVisualState(
-    state.spec,
-    state.cycleProgress,
-    Math.max(1, element.width),
-    Math.max(1, element.height),
-    state.isExiting
-  );
+  const visual = resolveElementVisualAtFrame(element, currentFrame, fps, pageDurationMs, options);
+  if (!visual) return base;
 
   // scaleMultiplier is uniform and composes on top of the per-axis multipliers.
   const scaleX = base.scaleX * visual.scaleMultiplier * visual.scaleXMultiplier;
@@ -332,10 +404,10 @@ export function resolveAnimatedElementPoseAtFrame(
  * path stays untouched.
  */
 export interface ElementRenderEffects {
-  revealMask: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["revealMask"];
-  textReveal: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["textReveal"];
-  glyphMotion: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["glyphMotion"];
-  overlayBar: NonNullable<ReturnType<typeof resolveAnimationVisualState>>["overlayBar"];
+  revealMask: AnimationVisualState["revealMask"];
+  textReveal: AnimationVisualState["textReveal"];
+  glyphMotion: AnimationVisualState["glyphMotion"];
+  overlayBar: AnimationVisualState["overlayBar"];
 }
 
 export function resolveAnimatedElementEffectsAtFrame(
@@ -345,15 +417,8 @@ export function resolveAnimatedElementEffectsAtFrame(
   pageDurationMs: number,
   options?: RenderPoseOptions
 ): ElementRenderEffects | null {
-  const state = resolveAnimationStateAtFrame(element, currentFrame, fps, pageDurationMs, options);
-  if (!state) return null;
-  const visual = resolveAnimationVisualState(
-    state.spec,
-    state.cycleProgress,
-    Math.max(1, element.width),
-    Math.max(1, element.height),
-    state.isExiting
-  );
+  const visual = resolveElementVisualAtFrame(element, currentFrame, fps, pageDurationMs, options);
+  if (!visual) return null;
   if (!visual.revealMask && !visual.textReveal && !visual.glyphMotion && !visual.overlayBar) {
     return null;
   }

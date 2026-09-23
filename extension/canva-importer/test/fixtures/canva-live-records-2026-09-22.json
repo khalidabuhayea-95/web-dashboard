@@ -1,0 +1,253 @@
+{
+  "_meta": {
+    "design": "DAHOPR_iwyk",
+    "element": "LB7SdXhgYJtYNB9M (Arabic paragraph text, RTL)",
+    "capturedAt": "2026-09-22",
+    "how": "Each Animate-panel tile was clicked on the selected paragraph and element.animation / element.Sz.ref were read back from Canva's React design model (see docs/canva-animation-parity.md). Minified keys (Xw, qg, Bf, Sz, R2a, BJa, N5a) rotate between Canva deploys — the importer must resolve them structurally.",
+    "notes": [
+      "A freshly clicked preset stores no config at all (no Xw) — durations come from Canva's page defaults.",
+      "RTL text stores an explicit direction 4 (left) for Pan, Wipe, Drift and Block.",
+      "'both' writes qg:{} and Bf:{} (empty = default timing); 'exit only' removes qg.",
+      "Speed 'slow' (c=0.1) writes qg.durationUs=5000000 and Bf.durationUs=2000000.",
+      "Reverse-exit toggle writes Bf.reverse:true.",
+      "Repeating effects default to Vd 0; rotate/pulse carry direction 1.",
+      "'مسح الرسوم المتحركة' (clear) writes animation {type:'none'} and drops the Sz repeating record — treat type 'none' as no animation."
+    ]
+  },
+  "presets": {
+    "rise": {
+      "label": "ارتقاء",
+      "animation": {
+        "type": "sequenced",
+        "animation": 8
+      }
+    },
+    "pan": {
+      "label": "تأرجح",
+      "animation": {
+        "type": "sequenced",
+        "animation": 6,
+        "Xw": {
+          "direction": 4
+        }
+      }
+    },
+    "fade": {
+      "label": "تلاشي",
+      "animation": {
+        "type": "sequenced",
+        "animation": 4
+      }
+    },
+    "pop": {
+      "label": "انبثاق",
+      "animation": {
+        "type": "sequenced",
+        "animation": 7
+      }
+    },
+    "wipe": {
+      "label": "المسح",
+      "animation": {
+        "type": "sequenced",
+        "animation": 26,
+        "Xw": {
+          "direction": 4
+        }
+      }
+    },
+    "blur": {
+      "label": "تمويه",
+      "animation": {
+        "type": "sequenced",
+        "animation": 29
+      }
+    },
+    "succession": {
+      "label": "التتابع",
+      "animation": {
+        "type": "sequenced",
+        "animation": 31
+      }
+    },
+    "breathe": {
+      "label": "ظهور بطيء",
+      "animation": {
+        "type": "sequenced",
+        "animation": 2
+      }
+    },
+    "baseline": {
+      "label": "Baseline",
+      "animation": {
+        "type": "sequenced",
+        "animation": 1
+      }
+    },
+    "drift": {
+      "label": "انجراف",
+      "animation": {
+        "type": "sequenced",
+        "animation": 3,
+        "Xw": {
+          "direction": 4
+        }
+      }
+    },
+    "tectonic": {
+      "label": "حركة تكتونية",
+      "animation": {
+        "type": "sequenced",
+        "animation": 12
+      }
+    },
+    "tumble": {
+      "label": "دوران",
+      "animation": {
+        "type": "sequenced",
+        "animation": 13
+      }
+    },
+    "neon": {
+      "label": "نيون",
+      "animation": {
+        "type": "sequenced",
+        "animation": 5
+      }
+    },
+    "scrapbook": {
+      "label": "سجل قصاصات",
+      "animation": {
+        "type": "sequenced",
+        "animation": 9
+      }
+    },
+    "stomp": {
+      "label": "سقوط هوائي",
+      "animation": {
+        "type": "sequenced",
+        "animation": 11
+      }
+    },
+    "block": {
+      "label": "Block",
+      "animation": {
+        "type": "sequenced",
+        "animation": 17,
+        "Xw": {
+          "direction": 4
+        }
+      }
+    }
+  },
+  "riseVariants": {
+    "both": {
+      "type": "sequenced",
+      "animation": 8,
+      "Xw": {
+        "direction": 2,
+        "qg": {},
+        "Bf": {}
+      }
+    },
+    "bothSlow": {
+      "type": "sequenced",
+      "animation": 8,
+      "Xw": {
+        "direction": 2,
+        "qg": {
+          "durationUs": 5000000
+        },
+        "Bf": {
+          "durationUs": 2000000
+        }
+      }
+    },
+    "bothSlowReverse": {
+      "type": "sequenced",
+      "animation": 8,
+      "Xw": {
+        "direction": 2,
+        "qg": {
+          "durationUs": 5000000
+        },
+        "Bf": {
+          "durationUs": 2000000,
+          "reverse": true
+        }
+      }
+    },
+    "exitOnly": {
+      "type": "sequenced",
+      "animation": 8,
+      "Xw": {
+        "direction": 2,
+        "Bf": {}
+      }
+    },
+    "customSpeedFromDesign": {
+      "type": "sequenced",
+      "animation": 8,
+      "Xw": {
+        "direction": 2,
+        "qg": {
+          "durationUs": 1724137.9310344828
+        }
+      }
+    }
+  },
+  "repeating": {
+    "rotateOn": {
+      "rotate": {
+        "Vd": 0,
+        "direction": 1
+      }
+    },
+    "flickerOn": {
+      "rotate": {
+        "Vd": 0,
+        "direction": 1
+      },
+      "R2a": {
+        "Vd": 0,
+        "Ezp": false
+      }
+    },
+    "pulseOn": {
+      "rotate": {
+        "Vd": 0,
+        "direction": 1
+      },
+      "R2a": {
+        "Vd": 0,
+        "Ezp": false
+      },
+      "BJa": {
+        "Vd": 0,
+        "direction": 1
+      }
+    },
+    "wiggleOn": {
+      "rotate": {
+        "Vd": 0,
+        "direction": 1
+      },
+      "R2a": {
+        "Vd": 0,
+        "Ezp": false
+      },
+      "BJa": {
+        "Vd": 0,
+        "direction": 1
+      },
+      "N5a": {
+        "Vd": 0
+      }
+    }
+  },
+  "cleared": {
+    "animation": {
+      "type": "none"
+    }
+  }
+}

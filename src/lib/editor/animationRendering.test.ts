@@ -150,7 +150,7 @@ test("CanvasEditor resolves effects for every layer kind, not just text", async 
     "utf8"
   );
   // Measured from inside the element loop, so the import at the top of the file does not count.
-  const loopAt = source.indexOf("elements.map((element) => {");
+  const loopAt = source.indexOf("elements.map((element, layerIndex) => {");
   const resolvedAt = source.indexOf("resolveAnimatedElementEffectsAtFrame(", loopAt);
   const firstTypeBranch = source.indexOf('element.type === "frame"', loopAt);
   assert.ok(loopAt > 0 && resolvedAt > 0 && firstTypeBranch > 0, "CanvasEditor no longer looks the way this test expects");

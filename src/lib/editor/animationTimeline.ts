@@ -513,7 +513,9 @@ export function normalizeAnimationEasing(
 export function normalizeAnimationIntensity(value: unknown) {
   const raw = Number(value);
   if (!Number.isFinite(raw)) return DEFAULT_ANIMATION_INTENSITY;
-  return Math.max(0.4, Math.min(2.4, Math.round(raw * 100) / 100));
+  // 0.1..4.0 on both platforms (spec §3): a Canva Drift/Tectonic amplitude is stored as
+  // intensity = m / 120, which needs more room than the picker's 0.4..2.4 ever did.
+  return Math.max(0.1, Math.min(4, Math.round(raw * 100) / 100));
 }
 
 export function labelForAnimationType(value: unknown) {
