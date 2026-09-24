@@ -46,6 +46,13 @@ model Template {
   /// Pro-only template. Included in the catalog for everyone (the app shows a
   /// crown badge and walls at the point of use), like AiTemplate.isPremium.
   isPremium         Boolean                  @default(false)
+  /// Hand-picked by the content team: listed first in every mobile template list
+  /// (featured → occasion boost → recency). Written only through
+  /// setTemplatesFeatured(), which never touches updatedAt.
+  isFeatured        Boolean                  @default(false)
+  /// When the template was featured; orders the featured group newest-first. Null
+  /// exactly when isFeatured is false (enforced by a CHECK constraint).
+  featuredAt        DateTime?
   publishedAt       DateTime?
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt

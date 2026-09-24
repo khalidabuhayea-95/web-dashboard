@@ -3,11 +3,11 @@ const nextConfig = {
   // Native (.node) addons used in server code must be loaded at runtime via
   // require() rather than bundled — Turbopack cannot place them in ESM chunks.
   serverExternalPackages: ["@neplex/vectorizer", "canvas", "sharp", "ag-psd"],
-  // 24 pre-existing type errors across 16 files (predate the import-worker work)
-  // block the production build. Unblock the build here; type/lint checks still
-  // run via `npx tsc --noEmit` and `npm run lint` / CI.
+  // Added when pre-existing type errors blocked the production build. `npx tsc --noEmit`
+  // is clean again as of 2026-09-24, so this is only a safety net now — drop it once CI
+  // runs the type check. Type/lint checks run via `npx tsc --noEmit` and `npm run lint`.
+  // (Next 16's build no longer runs ESLint, so there is no `eslint` option to set here.)
   typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
   experimental: {
     // Needed for large PSD/PDF uploads routed through Next proxy/middleware.
     // Kept above the 200MB PSD cap (route.ts) to allow for multipart overhead.

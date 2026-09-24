@@ -27,14 +27,16 @@ import { applyOccasionCategoryOrder, stablePartition } from "@/lib/occasions/hoi
 import { resolvePinnedWindow } from "@/lib/occasions/pinnedPagination";
 import { buildTemplateBoostWhere, makeTemplateBoostPredicate } from "@/lib/occasions/templateBoost";
 import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
+import { FEATURED_FIRST_ORDER_BY, sortFeaturedFirst } from "@/lib/templates/featured";
 import prisma from "@/lib/prisma";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 
 const logger = createLogger("api.mobile.templates");
 
-// Cap on how many boosted rows the pinned-first pagination tracks per request. Past it the
-// tail of boosted content falls back to recency order; nothing disappears.
+// Cap on how many pinned rows (featured + occasion-boosted) the pinned-first pagination
+// tracks per request. Past it the tail falls back to featured-then-recency order; nothing
+// disappears.
 const MAX_PINNED_ROWS = 5000;
 
 function parsePositiveInt(value: any, fallback: number): number {
@@ -117,7 +119,7 @@ function templateMatchesCombinedQuery(template: any, query: string): boolean {
   if (name.includes(normalizedQuery)) return true;
 
   const tags = Array.isArray(template?.tags) ? template.tags : [];
-  return tags.some((tag) => normalizeSearchText(String(tag || "")).includes(normalizedQuery));
+  return tags.some((tag: unknown) => normalizeSearchText(String(tag || "")).includes(normalizedQuery));
 }
 
 export async function buildMobileTemplatesListResponse(
@@ -214,6 +216,8 @@ export async function buildMobileTemplatesListResponse(
       canvasSize: true,
       pageCount: true,
       isPremium: true,
+      isFeatured: true,
+      featuredAt: true,
       thumbnailDataUrl: true,
       previewVideoUrl: true,
       previewPosterUrl: true,
@@ -242,6 +246,8 @@ export async function buildMobileTemplatesListResponse(
 
       const isBoosted = makeTemplateBoostPredicate(boost);
       if (isBoosted) matchingRows = stablePartition(matchingRows, isBoosted);
+      // Featured outrank the boost: pulled ahead of everything, the rest keeps its order.
+      matchingRows = sortFeaturedFirst(matchingRows);
 
       total = matchingRows.length;
       rows = matchingRows.slice(skip, skip + pageSize);
@@ -249,7 +255,7 @@ export async function buildMobileTemplatesListResponse(
       [rows, total] = await prisma.$transaction([
         prisma.template.findMany({
           where,
-          orderBy: { updatedAt: "desc" },
+          orderBy: FEATURED_FIRST_ORDER_BY,
           skip,
           take: pageSize,
           select: templateSelect,
@@ -257,20 +263,21 @@ export async function buildMobileTemplatesListResponse(
         prisma.template.count({ where }),
       ]);
     } else {
-      // Pinned-first pagination: every boosted row that matches `where` occupies the first
-      // positions of the virtual list, the remainder follows, `total` is unchanged. The
-      // remainder is `id notIn pinned` rather than `NOT boostWhere` because `categories` is
-      // a nullable jsonb and NOT over it would drop legacy rows from every page.
+      // Pinned-first pagination: the featured rows (newest-featured first) and then every
+      // boosted row that matches `where` occupy the first positions of the virtual list, the
+      // remainder follows, `total` is unchanged. The remainder is `id notIn pinned` rather
+      // than `NOT boostWhere` because `categories` is a nullable jsonb and NOT over it would
+      // drop legacy rows from every page.
       const pinnedIds: string[] = (
         await prisma.template.findMany({
-          where: mergeTemplateWhere(where, boostWhere),
-          orderBy: { updatedAt: "desc" },
+          where: mergeTemplateWhere(where, { OR: [{ isFeatured: true }, ...boostWhere.OR] }),
+          orderBy: FEATURED_FIRST_ORDER_BY,
           select: { id: true },
           take: MAX_PINNED_ROWS,
         })
       ).map((row: { id: string }) => row.id);
       if (pinnedIds.length === MAX_PINNED_ROWS) {
-        requestLogger.warn("Occasion boost hit the pinned-row cap", { cap: MAX_PINNED_ROWS });
+        requestLogger.warn("Featured + occasion boost hit the pinned-row cap", { cap: MAX_PINNED_ROWS });
       }
       const window = resolvePinnedWindow({ skip, take: pageSize, pinnedCount: pinnedIds.length });
       const pagePinnedIds = pinnedIds.slice(window.pinnedSkip, window.pinnedSkip + window.pinnedTake);
@@ -281,7 +288,7 @@ export async function buildMobileTemplatesListResponse(
         window.restTake > 0
           ? prisma.template.findMany({
               where: mergeTemplateWhere(where, { id: { notIn: pinnedIds } }),
-              orderBy: { updatedAt: "desc" },
+              orderBy: FEATURED_FIRST_ORDER_BY,
               skip: window.restSkip,
               take: window.restTake,
               select: templateSelect,

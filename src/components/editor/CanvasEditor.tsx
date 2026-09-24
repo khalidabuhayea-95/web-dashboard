@@ -2023,7 +2023,12 @@ function CanvasPageSceneImpl({
   // `elements` or the callback props directly — they read them through refs that
   // are re-pointed at the latest values on every render, so a cached handler
   // always invokes the current callback with the current element.
+  //
+  // The re-pointing happens during render on purpose, not in an effect: Konva
+  // fires dragend synchronously while React commits (a dragged node that unmounts
+  // or stops being draggable), before any effect of this component has run.
   const latestElementsRef = useRef(elements);
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref, only read by the cached handlers
   latestElementsRef.current = elements;
   const latestSceneCallbacksRef = useRef({
     onSelectNode,
@@ -2037,6 +2042,7 @@ function CanvasPageSceneImpl({
     onUpdateImageMetadata,
     onUpdateVideoMetadata,
   });
+  // eslint-disable-next-line react-hooks/refs -- latest-value ref, only read by the cached handlers
   latestSceneCallbacksRef.current = {
     onSelectNode,
     onOpenContextMenu,
@@ -2118,6 +2124,7 @@ function CanvasPageSceneImpl({
   // the blur ends so normal editing/rendering is untouched.
   const blurRadiiThisRenderRef = useRef<Map<string, number>>(new Map());
   const blurCachedIdsRef = useRef<Set<string>>(new Set());
+  // eslint-disable-next-line react-hooks/refs -- per-render scratch; read only by the effect below
   blurRadiiThisRenderRef.current = new Map();
   // An image finishing loading doesn't otherwise re-render this scene, so a statically-blurred
   // layer would keep the blank cache taken before its bitmap arrived. Bumping this re-runs the
@@ -2222,6 +2229,8 @@ function CanvasPageSceneImpl({
       ) : null}
 
       <Group clipX={0} clipY={0} clipWidth={page.width} clipHeight={page.height}>
+        {/* eslint-disable-next-line react-hooks/refs -- the refs touched here are the blur map
+            the effect above consumes and getElementHandlers' cache, whose entries never change */}
         {elements.map((element, layerIndex) => {
           if (!isElementVisibleAtPlayhead(element, playheadMs, pageDurationMs)) {
             return null;

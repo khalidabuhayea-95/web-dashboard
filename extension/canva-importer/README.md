@@ -45,6 +45,10 @@ Notes:
   "is debugging this browser" banner while the capture runs. On any failure the import keeps the
   poster frame and the warning names the reason (`no-video-element`, `no-media-requests`,
   `download-failed`, `video-too-large:NMB`).
+- v1.25.1: a page-fill VIDEO keeps the model rect's `rotation` (canva-fiber-main readPageFill →
+  clip `rb.rotation`) and the swapped video object carries `angle` with the rotated top-left
+  anchor. A story whose landscape clip is turned 90° to fill the portrait page imported lying
+  sideways (2434×1387 at angle 0) — the page showed white around it.
 - Fidelity round (v1.25.0): imported text keeps Canva's measured font size verbatim
   (`IMPORT_TEXT_FONT_SCALE` is 1 — the old 0.95 re-flowed every text box), letter-spacing takes
   the same composite scale as the font size (charSpacing was under-read by the node's own
@@ -101,7 +105,7 @@ Notes:
   really stores — `test/fixtures/canva-live-records-2026-09-22.json` — and run the three fiber-walk
   copies against one battery of elements). This round changes `background.js`, so the service
   worker must be refreshed with a full Remove + Load unpacked (the popup badge shows
-  `1.25.0-canva-fidelity`).
+  `1.25.1-canva-fidelity`).
 - When a layer source is blocked/temporary, importer falls back to image-based handling for that item.
 - Extension logger is enabled in both popup and background worker:
   - Structured logs are written to browser console.

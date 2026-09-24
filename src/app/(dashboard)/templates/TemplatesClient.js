@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, Star } from "lucide-react";
 
 import Badge from "@/components/ui/badge";
 import Button from "@/components/ui/button";
@@ -230,12 +230,16 @@ export default function TemplatesClient() {
   const [categoryFilter, setCategoryFilter] = useState("");
   const [subCategoryFilter, setSubCategoryFilter] = useState("");
   const [tagFilter, setTagFilter] = useState("");
+  // "" = all, "1" = featured only, "0" = not featured — sent as-is as ?featured=.
+  const [featuredFilter, setFeaturedFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [taxonomySettings, setTaxonomySettings] = useState(TEMPLATE_CATEGORY_SETTINGS);
   const [locale, setLocale] = useState("en");
   const [deletingTemplateId, setDeletingTemplateId] = useState("");
   const [selectedTemplateIds, setSelectedTemplateIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [featuringIds, setFeaturingIds] = useState({});
+  const [bulkFeaturing, setBulkFeaturing] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [previewPopup, setPreviewPopup] = useState(null);
   const [sharePopup, setSharePopup] = useState(null);
@@ -275,6 +279,13 @@ export default function TemplatesClient() {
   );
   const allVisibleSelected = visibleTemplateIds.length > 0 && selectedVisibleCount === visibleTemplateIds.length;
   const hasPartialSelection = selectedVisibleCount > 0 && !allVisibleSelected;
+  const selectedVisibleTemplates = useMemo(
+    () => templates.filter((template) => selectedTemplateIdsSet.has(template.id)),
+    [selectedTemplateIdsSet, templates]
+  );
+  // The bulk button unfeatures only when every selected row is already featured.
+  const bulkUnfeature =
+    selectedVisibleTemplates.length > 0 && selectedVisibleTemplates.every((template) => template.isFeatured);
 
   const onCategoryFilterChange = (value) => {
     const normalizedCategory = value ? normalizeTemplateCategory(value, taxonomySettings) : "";
@@ -345,6 +356,7 @@ export default function TemplatesClient() {
       if (categoryFilter.trim()) query.set("category", categoryFilter.trim());
       if (subCategoryFilter.trim()) query.set("subCategory", subCategoryFilter.trim());
       if (tagFilter.trim()) query.set("tag", tagFilter.trim());
+      if (featuredFilter) query.set("featured", featuredFilter);
       query.set("page", String(currentPage));
       query.set("perPage", String(PAGE_SIZE));
 
@@ -370,7 +382,7 @@ export default function TemplatesClient() {
     } finally {
       setRefreshing(false);
     }
-  }, [categoryFilter, subCategoryFilter, currentPage, tagFilter]);
+  }, [categoryFilter, subCategoryFilter, currentPage, tagFilter, featuredFilter]);
 
   useEffect(() => {
     loadTemplates();
@@ -378,7 +390,7 @@ export default function TemplatesClient() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [categoryFilter, subCategoryFilter, tagFilter]);
+  }, [categoryFilter, subCategoryFilter, tagFilter, featuredFilter]);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -491,6 +503,75 @@ export default function TemplatesClient() {
     }
   }, [deleteTemplateById, loadTemplates, selectedTemplateIdsSet, visibleTemplateIds]);
 
+  const patchFeatured = useCallback(async (ids, isFeatured) => {
+    const response = await fetch("/api/templates", {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ action: "setFeatured", ids, isFeatured }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || !payload?.ok) {
+      throw new Error(payload?.error || `Update failed (${response.status}).`);
+    }
+    return payload;
+  }, []);
+
+  /**
+   * Flips one template's featured flag. Optimistic — the star updates at once and reverts
+   * if the server rejects it. With the Featured filter on, a row that stops matching leaves
+   * the list, which is the honest result.
+   */
+  const toggleFeatured = useCallback(
+    async (template) => {
+      const templateId = String(template?.id || "");
+      if (!templateId || featuringIds[templateId]) return;
+      const nextValue = !template.isFeatured;
+      const setRowFeatured = (value) =>
+        setTemplates((prev) =>
+          prev.map((entry) => (entry.id === templateId ? { ...entry, isFeatured: value } : entry))
+        );
+      setFeaturingIds((prev) => ({ ...prev, [templateId]: true }));
+      setRowFeatured(nextValue);
+      try {
+        await patchFeatured([templateId], nextValue);
+        if (featuredFilter && (featuredFilter === "1") !== nextValue) {
+          setTemplates((prev) => prev.filter((entry) => entry.id !== templateId));
+          setTotalTemplates((prev) => Math.max(0, prev - 1));
+        }
+      } catch (error) {
+        setRowFeatured(!nextValue);
+        setStatus(error.message || "Failed to update the featured flag.");
+      } finally {
+        setFeaturingIds((prev) => {
+          const next = { ...prev };
+          delete next[templateId];
+          return next;
+        });
+      }
+    },
+    [featuredFilter, featuringIds, patchFeatured]
+  );
+
+  const handleFeatureSelected = useCallback(async () => {
+    const targetIds = selectedVisibleTemplates.map((template) => template.id);
+    if (!targetIds.length) return;
+    const nextValue = !bulkUnfeature;
+    const noun = `template${targetIds.length > 1 ? "s" : ""}`;
+
+    setBulkFeaturing(true);
+    setStatus(`${nextValue ? "Featuring" : "Unfeaturing"} ${targetIds.length} ${noun}...`);
+    try {
+      const payload = await patchFeatured(targetIds, nextValue);
+      const count = Array.isArray(payload?.templates) ? payload.templates.length : targetIds.length;
+      await loadTemplates();
+      setStatus(`${count} template${count === 1 ? "" : "s"} ${nextValue ? "featured" : "unfeatured"}.`);
+    } catch (error) {
+      setStatus(error.message || "Failed to update the featured flag.");
+    } finally {
+      setBulkFeaturing(false);
+    }
+  }, [bulkUnfeature, loadTemplates, patchFeatured, selectedVisibleTemplates]);
+
   const closeSharePopup = useCallback(() => {
     setSharePopup(null);
     setShareCopyState("idle");
@@ -600,9 +681,22 @@ export default function TemplatesClient() {
               </Button>
               <Button
                 type="button"
+                variant="secondary"
+                onClick={handleFeatureSelected}
+                disabled={selectedVisibleCount === 0 || bulkFeaturing || bulkDeleting}
+                className="inline-flex items-center gap-1.5"
+                title="Featured templates are listed first in the mobile app"
+              >
+                <Star size={14} strokeWidth={2.25} aria-hidden="true" />
+                {bulkFeaturing
+                  ? "Saving..."
+                  : `${bulkUnfeature ? "Unfeature" : "Feature"} selected${selectedVisibleCount ? ` (${selectedVisibleCount})` : ""}`}
+              </Button>
+              <Button
+                type="button"
                 variant="destructive"
                 onClick={handleDeleteSelected}
-                disabled={selectedVisibleCount === 0 || bulkDeleting || Boolean(deletingTemplateId)}
+                disabled={selectedVisibleCount === 0 || bulkDeleting || bulkFeaturing || Boolean(deletingTemplateId)}
               >
                 {bulkDeleting ? "Deleting..." : `Delete selected${selectedVisibleCount ? ` (${selectedVisibleCount})` : ""}`}
               </Button>
@@ -614,7 +708,7 @@ export default function TemplatesClient() {
         </CardHeader>
         <CardContent className="!p-0">
           <div className="space-y-4 p-5">
-            <div className="grid gap-3 md:grid-cols-3">
+            <div className="grid gap-3 md:grid-cols-4">
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)}>
@@ -649,6 +743,14 @@ export default function TemplatesClient() {
                   onChange={(event) => setTagFilter(event.target.value)}
                 />
               </div>
+              <div className="space-y-2">
+                <Label>Featured</Label>
+                <Select value={featuredFilter} onChange={(event) => setFeaturedFilter(event.target.value)}>
+                  <option value="">All templates</option>
+                  <option value="1">Featured only (app order)</option>
+                  <option value="0">Not featured</option>
+                </Select>
+              </div>
             </div>
 
             {status ? (
@@ -675,7 +777,7 @@ export default function TemplatesClient() {
                   <TableHeaderCell className="w-24 whitespace-nowrap">Status</TableHeaderCell>
                   <TableHeaderCell className="w-36 whitespace-nowrap">Updated</TableHeaderCell>
                   <TableHeaderCell className="w-48 whitespace-nowrap">Created by</TableHeaderCell>
-                  <TableHeaderCell className="w-64 whitespace-nowrap text-right">Actions</TableHeaderCell>
+                  <TableHeaderCell className="w-72 whitespace-nowrap text-right">Actions</TableHeaderCell>
                 </TableRow>
               </TableHead>
               <TableBody>
@@ -791,6 +893,26 @@ export default function TemplatesClient() {
                     </TableCell>
                     <TableCell className="whitespace-nowrap text-right">
                       <div className="flex items-center justify-end gap-2">
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          onClick={() => toggleFeatured(template)}
+                          disabled={Boolean(featuringIds[template.id]) || bulkFeaturing}
+                          aria-pressed={Boolean(template.isFeatured)}
+                          aria-label={`${template.isFeatured ? "Unfeature" : "Feature"} ${template.name}`}
+                          title={
+                            template.isFeatured
+                              ? `Featured: listed first in the app${template.status === "published" ? "" : " once published"}. Click to unfeature.`
+                              : `Feature: list this template first in the app${template.status === "published" ? "" : " once published"}.`
+                          }
+                        >
+                          <Star
+                            size={14}
+                            strokeWidth={2.25}
+                            aria-hidden="true"
+                            className={template.isFeatured ? "fill-current text-primary" : undefined}
+                          />
+                        </Button>
                         <Button
                           as="a"
                           href={`/editor-pro?templateId=${template.id}&updatedAt=${encodeURIComponent(template.updatedAt || "")}`}

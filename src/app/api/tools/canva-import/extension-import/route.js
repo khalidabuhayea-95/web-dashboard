@@ -1063,7 +1063,6 @@ function pruneRedundantFullPageSnapshotCropLayer(fabricData, canvasWidth, canvas
 
 // LEGACY (superseded by @/lib/tools/importSnapshotRecovery — kept temporarily for reference;
 // the imported versions above shadow these at call sites).
-// eslint-disable-next-line no-unused-vars
 function parseFailedFabricObjectIndexesFromError_legacy(errorMessage) {
   const source = String(errorMessage || "");
   const matches = source.matchAll(/fabricData\.objects\[(\d+)\]\.src/g);
@@ -1076,7 +1075,6 @@ function parseFailedFabricObjectIndexesFromError_legacy(errorMessage) {
   return indexes;
 }
 
-// eslint-disable-next-line no-unused-vars
 async function fetchExternalImageSourceAsDataUrl_legacy(sourceUrl, maxBytes = 10_000_000) {
   const normalizedUrl = String(sourceUrl || "").trim();
   if (!/^https?:\/\//i.test(normalizedUrl)) return "";
@@ -1099,7 +1097,6 @@ async function fetchExternalImageSourceAsDataUrl_legacy(sourceUrl, maxBytes = 10
   }
 }
 
-// eslint-disable-next-line no-unused-vars
 async function replaceExternalImageSourcesWithSnapshotCrops_legacy({
   fabricData,
   snapshotDataUrl,

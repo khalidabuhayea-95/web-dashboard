@@ -16,11 +16,11 @@ import {
   resolveSubCategoryFilterValue,
 } from "@/lib/mobile/taxonomy";
 import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
+import { FEATURED_FIRST_ORDER_BY, mergeRailRows } from "@/lib/templates/featured";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
 import { applyOccasionCategoryOrder } from "@/lib/occasions/hoist";
-import { sortRowsBySnapshotOrder } from "@/lib/occasions/templateBoost";
 
 const TEMPLATES_PER_SUBCATEGORY = 10;
 const MAX_TEMPLATES_PER_SUBCATEGORY = 50;
@@ -40,6 +40,8 @@ const RAIL_TEMPLATE_SELECT = {
   canvasSize: true,
   pageCount: true,
   isPremium: true,
+  isFeatured: true,
+  featuredAt: true,
   thumbnailDataUrl: true,
   previewVideoUrl: true,
   previewPosterUrl: true,
@@ -50,16 +52,18 @@ const RAIL_TEMPLATE_SELECT = {
 };
 
 /**
- * One rail's templates. Without boosted ids this is exactly the pre-occasions query. With
- * them, two queries run in parallel under the SAME `where` (audience status, category,
- * tag/query filters — so a draft never leaks and a filtered-out template is not pinned):
- * the boosted rows, kept in the occasion's own order, then the rest in recency order.
+ * One rail's templates: featured first (newest-featured first), then the occasion's boosted
+ * templates in the occasion's own order, then the rest by recency. Without boosted ids it
+ * is a single query. With them, two queries run in parallel under the SAME `where` (audience
+ * status, category, tag/query filters — so a draft never leaks and a filtered-out template
+ * is not pinned). The boosted query is not limited to `take`: it is bounded by the
+ * snapshot's id cap, and limiting it by recency would drop templates the occasion lists first.
  */
 async function fetchRailTemplates({ where, take, boostedIds }) {
   if (!boostedIds.length) {
     return prisma.template.findMany({
       where,
-      orderBy: { updatedAt: "desc" },
+      orderBy: FEATURED_FIRST_ORDER_BY,
       take,
       select: RAIL_TEMPLATE_SELECT,
     });
@@ -67,18 +71,16 @@ async function fetchRailTemplates({ where, take, boostedIds }) {
   const [boosted, rest] = await Promise.all([
     prisma.template.findMany({
       where: mergeTemplateWhere(where, { id: { in: boostedIds } }),
-      orderBy: { updatedAt: "desc" },
-      take,
       select: RAIL_TEMPLATE_SELECT,
     }),
     prisma.template.findMany({
       where: mergeTemplateWhere(where, { id: { notIn: boostedIds } }),
-      orderBy: { updatedAt: "desc" },
+      orderBy: FEATURED_FIRST_ORDER_BY,
       take,
       select: RAIL_TEMPLATE_SELECT,
     }),
   ]);
-  return [...sortRowsBySnapshotOrder(boosted, boostedIds), ...rest].slice(0, take);
+  return mergeRailRows({ boosted, rest, boostedIds, take });
 }
 
 export async function GET(request) {
@@ -226,6 +228,7 @@ export async function GET(request) {
         // The home rails render from this slim shape, so the crown depends on it
         // being listed here — toMobileTemplate carrying the field is not enough.
         isPremium: Boolean(mobileTemplate.isPremium),
+        isFeatured: Boolean(mobileTemplate.isFeatured),
         status: String(template.status || ""),
         ...(preview ? { preview } : {}),
         ...(preview?.url ? { previewVideoUrl: preview.url } : {}),

@@ -248,7 +248,7 @@ function parseAspectRatio(value: string) {
 
 function resolveLumaAspectRatio(width: number, height: number) {
   const targetRatio = Math.max(1, Number(width) || 1) / Math.max(1, Number(height) || 1);
-  let best = SUPPORTED_LUMA_ASPECT_RATIOS[0];
+  let best: (typeof SUPPORTED_LUMA_ASPECT_RATIOS)[number] = SUPPORTED_LUMA_ASPECT_RATIOS[0];
   let bestDistance = Math.abs(parseAspectRatio(best) - targetRatio);
 
   for (const candidate of SUPPORTED_LUMA_ASPECT_RATIOS.slice(1)) {

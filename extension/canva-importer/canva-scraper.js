@@ -5259,7 +5259,9 @@
                 const pageH = Math.max(1, Math.round(Number(designHeight || rect.height)));
                 const rb = firstVideoClip.video.rb;
                 let finalDataUrl = posterDataUrl;
-                if (rb && rb.width > 0 && rb.height > 0) {
+                // A rotated rect (clip turned 90° for a portrait page) has no axis-aligned
+                // page-visible region to crop to; keep the full poster and let the aspect check decide.
+                if (rb && rb.width > 0 && rb.height > 0 && Math.abs(Number(rb.rotation) || 0) <= 0.5) {
                   // the clip covers the page from a larger video rect — crop the poster to the
                   // page-visible region so the framing matches
                   const region = {

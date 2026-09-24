@@ -405,7 +405,7 @@ export async function POST(request: NextRequest) {
     const extension =
       extensionFromMimeType(uploadMimeType) || sourceExtension || extensionFromFileName(fileName);
 
-    const path = templatePreviewContext
+    const path = templatePreviewContext && variant
       ? makeTemplatePreviewObjectPath({
           ownerId: templatePreviewContext.ownerId,
           templateId,

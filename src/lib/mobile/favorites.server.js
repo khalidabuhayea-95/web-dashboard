@@ -23,6 +23,7 @@ const FAVORITE_TEMPLATE_SELECT = {
   canvasSize: true,
   pageCount: true,
   isPremium: true,
+  isFeatured: true,
   updatedAt: true,
 };
 
@@ -98,6 +99,7 @@ function serializeFavoriteTemplate(template, origin) {
     // Favorited Pro templates must still wear a crown here, or the paywall at
     // open would come out of nowhere.
     isPremium: Boolean(template.isPremium),
+    isFeatured: Boolean(template.isFeatured),
     updatedAt: new Date(template.updatedAt || Date.now()).getTime(),
   };
 }

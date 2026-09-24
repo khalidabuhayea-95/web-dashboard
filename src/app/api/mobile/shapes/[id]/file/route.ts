@@ -97,7 +97,7 @@ export async function GET(
 
     const webpBytes = await rasterizeSvgToWebp(decodeSvgDataUrl(shape.src));
 
-    return new NextResponse(webpBytes, {
+    return new NextResponse(new Uint8Array(webpBytes), {
       status: 200,
       headers: {
         "Content-Type": "image/webp",

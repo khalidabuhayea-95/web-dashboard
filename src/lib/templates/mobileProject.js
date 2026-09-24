@@ -2212,6 +2212,9 @@ export function toMobileTemplate(template, options = {}) {
     // Pro-only template: listed for everyone, the app badges it and walls at
     // the point of use (mirrors AiTool.isPremium).
     isPremium: Boolean(template?.isPremium),
+    // Hand-picked by the team. The list routes already put featured templates first, so
+    // this is informational (e.g. for a badge) — clients must not re-sort on it.
+    isFeatured: Boolean(template?.isFeatured),
     thumbnailUrl: resolvedThumbnail,
     thumbnailDataUrl: resolvedThumbnail,
     preview,
@@ -2361,6 +2364,7 @@ export function toMobileTemplateDetailSlim(template, options = {}) {
       ? { placements: options.placements }
       : {}),
     isPremium: Boolean(template?.isPremium),
+    isFeatured: Boolean(template?.isFeatured),
     thumbnailUrl,
     ...(preview ? { preview } : {}),
     pageCount: Math.max(1, Math.round(numberOr(project?.pageCount, 1))),

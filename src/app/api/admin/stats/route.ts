@@ -272,10 +272,10 @@ export async function GET(request: NextRequest) {
 
     // Merge the two independent signup series on the shared day axis.
     const dashboardByDay = new Map(
-      dashboardSignupRows.map((row) => [normalizeDay(row.day), toNum(row.count)]),
+      dashboardSignupRows.map((row: { day: Date; count: number }) => [normalizeDay(row.day), toNum(row.count)]),
     );
     const mobileByDay = new Map(
-      mobileSignupRows.map((row) => [normalizeDay(row.day), toNum(row.count)]),
+      mobileSignupRows.map((row: { day: Date; count: number }) => [normalizeDay(row.day), toNum(row.count)]),
     );
     const userAcquisition = buildDayAxis(30).map((day) => ({
       day,
@@ -303,16 +303,19 @@ export async function GET(request: NextRequest) {
     const charts = {
       templateCreationTrend: zeroFillDays(templateCreationRows, 30, ["count"]),
       templateStatusBreakdown: templateStatusGroups
-        .map((group) => ({ status: group.status, count: toNum(group._count?._all) }))
-        .sort((a, b) => b.count - a.count),
-      topCategories: topCategoryGroups.map((group) => ({
+        .map((group: { status: string; _count: { _all: number } }) => ({
+          status: group.status,
+          count: toNum(group._count?._all),
+        }))
+        .sort((a: { count: number }, b: { count: number }) => b.count - a.count),
+      topCategories: topCategoryGroups.map((group: { category: string; _count: { _all: number } }) => ({
         category: group.category,
         count: toNum(group._count?._all),
       })),
       userAcquisition,
       mobileVerificationFunnel: zeroFillDays(mobileVerificationRows, 30, ["total", "verified"]),
       importJobsTimeline,
-      fontSources: fontSourceGroups.map((group) => ({
+      fontSources: fontSourceGroups.map((group: { source: string; _count: { _all: number } }) => ({
         source: group.source,
         count: toNum(group._count?._all),
       })),

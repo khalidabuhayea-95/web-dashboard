@@ -260,7 +260,7 @@ async function decodeToCanvas({
 
   const sourceImage = await canvasLib
     .loadImage(createDataUrl(bytes, detectedMimeType))
-    .catch((_error) => null);
+    .catch((_error: unknown) => null);
   if (!sourceImage?.width || !sourceImage?.height) {
     throw createInvalidInputError("Could not decode the image.");
   }

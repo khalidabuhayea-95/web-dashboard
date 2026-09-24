@@ -11,6 +11,9 @@ const eslintConfig = defineConfig([
     "build/**",
     "next-env.d.ts",
     "src/generated/**",
+    // Local Python virtualenvs (gitignored) ship third-party JS that is not ours to lint.
+    "ai-worker/.venv/**",
+    ".venv-rembg/**",
   ]),
 ]);
 

@@ -64,7 +64,7 @@ function resolvePreviewText(font: any): string {
   const categories = Array.isArray(font?.categories) ? font.categories.map(String) : [];
   const label = `${font?.displayName || ""} ${font?.family || ""}`;
   const isArabic =
-    categories.some((c) => c.toUpperCase() === "ARABIC") || ARABIC_RANGE.test(label);
+    categories.some((c: string) => c.toUpperCase() === "ARABIC") || ARABIC_RANGE.test(label);
   return isArabic ? ARABIC_SAMPLE : LATIN_SAMPLE;
 }
 

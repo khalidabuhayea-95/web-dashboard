@@ -368,6 +368,9 @@ export function toMobileFontRecord(request, font) {
   };
 }
 
+/**
+ * @param {{ source?: string, excludeSource?: string, search?: string, skip?: number, take?: number }} [options]
+ */
 export async function listFontFamilies({ source, excludeSource, search, skip = 0, take } = {}) {
   const where = {};
   if (source) {

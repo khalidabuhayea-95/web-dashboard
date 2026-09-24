@@ -1196,6 +1196,9 @@
                 ? {
                     videoId: String(get(vid.video)),
                     transparency: Number(get(vid.transparency)) || 0,
+                    // `rotation` (degrees) rides along like the image box's: a story whose landscape
+                    // clip is turned 90° to fill the portrait page keeps its 2434×1387 rect rotated in
+                    // the model — dropping it imported the clip lying sideways across the middle.
                     box:
                       vbox && typeof vbox === "object"
                         ? {
@@ -1203,6 +1206,7 @@
                             top: Number(vbox.top) || 0,
                             width: Number(vbox.width) || 0,
                             height: Number(vbox.height) || 0,
+                            rotation: Number(vbox.rotation) || 0,
                           }
                         : null,
                   }

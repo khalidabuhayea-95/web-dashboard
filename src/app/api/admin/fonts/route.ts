@@ -75,7 +75,7 @@ export async function GET(request: NextRequest) {
     const perPage = Math.max(1, Math.min(100, Number(url.searchParams.get("perPage") || 50) || 50));
 
     const families = await listFontFamilies({ search, take: 5000 });
-    const all = families.map(toEditorFontRecord).filter(Boolean).map(slimFont);
+    const all: ReturnType<typeof slimFont>[] = families.map(toEditorFontRecord).filter(Boolean).map(slimFont);
 
     const counts = {
       total: all.length,

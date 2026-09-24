@@ -1470,6 +1470,12 @@ const schemas = {
           "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
         example: false,
       },
+      isFeatured: {
+        type: "boolean",
+        description:
+          "Hand-picked by the team. Featured templates are already listed first (newest-featured first), so this is display-only metadata (e.g. a badge) — keep the server order.",
+        example: false,
+      },
       category: { type: "string", description: "Localized category label." },
       subCategory: { type: "string", description: "Localized sub category label." },
       categoryId: { type: "string", format: "uuid" },
@@ -1534,6 +1540,12 @@ const schemas = {
         type: "boolean",
         description:
           "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
+        example: false,
+      },
+      isFeatured: {
+        type: "boolean",
+        description:
+          "Hand-picked by the team. Featured templates already lead their rail (newest-featured first), so this is display-only metadata (e.g. a badge) — keep the server order.",
         example: false,
       },
       thumbnailUrl: { type: "string" },
@@ -1615,6 +1627,11 @@ const schemas = {
         type: "boolean",
         description:
           "Nayroz Pro-only template. Premium templates ARE listed for everyone so the app can badge them; the app walls when the template is opened.",
+        example: false,
+      },
+      isFeatured: {
+        type: "boolean",
+        description: "Hand-picked by the team; the list routes show featured templates first.",
         example: false,
       },
       project: {
@@ -1734,6 +1751,34 @@ const schemas = {
         type: "array",
         items: {
           $ref: "#/components/schemas/BackgroundCategoryOption",
+        },
+      },
+    },
+  },
+  ElementCategoryOption: {
+    type: "object",
+    required: ["id", "value", "label", "thumbnailUrl", "published", "elementCount"],
+    properties: {
+      id: { type: "string" },
+      value: { type: "string", description: "Pass as the `category` filter of /api/mobile/elements." },
+      label: { type: "string", description: "Localized label." },
+      thumbnailUrl: { type: "string", format: "uri", nullable: true },
+      published: { type: "boolean" },
+      elementCount: { type: "integer", minimum: 0, description: "Imported elements in this category for the requested `source`." },
+    },
+  },
+  MobileElementCategoriesResponse: {
+    type: "object",
+    required: ["locale", "categories"],
+    properties: {
+      locale: {
+        type: "string",
+        enum: ["en", "ar"],
+      },
+      categories: {
+        type: "array",
+        items: {
+          $ref: "#/components/schemas/ElementCategoryOption",
         },
       },
     },
@@ -2253,6 +2298,12 @@ const schemas = {
         type: "boolean",
         description:
           "Nayroz Pro-only template. Carried on the favorite summary so the app can badge a favorited Pro template the same way it does in the feed.",
+        example: false,
+      },
+      isFeatured: {
+        type: "boolean",
+        description:
+          "Hand-picked by the team, carried so a favorited featured template can be badged like in the feed. Favorites keep their own favorited-at order.",
         example: false,
       },
       updatedAt: {
@@ -2804,7 +2855,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "List published templates",
           description:
-            "Returns grouped, localized template summaries. Use template id with /api/mobile/templates/{id} to fetch the full project payload.",
+            "Returns grouped, localized template summaries. Use template id with /api/mobile/templates/{id} to fetch the full project payload.\n\nOrder: featured templates first (newest-featured first), then templates linked to an active occasion, then the most recently updated. Pinning only reorders — `total` and paging are unaffected, and featuring never changes a template's `updatedAt` or `version`.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -2834,7 +2885,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "Search published templates",
           description:
-            "Returns the same paginated, grouped template payload as /api/mobile/templates. The `query` parameter performs a case-insensitive partial search across template names and tags.",
+            "Returns the same paginated, grouped template payload as /api/mobile/templates. The `query` parameter performs a case-insensitive partial search across template names and tags.\n\nMatches follow the same order — featured first (newest-featured first), then occasion-boosted, then the most recently updated — within each sub category group.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -2999,7 +3050,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "List published templates grouped by sub category",
           description:
-            "Returns every configured sub category with its latest templates (default 10 per sub category).",
+            "Returns every configured sub category with its templates (default 10 per sub category): featured first (newest-featured first), then templates linked to an active occasion, then the most recently updated.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -3060,6 +3111,34 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                   },
                 },
               },
+            },
+          },
+        },
+      },
+      "/api/mobile/element-categories": {
+        get: {
+          tags: ["Mobile Elements"],
+          summary: "List localized element categories",
+          description:
+            "Returns every published element category with its localized label, optional thumbnail, and imported element count. While an occasion is active, categories linked to it come first. Publicly cacheable for 10 minutes, with 30 more minutes of stale-while-revalidate.",
+          parameters: [
+            ...localeHeaderParameters,
+            ...localeQueryParameters,
+            reusableParameters.elementsSource,
+          ],
+          responses: {
+            200: {
+              description: "Element categories response",
+              content: {
+                "application/json": {
+                  schema: {
+                    $ref: "#/components/schemas/MobileElementCategoriesResponse",
+                  },
+                },
+              },
+            },
+            429: {
+              description: "Rate limit exceeded (120 requests per minute per IP)",
             },
           },
         },

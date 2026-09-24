@@ -115,6 +115,7 @@ export async function GET(request, { params }) {
         pageCount: true,
         pageThumbnails: true,
         isPremium: true,
+        isFeatured: true,
         thumbnailDataUrl: true,
         previewVideoUrl: true,
         previewPosterUrl: true,

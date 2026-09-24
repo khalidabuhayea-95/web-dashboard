@@ -333,14 +333,17 @@ Status codes:
 
 The dashboard keeps a calendar of Arabic and Islamic occasions (`/occasions`). Content linked
 to an occasion is surfaced first while the occasion's boost window is active
-(`boostLeadDays` before its start until its last day). Ordering is the only thing that
-changes — no payload field, no new endpoint, nothing hidden — so every shipped app build
+(`boostLeadDays` before its start until its last day) — for templates, right after any
+featured templates (see [Featured templates](#featured-templates)). Ordering is the only thing
+that changes — no payload field, no new endpoint, nothing hidden — so every shipped app build
 benefits without an update:
 
-- `/templates/by-subcategory`: linked templates lead their rail (in the order they were
-  linked), then the usual `updatedAt desc`. Drafts stay hidden for the public audience.
+- `/templates/by-subcategory`: linked templates follow the rail's featured templates (in the
+  order they were linked), then the usual `updatedAt desc`. Drafts stay hidden for the public
+  audience.
 - `/templates` and `/templates/search`: linked templates (and every template placed under a
-  linked category) are pinned to the front across pages; `total` and paging are unchanged.
+  linked category) are pinned to the front across pages, right after the featured templates;
+  `total` and paging are unchanged.
 - `/templates/taxonomy`, `/element-categories`, `/background-categories`: categories linked to
   the occasion move to the front of the list when the occasion has *Hoist linked categories*
   on, so the app opens on the occasion.
@@ -353,6 +356,33 @@ Outside a boost window every route behaves exactly as documented above. Public r
 are cached (`max-age=300`, `stale-while-revalidate=600`; catalog lists longer), plus a
 one-minute server-side snapshot, so a window starting or ending can take up to ~15 minutes
 to reach every client. Testers (`private, no-store`) see it within a minute.
+
+## Featured templates
+
+The content team marks templates as featured on the dashboard's Templates page (admins and
+designers: a star per row, a bulk action, and a *Featured* filter that shows them in app
+order). Featured templates lead every template list, so shipped app builds pick it up without
+an update:
+
+- Order everywhere: **featured** (newest-featured first) → templates linked to an active
+  occasion → the rest by `updatedAt desc`. Featured deliberately outranks the seasonal boost;
+  a template that is both counts as featured.
+- `/templates/by-subcategory`: featured templates lead every rail they are placed in.
+- `/templates`: featured templates are pinned to the front across pages; `total` and paging
+  are unchanged. Rows are grouped by sub category after paging, so on a category-wide page
+  "first" means first within each group.
+- `/templates/search`: featured matches lead within each sub-category group.
+- `isFeatured` (boolean) is on list, rail, detail and favorite summaries. It is display-only
+  (a badge, say) — don't re-sort on it, the order already reflects it. Favorites keep their
+  own favorited-at order.
+- Featuring never changes a template's `updatedAt` or `version`, so it can't bust cached
+  thumbnails, hide a ready preview video (a preview older than `updatedAt` is treated as
+  stale) or reorder the recency part of a list. The table's `template_updated_at` trigger
+  would otherwise stamp `now()`; the only writer, `setTemplatesFeatured`, opts out for its own
+  transaction.
+- Latency: public responses are cached as above, so a change can take up to ~15 minutes to
+  reach every client; testers see it immediately. The app's home tab additionally shows its
+  cached snapshot until pull-to-refresh, a tab switch or a cold start.
 
 ## Multi-category templates
 

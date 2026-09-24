@@ -172,7 +172,7 @@ export async function POST(request: NextRequest) {
     });
 
     return attachRequestIdHeader(
-      new NextResponse(result.bytes, {
+      new NextResponse(new Uint8Array(result.bytes), {
         status: 200,
         headers: {
           ...creditHeaders,

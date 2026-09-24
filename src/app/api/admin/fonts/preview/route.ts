@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
       orderBy: { updatedAt: "desc" },
     });
 
-    const ids = rows.map((r) => r.id);
+    const ids = rows.map((r: { id: string }) => r.id);
     return NextResponse.json({ ids, total: ids.length, missingOnly });
   } catch (error) {
     return handleApiError(error, "Failed to list fonts for preview generation");
@@ -83,7 +83,7 @@ export async function POST(request: NextRequest) {
       return handleBadRequest("Invalid JSON body");
     }
 
-    const rawIds = Array.isArray(body?.ids) ? body.ids : body?.id ? [body.id] : [];
+    const rawIds: unknown[] = Array.isArray(body?.ids) ? body.ids : body?.id ? [body.id] : [];
     const ids = Array.from(
       new Set(rawIds.map((v: unknown) => String(v || "").trim()).filter(Boolean))
     );

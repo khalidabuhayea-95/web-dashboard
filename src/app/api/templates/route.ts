@@ -31,6 +31,9 @@ import {
   normalizeTags,
 } from "@/lib/templates/server";
 import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
+import { parseSetFeaturedRequest } from "@/lib/templates/featured";
+import { setTemplatesFeatured } from "@/lib/templates/featured.server";
+import { setTemplatePremium } from "@/lib/templates/premium.server";
 import {
   normalizeEditorProMobileFontData,
   validateEditorProMobilePublishCompatibility,
@@ -66,6 +69,8 @@ const TEMPLATE_LIST_SELECT: any = {
   categories: true,
   tags: true,
   isPremium: true,
+  isFeatured: true,
+  featuredAt: true,
   thumbnailDataUrl: true,
   previewVideoUrl: true,
   previewPosterUrl: true,
@@ -500,10 +505,12 @@ interface TemplateListWhereInput {
   subCategory?: string;
   tag?: string;
   search?: string;
+  isFeatured?: boolean | null;
 }
 
 function buildTemplateListWhere(input: TemplateListWhereInput): any {
-  const { templateId, status, hasCategoryFilter, category, hasSubCategoryFilter, subCategory, tag, search } = input;
+  const { templateId, status, hasCategoryFilter, category, hasSubCategoryFilter, subCategory, tag, search, isFeatured } =
+    input;
 
   // The category filter matches ANY of a template's placements, so it is its own OR
   // fragment and has to be AND-merged with the search OR rather than spread alongside it.
@@ -517,6 +524,7 @@ function buildTemplateListWhere(input: TemplateListWhereInput): any {
       ...(status ? { status } : {}),
       ...(templateId ? { id: templateId } : {}),
       ...(tag ? { tags: { array_contains: [tag] } } : {}),
+      ...(typeof isFeatured === "boolean" ? { isFeatured } : {}),
     },
     categoryFilter,
     search
@@ -547,7 +555,7 @@ async function attachTemplateOwnerNames(templates: any[]): Promise<any[]> {
   const ownerMap = new Map<string, string>();
   const ownerIdsForLookup = ownerIds.slice(0, MAX_OWNER_LOOKUPS);
   const owners = await findDashboardUsersByIds(ownerIdsForLookup);
-  owners.forEach((owner) => {
+  owners.forEach((owner: any) => {
     ownerMap.set(owner.id, getUserDisplayName(owner));
   });
 
@@ -731,6 +739,13 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
     const hasSubCategoryFilter = searchParams.has("subCategory");
     const tag = String(searchParams.get("tag") || "").trim().toLowerCase();
     const search = String(searchParams.get("q") || "").trim().toLowerCase();
+    const featuredParam = String(searchParams.get("featured") || "").trim().toLowerCase();
+    const isFeatured =
+      featuredParam === "1" || featuredParam === "true"
+        ? true
+        : featuredParam === "0" || featuredParam === "false"
+          ? false
+          : null;
     const pagination = parseListPagination(searchParams);
 
     const where = buildTemplateListWhere({
@@ -742,14 +757,20 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       subCategory,
       tag,
       search,
+      isFeatured,
     });
     // Shared library: the list is not narrowed by owner for any role. See
     // canAccessTemplate in lib/templates/server.js.
     const scopedWhere = where;
+    // "Featured only" lists them the way the app shows them: newest-featured first.
+    const listOrderBy: Prisma.TemplateOrderByWithRelationInput[] =
+      isFeatured === true
+        ? [{ featuredAt: { sort: "desc", nulls: "last" } }, { updatedAt: "desc" }]
+        : [{ updatedAt: "desc" }];
 
     logger.info("Listing templates", {
       userId: session.userId,
-      filters: { status, category, tag, search: search ? "yes" : "no" },
+      filters: { status, category, tag, search: search ? "yes" : "no", featured: isFeatured },
       pagination: pagination.paginationRequested,
     });
 
@@ -760,7 +781,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       const [items, count] = await prisma.$transaction([
         prisma.template.findMany({
           where: scopedWhere,
-          orderBy: { updatedAt: "desc" },
+          orderBy: listOrderBy,
           skip: pagination.skip,
           take: pagination.take,
           select: TEMPLATE_LIST_SELECT,
@@ -775,7 +796,7 @@ export async function GET(request: NextRequest): Promise<NextResponse> {
       // primary paging mechanism — clients that need more should pass ?page.
       templates = await prisma.template.findMany({
         where: scopedWhere,
-        orderBy: { updatedAt: "desc" },
+        orderBy: listOrderBy,
         take: MAX_UNPAGINATED_LIST_SIZE,
         select: TEMPLATE_LIST_SELECT,
       });
@@ -1042,6 +1063,31 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     const id = typeof body?.id === "string" ? body.id : "";
     const action = typeof body?.action === "string" ? body.action : "";
 
+    // Featuring is curation, not pricing, so designers may do it too (unlike setPremium) —
+    // getEditorSession has already limited the caller to admins and designers. It takes a
+    // batch of `ids` for the list's bulk action, and never bumps updatedAt or version.
+    if (action === "setFeatured") {
+      const parsed = parseSetFeaturedRequest(body);
+      if (!parsed.ok) {
+        return handleBadRequest(parsed.error);
+      }
+      const templates = await setTemplatesFeatured(parsed.ids, parsed.isFeatured);
+      if (templates.length === 0) {
+        return handleNotFound("Template not found");
+      }
+      logger.info("Setting template featured flag", {
+        userId: session.userId,
+        isFeatured: parsed.isFeatured,
+        count: templates.length,
+      });
+      const updatedIds = new Set(templates.map((template) => template.id));
+      return jsonForEditorClient({
+        ok: true,
+        templates,
+        missingIds: parsed.ids.filter((templateId) => !updatedIds.has(templateId)),
+      });
+    }
+
     if (!id || !["publish", "unpublish", "updatePreview", "setPremium"].includes(action)) {
       return handleBadRequest("Invalid template update request");
     }
@@ -1055,16 +1101,13 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
     }
 
     // Marking a template Pro is a monetization decision, not authoring — a
-    // designer who owns the template still cannot price it.
+    // designer who owns the template still cannot price it. Like featuring, it
+    // leaves updatedAt and version alone (see setTemplatePremium).
     if (action === "setPremium") {
       if (session.role !== "admin") {
         return handleForbidden("Only admins can change the Pro flag");
       }
-      const template = await prisma.template.update({
-        where: { id },
-        data: { isPremium: Boolean(body?.isPremium) },
-        select: TEMPLATE_LIST_SELECT,
-      });
+      const template = await setTemplatePremium(id, Boolean(body?.isPremium), TEMPLATE_LIST_SELECT);
       return jsonForEditorClient({ ok: true, template });
     }
 

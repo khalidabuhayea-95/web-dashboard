@@ -269,6 +269,10 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
   };
 }
 
+/**
+ * @param {unknown} settings stored settings; normalized here
+ * @param {{ deviceType?: string | null, appVersion?: string | number | null, defaultObjectRemovalModel?: string, defaultAiExpandModel?: string, defaultUpscaleModel?: string }} [options]
+ */
 export function resolveMobileAppSettingsDecision(
   settings,
   {

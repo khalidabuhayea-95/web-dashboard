@@ -873,6 +873,25 @@ export async function getEditorCustomFonts() {
   return fonts.map(toEditorFontRecord).filter(Boolean);
 }
 
+/**
+ * @param {{
+ *   family: string,
+ *   fileName?: string,
+ *   dataUrl?: string,
+ *   fileUrl?: string,
+ *   mimeType?: string,
+ *   categories?: string[],
+ *   storageBucket?: string,
+ *   storagePath?: string,
+ *   sizeBytes?: number,
+ *   source?: string,
+ *   sourceId?: string,
+ *   removable?: boolean,
+ *   includeFontList?: boolean,
+ *   skipIfExists?: boolean,
+ *   extraVariants?: Array<{ dataUrl?: string, mimeType?: string, fileName?: string, weight?: number | string, style?: string }>,
+ * }} input
+ */
 export async function upsertEditorCustomFont({
   family,
   fileName,

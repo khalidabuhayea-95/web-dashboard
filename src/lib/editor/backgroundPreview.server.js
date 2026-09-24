@@ -108,6 +108,9 @@ export async function downloadRemoteAsset(url, { timeoutMs = DEFAULT_DOWNLOAD_TI
   };
 }
 
+/**
+ * @param {{ bytes?: Buffer | Uint8Array, mimeType?: string, maxDimension?: number }} [options]
+ */
 export async function createBackgroundPreview({
   bytes,
   mimeType,
@@ -203,6 +206,9 @@ export async function createBackgroundPreview({
   }
 }
 
+/**
+ * @param {{ ownerId?: string, sourceAssetId?: string, bytes?: Buffer | Uint8Array, mimeType?: string, bucket?: string }} [options]
+ */
 export async function uploadBackgroundPreviewToStorage({
   ownerId,
   sourceAssetId,

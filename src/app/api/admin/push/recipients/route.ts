@@ -31,7 +31,7 @@ export async function GET(request: NextRequest) {
       select: { id: true, name: true, email: true },
     });
 
-    const ids = users.map((u) => u.id);
+    const ids = users.map((u: { id: string }) => u.id);
     const counts = ids.length
       ? await prisma.mobileDeviceToken.groupBy({
           by: ["mobileUserId"],
@@ -39,10 +39,12 @@ export async function GET(request: NextRequest) {
           _count: { _all: true },
         })
       : [];
-    const countByUser = new Map(counts.map((c) => [c.mobileUserId, c._count._all]));
+    const countByUser = new Map(
+      counts.map((c: { mobileUserId: string; _count: { _all: number } }) => [c.mobileUserId, c._count._all])
+    );
 
     return NextResponse.json({
-      recipients: users.map((u) => ({
+      recipients: users.map((u: { id: string; name: string | null; email: string | null }) => ({
         id: u.id,
         name: u.name || null,
         email: u.email || null,

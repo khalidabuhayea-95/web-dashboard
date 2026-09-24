@@ -187,6 +187,25 @@ function normalizePages(value, fallbackWidth = 1080, fallbackHeight = 1080) {
   });
 }
 
+/**
+ * Every field is optional and sanitized here; `fallback` fills whatever `input` leaves empty.
+ *
+ * @typedef {{
+ *   source?: string,
+ *   importVersion?: number,
+ *   page?: object | null,
+ *   pages?: object[] | null,
+ *   layerTree?: unknown[],
+ *   layerStats?: object | null,
+ *   usedFonts?: unknown[],
+ *   warnings?: unknown[],
+ *   assetManifest?: object | null,
+ *   provenance?: Record<string, unknown> | null,
+ * }} ImportMetadataInput
+ *
+ * @param {ImportMetadataInput} input
+ * @param {ImportMetadataInput} [fallback]
+ */
 export function buildImportMetadata({
   source = "unknown",
   importVersion = IMPORT_PARITY_VERSION,

@@ -8,7 +8,7 @@
     "start": "next start",
     "worker": "node --import tsx scripts/worker.ts",
     "lint": "eslint && npm run check:mobile-openapi",
-    "check:mobile-openapi": "node scripts/check-mobile-openapi-coverage.mjs",
+    "check:mobile-openapi": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-mobile-openapi-coverage.mjs",
     "import:canva": "node scripts/import-canva-template.mjs",
     "backfill:background-previews": "node scripts/backfill-background-previews.mjs",
     "cleanup:orphan-media": "node --env-file=.env --env-file=.env.local --import tsx scripts/cleanup-orphan-media.ts",
@@ -34,7 +34,10 @@
     "smoke:ai-worker": "ai-worker/.venv/bin/python ai-worker/scripts/smoke_test.py",
     "seed:occasions": "node --env-file=.env --env-file=.env.local --import tsx scripts/seed-occasions.mjs",
     "smoke:occasions": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-occasions.ts",
-    "test:occasions": "node --import tsx --test src/lib/occasions/*.test.ts src/lib/occasions/*.test.js src/lib/editor/assetBoostOrder.test.js"
+    "test:occasions": "node --import tsx --test src/lib/occasions/*.test.ts src/lib/occasions/*.test.js src/lib/editor/assetBoostOrder.test.js",
+    "smoke:featured": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-featured-templates.ts",
+    "smoke:template-premium": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-template-premium.ts",
+    "test:featured": "node --import tsx --test src/lib/templates/featured.test.js"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",

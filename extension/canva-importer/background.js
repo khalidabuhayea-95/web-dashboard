@@ -5707,6 +5707,12 @@ async function attachCapturedBackgroundVideo(fabricObjects, context) {
   const pageHeight = Math.max(1, Math.round(numberOr(context?.pageHeight, 1920)));
   const rb = videoClip?.video?.rb;
   const hasRect = rb && Number(rb.width) > 0 && Number(rb.height) > 0;
+  // The model rect is centred like every Canva box and may be rotated (a landscape clip turned
+  // 90° to fill a portrait story); fabric rotates about the top-left corner, so the anchor moves.
+  const videoAngle = hasRect ? numberOr(rb.rotation, 0) : 0;
+  const videoAnchor = hasRect
+    ? resolveRotatedTopLeftAnchor(Number(rb.left) || 0, Number(rb.top) || 0, Number(rb.width), Number(rb.height), videoAngle)
+    : { left: 0, top: 0 };
   const durationSec = Math.round(Math.max(0, Number(capture.durationSec) || 0) * 1000) / 1000;
   const nextObjects = objects.slice();
   // One decode for the whole page: every poster index here is the same clip's poster frame.
@@ -5723,10 +5729,11 @@ async function attachCapturedBackgroundVideo(fabricObjects, context) {
       layerType: "video",
       importKind: "video",
       layerName: "Background video",
-      left: hasRect ? Number(rb.left) || 0 : 0,
-      top: hasRect ? Number(rb.top) || 0 : 0,
+      left: videoAnchor.left,
+      top: videoAnchor.top,
       width: hasRect ? Math.round(Number(rb.width)) : pageWidth,
       height: hasRect ? Math.round(Number(rb.height)) : pageHeight,
+      angle: videoAngle,
       scaleX: 1,
       scaleY: 1,
       src: blobRef,

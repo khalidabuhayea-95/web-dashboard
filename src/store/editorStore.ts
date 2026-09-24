@@ -93,7 +93,14 @@ export type ElementType = "text" | "image" | "video" | "frame" | ShapeType;
 export type AlignType = "left" | "center" | "right" | "top" | "middle" | "bottom";
 export type DrawTool = "selection" | "brush" | "highlighter";
 export type TemplateLifecycleStatus = "draft" | "published";
-export type TimelinePreviewStatus = "not_requested" | "queued" | "processing" | "ready" | "failed";
+const TIMELINE_PREVIEW_STATUSES = ["not_requested", "queued", "processing", "ready", "failed"] as const;
+export type TimelinePreviewStatus = (typeof TIMELINE_PREVIEW_STATUSES)[number];
+
+/** A preview status read from the server or a stored template; blank or unknown reads as "not_requested". */
+export function normalizeTimelinePreviewStatus(value: unknown): TimelinePreviewStatus {
+  const status = typeof value === "string" ? value.trim() : "";
+  return TIMELINE_PREVIEW_STATUSES.find((candidate) => candidate === status) ?? "not_requested";
+}
 
 export interface EditorElement {
   id: string;

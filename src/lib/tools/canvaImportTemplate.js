@@ -198,6 +198,26 @@ export function resolveImportedTemplateData({
   return { data, hasFabricData, refittedAnimations };
 }
 
+/**
+ * @param {{
+ *   ownerId: string,
+ *   imageDataUrl?: string,
+ *   thumbnailDataUrl?: string,
+ *   fabricData?: object | null,
+ *   editorData?: object | null,
+ *   name?: string,
+ *   slug?: string,
+ *   canvasWidth: number,
+ *   canvasHeight: number,
+ *   sourceWidth?: number,
+ *   sourceHeight?: number,
+ *   tags?: string[],
+ *   action?: string,
+ *   importMetadata?: object | null,
+ *   pageThumbnails?: Record<string, string> | null,
+ *   categories?: Array<{ category: string, subCategory: string }> | null,
+ * }} input
+ */
 export async function createImportedTemplate({
   ownerId,
   imageDataUrl,

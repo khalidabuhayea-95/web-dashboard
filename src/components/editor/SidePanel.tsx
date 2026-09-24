@@ -104,6 +104,7 @@ import { getPublishablePageElements } from "@/lib/editor/publishableElements";
 import {
   createElementFromAsset,
   isBackgroundLayerElement,
+  normalizeTimelinePreviewStatus,
   useEditorStore,
   type EditorDesign,
   type EditorElement,
@@ -1483,7 +1484,7 @@ function toEditorDesignFromTemplate(
   const dbPreviewUrl = String(template.previewVideoUrl || "").trim();
   const dbPreviewPosterUrl =
     String(template.previewPosterUrl || "").trim() || templateThumbnailSrc || null;
-  const dbPreviewStatus = String(template.previewStatus || "").trim() || "not_requested";
+  const dbPreviewStatus = normalizeTimelinePreviewStatus(template.previewStatus);
   const dbPreviewGeneratedAt = String(template.previewUpdatedAt || "").trim() || null;
   const dbPreviewError = String(template.previewError || "").trim() || null;
 

@@ -24,6 +24,7 @@ import { OCCASIONS_TIME_ZONE, todayInTimeZone } from "@/lib/occasions/dates";
 import { linkOccasionItem, listHydratedOccasionItems } from "@/lib/occasions/items.server";
 import { countOccasionReminders, listUpcomingOccasions } from "@/lib/occasions/occasions.server";
 import prisma from "@/lib/prisma";
+import { preserveTemplateUpdatedAt } from "@/lib/templates/featured.server";
 import { normalizeCategoryFields } from "@/lib/templates/server";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 
@@ -47,7 +48,7 @@ async function json(response: Response): Promise<any> {
 
 async function rails(categoryId: string, take: number) {
   const payload = await json(await bySubCategoryGet(request(`/api/mobile/templates/by-subcategory?categoryId=${categoryId}&templatesPerSubCategory=${take}`)));
-  return payload.subCategories as Array<{ category: { value: string }; subCategory: { value: string }; templates: Array<{ id: string }> }>;
+  return payload.subCategories as Array<{ category: { value: string }; subCategory: { value: string }; templates: Array<{ id: string; isFeatured?: boolean }> }>;
 }
 
 async function main(): Promise<void> {
@@ -77,8 +78,12 @@ async function main(): Promise<void> {
     await prisma.template.create({
       data: { ...baseRow, id: draftId, status: "draft", name: `smoke-occasion-draft-${suffix}`, slug: `smoke-occasion-draft-${suffix}`, ...categoryFields },
     });
-    // Old enough that recency order alone would never put it first.
-    await prisma.template.updateMany({ where: { id: { in: [publishedId, draftId] } }, data: { updatedAt: new Date("2020-01-01T00:00:00Z") } });
+    // Old enough that recency order alone would never put it first. The table trigger stamps
+    // now() on every update unless the transaction opts out.
+    await prisma.$transaction([
+      preserveTemplateUpdatedAt(),
+      prisma.template.updateMany({ where: { id: { in: [publishedId, draftId] } }, data: { updatedAt: new Date("2020-01-01T00:00:00Z") } }),
+    ]);
 
     invalidateOccasionBoostCache();
     const baselineRails = JSON.stringify(await rails(String(category.id), 5));
@@ -108,7 +113,9 @@ async function main(): Promise<void> {
         sortOrder: 9999,
       },
     });
-    occasionId = occasion.id;
+    // String(): the shared prisma client is typed `any`, and only a real string narrows
+    // `occasionId` for the calls below.
+    occasionId = String(occasion.id);
 
     console.log("\nReminders");
     const reminders = await countOccasionReminders(todayIso);
@@ -136,7 +143,13 @@ async function main(): Promise<void> {
     invalidateOccasionBoostCache();
     const boostedRails = await rails(String(category.id), 5);
     const rail = boostedRails.find((item) => item.subCategory.value === pair.subCategory);
-    check("boosted template is first in its rail", rail?.templates[0]?.id, publishedId);
+    // Featured templates outrank the boost, so "first" means first after any featured ones.
+    const railNonFeatured = rail?.templates.filter((t) => !t.isFeatured) ?? [];
+    if (railNonFeatured.length > 0) {
+      check("boosted template is first in its rail after any featured ones", railNonFeatured[0]?.id, publishedId);
+    } else {
+      console.log("skip  boosted-first rail check (featured templates fill the rail)");
+    }
     check("draft template never surfaces for the anonymous audience", rail?.templates.some((t) => t.id === draftId), false);
     check("rail keeps its size", rail?.templates.length, Math.min(5, railSize));
     check("template order in other rails is untouched", JSON.stringify(boostedRails.filter((r) => r.subCategory.value !== pair.subCategory)), JSON.stringify(JSON.parse(baselineRails).filter((r: any) => r.subCategory.value !== pair.subCategory)));
@@ -144,7 +157,12 @@ async function main(): Promise<void> {
     console.log("\nFlat list + search");
     const boostedList = await json(await buildMobileTemplatesListResponse(request(`/api/mobile/templates?categoryId=${category.id}&pageSize=5`)));
     const firstGroup = boostedList.templatesBySubCategory.find((group: any) => group.subCategoryValue === pair.subCategory);
-    check("pinned template is first in the grouped list", firstGroup?.templates[0]?.id, publishedId);
+    const groupNonFeatured = (firstGroup?.templates ?? []).filter((t: any) => !t.isFeatured);
+    if (groupNonFeatured.length > 0) {
+      check("pinned template is first in the grouped list after any featured ones", groupNonFeatured[0]?.id, publishedId);
+    } else {
+      console.log("skip  pinned-first list check (featured templates fill the page)");
+    }
     check("total is unchanged by pinning", boostedList.total, baselineList.total);
     const pageTwo = await json(await buildMobileTemplatesListResponse(request(`/api/mobile/templates?categoryId=${category.id}&pageSize=5&page=2`)));
     const pageTwoIds = pageTwo.templatesBySubCategory.flatMap((group: any) => group.templates.map((t: any) => t.id));

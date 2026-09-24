@@ -24,6 +24,10 @@ const INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const logger = createLogger("auth.dashboard-users");
 
 let ensureSystemAdminPromise = null;
+// ensureSystemAdmin runs on every dashboard request, so a missing-env warning would repeat
+// on each one; saying it once per process is enough. Kept on globalThis because dev bundles
+// give each route its own copy of this module.
+const systemAdminWarnings = globalThis;
 
 export async function ensureLegacyDashboardUsersMigrated({ force = false } = {}) {
   if (force) {
@@ -60,9 +64,12 @@ export async function ensureSystemAdmin() {
     await ensureLegacyDashboardUsersMigrated();
 
     if (!SYSTEM_ADMIN.email || !SYSTEM_ADMIN.password) {
-      logger.warn(
-        "System-admin seeding skipped: SYSTEM_ADMIN_EMAIL and SYSTEM_ADMIN_PASSWORD must both be set to provision the initial admin account."
-      );
+      if (!systemAdminWarnings.nayrozWarnedSystemAdminEnvMissing) {
+        systemAdminWarnings.nayrozWarnedSystemAdminEnvMissing = true;
+        logger.warn(
+          "System-admin seeding skipped: SYSTEM_ADMIN_EMAIL and SYSTEM_ADMIN_PASSWORD must both be set to provision the initial admin account."
+        );
+      }
       return null;
     }
 
@@ -277,6 +284,9 @@ export async function registerDashboardUserFromInvite({
   return user;
 }
 
+/**
+ * @param {{ id: string, email?: string, password?: string, ban?: boolean, actingUserId?: string }} input
+ */
 export async function updateDashboardUser({
   id,
   email,

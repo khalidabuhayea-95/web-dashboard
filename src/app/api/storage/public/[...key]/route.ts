@@ -97,7 +97,7 @@ function buildHeaders(object: {
   if (object.ContentLength != null) headers.set("Content-Length", String(object.ContentLength));
   // Present only on a ranged read; R2 has already narrowed ContentLength to match the slice.
   if (object.ContentRange) headers.set("Content-Range", String(object.ContentRange));
-  if (object.ETag) headers.set("ETag", object.ETag);
+  if (object.ETag) headers.set("ETag", String(object.ETag));
   return headers;
 }
 

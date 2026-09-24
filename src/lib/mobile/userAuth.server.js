@@ -54,6 +54,16 @@ export async function getMobileAuthConfig() {
   return buildMobileAuthConfig(settings);
 }
 
+/**
+ * @param {{
+ *   mobileUser: import("@prisma/client").MobileUser,
+ *   userAgent?: string | null,
+ *   ipAddress?: string | null,
+ *   deviceToken?: string,
+ *   devicePlatform?: string,
+ *   appVersion?: string,
+ * }} input
+ */
 export async function issueMobileSession({
   mobileUser,
   userAgent,
@@ -243,6 +253,16 @@ export async function resolveMobileBearerUser(request) {
   }
 }
 
+/**
+ * @param {{
+ *   refreshToken: string,
+ *   userAgent?: string | null,
+ *   ipAddress?: string | null,
+ *   deviceToken?: string,
+ *   devicePlatform?: string,
+ *   appVersion?: string,
+ * }} input
+ */
 export async function refreshMobileSession({
   refreshToken,
   userAgent,

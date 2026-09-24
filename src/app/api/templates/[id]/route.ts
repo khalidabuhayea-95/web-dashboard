@@ -100,7 +100,7 @@ async function isObjectKeyReferencedOutsideTemplate(key: string, templateId: str
   if (Number(coreRows?.[0]?.count || 0) > 0) return true;
 
   for (const tableName of ["editor_element_assets", "editor_background_assets"]) {
-    const tableRows = await prisma.$queryRawUnsafe<Array<{ count: bigint }>>(
+    const tableRows: Array<{ count: bigint }> = await prisma.$queryRawUnsafe(
       `
         SELECT COUNT(*)::bigint AS count
         FROM ${tableName}
@@ -109,9 +109,9 @@ async function isObjectKeyReferencedOutsideTemplate(key: string, templateId: str
           OR POSITION($1 IN source_payload::text) > 0
       `,
       key
-    ).catch((error) => {
+    ).catch((error: any) => {
       if (String(error?.message || "").includes("does not exist")) {
-        return [{ count: 0n }];
+        return [{ count: BigInt(0) }];
       }
       throw error;
     });

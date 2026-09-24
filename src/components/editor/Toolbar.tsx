@@ -52,7 +52,13 @@ import {
 import { formatTimelineTime, hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { PREVIEW_RENDER_FPS } from "@/lib/editor/previewRuntime";
 import { buildTemplateShareUrl } from "@/lib/shareLink";
-import { useEditorStore, type EditorDesign, type EditorElement } from "@/store/editorStore";
+import {
+  normalizeTimelinePreviewStatus,
+  useEditorStore,
+  type EditorDesign,
+  type EditorElement,
+  type EditorTimelinePreview,
+} from "@/store/editorStore";
 
 interface ToolbarProps {
   onToggleLeft: () => void;
@@ -1002,13 +1008,7 @@ export default function Toolbar({
           return `${safeUrl}${separator}v=${encodeURIComponent(safeToken)}`;
         }
       };
-      const setLocalPreviewState = (patch: {
-        status?: string | null;
-        url?: string | null;
-        posterUrl?: string | null;
-        generatedAt?: string | null;
-        error?: string | null;
-      }) => {
+      const setLocalPreviewState = (patch: Partial<EditorTimelinePreview>) => {
         if (previewGenerationIdRef.current !== jobId) return;
         updateTimeline(
           {
@@ -1313,7 +1313,7 @@ export default function Toolbar({
         updateTimeline(
           {
             preview: {
-              status: String(templatePreview?.status || "not_requested"),
+              status: normalizeTimelinePreviewStatus(templatePreview?.status),
               url: String(templatePreview?.url || "").trim() || null,
               posterUrl:
                 String(templatePreview?.posterUrl || "").trim() ||
@@ -1471,7 +1471,10 @@ export default function Toolbar({
     if (isTogglingPremium) return;
     setIsTogglingPremium(true);
     try {
-      const saved = await saveTemplate();
+      // Only a template that was never saved needs a save to get an id. Saving an existing
+      // one would bump its updatedAt, and the app then drops its ready preview video
+      // (isTemplatePreviewStale) — the Pro flag itself never touches the design.
+      const saved = activeTemplateId ? null : await saveTemplate();
       const templateId = String(saved?.id || activeTemplateId || "");
       if (!templateId) return;
 
