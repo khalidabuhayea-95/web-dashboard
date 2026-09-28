@@ -16,9 +16,13 @@ import {
   getTemplateSubCategoryOptions,
   normalizeTemplateCategory,
   normalizeTemplateSubCategory,
+  sanitizeTemplateCategorySettings,
 } from "@/lib/templates/templateSettings";
 
 const PAGE_SIZE = 10;
+// Category names on this page (filters and the Categories column) are shown in Arabic, the
+// way the app shows them; a category without an Arabic name falls back to English.
+const CATEGORY_LABEL_LOCALE = "ar";
 
 /**
  * Every category a template is filed under, primary first. Rows written before
@@ -234,7 +238,6 @@ export default function TemplatesClient() {
   const [featuredFilter, setFeaturedFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [taxonomySettings, setTaxonomySettings] = useState(TEMPLATE_CATEGORY_SETTINGS);
-  const [locale, setLocale] = useState("en");
   const [deletingTemplateId, setDeletingTemplateId] = useState("");
   const [selectedTemplateIds, setSelectedTemplateIds] = useState([]);
   const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -249,14 +252,32 @@ export default function TemplatesClient() {
   const shareCopyTimeoutRef = useRef(null);
 
   const categoryOptions = useMemo(
-    () => getTemplateCategoryOptions(taxonomySettings, locale),
-    [locale, taxonomySettings]
+    () => getTemplateCategoryOptions(taxonomySettings, CATEGORY_LABEL_LOCALE),
+    [taxonomySettings]
   );
   const subCategoryOptions = useMemo(
     () =>
-      categoryFilter ? getTemplateSubCategoryOptions(categoryFilter, taxonomySettings, locale) : [],
-    [categoryFilter, locale, taxonomySettings]
+      categoryFilter
+        ? getTemplateSubCategoryOptions(categoryFilter, taxonomySettings, CATEGORY_LABEL_LOCALE)
+        : [],
+    [categoryFilter, taxonomySettings]
   );
+  // Every category and sub category, published or not (a template can still sit under a
+  // hidden one), so the Categories column shows names instead of slugs.
+  const placementLabels = useMemo(() => {
+    const categories = new Map();
+    const subCategories = new Map();
+    sanitizeTemplateCategorySettings(taxonomySettings).forEach((category) => {
+      categories.set(category.value, category.labelAr || category.labelEn || category.value);
+      (category.subCategories || []).forEach((subCategory) => {
+        subCategories.set(
+          `${category.value}::${subCategory.value}`,
+          subCategory.labelAr || subCategory.labelEn || subCategory.value
+        );
+      });
+    });
+    return { categories, subCategories };
+  }, [taxonomySettings]);
   const selectedTemplateIdsSet = useMemo(() => new Set(selectedTemplateIds), [selectedTemplateIds]);
   const previewByTemplateId = useMemo(() => {
     const next = new Map();
@@ -305,13 +326,6 @@ export default function TemplatesClient() {
         : nextSubCategoryOptions[0]?.value || ""
     );
   };
-
-  useEffect(() => {
-    const docDir = document?.documentElement?.dir;
-    const docLang = document?.documentElement?.lang;
-    const browserLang = typeof navigator !== "undefined" ? navigator.language : "";
-    setLocale(docDir === "rtl" || /^ar/i.test(docLang || browserLang || "") ? "ar" : "en");
-  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -867,10 +881,16 @@ export default function TemplatesClient() {
                         {resolveTemplatePlacements(template).map((pair) => (
                           <div
                             key={`${pair.category}::${pair.subCategory}`}
-                            className="whitespace-nowrap text-xs"
+                            dir="rtl"
+                            className="whitespace-nowrap text-left text-xs"
+                            title={`${pair.category} · ${pair.subCategory}`}
                           >
-                            {pair.category}
-                            <span className="text-muted-foreground"> · {pair.subCategory}</span>
+                            {placementLabels.categories.get(pair.category) || pair.category}
+                            <span className="text-muted-foreground">
+                              {" · "}
+                              {placementLabels.subCategories.get(`${pair.category}::${pair.subCategory}`) ||
+                                pair.subCategory}
+                            </span>
                           </div>
                         ))}
                       </div>

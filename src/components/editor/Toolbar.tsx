@@ -2498,7 +2498,7 @@ export default function Toolbar({
       {hasSingleVideoSelection && activeVideoElement && isVideoTrimOpen ? (
         <div className="mt-2 border-t border-[#d7dbe1] bg-[#eef1f5] px-0 py-3">
           <div className="rounded-[24px] border border-[#cad1db] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-4 pb-4 pt-2 shadow-sm">
-            <div className="grid grid-cols-[28px,1fr] gap-x-3">
+            <div className="grid grid-cols-[28px_1fr] gap-x-3">
               <div className="pt-4" />
 
               <div ref={videoTrimViewportRef} className="relative min-w-0">

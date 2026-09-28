@@ -113,6 +113,12 @@ interface PreviewMediaController {
   resyncPlayback: (targetMs: number) => void;
   /** Stop rolling and leave the element where it is. */
   endPlayback: () => void;
+  /**
+   * Resolve once the element has a decoded frame to draw (bounded by [timeoutMs]). The recorder
+   * calls it before its first capture and right after [beginPlayback]: a clip still seeking would
+   * otherwise paint nothing and the opening frames record as the page background.
+   */
+  waitUntilDrawable?: (timeoutMs?: number) => Promise<void>;
 }
 
 /**
@@ -199,6 +205,85 @@ function waitForAnimationFrame() {
   return new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
 }
 
+/**
+ * A clock that keeps ticking in a BACKGROUND tab.
+ *
+ * requestAnimationFrame stops entirely while the tab is hidden and main-thread timers are
+ * throttled to once a second (once a minute after five minutes), so a preview recording driven by
+ * either froze the moment the user switched tabs and came back as a still. Dedicated workers are
+ * exempt from that throttling: this one posts a tick every few milliseconds for as long as
+ * somebody is waiting on it, and goes quiet on the first tick nobody wanted.
+ */
+const BACKGROUND_TICK_INTERVAL_MS = 8;
+const backgroundTicker = (() => {
+  let worker: Worker | null | undefined;
+  let waiters: Array<() => void> = [];
+  let running = false;
+  const ensureWorker = () => {
+    if (worker !== undefined) return worker;
+    if (typeof Worker === "undefined" || typeof URL === "undefined" || typeof Blob === "undefined") {
+      worker = null;
+      return worker;
+    }
+    try {
+      const source =
+        "let timer = 0;" +
+        "onmessage = (event) => {" +
+        `  if (event.data === "start") { if (!timer) timer = setInterval(() => postMessage(0), ${BACKGROUND_TICK_INTERVAL_MS}); }` +
+        '  else if (event.data === "stop" && timer) { clearInterval(timer); timer = 0; }' +
+        "};";
+      // The blob URL stays alive for the page: revoking it right after construction races the
+      // worker's own fetch of its script in some browsers.
+      const url = URL.createObjectURL(new Blob([source], { type: "text/javascript" }));
+      const created = new Worker(url);
+      created.onmessage = () => {
+        const pending = waiters;
+        waiters = [];
+        if (pending.length === 0) {
+          running = false;
+          created.postMessage("stop");
+          return;
+        }
+        pending.forEach((resolve) => resolve());
+      };
+      created.onerror = () => {
+        worker = null;
+        const pending = waiters;
+        waiters = [];
+        running = false;
+        pending.forEach((resolve) => resolve());
+      };
+      worker = created;
+    } catch {
+      worker = null;
+    }
+    return worker;
+  };
+  return {
+    next(): Promise<void> {
+      const target = ensureWorker();
+      if (!target) {
+        return new Promise<void>((resolve) => window.setTimeout(resolve, BACKGROUND_TICK_INTERVAL_MS));
+      }
+      return new Promise<void>((resolve) => {
+        waiters.push(resolve);
+        if (!running) {
+          running = true;
+          target.postMessage("start");
+        }
+      });
+    },
+  };
+})();
+
+/**
+ * The next animation frame — or the next background tick, whichever comes first. Every wait on
+ * the preview/export path goes through this so a recording carries on when the tab is hidden.
+ */
+function waitForCaptureTick() {
+  return Promise.race([waitForAnimationFrame(), backgroundTicker.next()]);
+}
+
 function getPreviewRenderSpec(page: EditorPage | null | undefined, maxDimension = 720) {
   const pageWidth = Math.max(1, Number(page?.width) || 1);
   const pageHeight = Math.max(1, Number(page?.height) || 1);
@@ -243,6 +328,79 @@ function isDrawableMediaReady(media: unknown) {
   return Boolean(media);
 }
 
+/**
+ * The last decoded frame of a <video>, kept on an offscreen canvas.
+ *
+ * `drawImage(video)` paints NOTHING while the element's readyState sits below HAVE_CURRENT_DATA —
+ * which is every moment of a seek. The preview recorder seeks its clips twice (the opening
+ * positioning and each drift correction), and on a keyframe-sparse clip a seek takes 100-350ms,
+ * so the recording came out with runs of pure page-background frames (11 white frames at 0:00 and
+ * two more bursts around 0:02 on a 20s Canva story). Holding the last frame here lets the draw
+ * paths fall back to it, and the recorder waits on it before it grabs its first frame.
+ */
+class VideoFrameSurface {
+  private canvas: HTMLCanvasElement | null = null;
+  private painted = false;
+
+  /** Copy the element's current frame when it has one; a not-ready element leaves the last frame. */
+  paint(media: HTMLVideoElement | null | undefined) {
+    if (!media || !isDrawableMediaReady(media)) return;
+    if (!this.canvas) this.canvas = document.createElement("canvas");
+    if (this.canvas.width !== media.videoWidth || this.canvas.height !== media.videoHeight) {
+      this.canvas.width = media.videoWidth;
+      this.canvas.height = media.videoHeight;
+    }
+    const context = this.canvas.getContext("2d");
+    if (!context) return;
+    try {
+      context.drawImage(media, 0, 0);
+      this.painted = true;
+    } catch {
+      // A frame that cannot be copied (decoder mid-swap) keeps the previous one.
+    }
+  }
+
+  /** Forget the held frame — a new source must never show the old clip's picture. */
+  reset() {
+    this.painted = false;
+  }
+
+  get frame(): HTMLCanvasElement | null {
+    return this.painted ? this.canvas : null;
+  }
+}
+
+/** Resolve once the element has a decoded frame to draw, or after [timeoutMs]. */
+async function waitForVideoFrame(media: HTMLVideoElement, timeoutMs = 2500) {
+  const startedAt = performance.now();
+  while (!isDrawableMediaReady(media) && performance.now() - startedAt < timeoutMs) {
+    await waitForCaptureTick();
+  }
+}
+
+/**
+ * The node's <video> is published (ref + state) from its `canplay` handler, so right after the
+ * export stage mounts the ref is still null. A drawable-wait that returned on a null ref waited for
+ * nothing — the recorder's first frame still went out before the clip existed (9 white frames).
+ * Wait for the element, then for its frame, then one animation frame so the React commit that
+ * published it has landed before the caller draws.
+ */
+async function waitForPublishedVideoFrame(
+  read: () => HTMLVideoElement | null,
+  timeoutMs = 2500
+): Promise<HTMLVideoElement | null> {
+  const startedAt = performance.now();
+  let media = read();
+  while (!media && performance.now() - startedAt < timeoutMs) {
+    await waitForCaptureTick();
+    media = read();
+  }
+  if (!media) return null;
+  await waitForVideoFrame(media, Math.max(0, timeoutMs - (performance.now() - startedAt)));
+  await waitForCaptureTick();
+  return media;
+}
+
 async function waitForStageDrawableMedia(stage: Konva.Stage, timeoutMs = 3000) {
   const startedAt = performance.now();
   while (performance.now() - startedAt < timeoutMs) {
@@ -267,7 +425,7 @@ async function waitForStageDrawableMedia(stage: Konva.Stage, timeoutMs = 3000) {
       return;
     }
 
-    await waitForAnimationFrame();
+    await waitForCaptureTick();
   }
 }
 
@@ -842,6 +1000,7 @@ function CanvasVideoNodeImpl({
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const mediaRef = useRef<Konva.Shape | null>(null);
+  const heldFrame = useState(() => new VideoFrameSurface())[0];
   const onMetadataRef = useRef(onVideoMetadata);
   const forceTimelineSyncRef = useRef(forceTimelineSync);
 
@@ -1026,6 +1185,14 @@ function CanvasVideoNodeImpl({
     media.pause();
   }, []);
 
+  const waitUntilVideoDrawable = useCallback(
+    async (timeoutMs?: number) => {
+      const media = await waitForPublishedVideoFrame(() => videoRef.current, timeoutMs);
+      if (media) heldFrame.paint(media);
+    },
+    [heldFrame]
+  );
+
   useEffect(() => {
     if (!registerPreviewMediaController) return undefined;
     registerPreviewMediaController(element.id, {
@@ -1033,11 +1200,13 @@ function CanvasVideoNodeImpl({
       beginPlayback: beginVideoPlayback,
       resyncPlayback: resyncVideoPlayback,
       endPlayback: endVideoPlayback,
+      waitUntilDrawable: waitUntilVideoDrawable,
     });
     return () => registerPreviewMediaController(element.id, null);
   }, [
     beginVideoPlayback,
     element.id,
+    waitUntilVideoDrawable,
     endVideoPlayback,
     registerPreviewMediaController,
     resyncVideoPlayback,
@@ -1092,7 +1261,11 @@ function CanvasVideoNodeImpl({
   useEffect(() => {
     const media = videoRef.current;
     if (!media) return;
-    const redraw = () => mediaRef.current?.getLayer()?.batchDraw();
+    heldFrame.reset();
+    const redraw = () => {
+      heldFrame.paint(media);
+      mediaRef.current?.getLayer()?.batchDraw();
+    };
     media.addEventListener("seeked", redraw);
     media.addEventListener("loadeddata", redraw);
     media.addEventListener("canplay", redraw);
@@ -1102,7 +1275,7 @@ function CanvasVideoNodeImpl({
       media.removeEventListener("loadeddata", redraw);
       media.removeEventListener("canplay", redraw);
     };
-  }, [video]);
+  }, [heldFrame, video]);
   // Konva has no idea the <video> advanced a frame, and the events above only fire on seeks and
   // load. While the media plays, repaint the layer every animation frame — same as the GIF path —
   // otherwise the canvas keeps showing whatever frame was current when the last `seeked` fired.
@@ -1111,6 +1284,7 @@ function CanvasVideoNodeImpl({
     if (!media) return undefined;
     let frame = 0;
     const tick = () => {
+      heldFrame.paint(media);
       mediaRef.current?.getLayer()?.batchDraw();
       frame = window.requestAnimationFrame(tick);
     };
@@ -1136,7 +1310,7 @@ function CanvasVideoNodeImpl({
       media.removeEventListener("ended", stop);
       stop();
     };
-  }, [video]);
+  }, [heldFrame, video]);
 
   return (
     <Shape
@@ -1178,8 +1352,17 @@ function CanvasVideoNodeImpl({
         context.fillStrokeShape(shape);
         buildMediaShapePath(context, element);
         context.clip();
-        if (video && video.readyState >= 2) {
-          context.drawImage(video, 0, 0, element.width, element.height);
+        const lastFrame = heldFrame.frame;
+        // The ref is set in the same handler as the state, but a draw forced between that handler
+        // and React's commit would still see the old closure — read the element itself.
+        const media = videoRef.current ?? video;
+        if (media && media.readyState >= 2) {
+          context.drawImage(media, 0, 0, element.width, element.height);
+          heldFrame.paint(media);
+        } else if (lastFrame) {
+          // Mid-seek the element has no current frame and drawImage would paint nothing —
+          // the page background showed through as white frames in recorded previews.
+          context.drawImage(lastFrame, 0, 0, element.width, element.height);
         } else if (posterImage) {
           context.drawImage(posterImage, 0, 0, element.width, element.height);
         } else {
@@ -1355,6 +1538,8 @@ function CanvasFrameNodeImpl({
   const transform = element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM;
   const [image] = useImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
+  const heldFrame = useState(() => new VideoFrameSurface())[0];
+  const [heldFrameCanvas, setHeldFrameCanvas] = useState<HTMLCanvasElement | null>(null);
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const frameGroupRef = useRef<Konva.Group | null>(null);
   const mediaRef = useRef<Konva.Image | null>(null);
@@ -1541,6 +1726,18 @@ function CanvasFrameNodeImpl({
     videoRef.current?.pause();
   }, []);
 
+  const waitUntilFrameContentDrawable = useCallback(
+    async (timeoutMs?: number) => {
+      const media = await waitForPublishedVideoFrame(() => videoRef.current, timeoutMs);
+      if (!media) return;
+      heldFrame.paint(media);
+      setHeldFrameCanvas((current) => (current === heldFrame.frame ? current : heldFrame.frame));
+      // The KonvaImage reads the held canvas from state; let that commit land before the capture.
+      await waitForCaptureTick();
+    },
+    [heldFrame]
+  );
+
   useEffect(() => {
     if (!registerPreviewMediaController) return undefined;
     if (frameContent?.kind !== "video") {
@@ -1552,11 +1749,13 @@ function CanvasFrameNodeImpl({
       beginPlayback: beginFrameContentPlayback,
       resyncPlayback: resyncFrameContentPlayback,
       endPlayback: endFrameContentPlayback,
+      waitUntilDrawable: waitUntilFrameContentDrawable,
     });
     return () => registerPreviewMediaController(element.id, null);
   }, [
     beginFrameContentPlayback,
     element.id,
+    waitUntilFrameContentDrawable,
     endFrameContentPlayback,
     frameContent?.kind,
     registerPreviewMediaController,
@@ -1601,7 +1800,12 @@ function CanvasFrameNodeImpl({
   useEffect(() => {
     const media = videoRef.current;
     if (!media) return;
-    const redraw = () => mediaRef.current?.getLayer()?.batchDraw();
+    heldFrame.reset();
+    const redraw = () => {
+      heldFrame.paint(media);
+      setHeldFrameCanvas((current) => (current === heldFrame.frame ? current : heldFrame.frame));
+      mediaRef.current?.getLayer()?.batchDraw();
+    };
     media.addEventListener("seeked", redraw);
     media.addEventListener("loadeddata", redraw);
     media.addEventListener("canplay", redraw);
@@ -1611,7 +1815,7 @@ function CanvasFrameNodeImpl({
       media.removeEventListener("loadeddata", redraw);
       media.removeEventListener("canplay", redraw);
     };
-  }, [video]);
+  }, [heldFrame, video]);
   // Konva has no idea the <video> advanced a frame, and the events above only fire on seeks and
   // load. While the media plays, repaint the layer every animation frame — same as the GIF path —
   // otherwise the canvas keeps showing whatever frame was current when the last `seeked` fired.
@@ -1620,6 +1824,8 @@ function CanvasFrameNodeImpl({
     if (!media) return undefined;
     let frame = 0;
     const tick = () => {
+      heldFrame.paint(media);
+      setHeldFrameCanvas((current) => (current === heldFrame.frame ? current : heldFrame.frame));
       mediaRef.current?.getLayer()?.batchDraw();
       frame = window.requestAnimationFrame(tick);
     };
@@ -1645,7 +1851,7 @@ function CanvasFrameNodeImpl({
       media.removeEventListener("ended", stop);
       stop();
     };
-  }, [video]);
+  }, [heldFrame, video]);
 
   useEffect(() => {
     const node = dropFeedbackRef.current;
@@ -1680,7 +1886,9 @@ function CanvasFrameNodeImpl({
     };
   }, [isDropTarget]);
 
-  const mediaSource = frameContent?.kind === "video" ? video : image;
+  // A video frame draws from the held copy of its last decoded frame (see VideoFrameSurface):
+  // Konva.Image paints nothing from a seeking <video>, so the copy is what keeps the picture up.
+  const mediaSource = frameContent?.kind === "video" ? heldFrameCanvas ?? video : image;
   const mediaLayout = useMemo(
     () =>
       resolveFrameContentLayout(
@@ -3613,6 +3821,15 @@ export default function CanvasEditor() {
     );
   }, []);
 
+  /** Wait (bounded) until every export-stage clip has a decoded frame to draw. */
+  const waitForExportPreviewMediaDrawable = useCallback(async (timeoutMs = 2500) => {
+    const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
+    if (controllers.length === 0) return;
+    await Promise.all(
+      controllers.map((controller) => controller.waitUntilDrawable?.(timeoutMs)?.catch?.(() => undefined))
+    );
+  }, []);
+
   /** Drift-correct rolling clips. Synchronous by design — the capture loop must not await it. */
   const resyncExportPreviewMediaPlayback = useCallback((targetMs: number) => {
     exportPreviewMediaControllersRef.current.forEach((controller) => {
@@ -4152,11 +4369,14 @@ export default function CanvasEditor() {
           // rasterises blank and the stored poster came out pure white. Take it settled.
           setExportSettledPose(true);
         });
-        await waitForAnimationFrame();
+        await waitForCaptureTick();
         await waitForStageDrawableMedia(stage);
         await syncExportPreviewMediaControllers(0, fps);
+        // The seek above gives up after 180ms; a keyframe-sparse clip is still decoding then and
+        // the poster would rasterise without it. Wait for a real frame (bounded).
+        await waitForExportPreviewMediaDrawable();
         stage.getLayers().forEach((layer) => layer.draw());
-        await waitForAnimationFrame();
+        await waitForCaptureTick();
         ensureNotAborted();
 
         const initialCapture = renderExportPageToCanvas();
@@ -4176,7 +4396,7 @@ export default function CanvasEditor() {
           setExportSettledPose(false);
         });
         stage.getLayers().forEach((layer) => layer.draw());
-        await waitForAnimationFrame();
+        await waitForCaptureTick();
         ensureNotAborted();
 
         const exportLayer = stage.getLayers()[0];
@@ -4303,9 +4523,10 @@ export default function CanvasEditor() {
 
             setTimelinePlayheadMs(0);
             await syncExportPreviewMediaControllers(0, fps);
+            await waitForExportPreviewMediaDrawable();
             stage.getLayers().forEach((layer) => layer.draw());
             requestCapturedFrame?.();
-            await waitForAnimationFrame();
+            await waitForCaptureTick();
 
             // ★PLAY the clips for the capture; do not seek them frame by frame.
             //
@@ -4321,6 +4542,8 @@ export default function CanvasEditor() {
             // when the playhead begins to move, and the recording opens on moving video instead of
             // a held poster.
             await beginExportPreviewMediaPlayback(0);
+            // play() re-positions the clip; do not start the clock on a frame it has not decoded.
+            await waitForExportPreviewMediaDrawable();
             ensureNotAborted();
             setTimelinePlaying(true);
 
@@ -4332,6 +4555,15 @@ export default function CanvasEditor() {
             while (true) {
               ensureNotAborted();
               const elapsedMs = Math.max(0, performance.now() - startedAt);
+              // In a background tab the timeline's own playback loop (PagesTimeline, rAF-driven)
+              // stops advancing the playhead; keep it on the wall clock from here so the recording
+              // keeps moving. Both drivers count from the same start, so switching between them as
+              // the tab is hidden and shown again is seamless.
+              if (typeof document !== "undefined" && document.visibilityState !== "visible") {
+                useEditorStore
+                  .getState()
+                  .setTimelinePlayheadMs(Math.min(durationMs, Math.round(elapsedMs)));
+              }
               // The imperative playback driver is switched off while a preview records (it would
               // fight the recorder), and it is the ONLY thing that advances these two refs. Reading
               // them here meant every tick saw time zero: the recording came out as the opening
@@ -4386,7 +4618,7 @@ export default function CanvasEditor() {
               if (playheadMs >= durationMs || elapsedMs >= durationMs + frameDurationMs) {
                 break;
               }
-              await waitForAnimationFrame();
+              await waitForCaptureTick();
             }
 
             setTimelinePlaying(false);
@@ -4397,7 +4629,7 @@ export default function CanvasEditor() {
               getFrameAlignedPlayheadFrame(durationMs, previewRenderFps, activePageDurationMs),
               fps
             );
-            await waitForAnimationFrame();
+            await waitForCaptureTick();
             stage.getLayers().forEach((layer) => layer.draw());
             requestCapturedFrame?.();
             if (activeRecorder.state === "recording") {
@@ -4490,6 +4722,7 @@ export default function CanvasEditor() {
       renderExportPageToCanvas,
       syncExportPreviewMediaControllers,
       beginExportPreviewMediaPlayback,
+      waitForExportPreviewMediaDrawable,
       resyncExportPreviewMediaPlayback,
       endExportPreviewMediaPlayback,
       setTimelinePlayheadMs,

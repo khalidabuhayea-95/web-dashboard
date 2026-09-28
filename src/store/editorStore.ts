@@ -2528,6 +2528,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       designTimeline,
       timelinePlayheadMs: 0,
       timelineIsPlaying: false,
+      // Every template opens with the timeline expanded; collapsing it is a per-session choice
+      // that must not follow the user into the next template.
+      timelineCollapsed: false,
       selectedIds: [],
       publishCandidateIds: [],
       availableFontFamilies: mergeFontFamilies(state.availableFontFamilies, designFonts),

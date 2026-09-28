@@ -109,8 +109,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
     }
 
     const rangeHeader = request.headers.get("range")?.trim() || "";
+    // Next aborts request.signal only when the client disconnects before the response finishes, so
+    // a completed download is never cut short — an abandoned one releases its R2 socket.
     const object = await getObject(getPublicStorageBucketName(), objectKey, {
       range: rangeHeader,
+      abortSignal: request.signal,
     });
     const body = toWebStream(object.Body);
     if (!body) {

@@ -1174,7 +1174,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                       {activeRasterPalette.map((originalColor) => {
                         const mappedColor = activeRasterColorMap[originalColor] || originalColor;
                         return (
-                          <div key={originalColor} className="grid grid-cols-[auto,1fr,auto,auto] items-center gap-2">
+                          <div key={originalColor} className="grid grid-cols-[auto_1fr_auto_auto] items-center gap-2">
                             <span
                               className="h-5 w-5 rounded border border-slate-300 dark:border-slate-600"
                               style={{ backgroundColor: mappedColor }}

@@ -57,6 +57,15 @@ function getClientConfig() {
       accessKeyId: requireEnv("R2_ACCESS_KEY_ID"),
       secretAccessKey: requireEnv("R2_SECRET_ACCESS_KEY"),
     },
+    // ★Without these a stalled R2 connection is waited on forever, holding one of the pool's 50
+    // sockets; once all 50 are held every media, font and thumbnail request hangs while JSON routes
+    // keep working. connectionTimeout fails a hung connect; socketTimeout fails an upstream that goes
+    // quiet BEFORE its response headers — the SDK clears it once headers arrive, so mid-stream it is
+    // getObject's abortSignal (wired by the storage proxy route) that frees an abandoned socket.
+    requestHandler: {
+      connectionTimeout: 5_000,
+      socketTimeout: 30_000,
+    },
   };
 }
 
@@ -378,7 +387,10 @@ export async function getObject(bucket, key, options = {}) {
       Bucket: safeBucket,
       Key: safeKey,
       ...(range ? { Range: range } : {}),
-    })
+    }),
+    // Pass the caller's request signal so a client disconnect destroys the upstream socket (before
+    // or during the body) instead of leaving it checked out of the pool.
+    options?.abortSignal ? { abortSignal: options.abortSignal } : undefined
   );
 }
 
