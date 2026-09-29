@@ -15,6 +15,7 @@
     "backfill:font-names": "node --env-file=.env --env-file=.env.local --import tsx scripts/backfill-font-names.ts",
     "dedupe:backgrounds": "node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-backgrounds.ts",
     "dedupe:fonts": "node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-fonts.ts",
+    "fonts:duplicates": "node --env-file=.env --env-file=.env.local --import tsx scripts/merge-duplicate-font-families.ts",
     "regenerate:font-previews": "node --env-file=.env --env-file=.env.local --import tsx scripts/regenerate-font-previews.ts",
     "render:ai-templates": "node scripts/render-ai-templates.mjs",
     "seed:ai-templates": "node --env-file=.env --env-file=.env.local --import tsx scripts/seed-ai-templates.mjs",

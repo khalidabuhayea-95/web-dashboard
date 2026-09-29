@@ -732,6 +732,34 @@ function readTextAlignment(item) {
  * `letterSpacing` is already px and passes through untouched. Every published template stores the
  * native field; `charSpacing` only rides raw Canva-extension imports.
  */
+/**
+ * The app's curved text is a true circular arc ({ arcDegrees, radius }); the web editor bends
+ * along a quadratic Bézier whose bulge is `textCurveAmount`% of clamp(width*0.42, fontSize,
+ * fontSize*6). An imported layer also carries the arc Canva actually drew
+ * (`textCurveArcDegrees`), which wins when present; otherwise the Bézier's sagitta over the box's
+ * chord is turned back into the circle through the same three points. Positive bows up.
+ */
+function readCurveConfig(item) {
+  const amount = clamp(numberOr(item?.textCurveAmount, 0), -200, 200);
+  const enabled = Boolean(item?.textCurveEnabled) && Math.abs(amount) > 0.5;
+  if (!enabled) return { enabled: false, arcDegrees: 0, radius: 200 };
+  const width = Math.max(2, numberOr(item?.width, 2) * Math.abs(numberOr(item?.scaleX, 1)));
+  const fontSize = Math.max(1, numberOr(item?.fontSize, 42));
+  const measuredArc = numberOr(item?.textCurveArcDegrees, 0);
+  let arcDegrees;
+  let radius;
+  if (Math.abs(measuredArc) >= 1) {
+    arcDegrees = clamp(measuredArc, -300, 300);
+    radius = width / (2 * Math.sin(Math.min(Math.PI / 2, (Math.abs(arcDegrees) * Math.PI) / 360)));
+  } else {
+    const maxCurveOffset = Math.max(Math.max(12, fontSize), Math.min(width * 0.42, Math.max(16, fontSize * 6)));
+    const sagitta = Math.max(0.5, ((Math.abs(amount) / 100) * maxCurveOffset) / 2);
+    radius = (width * width) / (8 * sagitta) + sagitta / 2;
+    arcDegrees = Math.sign(amount) * ((2 * Math.asin(Math.min(1, width / (2 * radius))) * 180) / Math.PI);
+  }
+  return { enabled: true, arcDegrees: Math.round(arcDegrees * 10) / 10, radius: Math.round(radius) };
+}
+
 function readLetterSpacingPx(item, fontSizePx) {
   const charSpacing = Number(item?.charSpacing);
   if (typeof item?.charSpacing !== "undefined" && Number.isFinite(charSpacing)) {
@@ -847,6 +875,16 @@ function centerFromFabricItem(item) {
   };
 }
 
+// Whether an object is mirrored along one axis. The editor writes a mirror as BOTH a negative
+// scale and flipX:true (flipSelected / the fabric->element loader keep them together), while a
+// fabric payload — every Canva import until it is re-saved from the editor — carries only the
+// flipX/flipY flag on a positive scale and mirrors IN PLACE. Reading the sign alone dropped every
+// imported mirror on mobile (the flipped paper texture, five of six watercolour stickers). Either
+// signal means one mirror; the centre maths is unaffected, since both mirror about the box.
+function isMirrored(rawScale, flag) {
+  return rawScale < 0 || flag === true;
+}
+
 function buildTransform({
   item,
   canvasSize,
@@ -858,8 +896,8 @@ function buildTransform({
   baseHeight,
   scaleBounds = { min: 0.1, max: 16 },
 }) {
-  const signX = rawScaleX < 0 ? -1 : 1;
-  const signY = rawScaleY < 0 ? -1 : 1;
+  const signX = isMirrored(rawScaleX, item.flipX) ? -1 : 1;
+  const signY = isMirrored(rawScaleY, item.flipY) ? -1 : 1;
   const displayWidth = Math.max(Math.abs(rawScaleX) * Math.max(numberOr(item.width, 1), 1), 1);
   const displayHeight = Math.max(Math.abs(rawScaleY) * Math.max(numberOr(item.height, 1), 1), 1);
 
@@ -932,8 +970,8 @@ function textWrapWidthFromFabric(item) {
 
 function textTransformFromFabric(item, canvasSize) {
   const { centerX, centerY, rawScaleX, rawScaleY } = centerFromFabricItem(item);
-  const signX = rawScaleX < 0 ? -1 : 1;
-  const signY = rawScaleY < 0 ? -1 : 1;
+  const signX = isMirrored(rawScaleX, item.flipX) ? -1 : 1;
+  const signY = isMirrored(rawScaleY, item.flipY) ? -1 : 1;
 
   return {
     x: clamp(centerX, -canvasSize.width * 4, canvasSize.width * 4),
@@ -988,6 +1026,10 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
   const textFormat = resolveTextFormat(item);
   const bgColor = normalizeHex(item.textBackgroundBaseColor || item.textBackgroundColor, "#000000");
   const bgOpacity = clamp(numberOr(item.textBackgroundOpacity, item.textBackgroundColor ? 1 : 0), 0, 1);
+  // The editor's on/off switch keeps the colour when the box is turned off; older layers have no
+  // switch and meant "on" whenever they carried a colour.
+  const bgEnabled =
+    item.textBackgroundEnabled === undefined ? Boolean(item.textBackgroundColor) : Boolean(item.textBackgroundEnabled);
   const fontName = resolveEditorTextFontName(item);
   const font = buildTextLayerFontPayload(fontName, options?.fontLookup);
   const wrapWidth = textWrapWidthFromFabric(item);
@@ -1027,15 +1069,14 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     letterSpacing: readLetterSpacingPx(item, numberOr(item.fontSize, 42)),
     lineHeight: numberOr(item.lineHeight, 1.2),
     alignment: mapTextAlignment(readTextAlignment(item)),
-    curveConfig: {
-      enabled: false,
-      arcDegrees: 0,
-      radius: 200,
-    },
-    backgroundVisible: bgOpacity > 0,
+    curveConfig: readCurveConfig(item),
+    backgroundVisible: bgEnabled && bgOpacity > 0,
     backgroundColorHex: bgColor,
     backgroundAngleSize: clamp(numberOr(item.textBackgroundAngleSize, 0), 0, 1),
     backgroundOpacity: bgOpacity,
+    // Ratios of the font size, exactly the app's backgroundPaddingX/Y (0..1 × fontSize × 0.5).
+    backgroundPaddingX: clamp(numberOr(item.textBackgroundPaddingX, 0), 0, 1),
+    backgroundPaddingY: clamp(numberOr(item.textBackgroundPaddingY, 0), 0, 1),
     ...(font ? { font } : {}),
   };
 }
@@ -1056,6 +1097,7 @@ function mediaFilters(item, options = {}) {
   const shadowColor = rgbaToHexWithOpacity(shadow.color, "#000000");
   const includeStroke = options.includeStroke !== false;
   const includeShapeMask = options.includeShapeMask !== false;
+  const maxStrokeWidth = numberOr(options.maxStrokeWidth, 24);
 
   return {
     filterPresetId: item.mediaFilterPresetId ? String(item.mediaFilterPresetId) : null,
@@ -1084,7 +1126,7 @@ function mediaFilters(item, options = {}) {
       : {}),
     strokeColorHex: includeStroke ? stroke.hex : "#FFFFFF",
     strokeOpacity: includeStroke ? stroke.opacity : 0,
-    strokeWidth: includeStroke ? clamp(numberOr(item.strokeWidth, 0), 0, 24) : 0,
+    strokeWidth: includeStroke ? clamp(numberOr(item.strokeWidth, 0), 0, maxStrokeWidth) : 0,
     shadowColorHex: shadowColor.hex,
     shadowOpacity: shadowColor.opacity,
     shadowBlurRadius: clamp(numberOr(shadow.blur, 0), 0, 40),
@@ -1361,8 +1403,26 @@ function resolveFramePreviewContentUri(item, index, options) {
   ).trim();
 }
 
+/**
+ * A frame's content. An imported shaped frame (Canva clip-path → polygon) is stored as an IMAGE
+ * object carrying a `frameShape`, with the photo in its own `src` — the server uploads `src` like
+ * any image, so the content is read from there rather than from a copy that would go stale.
+ */
+export function resolveFrameContent(item) {
+  const explicit = asObject(item?.frameContent);
+  if (explicit?.src) return explicit;
+  const src = String(item?.src || "").trim();
+  if (!src || !asObject(item?.frameShape)) return explicit || null;
+  return {
+    kind: "image",
+    src,
+    sourceWidth: numberOr(item?.sourceWidth, numberOr(item?.width, 1)),
+    sourceHeight: numberOr(item?.sourceHeight, numberOr(item?.height, 1)),
+  };
+}
+
 function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
-  const content = asObject(item?.frameContent);
+  const content = resolveFrameContent(item);
   if (!content?.src) return null;
 
   const kind = String(content.kind || "").trim().toLowerCase() === "video" ? "VIDEO" : "IMAGE";
@@ -1456,6 +1516,9 @@ function mapFrameLayer(item, index, canvasSize, options) {
     contentTransform,
     filters: mediaFilters(item, {
       includeShapeMask: false,
+      // Frames keep their full border (Canva photo frames are commonly 26px): the app clamps
+      // media strokes at 50 project px, and draws a frame's stroke inside its shape like the web.
+      maxStrokeWidth: 50,
     }),
   };
 }
@@ -2100,6 +2163,8 @@ function slimMobileLayer(layer) {
         backgroundColorHex: layer.backgroundColorHex,
         backgroundAngleSize: layer.backgroundAngleSize,
         backgroundOpacity: layer.backgroundOpacity,
+        backgroundPaddingX: layer.backgroundPaddingX,
+        backgroundPaddingY: layer.backgroundPaddingY,
         ...(font ? { font } : {}),
       };
     }

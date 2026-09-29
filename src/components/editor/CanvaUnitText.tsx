@@ -32,6 +32,7 @@ import {
   type CanvaUnitVisual,
 } from "@/lib/editor/animationCanvaUnits";
 import type { GlyphMotionSpec } from "@/lib/editor/animationVisual";
+import { drawTextBackground, type TextBackgroundBox } from "@/lib/editor/textBackground";
 
 export interface CanvaUnitTextStyle {
   text: string;
@@ -49,6 +50,8 @@ export interface CanvaUnitTextStyle {
   fill: string;
   stroke?: string;
   strokeWidth?: number;
+  /** The layer's background box, painted under the units so it stays put while they animate. */
+  background?: TextBackgroundBox | null;
 }
 
 type Interval = [number, number];
@@ -460,6 +463,7 @@ function drawCanvaUnitText(
   motion: GlyphMotionSpec
 ) {
   const ctx = context._context;
+  if (style.background) drawTextBackground(ctx, style.background);
   const schedule = cachedCanvaUnitSchedule({
     type: motion.type,
     fill: Boolean(motion.fill),

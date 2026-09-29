@@ -178,6 +178,16 @@ export interface EditorElement {
   letterSpacing: number;
   textCurveEnabled?: boolean;
   textCurveAmount?: number;
+  /**
+   * Background box behind the text — the mobile app's model field for field (see
+   * lib/editor/textBackground.ts): angle 0..1 → radius angle×28 px, padding 0..1 → fontSize×ratio×0.5.
+   */
+  textBackgroundEnabled?: boolean;
+  textBackgroundColor?: string;
+  textBackgroundOpacity?: number;
+  textBackgroundAngleSize?: number;
+  textBackgroundPaddingX?: number;
+  textBackgroundPaddingY?: number;
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
@@ -589,6 +599,16 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     letterSpacing: partial.letterSpacing ?? 0,
     textCurveEnabled: partial.textCurveEnabled ?? false,
     textCurveAmount: partial.textCurveAmount ?? 0,
+    ...(partial.textBackgroundEnabled !== undefined || partial.textBackgroundColor !== undefined
+      ? {
+          textBackgroundEnabled: Boolean(partial.textBackgroundEnabled),
+          textBackgroundColor: partial.textBackgroundColor ?? "#000000",
+          textBackgroundOpacity: partial.textBackgroundOpacity ?? 1,
+          textBackgroundAngleSize: partial.textBackgroundAngleSize ?? 0,
+          textBackgroundPaddingX: partial.textBackgroundPaddingX ?? 0,
+          textBackgroundPaddingY: partial.textBackgroundPaddingY ?? 0,
+        }
+      : {}),
     color: partial.color ?? "#111827",
     timelineStartMs: partial.timelineStartMs ?? 0,
     timelineEndMs: partial.timelineEndMs ?? DEFAULT_PAGE_DURATION_MS,

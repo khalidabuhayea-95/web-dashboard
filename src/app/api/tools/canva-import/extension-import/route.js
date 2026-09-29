@@ -5,6 +5,7 @@ import { gunzipSync } from "node:zlib";
 import { NextResponse } from "next/server";
 
 import { upsertEditorCustomFont } from "@/lib/editor/customFonts.server";
+import { extractFontFamilyName } from "@/lib/editor/fontName.server";
 import { upsertImportedElementAsset } from "@/lib/editor/importedElements.server";
 import { isFabricTextObject, trimTrailingBlankTextLines } from "@/lib/editor/textContent";
 import { createLogger } from "@/lib/logging/logger";
@@ -446,6 +447,50 @@ function collectFontCategoryHintsFromObjects(objects, resultMap) {
   });
 }
 
+// The family name the font file itself carries (nameID 16, else 1; English first). The extension
+// can only guess a family from Canva's opaque token or its file stem — a guess named RTL-Mary and
+// RTL-Banana both "RTL", filed Arimo REGULAR as "Arimo Bold Italic" and UKIJ Chiwer Kesme as
+// "UKIJ Chi K". The bytes know. Canva serves WOFF2, which the reader unpacks itself.
+const PLACEHOLDER_FONT_NAMES = /^(untitled|font|regular|normal|bold|italic|unknown|default|new font)$/i;
+function readEmbeddedFontFamily(dataUrl) {
+  try {
+    const raw = String(dataUrl || "");
+    const comma = raw.indexOf(",");
+    if (!raw.startsWith("data:") || comma < 0 || !/;base64,/i.test(raw.slice(0, comma + 1))) return "";
+    const name = String(extractFontFamilyName(Buffer.from(raw.slice(comma + 1), "base64")) || "")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (name.length < 2 || name.length > 80 || !/[A-Za-z\u0600-\u06FF]/.test(name)) return "";
+    if (/^YA[A-Za-z0-9_-]+$/.test(name) || PLACEHOLDER_FONT_NAMES.test(name)) return "";
+    return name;
+  } catch (_error) {
+    return "";
+  }
+}
+
+// Point every text object that asks for `fromFamily` at `toFamily`, groups included.
+function remapFontFamilyInObjects(objects, fromFamily, toFamily) {
+  if (!Array.isArray(objects)) return 0;
+  const fromKey = String(fromFamily || "").trim().toLowerCase();
+  if (!fromKey) return 0;
+  let changed = 0;
+  objects.forEach((object) => {
+    if (!object || typeof object !== "object") return;
+    if (Array.isArray(object.objects)) {
+      changed += remapFontFamilyInObjects(object.objects, fromFamily, toFamily);
+    }
+    const type = String(object.type || "").toLowerCase();
+    if (type !== "text" && type !== "textbox" && type !== "i-text") return;
+    for (const field of ["fontFamily", "fontName"]) {
+      if (normalizeFontFamilyName(object[field]).toLowerCase() === fromKey) {
+        object[field] = toFamily;
+        changed += 1;
+      }
+    }
+  });
+  return changed;
+}
+
 function deriveImportedFontCategoryHints(fabricData) {
   const map = new Map();
   const objects = Array.isArray(fabricData?.objects) ? fabricData.objects : [];
@@ -560,6 +605,9 @@ function normalizeIncomingCustomFonts(editorData) {
       dataUrl: primary.dataUrl,
       mimeType: primary.mimeType,
       fileName: primary.fileName,
+      // What the primary was declared at: a design with no 400 cut sends its only cut as primary.
+      fontWeight: primary.weight,
+      fontStyle: primary.style,
       categories: entry.categories,
       extraVariants: entry.variants.filter((v) => v !== primary),
     };
@@ -1958,15 +2006,36 @@ export async function POST(request) {
         const inferredCategories =
           importedFontCategoryHints.get(String(font.family || "").toLowerCase()) ||
           sanitizeFontCategories(font.categories, font.family);
+        const embeddedFamily = readEmbeddedFontFamily(font.dataUrl);
         const fontResult = await upsertEditorCustomFont({
-          family: font.family,
+          family: embeddedFamily || font.family,
           dataUrl: font.dataUrl,
           mimeType: font.mimeType,
           fileName: font.fileName || `${font.family}.ttf`,
+          fontWeight: font.fontWeight,
+          fontStyle: font.fontStyle,
           categories: inferredCategories,
           // Every other weight/style the design uses of this same family.
           extraVariants: Array.isArray(font.extraVariants) ? font.extraVariants : [],
+          // The name the layers use today (Canva token or the extension's guess) keeps resolving.
+          aliases: embeddedFamily && embeddedFamily !== font.family ? [font.family] : [],
+          // A font the library already has gains the cuts it lacks; nothing it holds is replaced.
+          mergeCuts: true,
         });
+        // The library may already hold this family under another spelling — "IBM Plex Sans
+        // Arabic Regular" for a requested "IBM Plex Sans Arabic" — and the upsert dedupes onto
+        // it and returns THAT record. Its family is the only name the editor declares an
+        // @font-face for, and the only name the app finds in the catalog, so every text object
+        // has to ask for the stored spelling; otherwise the layer names a family that exists
+        // nowhere and renders in the fallback font.
+        const storedFamily = normalizeFontFamilyName(fontResult?.font?.family);
+        if (
+          hasFabricData &&
+          storedFamily &&
+          storedFamily.toLowerCase() !== String(font.family || "").trim().toLowerCase()
+        ) {
+          remapFontFamilyInObjects(fabricData.objects, font.family, storedFamily);
+        }
         const conversionStatus = String(fontResult?.font?.conversionStatus || "").trim().toLowerCase();
         if (conversionStatus === "ready") {
           importedCustomFonts += 1;

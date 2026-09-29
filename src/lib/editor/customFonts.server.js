@@ -1,6 +1,7 @@
 import { normalizeFontFamilyName } from "@/lib/editor/fonts";
-import { extractFontFamilyName } from "@/lib/editor/fontName.server";
+import { extractFontFaceInfo, extractFontFamilyName } from "@/lib/editor/fontName.server";
 import { isSyntheticFontFamily } from "@/lib/editor/customFontLabel";
+import { planFontFamilyMerge } from "@/lib/editor/fontMergePlan";
 import {
   buildFontFileKind,
   deleteFontFamily,
@@ -12,9 +13,11 @@ import {
   defaultWeightVariants,
   findFontFamiliesByNames,
   listFontFamilies,
+  mergeFontFamilyFiles,
   normalizeFontStorageKey,
   normalizeFontStyleValue,
   normalizeFontWeightValue,
+  readFontFileVariant,
   toEditorFontRecord,
   upsertFontFamilyWithFiles,
 } from "@/lib/editor/fontStorage.server";
@@ -23,6 +26,7 @@ import {
   writeEditorFontLibraryRaw,
 } from "@/lib/editor/fontLibraryStore.server";
 import {
+  getObject,
   getPublicStorageBucketName,
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
@@ -873,6 +877,167 @@ export async function getEditorCustomFonts() {
   return fonts.map(toEditorFontRecord).filter(Boolean);
 }
 
+// A non-mobile source (Canva serves WOFF2) converted to TTF/OTF, or the variant itself when it
+// already is one. convertFontDataToMobileCompatible returns a FLAT {dataUrl, mimeType, fileName,
+// fileUrl, converted}, not a wrapped variant — reading the wrong shape once silently dropped every
+// extra weight.
+async function toMobileCompatibleVariant(variant, fallbackFileName) {
+  if (!variant) return null;
+  if (isMobileCompatibleVariant(variant)) return variant;
+  const converted = await convertFontDataToMobileCompatible({
+    dataUrl: variant.dataUrl,
+    mimeType: variant.mimeType,
+    fileName: variant.fileName,
+    fileUrl: variant.fileUrl,
+  });
+  if (!converted?.converted) return null;
+  const normalized = normalizeFontVariant(
+    {
+      fileName: converted.fileName || fallbackFileName,
+      mimeType: converted.mimeType || "font/ttf",
+      dataUrl: converted.dataUrl,
+      fileUrl: converted.fileUrl,
+    },
+    fallbackFileName
+  );
+  return isMobileCompatibleVariant(normalized) ? normalized : null;
+}
+
+async function readStoredFontFileBytes(file) {
+  try {
+    const bucket = String(file?.storageBucket || "").trim();
+    const key = String(file?.storagePath || "").trim();
+    if (bucket && key) {
+      const object = await getObject(bucket, key);
+      const body = object?.Body;
+      if (body && typeof body.transformToByteArray === "function") {
+        return Buffer.from(await body.transformToByteArray());
+      }
+      if (body) {
+        const chunks = [];
+        for await (const chunk of body) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
+        return Buffer.concat(chunks);
+      }
+    }
+    const url = String(file?.publicUrl || "").trim();
+    if (/^https?:\/\//i.test(url)) {
+      const response = await fetch(url);
+      if (response.ok) return Buffer.from(await response.arrayBuffer());
+    }
+  } catch (_error) {
+    // Unreadable is "no evidence" — the caller then leaves the stored file alone.
+  }
+  return null;
+}
+
+/**
+ * The library already holds this font (matched by name or alias): add what the design brings
+ * without taking anything away — the rules are in fontMergePlan.js. Every cut the family lacks is
+ * stored at the weight/style Canva declared for it, so a Light-only design on a Regular-only
+ * family gets its Light face; nothing the family has is deleted, re-tagged or renamed. Its
+ * `family` is the name every template and the web editor already use, so the import remaps its
+ * own layers onto it instead.
+ */
+async function mergeImportIntoExistingFamily({ existing, requestedFamily, cuts, aliases, includeFontList }) {
+  const isCustom = String(existing?.source || FONT_SOURCE_CUSTOM).trim().toLowerCase() === FONT_SOURCE_CUSTOM;
+  const storedFiles = (Array.isArray(existing?.files) ? existing.files : []).map((file) => ({
+    id: file.id,
+    kind: String(file.kind || "").toLowerCase(),
+    ...readFontFileVariant(file),
+    file,
+  }));
+  const preparedCuts = cuts
+    .map((cut) => {
+      const fallbackFileName = normalizeFileName(
+        cut.fileName || `${existing.family}-${cut.weight}${cut.style === "italic" ? "i" : ""}.ttf`
+      );
+      const variant = normalizeFontVariant(
+        { fileName: fallbackFileName, mimeType: cut.mimeType, dataUrl: cut.dataUrl },
+        fallbackFileName
+      );
+      if (!variant) return null;
+      return {
+        ...cut,
+        variant,
+        fallbackFileName,
+        payloadInfo: extractFontFaceInfo(parseDataUri(variant.dataUrl)?.bytes),
+      };
+    })
+    .filter(Boolean);
+
+  // Two passes: the plan first says which stored files it needs evidence about (only a custom
+  // family's slot that an incoming file matches), and only those are downloaded.
+  let plan = planFontFamilyMerge({ isCustom, storedFiles, cuts: preparedCuts });
+  if (plan.needsStoredInfo.length > 0) {
+    const storedInfoByKind = new Map();
+    for (const kind of plan.needsStoredInfo) {
+      const stored = storedFiles.find((file) => file.kind === kind);
+      storedInfoByKind.set(kind, extractFontFaceInfo(await readStoredFontFileBytes(stored?.file)));
+    }
+    plan = planFontFamilyMerge({ isCustom, storedFiles, cuts: preparedCuts, storedInfoByKind });
+  }
+
+  // The exact file already stored under another weight (Hacen Tunisia Lt sits in its family's
+  // default slot, and a design declares it at 300) adds nothing: the browser's weight matching
+  // already reaches it. Converted output is deterministic, so a checksum identifies it.
+  const storedChecksums = new Set(
+    storedFiles.map((stored) => String(stored.file?.checksum || "").trim()).filter(Boolean)
+  );
+  const addedFiles = [];
+  const rekind = [];
+  for (const step of plan.steps) {
+    const cut = preparedCuts[step.cutIndex];
+    const usableVariant = await toMobileCompatibleVariant(cut.variant, cut.fallbackFileName);
+    if (!usableVariant) continue;
+    const convertedBytes = parseDataUri(usableVariant.dataUrl)?.bytes;
+    if (
+      !step.replaces &&
+      convertedBytes?.length &&
+      storedChecksums.has(createHash("sha256").update(convertedBytes).digest("hex"))
+    ) {
+      continue;
+    }
+    const file = await materializeFontVariant({
+      fontId: existing.id,
+      family: existing.family,
+      kind: step.kind,
+      variant: usableVariant,
+    });
+    if (!file) continue;
+    addedFiles.push({ ...file, fontWeight: cut.weight, fontStyle: cut.style });
+    // Only now that the replacement exists may the file it displaces leave the slot.
+    if (step.rekind) rekind.push(step.rekind);
+  }
+
+  const readableName =
+    requestedFamily && !isSyntheticFontFamily(requestedFamily) ? requestedFamily : "";
+  const currentDisplayName = String(existing.displayName || "").trim();
+  const merged = await mergeFontFamilyFiles({
+    fontId: existing.id,
+    files: addedFiles,
+    rekind,
+    aliases: [requestedFamily, ...(Array.isArray(aliases) ? aliases : [])],
+    // Only a custom family's placeholder label is ours to improve.
+    displayName:
+      isCustom && readableName && (!currentDisplayName || isSyntheticFontFamily(currentDisplayName))
+        ? readableName
+        : undefined,
+  });
+
+  return {
+    font: toEditorFontRecord(merged || existing),
+    fonts: includeFontList ? await getEditorCustomFonts() : [],
+    conversionStatus: FONT_CONVERSION_STATUS_READY,
+    conversionError: "",
+    conversionAttempts: 0,
+    lastConversionAt: null,
+    skippedDuplicate: addedFiles.length === 0,
+    merged: true,
+    addedKinds: addedFiles.map((file) => file.kind),
+    rekinded: rekind.map((move) => move.kind),
+  };
+}
+
 /**
  * @param {{
  *   family: string,
@@ -890,6 +1055,10 @@ export async function getEditorCustomFonts() {
  *   includeFontList?: boolean,
  *   skipIfExists?: boolean,
  *   extraVariants?: Array<{ dataUrl?: string, mimeType?: string, fileName?: string, weight?: number | string, style?: string }>,
+ *   fontWeight?: number | string | null,
+ *   fontStyle?: string | null,
+ *   aliases?: string[],
+ *   mergeCuts?: boolean,
  * }} input
  */
 export async function upsertEditorCustomFont({
@@ -919,6 +1088,18 @@ export async function upsertEditorCustomFont({
   // family stores a single file and the browser fakes every other weight (faux-bold), which
   // reads visibly heavier and differently shaped than the real cut.
   extraVariants = [],
+  // The weight/style the PRIMARY file was declared at (Canva's @font-face descriptor). A Light-only
+  // design sends its Light cut as the primary; on a family that already has a default face it is
+  // stored at 300, not forced into the 400 slot.
+  fontWeight = null,
+  fontStyle = null,
+  // More names this font answers to (a Canva token, the extension's guess). Added as aliases so
+  // they resolve to the stored family; never used to FIND a family — one Canva token can group
+  // several legacy families ("Hacen Tunisia", "… Lt", "… Bd").
+  aliases = [],
+  // When the library already has the font: add the cuts it lacks (mergeImportIntoExistingFamily)
+  // instead of skipping. The Canva import sets it; a payload with explicit variants always merges.
+  mergeCuts = false,
 }) {
   const normalizedFamily = normalizeFontFamilyName(family);
   if (!normalizedFamily) {
@@ -960,16 +1141,45 @@ export async function upsertEditorCustomFont({
         break;
       }
     }
-    // A caller that sends explicit weight variants knows exactly which cuts this family should
-    // hold, so NEVER skip it as a duplicate — refresh the whole set instead. Skipping is what let
-    // a wrong file survive indefinitely: an early import stored the family's BOLD file in the
-    // default (400) slot, every later import saw "the 400 kind already exists" and left it there,
-    // and the design rendered bold everywhere. upsertFontFamilyWithFiles deletes any file whose
-    // kind isn't in the new set, so this converges the family on the payload.
+    // A payload that brings cuts (explicit variants, or a Canva import) MERGES into the family it
+    // matched. It used to refresh the whole set through upsertFontFamilyWithFiles — a full
+    // replace that deleted every kind the payload lacked, re-tagged the family `custom` and wiped
+    // its aliases — which is safe only for the family's own importer. The wrong-file case that
+    // refresh was added for (Arimo BOLD stored in the 400 slot) is handled inside the merge, from
+    // the files' own OS/2 weights.
     const hasExplicitVariants = (Array.isArray(extraVariants) ? extraVariants : []).some((entry) =>
       sanitizeDataUrl(entry?.dataUrl)
     );
-    if (existingMatch && !hasExplicitVariants) {
+    if (existingMatch && (mergeCuts || hasExplicitVariants) && safeDataUrl) {
+      const cuts = [
+        {
+          isPrimary: true,
+          weight: normalizeFontWeightValue(fontWeight ?? 400),
+          style: normalizeFontStyleValue(fontStyle),
+          dataUrl: safeDataUrl,
+          mimeType,
+          fileName,
+        },
+        ...(Array.isArray(extraVariants) ? extraVariants : [])
+          .filter((entry) => sanitizeDataUrl(entry?.dataUrl))
+          .map((entry) => ({
+            isPrimary: false,
+            weight: normalizeFontWeightValue(entry.weight),
+            style: normalizeFontStyleValue(entry.style),
+            dataUrl: sanitizeDataUrl(entry.dataUrl),
+            mimeType: entry.mimeType,
+            fileName: entry.fileName,
+          })),
+      ];
+      return mergeImportIntoExistingFamily({
+        existing: existingMatch,
+        requestedFamily: normalizedFamily,
+        cuts,
+        aliases,
+        includeFontList,
+      });
+    }
+    if (existingMatch) {
       return {
         font: toEditorFontRecord(existingMatch),
         fonts: includeFontList ? await getEditorCustomFonts() : [],
@@ -1083,7 +1293,13 @@ export async function upsertEditorCustomFont({
   const existingFontLookup = await findFontFamiliesByNames([normalizedFamily, familyKey]);
   const existingFont = existingFontLookup.get(normalizeFontStorageKey(normalizedFamily)) ||
     existingFontLookup.get(normalizeFontStorageKey(familyKey));
-  const fontId = existingFont?.id || randomUUID();
+  // upsertFontFamilyWithFiles is keyed by normalizedFamily, so only a family that IS this name may
+  // lend its id. One matched through an alias has a different normalizedFamily: its id would go
+  // into a CREATE and collide with the row that already has it.
+  const fontId =
+    existingFont && existingFont.normalizedFamily === normalizeFontStorageKey(normalizedFamily)
+      ? existingFont.id
+      : randomUUID();
   if (!mobileVariant) {
     throw new Error(
       conversionError ||
@@ -1128,30 +1344,8 @@ export async function upsertEditorCustomFont({
       entryFileName
     );
     if (!entryVariant) continue;
-    let usableVariant = entryVariant;
-    if (!isMobileCompatibleVariant(entryVariant)) {
-      // convertFontDataToMobileCompatible returns a FLAT {dataUrl, mimeType, fileName, fileUrl,
-      // converted} — not a wrapped variant. Canva serves WOFF2, which is never mobile-compatible,
-      // so EVERY extra weight comes through here; reading the wrong shape silently dropped all of
-      // them (the family row updated, but no variant files appeared).
-      const converted = await convertFontDataToMobileCompatible({
-        dataUrl: entryVariant.dataUrl,
-        mimeType: entryVariant.mimeType,
-        fileName: entryVariant.fileName,
-      });
-      const normalizedConverted = converted?.converted
-        ? normalizeFontVariant(
-            {
-              fileName: converted.fileName || entryFileName,
-              mimeType: converted.mimeType || "font/ttf",
-              dataUrl: converted.dataUrl,
-              fileUrl: converted.fileUrl,
-            },
-            entryFileName
-          )
-        : null;
-      usableVariant = isMobileCompatibleVariant(normalizedConverted) ? normalizedConverted : null;
-    }
+    // Canva serves WOFF2, which is never mobile-compatible, so EVERY extra weight is converted.
+    const usableVariant = await toMobileCompatibleVariant(entryVariant, entryFileName);
     if (!usableVariant) continue;
     const file = await materializeFontVariant({
       fontId,
@@ -1200,7 +1394,7 @@ export async function upsertEditorCustomFont({
     cssFontFamily: `'${normalizedFamily}'`,
     removable,
     files: [mobileFile, ...extraFiles],
-    aliases: [normalizedFamily, familyKey, ...extraAliases],
+    aliases: [normalizedFamily, familyKey, ...extraAliases, ...(Array.isArray(aliases) ? aliases : [])],
   });
   const editorFont = toEditorFontRecord({
     ...stored,

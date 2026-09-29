@@ -2,60 +2,34 @@ import prisma from "@/lib/prisma";
 import { deleteStorageForUrls, deleteStorageObjects } from "@/lib/storage/assetReferences.server";
 import { deriveReadableFontLabel } from "@/lib/editor/customFontLabel";
 import { bumpFontCatalogVersion } from "@/lib/fonts/fontCatalogVersion.server";
+import {
+  DEFAULT_FONT_STYLE,
+  FONT_FILE_KIND_MOBILE,
+  FONT_FILE_KIND_ORIGINAL,
+  isDefaultFontVariant,
+  normalizeFontStyleValue,
+  normalizeFontWeightValue,
+  readFontFileVariant,
+} from "@/lib/editor/fontVariants";
+
+// The weight/style ⇄ kind helpers live in the pure fontVariants module; every existing importer
+// keeps getting them from here.
+export {
+  DEFAULT_FONT_STYLE,
+  DEFAULT_FONT_WEIGHT,
+  FONT_FILE_KIND_MOBILE,
+  FONT_FILE_KIND_ORIGINAL,
+  buildFontFileKind,
+  isDefaultFontVariant,
+  normalizeFontStyleValue,
+  normalizeFontWeightValue,
+  readFontFileVariant,
+} from "@/lib/editor/fontVariants";
 
 export const FONT_SOURCE_CUSTOM = "custom";
 export const FONT_STATUS_READY = "ready";
 export const FONT_STATUS_PENDING = "pending";
 export const FONT_STATUS_FAILED = "failed";
-export const FONT_FILE_KIND_ORIGINAL = "original";
-export const FONT_FILE_KIND_MOBILE = "mobile";
-
-export const DEFAULT_FONT_WEIGHT = 400;
-export const DEFAULT_FONT_STYLE = "normal";
-
-export function normalizeFontWeightValue(value) {
-  const weight = Math.round(Number(value));
-  if (!Number.isFinite(weight)) return DEFAULT_FONT_WEIGHT;
-  return Math.max(100, Math.min(900, weight));
-}
-
-export function normalizeFontStyleValue(value) {
-  return String(value || "").trim().toLowerCase() === "italic" ? "italic" : DEFAULT_FONT_STYLE;
-}
-
-export function isDefaultFontVariant(weight, style) {
-  return (
-    normalizeFontWeightValue(weight) === DEFAULT_FONT_WEIGHT &&
-    normalizeFontStyleValue(style) === DEFAULT_FONT_STYLE
-  );
-}
-
-/**
- * FontFile.kind carries BOTH the file's purpose and its variant, because the table is unique on
- * (fontId, kind). The family's default face keeps the bare kind ("mobile") so every pre-existing
- * row stays valid and every existing reader keeps finding it; any other weight/style is suffixed
- * ("mobile@700", "mobile@400i"). One family can then hold every weight a design uses — Canva
- * routinely ships two or three under a single family name.
- */
-export function buildFontFileKind(baseKind, weight, style) {
-  const base = String(baseKind || FONT_FILE_KIND_MOBILE).trim().toLowerCase();
-  if (isDefaultFontVariant(weight, style)) return base;
-  const normalizedWeight = normalizeFontWeightValue(weight);
-  const suffix = normalizeFontStyleValue(style) === "italic" ? "i" : "";
-  return `${base}@${normalizedWeight}${suffix}`;
-}
-
-/** The weight/style a stored file represents (null columns = the default 400/normal face). */
-export function readFontFileVariant(file) {
-  return {
-    weight: normalizeFontWeightValue(
-      file?.fontWeight === null || typeof file?.fontWeight === "undefined"
-        ? DEFAULT_FONT_WEIGHT
-        : file.fontWeight
-    ),
-    style: normalizeFontStyleValue(file?.fontStyle || DEFAULT_FONT_STYLE),
-  };
-}
 
 const MOBILE_SUPPORTED_FONT_FORMATS = new Set(["ttf", "otf", "ttc"]);
 const FONT_CATEGORY_EXCLUSIVE = "EXCLUSIVE";
@@ -619,6 +593,93 @@ export async function upsertFontFamilyWithFiles({
   await bumpFontCatalogVersion();
 
   return getFontFamilyById(font.id);
+}
+
+/**
+ * Add to an EXISTING family without taking anything away — the path every import that lands on a
+ * family the library already holds must use. upsertFontFamilyWithFiles is a full replace: it
+ * re-tags the source, nulls sourceId / preview fields, deletes every file kind the payload lacks
+ * and rewrites the alias list. That is right for a family's own importer and wrong for anyone
+ * else: a Canva design using two cuts of "Cairo" would strip the Google family down to those two
+ * cuts, make it `custom` (deletable), and drop the aliases older templates resolve through.
+ *
+ *  - `rekind`: rows to move to another kind (a file found in the wrong weight slot, kept at the
+ *    weight it really is). Applied first, so the slot it vacates can be refilled in the same call.
+ *  - `files`: rows to create, or to replace at their kind. Nothing else is deleted.
+ *  - `aliases`: added, never replaced; an alias another family already owns is skipped.
+ *  - `displayName`: optional; only set when given.
+ * Objects of rows a replacement overwrote are cleaned up once nothing references them.
+ *
+ * @param {{
+ *   fontId: string,
+ *   files?: Array<Record<string, unknown>>,
+ *   rekind?: Array<{ fileId: string, kind: string }>,
+ *   aliases?: string[],
+ *   displayName?: string,
+ * }} input
+ */
+export async function mergeFontFamilyFiles({ fontId, files = [], rekind = [], aliases = [], displayName }) {
+  const id = String(fontId || "").trim();
+  if (!id) throw new Error("Font id is required.");
+  const fileInputs = Array.from(
+    new Map(
+      (Array.isArray(files) ? files : [])
+        .map(normalizeFontFileInput)
+        .filter(Boolean)
+        .map((file) => [file.kind, file])
+    ).values()
+  );
+  const moves = (Array.isArray(rekind) ? rekind : [])
+    .map((move) => ({ fileId: String(move?.fileId || "").trim(), kind: normalizeFileKind(move?.kind) }))
+    .filter((move) => move.fileId && move.kind);
+  const safeDisplayName = String(displayName || "").trim();
+  const aliasInputs = normalizeAliasInputs({ family: "", displayName: "", aliases });
+
+  const overwritten = [];
+  let changed = false;
+  await prisma.$transaction(async (tx) => {
+    for (const move of moves) {
+      const isDefaultVariant = !move.kind.includes("@");
+      const [, variant = ""] = move.kind.split("@");
+      await tx.fontFile.update({
+        where: { id: move.fileId },
+        data: {
+          kind: move.kind,
+          fontWeight: isDefaultVariant ? null : normalizeFontWeightValue(variant.replace(/i$/, "")),
+          fontStyle: isDefaultVariant ? null : variant.endsWith("i") ? "italic" : DEFAULT_FONT_STYLE,
+        },
+      });
+      changed = true;
+    }
+    for (const file of fileInputs) {
+      const previous = await tx.fontFile.findUnique({
+        where: { fontId_kind: { fontId: id, kind: file.kind } },
+        select: { storageBucket: true, storagePath: true, publicUrl: true },
+      });
+      if (previous && previous.storagePath !== file.storagePath) overwritten.push(previous);
+      await tx.fontFile.upsert({
+        where: { fontId_kind: { fontId: id, kind: file.kind } },
+        create: { fontId: id, ...file },
+        update: file,
+      });
+      changed = true;
+    }
+    if (aliasInputs.length > 0) {
+      const created = await tx.fontAlias.createMany({
+        data: aliasInputs.map((alias) => ({ fontId: id, ...alias })),
+        skipDuplicates: true,
+      });
+      if (created.count > 0) changed = true;
+    }
+    if (safeDisplayName) {
+      await tx.fontFamily.update({ where: { id }, data: { displayName: safeDisplayName } });
+      changed = true;
+    }
+  });
+
+  await deleteFontFileObjects(overwritten, { fontId: id, reason: "variant replaced on merge" });
+  if (changed) await bumpFontCatalogVersion();
+  return getFontFamilyById(id);
 }
 
 /**

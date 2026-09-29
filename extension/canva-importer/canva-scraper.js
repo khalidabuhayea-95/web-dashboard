@@ -1077,10 +1077,162 @@
             if (!solid) return null;
             return { paint: solid.hex, alpha: solid.alpha, defs: "" };
           };
+          // Canva resizes a shape by SLICING, not stretching: `el.slice.source` is the band of the viewBox
+          // that stretches (a 55×64 hexagon stretches only rows 16..48), everything outside keeps its size,
+          // and the sliced result is then scaled UNIFORMLY into the box. Stretching the whole viewBox to the
+          // box (a 739×883 badge) steepened its caps from 105 px to 221 px. The slice record also carries
+          // the stretched sizes of that band under minified names; they are the pair whose sliced viewBox
+          // has the box's own aspect ratio.
+          const readShapeSlice = (el, vbWidth, vbHeight, boxWidth, boxHeight) => {
+            const slice = el.slice && typeof el.slice === "object" ? el.slice : null;
+            const source = slice && slice.source && typeof slice.source === "object" ? slice.source : null;
+            if (!source) return null;
+            const srcLeft = Number(source.left) || 0;
+            const srcTop = Number(source.top) || 0;
+            const srcWidth = Number(source.width) || 0;
+            const srcHeight = Number(source.height) || 0;
+            if (!(srcWidth > 0 && srcHeight > 0)) return null;
+            const sizes = Object.keys(slice)
+              .filter((key) => key !== "source" && key !== "horizontal" && key !== "vertical")
+              .map((key) => Number(slice[key]))
+              .filter((value) => Number.isFinite(value) && value > 0);
+            let best = null;
+            for (let i = 0; i < sizes.length; i += 1) {
+              for (let j = 0; j < sizes.length; j += 1) {
+                if (i === j) continue;
+                const width = sizes[i] + (vbWidth - srcWidth);
+                const height = sizes[j] + (vbHeight - srcHeight);
+                if (!(width > 0 && height > 0)) continue;
+                const error = Math.abs(boxWidth / width - boxHeight / height) / (boxWidth / width);
+                if (!best || error < best.error) best = { error, stretchedWidth: sizes[i], stretchedHeight: sizes[j], width, height };
+              }
+            }
+            if (!best || best.error > 0.01) return null;
+            const axis = (start, size, stretched) => (value) =>
+              value <= start ? value : value >= start + size ? value + (stretched - size) : start + ((value - start) * stretched) / size;
+            return {
+              width: best.width,
+              height: best.height,
+              mapX: axis(srcLeft, srcWidth, best.stretchedWidth),
+              mapY: axis(srcTop, srcHeight, best.stretchedHeight),
+            };
+          };
+          // A path's points mapped through (mapX, mapY): parsed to absolute M/L/C/Q/Z first, since a
+          // piecewise map can't be applied to relative offsets. Null for arcs (their radii can't be sliced)
+          // or anything unparseable — the caller then stretches as before.
+          const mapSvgPathPoints = (d, mapX, mapY) => {
+            const tokens = String(d).match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
+            if (!tokens || !/^[Mm]$/.test(tokens[0])) return null;
+            const out = [];
+            const fmt = (value) => String(Math.round(value * 1000) / 1000);
+            const point = (x, y) => `${fmt(mapX(x))} ${fmt(mapY(y))}`;
+            let index = 0;
+            let command = "";
+            let x = 0;
+            let y = 0;
+            let startX = 0;
+            let startY = 0;
+            let lastControlX = null;
+            let lastControlY = null;
+            let lastCommand = "";
+            const next = () => {
+              const value = Number(tokens[index]);
+              index += 1;
+              if (!Number.isFinite(value)) throw new Error("bad path");
+              return value;
+            };
+            while (index < tokens.length) {
+              if (/^[A-Za-z]$/.test(tokens[index])) {
+                command = tokens[index];
+                index += 1;
+              } else if (!command) {
+                return null;
+              }
+              const relative = command === command.toLowerCase();
+              const upper = command.toUpperCase();
+              const dx = relative ? x : 0;
+              const dy = relative ? y : 0;
+              if (upper === "A") return null;
+              if (upper === "Z") {
+                out.push("Z");
+                x = startX;
+                y = startY;
+                lastControlX = null;
+                lastCommand = "Z";
+                continue;
+              }
+              if (upper === "M") {
+                x = next() + dx;
+                y = next() + dy;
+                startX = x;
+                startY = y;
+                out.push(`M${point(x, y)}`);
+                command = relative ? "l" : "L";
+                lastControlX = null;
+                lastCommand = "M";
+              } else if (upper === "L") {
+                x = next() + dx;
+                y = next() + dy;
+                out.push(`L${point(x, y)}`);
+                lastControlX = null;
+                lastCommand = "L";
+              } else if (upper === "H") {
+                x = next() + (relative ? x : 0);
+                out.push(`L${point(x, y)}`);
+                lastControlX = null;
+                lastCommand = "H";
+              } else if (upper === "V") {
+                y = next() + (relative ? y : 0);
+                out.push(`L${point(x, y)}`);
+                lastControlX = null;
+                lastCommand = "V";
+              } else if (upper === "C" || upper === "S") {
+                let x1;
+                let y1;
+                if (upper === "C") {
+                  x1 = next() + dx;
+                  y1 = next() + dy;
+                } else {
+                  const smooth = lastCommand === "C" && lastControlX !== null;
+                  x1 = smooth ? 2 * x - lastControlX : x;
+                  y1 = smooth ? 2 * y - lastControlY : y;
+                }
+                const x2 = next() + dx;
+                const y2 = next() + dy;
+                x = next() + dx;
+                y = next() + dy;
+                out.push(`C${point(x1, y1)} ${point(x2, y2)} ${point(x, y)}`);
+                lastControlX = x2;
+                lastControlY = y2;
+                lastCommand = "C";
+              } else if (upper === "Q" || upper === "T") {
+                let x1;
+                let y1;
+                if (upper === "Q") {
+                  x1 = next() + dx;
+                  y1 = next() + dy;
+                } else {
+                  const smooth = lastCommand === "Q" && lastControlX !== null;
+                  x1 = smooth ? 2 * x - lastControlX : x;
+                  y1 = smooth ? 2 * y - lastControlY : y;
+                }
+                x = next() + dx;
+                y = next() + dy;
+                out.push(`Q${point(x1, y1)} ${point(x, y)}`);
+                lastControlX = x1;
+                lastControlY = y1;
+                lastCommand = "Q";
+              } else {
+                return null;
+              }
+            }
+            return out.join("");
+          };
           const extractVectorShape = (el) => {
             try {
               const paths = Array.isArray(el.paths) ? el.paths : null;
               if (!paths || paths.length === 0 || paths.length > 12) return null;
+              // An image-filled path is a photo frame — keep the photo (extractBorder handles it).
               if (paths.some((p) => p && p.fill && typeof p.fill === "object" && p.fill.image)) return null;
               const viewBox = el.viewBox && typeof el.viewBox === "object" ? el.viewBox : null;
               const vbWidth = Number(viewBox && viewBox.width) || 0;
@@ -1088,38 +1240,67 @@
               if (!(vbWidth > 0 && vbHeight > 0)) return null;
               const vbLeft = Number(viewBox.left) || 0;
               const vbTop = Number(viewBox.top) || 0;
+              const boxWidth = Math.max(1, Number(el.width) || vbWidth);
+              const boxHeight = Math.max(1, Number(el.height) || vbHeight);
+
+              // Slice the geometry when Canva does (and every path can be mapped); else stretch as before.
+              const slice = readShapeSlice(el, vbWidth, vbHeight, boxWidth, boxHeight);
+              const slicedPaths = slice
+                ? paths.map((p) => (p && typeof p.d === "string" ? mapSvgPathPoints(p.d.trim(), slice.mapX, slice.mapY) : null))
+                : null;
+              const useSlice = Boolean(slicedPaths && slicedPaths.every((d, i) => d || !(paths[i] && paths[i].d)));
+              const outViewBox = useSlice ? `0 0 ${slice.width} ${slice.height}` : `${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}`;
+              // Design px per viewBox unit (uniform when sliced; the geometric mean of a stretch otherwise).
+              const unitScale = useSlice
+                ? boxWidth / slice.width
+                : Math.sqrt((boxWidth / vbWidth) * (boxHeight / vbHeight));
+
               const defs = [];
               const body = [];
               paths.forEach((p, i) => {
-                const d = p && typeof p.d === "string" ? p.d.trim() : "";
+                const rawD = p && typeof p.d === "string" ? p.d.trim() : "";
+                const d = useSlice ? slicedPaths[i] : rawD;
                 if (!d) return;
                 const fillPaint = svgPaintFromFill(p.fill, `g${i}`);
                 const stroke = p.stroke && typeof p.stroke === "object" ? p.stroke : null;
                 const strokePaint = stroke ? svgColor(stroke.color, stroke.transparency) : null;
-                const strokeWidth = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
-                if (!fillPaint && !(strokePaint && strokeWidth > 0)) return;
+                const strokeWeight = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
+                if (!fillPaint && !(strokePaint && strokeWeight > 0)) return;
                 if (fillPaint && fillPaint.defs) defs.push(fillPaint.defs);
-                const attrs = [
-                  `d="${d.replace(/"/g, "'")}"`,
-                  fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"',
-                  fillPaint && fillPaint.alpha < 1 ? `fill-opacity="${fillPaint.alpha}"` : "",
-                  strokePaint && strokeWidth > 0 ? `stroke="${strokePaint.hex}"` : "",
-                  strokePaint && strokeWidth > 0 ? `stroke-width="${strokeWidth}"` : "",
-                  strokePaint && strokeWidth > 0 && strokePaint.alpha < 1
-                    ? `stroke-opacity="${strokePaint.alpha}"`
-                    : "",
-                ].filter(Boolean);
-                body.push(`<path ${attrs.join(" ")}/>`);
+                const safeD = d.replace(/"/g, "'");
+                body.push(
+                  `<path d="${safeD}" ${fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"'}${
+                    fillPaint && fillPaint.alpha < 1 ? ` fill-opacity="${fillPaint.alpha}"` : ""
+                  }/>`
+                );
+                if (strokePaint && strokeWeight > 0) {
+                  // Canva's border is `weight` DESIGN px wide and lies INSIDE the shape: it draws a
+                  // non-scaling stroke of twice the weight clipped to the path. In viewBox units that is
+                  // 2·weight / unitScale; the old rebuild used `weight` viewBox units centred on the edge,
+                  // which a 13× stretch turned into a 67 px band (34 px of it left inside the image).
+                  const closed = /[Zz]\s*$/.test(d);
+                  const widthUnits = ((closed ? 2 : 1) * strokeWeight) / Math.max(0.0001, unitScale);
+                  const clipId = `c${i}`;
+                  if (closed) defs.push(`<clipPath id="${clipId}"><path d="${safeD}"/></clipPath>`);
+                  body.push(
+                    `<path d="${safeD}" fill="none" stroke="${strokePaint.hex}" stroke-width="${
+                      Math.round(widthUnits * 10000) / 10000
+                    }"${strokePaint.alpha < 1 ? ` stroke-opacity="${strokePaint.alpha}"` : ""}${
+                      closed ? ` clip-path="url(#${clipId})"` : ""
+                    }/>`
+                  );
+                }
               });
               if (body.length === 0) return null;
-              const boxWidth = Math.max(1, Math.round(Number(el.width) || vbWidth));
-              const boxHeight = Math.max(1, Math.round(Number(el.height) || vbHeight));
-              const scale = Math.min(1, 2048 / Math.max(boxWidth, boxHeight));
+
+              // Rasterized server-side, so give it real pixels: the element's own design size, capped.
+              const cap = 2048;
+              const scale = Math.min(1, cap / Math.max(boxWidth, boxHeight));
               const outWidth = Math.max(1, Math.round(boxWidth * scale));
               const outHeight = Math.max(1, Math.round(boxHeight * scale));
               const svg =
                 `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" ` +
-                `viewBox="${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}" preserveAspectRatio="none">` +
+                `viewBox="${outViewBox}" preserveAspectRatio="none">` +
                 (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
                 body.join("") +
                 `</svg>`;
@@ -1172,6 +1353,13 @@
               ...readAnimationEntry(el, parentId),
               text: el.type === "text" ? extractText(el) : null,
               image: el.type === "rect" ? extractImage(el) : null,
+              // The fill's own mirroring, whatever it holds. `image` carries it for photo fills, but a
+              // VIDEO fill (Canva's animated stickers) has no image media, so its flip was lost and
+              // five of six watercolours on DAHOhOaWZTw imported un-mirrored.
+              fillFlip:
+                el.type === "rect" && el.fill
+                  ? { flipX: Boolean(el.fill.flipX), flipY: Boolean(el.fill.flipY) }
+                  : null,
               shape: el.type === "shape" ? extractShape(el) : null,
               line: el.type === "line" ? extractLine(el) : null,
               border: el.type === "shape" ? extractBorder(el) : null,
@@ -1711,6 +1899,41 @@
         };
       };
 
+      // How far Canva nudges a text's glyphs down inside its own box, in the node's px (= design
+      // px). Some fonts get an inner translateY that neither the font size nor the box carries —
+      // UKIJ Chiwer Kesme sits 0.1 em lower: translate(0, 12.504px) at 125.04px, inside a
+      // scale(1.764) wrapper, so 22 px on a 220 px title. Each translation lives in its PARENT's
+      // space, so it is scaled by every scale above it, walking from the node inwards.
+      const getInnerTextShiftY = (element, stopAtNode) => {
+        const chain = [];
+        let current = element;
+        let depth = 0;
+        while (current && current !== stopAtNode && depth < 16) {
+          chain.push(current);
+          current = current.parentElement;
+          depth += 1;
+        }
+        if (current !== stopAtNode) return 0;
+        let shiftY = 0;
+        let scaleAbove = 1;
+        for (let index = chain.length - 1; index >= 0; index -= 1) {
+          const value = window.getComputedStyle(chain[index]).transform;
+          if (!value || value === "none") continue;
+          let matrix = null;
+          try {
+            matrix = new DOMMatrixReadOnly(value);
+          } catch (_error) {
+            continue;
+          }
+          // Only an upright wrapper's own vertical offset counts; a rotated or skewed inner
+          // element (curved letters live BELOW the paragraph anyway) is not a font nudge.
+          if (Math.abs(matrix.b) > 1e-6 || Math.abs(matrix.c) > 1e-6) return 0;
+          shiftY += matrix.f * scaleAbove;
+          scaleAbove *= Math.abs(matrix.d) || 1;
+        }
+        return Math.abs(shiftY) >= 0.5 ? Math.round(shiftY * 100) / 100 : 0;
+      };
+
       const hasMeaningfulTransformBetween = (element, stopAtNode) => {
         let node = element?.parentElement || null;
         let depth = 0;
@@ -1805,21 +2028,45 @@
       };
 
       const dedupeTextLines = (value) => {
-        const lines = String(value || "")
+        const rawLines = String(value || "")
           .split("\n")
-          .map((line) => line.replace(/\s+/g, " ").trim())
-          .filter(Boolean);
+          .map((line) => line.replace(/\s+/g, " ").trim());
+        const lines = rawLines.filter(Boolean);
         if (lines.length === 0) return "";
 
         const shortLineCount = lines.filter((line) => line.length <= 2).length;
         const isCharacterStack =
           lines.length >= 4 && shortLineCount / Math.max(1, lines.length) >= 0.7;
         if (isCharacterStack) {
-          return lines.join("");
+          // Curved text arrives one <p> per LETTER — and its word gaps as whitespace-only rows.
+          // Dropping the blank rows before joining fused "HAPPY UAE NATIONAL DAY" into one word,
+          // so a blank row between letters is the space it was.
+          return rawLines
+            .map((line) => (line === "" ? " " : line))
+            .join("")
+            .replace(/\s+/g, " ")
+            .trim();
         }
 
+        // Canva renders a text box's paragraphs more than once inside the same LB node (two
+        // hidden logical copies of every <p>), so querySelectorAll("p") hands back the whole
+        // paragraph block twice, back to back. Consecutive-line dedupe never sees that — the
+        // repeat starts four lines later — and a four-line greeting imported as eight. When the
+        // sequence is an exact repetition of its own prefix, keep one copy.
+        const collapseRepeatedBlock = (items) => {
+          for (let period = 1; period <= items.length / 2; period += 1) {
+            if (items.length % period !== 0) continue;
+            let repeats = true;
+            for (let index = period; index < items.length && repeats; index += 1) {
+              if (items[index] !== items[index % period]) repeats = false;
+            }
+            if (repeats) return items.slice(0, period);
+          }
+          return items;
+        };
+
         const deduped = [];
-        lines.forEach((line) => {
+        collapseRepeatedBlock(lines).forEach((line) => {
           if (deduped[deduped.length - 1] !== line) {
             deduped.push(line);
           }
@@ -1878,13 +2125,123 @@
         "fangsong",
       ]);
 
+      // Canva draws every letter a text's font lacks with its own fallback family `_fb_` — for Arabic
+      // that is Noto Sans Arabic (same advances, ascent 1.37 em, descent 0.74 em; measured against
+      // our library copy). A Latin-only font on an Arabic line therefore SHOWS Noto in Canva, while
+      // our editor and the app would each fall back to a different system font (Geeza Pro, Noto
+      // Naskh, SF Arabic): an Arimo label that wrapped after four words in Canva wrapped after five
+      // in the editor. Test it where the font is loaded: when the family has no Arabic glyphs,
+      // "family, _fb_" and "_fb_" alone draw the very same letters. No spaces in the sample — a
+      // Latin font does have a space, and it would differ.
+      const ARABIC_LETTER_PATTERN = /[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF]/;
+      const ARABIC_COVERAGE_SAMPLE = "\u0627\u0628\u062a\u062b\u062c\u062d\u062e\u062f\u0630\u0631\u0632\u0633\u0634\u0635\u0636\u0637\u0638\u0639\u063a\u0641\u0642\u0643\u0644\u0645\u0646\u0647\u0648\u064a";
+      const arabicCoverageCache = new Map();
+      let arabicCoverageContext = null;
+      const fontLacksArabicGlyphs = (cssFontFamily, fontWeight, fontStyle) => {
+        const family =
+          String(cssFontFamily || "").split(",")[0]?.replace(/^['"]+|['"]+$/g, "").trim() || "";
+        if (!family || family === "_fb_" || GENERIC_FONT_FAMILIES.has(family.toLowerCase())) return false;
+        const key = `${family}|${fontWeight}|${fontStyle}`;
+        if (arabicCoverageCache.has(key)) return arabicCoverageCache.get(key);
+        let lacks = false;
+        try {
+          // Only a LOADED family can be tested: an unloaded one draws everything in the fallback.
+          const loaded = Array.from(document.fonts || []).some(
+            (face) => String(face.family || "").replace(/^['"]+|['"]+$/g, "") === family && face.status === "loaded"
+          );
+          if (loaded) {
+            arabicCoverageContext = arabicCoverageContext || document.createElement("canvas").getContext("2d");
+            const prefix = `${String(fontStyle || "") === "italic" ? "italic " : ""}${fontWeight || 400} 40px`;
+            arabicCoverageContext.font = `${prefix} "${family.replace(/"/g, "")}", _fb_`;
+            const withFamily = arabicCoverageContext.measureText(ARABIC_COVERAGE_SAMPLE).width;
+            arabicCoverageContext.font = `${prefix} _fb_`;
+            const fallbackOnly = arabicCoverageContext.measureText(ARABIC_COVERAGE_SAMPLE).width;
+            lacks = withFamily > 0 && Math.abs(withFamily - fallbackOnly) < 0.01;
+          }
+        } catch (_error) {
+          lacks = false;
+        }
+        arabicCoverageCache.set(key, lacks);
+        return lacks;
+      };
+
       const normalizeFontFamilyName = (value) => {
         const input = String(value || "").trim();
         if (!input) return "";
         const primary = input.split(",")[0]?.replace(/^['"]+|['"]+$/g, "").trim() || "";
         if (!primary) return "";
         if (GENERIC_FONT_FAMILIES.has(primary.toLowerCase())) return "";
-        return primary.replace(/\s+/g, " ").trim();
+        return resolveCanvaFontToken(primary.replace(/\s+/g, " ").trim());
+      };
+
+      // Canva names its @font-face families with an opaque token ("YAGVuEYCNg0_1"), and that token
+      // was travelling all the way into the library as the family NAME — a second "IBM Plex Sans
+      // Arabic" living under a name nobody can search for. The token's own @font-face src says
+      // what it is: ".../YAGVuEYCNg0/0/IBMPlexSansArabic-Bold6106…woff2". Read the file stem up to
+      // the weight dash and split the camel case, and the family imports as "IBM Plex Sans Arabic"
+      // — which also lets the server's dedupe find the copy it already holds.
+      const CANVA_FONT_TOKEN_PATTERN = /^[A-Za-z0-9_-]{6,}$/;
+      const UNNAMED_FONT_FILE_STEMS = new Set(["font", "fonts", "file", "index", "webfont"]);
+      const canvaFontTokenNames = new Map();
+      // The trailing token(s) of a Canva font file stem name the CUT, never the family:
+      // "RTL-Banana-Regular", "Amiri-BoldSlanted", "IBMPlexSansArabic-Bold6106…". Only those come
+      // off — a family's own dashes stay. Splitting at the FIRST dash instead turned RTL-Mary and
+      // RTL-Banana both into "RTL", so the second design deduped onto the first's file and rendered
+      // in a font it never used.
+      const FONT_CUT_WORDS =
+        /^(thin|hairline|extralight|ultralight|light|regular|normal|book|roman|text|medium|semibold|demibold|bold|extrabold|ultrabold|black|heavy|italic|oblique|slanted|condensed|expanded|var|variable|vf)+$/i;
+      const familyNameFromFontFileUrl = (url) => {
+        const file = String(url || "").replace(/[?#].*$/, "").split("/").pop() || "";
+        // Canva appends hash segments after the first dot: "RTL-Banana-Regular.6264b….2e0d….woff2".
+        const stem = file.split(".")[0] || "";
+        const parts = stem
+          .split("-")
+          .map((part) => part.replace(/\d+$/, "").trim())
+          .filter(Boolean);
+        while (parts.length > 1 && FONT_CUT_WORDS.test(parts[parts.length - 1])) parts.pop();
+        const base = parts.join("-");
+        if (!/^[A-Za-z][A-Za-z-]{2,}$/.test(base) || UNNAMED_FONT_FILE_STEMS.has(base.toLowerCase())) return "";
+        return base
+          .split("-")
+          .map((part) =>
+            part.replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2").replace(/([a-z])([A-Z])/g, "$1 $2")
+          )
+          .join("-")
+          .trim();
+      };
+      const resolveCanvaFontToken = (family) => {
+        const name = String(family || "").trim();
+        // A real family name has spaces or no digits; a Canva token has neither.
+        if (!name || /\s/.test(name) || !/\d/.test(name) || !CANVA_FONT_TOKEN_PATTERN.test(name)) {
+          return name;
+        }
+        if (canvaFontTokenNames.has(name)) return canvaFontTokenNames.get(name) || name;
+        let resolved = "";
+        try {
+          const sheets = Array.from(document.styleSheets || []);
+          for (let s = 0; s < sheets.length && !resolved; s += 1) {
+            let rules = null;
+            try {
+              rules = sheets[s].cssRules || [];
+            } catch (_error) {
+              continue;
+            }
+            for (let r = 0; r < rules.length && !resolved; r += 1) {
+              const rule = rules[r];
+              if (!rule || rule.type !== CSSRule.FONT_FACE_RULE) continue;
+              const ruleFamily = String(rule.style?.getPropertyValue?.("font-family") || "")
+                .replace(/^['"]+|['"]+$/g, "")
+                .trim();
+              if (ruleFamily !== name) continue;
+              const srcMatch = /url\((['"]?)([^'")]+)\1\)/i.exec(rule.style?.getPropertyValue?.("src") || "");
+              if (srcMatch) resolved = familyNameFromFontFileUrl(srcMatch[2]);
+            }
+          }
+        } catch (_error) {
+          resolved = "";
+        }
+        canvaFontTokenNames.set(name, resolved);
+        return resolved || name;
       };
 
       const normalizeAssetUrl = (value) => {
@@ -1989,6 +2346,81 @@
         }
       };
 
+      // Canva's animated stickers ("Animated Watercolor …") are rects whose fill is a VIDEO; the
+      // editor shows them as a looping GIF from video-public.canva.com that paints in from a
+      // BLANK first frame, holds for ~9 s, then paints out to a blank last frame. drawImage()
+      // always paints an animated image's first frame, so the raster fallback captured nothing:
+      // six watercolours on DAHOhOaWZTw imported as fully transparent PNGs. Decode the animation
+      // and keep its fullest frame (most opaque pixels) — the settled look Canva shows at rest.
+      // The GIFs run 14–28 MB, which the plain fetch cap below would also have rejected.
+      const ANIMATED_IMAGE_MAX_BYTES = 64_000_000;
+      const ANIMATED_IMAGE_SAMPLE_FRAMES = 16;
+      const settledFrameOfAnimatedImage = async (blob, mimeType) => {
+        if (typeof ImageDecoder !== "function") return "";
+        let decoder = null;
+        try {
+          if (!(await ImageDecoder.isTypeSupported(mimeType))) return "";
+          decoder = new ImageDecoder({ data: await blob.arrayBuffer(), type: mimeType });
+          await decoder.tracks.ready;
+          await decoder.completed;
+          const track = decoder.tracks.selectedTrack;
+          const frameCount = Number(track?.frameCount || 0);
+          if (!track || !track.animated || frameCount <= 1) return "";
+          const canvas = document.createElement("canvas");
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+          if (!context) return "";
+          const best = document.createElement("canvas");
+          let bestCoverage = -1;
+          // Increasing frame indices: a GIF decodes sequentially, so this costs one pass.
+          const samples = Math.min(ANIMATED_IMAGE_SAMPLE_FRAMES, frameCount);
+          for (let sample = 0; sample < samples; sample += 1) {
+            const frameIndex = Math.min(frameCount - 1, Math.floor(((sample + 0.5) * frameCount) / samples));
+            const { image } = await decoder.decode({ frameIndex });
+            try {
+              const width = Number(image.displayWidth || image.codedWidth || 0);
+              const height = Number(image.displayHeight || image.codedHeight || 0);
+              if (width <= 0 || height <= 0) continue;
+              if (canvas.width !== width || canvas.height !== height) {
+                canvas.width = width;
+                canvas.height = height;
+              }
+              context.clearRect(0, 0, width, height);
+              context.drawImage(image, 0, 0);
+              const pixels = context.getImageData(0, 0, width, height).data;
+              let opaque = 0;
+              let seen = 0;
+              for (let offset = 3; offset < pixels.length; offset += 16) {
+                seen += 1;
+                if (pixels[offset] > 16) opaque += 1;
+              }
+              const coverage = seen > 0 ? opaque / seen : 0;
+              // Ties keep the earliest frame (an opaque animation has no "settled" frame).
+              if (coverage > bestCoverage) {
+                bestCoverage = coverage;
+                best.width = width;
+                best.height = height;
+                const bestContext = best.getContext("2d");
+                bestContext.clearRect(0, 0, width, height);
+                bestContext.drawImage(canvas, 0, 0);
+              }
+            } finally {
+              image.close();
+            }
+          }
+          if (bestCoverage <= 0) return "";
+          const dataUrl = best.toDataURL("image/png");
+          return String(dataUrl).startsWith("data:image/png") ? dataUrl : "";
+        } catch (_error) {
+          return "";
+        } finally {
+          try {
+            decoder?.close();
+          } catch (_closeError) {
+            /* already closed */
+          }
+        }
+      };
+
       const readRemoteImageAssetAsDataUrl = async (sourceUrl, maxBytes = 8_000_000) => {
         const normalizedUrl = normalizeAssetUrl(sourceUrl);
         if (!normalizedUrl) return "";
@@ -2008,7 +2440,7 @@
             });
             if (!response.ok) continue;
             const blob = await response.blob();
-            if (!blob || blob.size <= 0 || blob.size > maxBytes) continue;
+            if (!blob || blob.size <= 0 || blob.size > Math.max(maxBytes, ANIMATED_IMAGE_MAX_BYTES)) continue;
             const mimeType = String(blob.type || "").trim().toLowerCase();
             let typedBlob = blob;
             if (!mimeType.startsWith("image/")) {
@@ -2018,6 +2450,11 @@
               if (!sniffed) continue;
               typedBlob = new Blob([blob], { type: sniffed });
             }
+            if (typedBlob.type === "image/gif" || typedBlob.type === "image/webp") {
+              const settled = await settledFrameOfAnimatedImage(typedBlob, typedBlob.type);
+              if (settled) return settled;
+            }
+            if (typedBlob.size > maxBytes) continue;
             const dataUrl = await toDataUrlFromBlob(typedBlob);
             if (String(dataUrl).startsWith("data:image/")) return dataUrl;
           } catch (_error) {
@@ -2046,6 +2483,28 @@
         if (String(initialSrc).startsWith("blob:")) {
           const blobDataUrl = await blobUrlToDataUrl(initialSrc);
           if (blobDataUrl) {
+            // A blob is the WHOLE media, exactly like a fetched one, so an element that shows a
+            // SLICE of it needs the same fit. Returning the blob raw drew the entire "حج مبرور"
+            // artwork, shrunk, into the box that was meant to show only "مبرور" — while its
+            // sibling, whose blob had already been revoked, fell through to the raster path and
+            // came out cropped correctly. Same asset, two results, by luck.
+            if (fitFetchedToTarget) {
+              const fitted = await fitDataUrlToDisplayedBox(
+                blobDataUrl,
+                targetWidth,
+                targetHeight,
+                cropRegion
+              );
+              if (fitted && String(fitted.dataUrl || "").startsWith("data:image/")) {
+                return {
+                  src: fitted.dataUrl,
+                  dataUrl: fitted.dataUrl,
+                  provenance: "fetch-fit",
+                  sourceWidth: fitted.width,
+                  sourceHeight: fitted.height,
+                };
+              }
+            }
             return { src: blobDataUrl, dataUrl: blobDataUrl, provenance: "blob" };
           }
           // fall through to raster
@@ -2611,6 +3070,262 @@
       // from the dominant leaf text element so imported text matches the rendered
       // weight (e.g. numbers shown in Poppins 900, not the inherited 400). Computed
       // style resolves inheritance, so a genuinely-400 leaf still reports 400.
+      // Canva renders curved text as one span per letter, each carrying its own rotation. Read
+      // the arc back off those rotations: how far the letters turn from first to last is the
+      // sweep, and whether the ends sit lower than the middle says which way it bows. The result
+      // is scale-free (degrees + a direction), so the importer can size it against the editor's
+      // own curve model once the layer's design-space width is known.
+      const detectTextCurve = (layerNode) => {
+        if (!layerNode) return null;
+        const paragraphs = Array.from(layerNode.querySelectorAll("p")).filter(
+          (item) => !isInsideForeignLayer(item, layerNode)
+        );
+        // The same duplicated logical copy dedupeTextLines collapses: read the first copy only.
+        const firstCopy = paragraphs.slice(0, Math.max(1, Math.ceil(paragraphs.length / 2)));
+        const letters = [];
+        firstCopy.forEach((paragraph) => {
+          Array.from(paragraph.querySelectorAll("span")).forEach((span) => {
+            if (span.children.length > 0 || !String(span.textContent || "").trim()) return;
+            const transform = window.getComputedStyle(span).transform;
+            const match = /matrix\(([^)]+)\)/.exec(transform || "");
+            if (!match) return;
+            const [a, b] = match[1].split(",").map((part) => Number(part));
+            if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+            const rect = span.getBoundingClientRect();
+            letters.push({
+              deg: (Math.atan2(b, a) * 180) / Math.PI,
+              cx: rect.left + rect.width / 2,
+              cy: rect.top + rect.height / 2,
+            });
+          });
+        });
+        if (letters.length < 6) return null;
+        const first = letters[0];
+        const last = letters[letters.length - 1];
+        const spread = last.deg - first.deg;
+        if (Math.abs(spread) < 8) return null;
+        // Monotonic rotation from letter to letter is the signature of one arc; anything else
+        // (a wave, a scatter) is not a curve the editor can express.
+        const direction = Math.sign(spread);
+        for (let index = 1; index < letters.length; index += 1) {
+          if ((letters[index].deg - letters[index - 1].deg) * direction < -1.5) return null;
+        }
+        // The rotations run between letter CENTRES; stretch by one step so the arc also covers
+        // the half-glyph on each end.
+        const sweepDeg = Math.abs(spread) * (letters.length / (letters.length - 1));
+        const middle = letters[Math.floor(letters.length / 2)];
+        const endsY = (first.cy + last.cy) / 2;
+        // Screen y grows downward: ends below the middle means the text bows UP.
+        const bowsUp = endsY > middle.cy;
+        // Where the run actually sits inside the box, as fractions of the node's own rect, so the
+        // importer can place the editor's curve THROUGH the letters rather than through the box:
+        // the editor's path ends at the box's vertical middle and bulges out of it, while Canva's
+        // letters end at the bottom of the box and peak near its top — a curve fitted to the box
+        // instead of the letters sat ~120px too high. The median centre-to-centre step is the
+        // advance (spaces make a few steps longer; the median ignores them).
+        const box = layerNode.getBoundingClientRect();
+        const steps = [];
+        for (let index = 1; index < letters.length; index += 1) {
+          steps.push(Math.hypot(letters[index].cx - letters[index - 1].cx, letters[index].cy - letters[index - 1].cy));
+        }
+        steps.sort((a, b) => a - b);
+        const advance = steps[Math.floor(steps.length / 2)] || 0;
+        const frac = (value, size) => (size > 0 ? Math.round((value / size) * 10000) / 10000 : 0);
+        return {
+          sweepDeg: Math.round(sweepDeg * 10) / 10,
+          bowsUp,
+          firstXFrac: frac(first.cx - box.left, box.width),
+          lastXFrac: frac(last.cx - box.left, box.width),
+          endsYFrac: frac(endsY - box.top, box.height),
+          apexYFrac: frac(middle.cy - box.top, box.height),
+          advanceFrac: frac(advance, box.width),
+        };
+      };
+
+      // Canva's "Background" text effect is not a CSS background: it is an SVG <path> inside the
+      // text element — rounded boxes behind each line, merged into one outline. The CSS read above
+      // (resolveTextBackgroundStyle) never saw it, so these boxes were silently dropped. Read the
+      // path instead: its fill and opacity, its corner radius (the first cubic of a rounded rect
+      // turns through a quarter circle, so |dx| = |dy| = r), and how far it reaches past the text —
+      // horizontally past the widest line's ink, vertically past the element's line box. All in
+      // design px, via the element's own css→design scale.
+      const detectTextBackgroundEffect = (layerNode, designWidth) => {
+        if (!layerNode || !(Number(designWidth) > 0)) return null;
+        const nodeRect = layerNode.getBoundingClientRect();
+        if (!(nodeRect.width > 0) || !(nodeRect.height > 0)) return null;
+        const toDesign = Number(designWidth) / nodeRect.width;
+        let best = null;
+        Array.from(layerNode.querySelectorAll("svg path")).forEach((path) => {
+          if (isInsideForeignLayer(path, layerNode)) return;
+          const style = window.getComputedStyle(path);
+          const fill = String(style.fill || "").trim();
+          if (!fill || fill === "none" || isTransparentColor(fill) || fill.startsWith("url(")) return;
+          const opacity = (Number(style.opacity) || 1) * (Number(style.fillOpacity) || 1);
+          if (opacity <= 0.01) return;
+          const rect = path.getBoundingClientRect();
+          if (rect.width < 4 || rect.height < 4) return;
+          const area = rect.width * rect.height;
+          if (!best || area > best.area) best = { path, fill, opacity, rect, area };
+        });
+        if (!best) return null;
+
+        // Widest rendered line of ink (first logical copy only — Canva keeps two).
+        const paragraphs = Array.from(layerNode.querySelectorAll("p")).filter(
+          (item) => !isInsideForeignLayer(item, layerNode)
+        );
+        const firstCopy = paragraphs.slice(0, Math.max(1, Math.ceil(paragraphs.length / 2)));
+        const lines = new Map();
+        firstCopy.forEach((paragraph) => {
+          Array.from(paragraph.querySelectorAll("span")).forEach((span) => {
+            if (span.children.length > 0 || !String(span.textContent || "").trim()) return;
+            const r = span.getBoundingClientRect();
+            if (!(r.width > 0)) return;
+            const key = Math.round(r.top / 4);
+            const line = lines.get(key) || { left: Infinity, right: -Infinity };
+            line.left = Math.min(line.left, r.left);
+            line.right = Math.max(line.right, r.right);
+            lines.set(key, line);
+          });
+        });
+        let inkWidth = 0;
+        lines.forEach((line) => {
+          inkWidth = Math.max(inkWidth, line.right - line.left);
+        });
+        if (!(inkWidth > 0)) inkWidth = nodeRect.width;
+
+        // Corner radius from the first cubic segment, in the path's own units → css → design.
+        let radiusPx = 0;
+        try {
+          const tokens = String(best.path.getAttribute("d") || "").match(/[MLCZmlcz]|-?\d*\.?\d+(?:e[-+]?\d+)?/g) || [];
+          let cx = 0;
+          let cy = 0;
+          let command = "";
+          for (let index = 0; index < tokens.length; ) {
+            const token = tokens[index];
+            if (/^[MLCZmlcz]$/.test(token)) {
+              command = token;
+              index += 1;
+              continue;
+            }
+            if (command === "M" || command === "L") {
+              cx = Number(tokens[index]);
+              cy = Number(tokens[index + 1]);
+              index += 2;
+            } else if (command === "C") {
+              const ex = Number(tokens[index + 4]);
+              const ey = Number(tokens[index + 5]);
+              radiusPx = (Math.abs(ex - cx) + Math.abs(ey - cy)) / 2;
+              break;
+            } else {
+              index += 1;
+            }
+          }
+          const bbox = typeof best.path.getBBox === "function" ? best.path.getBBox() : null;
+          const unitsToCss = bbox && bbox.width > 0 ? best.rect.width / bbox.width : 1;
+          radiusPx = radiusPx * unitsToCss * toDesign;
+        } catch (_error) {
+          radiusPx = 0;
+        }
+
+        const rgb = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(best.fill);
+        const color = rgb
+          ? `#${[rgb[1], rgb[2], rgb[3]]
+              .map((part) => Math.max(0, Math.min(255, Math.round(Number(part)))).toString(16).padStart(2, "0"))
+              .join("")}`
+          : best.fill;
+        const round1 = (value) => Math.round(value * 10) / 10;
+        return {
+          color,
+          opacity: Math.round(best.opacity * 1000) / 1000,
+          radiusPx: round1(Math.max(0, radiusPx)),
+          padXPx: round1(Math.max(0, (best.rect.width - inkWidth) / 2) * toDesign),
+          padYPx: round1(Math.max(0, (best.rect.height - nodeRect.height) / 2) * toDesign),
+        };
+      };
+
+      // Canva's shaped photo frames (arches, blobs, badges…) are a `shape` element whose image is
+      // clipped by an SVG <clipPath> path — `clip-path: url(#id)` on a wrapper div. The importer
+      // fetched the photo and dropped the clip, so an arch came in as a plain rectangle. Sample the
+      // clip outline into a polygon in the frame's own 0..100 space (the editor's and the app's
+      // frame-shape unit): userSpaceOnUse clip coordinates are the clipped element's CSS box, so
+      // they normalise by its layout size; objectBoundingBox ones are already 0..1.
+      const detectClipPathFrameMask = (layerNode) => {
+        if (!layerNode) return null;
+        const clipped = [layerNode, ...Array.from(layerNode.querySelectorAll("*"))].find((element) => {
+          if (element !== layerNode && isInsideForeignLayer(element, layerNode)) return false;
+          const clip = window.getComputedStyle(element).clipPath;
+          return typeof clip === "string" && clip.startsWith("url(");
+        });
+        if (!clipped) return null;
+        const id = /url\(["']?#([^"')]+)["']?\)/.exec(window.getComputedStyle(clipped).clipPath || "")?.[1];
+        const clipElement = id ? document.getElementById(id) : null;
+        const paths = clipElement ? Array.from(clipElement.querySelectorAll("path")) : [];
+        if (paths.length !== 1 || typeof paths[0].getTotalLength !== "function") return null;
+        const path = paths[0];
+        const boundingBoxUnits = clipElement.getAttribute("clipPathUnits") === "objectBoundingBox";
+        const boxWidth = clipped.offsetWidth || clipped.getBoundingClientRect().width;
+        const boxHeight = clipped.offsetHeight || clipped.getBoundingClientRect().height;
+        if (!boundingBoxUnits && !(boxWidth > 0 && boxHeight > 0)) return null;
+        let total = 0;
+        try {
+          total = path.getTotalLength();
+        } catch (_error) {
+          return null;
+        }
+        if (!(total > 0)) return null;
+        const SAMPLES = 160;
+        const raw = [];
+        for (let index = 0; index < SAMPLES; index += 1) {
+          const point = path.getPointAtLength((total * index) / SAMPLES);
+          const x = boundingBoxUnits ? point.x * 100 : (point.x / boxWidth) * 100;
+          const y = boundingBoxUnits ? point.y * 100 : (point.y / boxHeight) * 100;
+          raw.push([Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y))]);
+        }
+        // Drop points a straight line already explains (Ramer–Douglas–Peucker, 0.12% of the box):
+        // straight sides collapse to their ends, curves keep their samples.
+        const simplify = (points, tolerance) => {
+          if (points.length < 3) return points;
+          const [ax, ay] = points[0];
+          const [bx, by] = points[points.length - 1];
+          const length = Math.hypot(bx - ax, by - ay) || 1;
+          let worst = 0;
+          let worstIndex = 0;
+          for (let index = 1; index < points.length - 1; index += 1) {
+            const [px, py] = points[index];
+            const distance = Math.abs((by - ay) * px - (bx - ax) * py + bx * ay - by * ax) / length;
+            if (distance > worst) {
+              worst = distance;
+              worstIndex = index;
+            }
+          }
+          if (worst <= tolerance) return [points[0], points[points.length - 1]];
+          const left = simplify(points.slice(0, worstIndex + 1), tolerance);
+          const right = simplify(points.slice(worstIndex), tolerance);
+          return [...left.slice(0, -1), ...right];
+        };
+        // A closed ring has no baseline (its ends coincide), so split it at the point farthest
+        // from the start and simplify the two open halves.
+        let far = 0;
+        let farDistance = -1;
+        raw.forEach(([x, y], index) => {
+          const distance = Math.hypot(x - raw[0][0], y - raw[0][1]);
+          if (distance > farDistance) {
+            farDistance = distance;
+            far = index;
+          }
+        });
+        const firstHalf = simplify(raw.slice(0, far + 1), 0.12);
+        const secondHalf = simplify([...raw.slice(far), raw[0]], 0.12);
+        const simplified = [...firstHalf.slice(0, -1), ...secondHalf.slice(0, -1)];
+        if (simplified.length < 3) return null;
+        // A clip that is just the box itself is not a shape worth a frame.
+        const onEdge = (value) => value <= 0.5 || value >= 99.5;
+        if (simplified.length <= 4 && simplified.every(([x, y]) => onEdge(x) && onEdge(y))) return null;
+        return {
+          points: simplified.flatMap(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]),
+        };
+      };
+
       const resolveEffectiveFontWeight = (styleElement, ownerNode, fallbackStyle) => {
         const root = styleElement || ownerNode;
         const fallback = parseFontWeight(fallbackStyle?.fontWeight);
@@ -4276,6 +4991,14 @@
               (modelFrameBorder.rectFrame || modelFrameBorder.circleFrame)
           );
           const shouldUseVisibleGeometry = isMaskedImage && !isReproducibleModelFrame;
+          // A clip-path frame is imported as a real frame (polygon shape + the photo inside) only
+          // when the layer keeps its FULL box; a frame cut off by the page edge keeps the old
+          // snapshot path, because its polygon is normalised to the full box.
+          const layerIsPageClipped = Boolean(
+            viewportInfo.rawRect &&
+              (Math.abs(Number(viewportInfo.rawRect.width) - Number(viewportRect.width)) > 2 ||
+                Math.abs(Number(viewportInfo.rawRect.height) - Number(viewportRect.height)) > 2)
+          );
           // A non-masked image whose FULL frame extends past the canvas edge can NEVER be
           // faithfully captured by a rendered snapshot (the snapshot/isolation pass only sees
           // on-canvas pixels), so it must keep the full fetched asset — otherwise the bleeding
@@ -4408,6 +5131,20 @@
               }
             }
             thinVectorStrokeStyle = resolveThinVectorStrokeStyle(node);
+            // A vector shape whose every path is transparent or at opacity 0 paints NOTHING in
+            // Canva. The background-colour read above still found a colour on some inner wrapper,
+            // so two such rects imported as solid black blocks over a silhouette. resolveThin…
+            // already skips invisible paths and comes back empty-handed for them; when the node
+            // is an SVG-rendered shape with no text and no image, that empty answer is the answer.
+            if (
+              !text &&
+              shapeFill &&
+              !thinVectorStrokeStyle.color &&
+              findBestSvgRenderCandidate(node) instanceof SVGElement &&
+              getScopedImageElements(node).length === 0
+            ) {
+              continue;
+            }
             shapeImageDataUrl = extractShapeImageDataUrl(node, width, height, {
               excludeTextNodes: Boolean(text),
             });
@@ -4530,7 +5267,10 @@
           const hasMediaDimensions = mediaWidth >= 12 && mediaHeight >= 12;
           const hasImageSignal = Boolean(imageElement || imageSrc || imageDataUrl || backgroundImageSignals.length);
           const zIndexSignal = zIndex === null || zIndex >= -10;
-          const opacitySignal = effectiveOpacity > 0.03;
+          // Above 1%, not 3%: a full-width calligraphy watermark at 2% is faint by design and
+          // plainly visible in Canva's render, and 3% dropped it entirely. 1% is also what the
+          // background-candidate and thin-vector passes already use as "invisible".
+          const opacitySignal = effectiveOpacity > 0.01;
           let imageConfidence = 0;
           if (imageElement) imageConfidence += 3;
           if (shapeImageDataUrl) imageConfidence += 4;
@@ -4592,11 +5332,14 @@
           // Canva applies mirroring at the FILL level (inner media element), invisible to the LB
           // node's transform matrix — merge the model's fill flips in or mirrored decorations
           // import un-mirrored (e.g. paired corner flowers, one flipX + rot180).
-          const modelFillImage = (fiberModelById[String(node.id || "")] || {}).image || null;
+          const modelEntryForFlip = fiberModelById[String(node.id || "")] || {};
+          const modelFillImage = modelEntryForFlip.image || null;
+          // A video fill (animated sticker) has no `image` entry; its mirroring rides on fillFlip.
+          const modelFillFlip = modelFillImage || modelEntryForFlip.fillFlip || null;
           const normalizedLayerFlipX =
-            (isThinVectorDividerLayer ? false : layerFlipX) || Boolean(modelFillImage?.flipX);
+            (isThinVectorDividerLayer ? false : layerFlipX) || Boolean(modelFillFlip?.flipX);
           const normalizedLayerFlipY =
-            (isThinVectorDividerLayer ? false : layerFlipY) || Boolean(modelFillImage?.flipY);
+            (isThinVectorDividerLayer ? false : layerFlipY) || Boolean(modelFillFlip?.flipY);
           const imageRect = imageElement?.getBoundingClientRect?.() || null;
           // Compare the image against its FULL (unclipped) layer frame, NOT the page-clipped
           // viewportRect. Otherwise any image that merely bleeds past the CANVAS edge (a
@@ -4800,6 +5543,10 @@
             textAlign: textStyle?.textAlign || "left",
             color: textStyle?.color || "#111827",
             fontFamily: resolvedFontFamily,
+            fontLacksArabic:
+              kind === "text" && ARABIC_LETTER_PATTERN.test(String(text || ""))
+                ? fontLacksArabicGlyphs(textStyle?.fontFamily, textStyle?.fontWeight, textStyle?.fontStyle)
+                : false,
             fontSize: resolvedFontSize,
             fontStyle: textStyle?.fontStyle || "normal",
             fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
@@ -4808,6 +5555,13 @@
             textDecoration,
             textBackgroundColor,
             textBackgroundRadius,
+            textCurve: kind === "text" ? detectTextCurve(node) : null,
+            textShiftY: kind === "text" && textStyleElement ? getInnerTextShiftY(textStyleElement, node) : 0,
+            textBackgroundEffect: kind === "text" ? detectTextBackgroundEffect(node, width) : null,
+            frameMask:
+              kind === "image" && isMaskedImage && !isReproducibleModelFrame && !layerIsPageClipped
+                ? detectClipPathFrameMask(node)
+                : null,
             fill: isThinVectorDividerLayer ? thinVectorStrokeStyle.color : shapeFill || "",
             zIndex: zIndex ?? layerIndex,
             opacity: effectiveOpacity,
@@ -4868,6 +5622,10 @@
                 textAlign: textStyle?.textAlign || "left",
                 color: textStyle?.color || "#111827",
                 fontFamily: resolvedFontFamily,
+                fontLacksArabic:
+                  ARABIC_LETTER_PATTERN.test(String(text || ""))
+                    ? fontLacksArabicGlyphs(textStyle?.fontFamily, textStyle?.fontWeight, textStyle?.fontStyle)
+                    : false,
                 fontSize: resolvedFontSize,
                 fontStyle: textStyle?.fontStyle || "normal",
                 fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
@@ -5007,7 +5765,8 @@
           }
           // Canva font token "X,0" → CSS family "X_0" (Canva loads each design font under the
           // underscore name; the existing font-asset collector captures the loaded FontFaces).
-          const fontTokenToFamily = (token) => String(token || "").trim().replace(/,/g, "_");
+          const fontTokenToFamily = (token) =>
+            resolveCanvaFontToken(String(token || "").trim().replace(/,/g, "_"));
           const clampOpacity = (transparency) => {
             let t = Number(transparency) || 0;
             if (t > 1) t /= 100;
@@ -5510,17 +6269,37 @@
               layer.angle = Number(model.rotation);
             }
             const modelRotationAbs = Math.abs(Number(model.rotation) || 0);
+            // The model box is LOCAL to the element's group, so a nested element's left/top are
+            // only page space once every ancestor group's own offset is added. Taking them raw put
+            // a Kaaba cropped inside a group at (209, 901) down at the page ORIGIN — the whole
+            // composition it anchored fell apart around it. A rotated ancestor would rotate that
+            // offset too, so the override is skipped there and the DOM box stays.
+            const modelPageOffset = (() => {
+              let dx = 0;
+              let dy = 0;
+              let hops = 0;
+              let parent = model.parentId ? fiberModelById[String(model.parentId)] : null;
+              while (parent && hops < 8) {
+                if (Math.abs(Number(parent.rotation) || 0) > 0.5) return null;
+                dx += Number(parent.left) || 0;
+                dy += Number(parent.top) || 0;
+                parent = parent.parentId ? fiberModelById[String(parent.parentId)] : null;
+                hops += 1;
+              }
+              return { dx, dy };
+            })();
             if (
               modelRotationAbs > 0.5 &&
               // Same reason as the rotation guard above: a DOM-derived box is already correct in
               // page space, while model.left/top/width/height are LOCAL to the element's group.
               !layer.domGeometry &&
+              modelPageOffset &&
               String(layer.kind || "") === "image" &&
               Number(model.width) >= 2 &&
               Number(model.height) >= 2
             ) {
-              layer.x = Number(model.left) || 0;
-              layer.y = Number(model.top) || 0;
+              layer.x = (Number(model.left) || 0) + modelPageOffset.dx;
+              layer.y = (Number(model.top) || 0) + modelPageOffset.dy;
               layer.width = Math.max(1, Math.round(Number(model.width)));
               layer.height = Math.max(1, Math.round(Number(model.height)));
               layer.pageRelativeRect = {
@@ -5937,20 +6716,47 @@
       // keeps the matching font faces (e.g. Poppins Black 900 for big numbers) instead
       // of the arbitrary first few Canva happens to declare for the family.
       const usedFontTargetsByFamily = {};
+      const addFontTarget = (family, target) => {
+        const bucket = usedFontTargetsByFamily[family] || [];
+        if (!bucket.some((t) => t.weight === target.weight && t.style === target.style)) {
+          bucket.push(target);
+        }
+        usedFontTargetsByFamily[family] = bucket;
+      };
+      // A Canva text box can mix cuts — one bold line inside a regular paragraph. The layer
+      // carries ONE weight (the editor has no per-run styling), but every cut the box renders
+      // still has to ship, or the family lands with the regular file alone and the bold line can
+      // never be recovered. Read the runs off the live node.
+      const runFontTargets = (layerId) => {
+        const node = layerId ? document.getElementById(String(layerId)) : null;
+        if (!node) return [];
+        const targets = [];
+        node.querySelectorAll("*").forEach((child) => {
+          if (child.children.length > 0 || !String(child.textContent || "").trim()) return;
+          const style = window.getComputedStyle(child);
+          if (parseFloat(style.fontSize || "0") < 6 || style.visibility === "hidden") return;
+          targets.push({
+            family: normalizeFontFamilyName(style.fontFamily),
+            weight: parseFontWeight(style.fontWeight),
+            style: normalizeFontStyle(style.fontStyle),
+          });
+        });
+        return targets;
+      };
       layers
         .filter((layer) => String(layer?.kind || "").toLowerCase() === "text")
         .forEach((layer) => {
           const family = normalizeFontFamilyName(layer?.fontFamily);
           if (!family) return;
-          const target = {
+          addFontTarget(family, {
             weight: parseFontWeight(layer?.fontWeight),
             style: normalizeFontStyle(layer?.fontStyle),
-          };
-          const bucket = usedFontTargetsByFamily[family] || [];
-          if (!bucket.some((t) => t.weight === target.weight && t.style === target.style)) {
-            bucket.push(target);
-          }
-          usedFontTargetsByFamily[family] = bucket;
+          });
+          runFontTargets(layer?.id).forEach((target) => {
+            if (target.family && target.family === family) {
+              addFontTarget(family, { weight: target.weight, style: target.style });
+            }
+          });
         });
       const resolvedFontAssets = await resolveFontAssetsForFamilies(
         documentFontAssets,

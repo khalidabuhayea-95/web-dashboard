@@ -1,4 +1,6 @@
 import Konva from "konva";
+// Side effect: the snug-fit measures RTL letter-spacing the way the canvas draws it.
+import "@/lib/editor/konvaTextPatches";
 
 /**
  * Everything that changes how a text layer is laid out. Deliberately mirrors the props the

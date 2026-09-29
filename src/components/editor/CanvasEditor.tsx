@@ -3,6 +3,8 @@
 import { memo, useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import Konva from "konva";
+// Side effect: RTL letter-spacing is measured the way Konva draws it (see the module).
+import "@/lib/editor/konvaTextPatches";
 import useImage from "use-image";
 import { Minus, Plus } from "lucide-react";
 import {
@@ -70,6 +72,7 @@ import {
 import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
 import CanvaUnitText from "@/components/editor/CanvaUnitText";
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
+import { drawTextBackground, resolveTextBackgroundBox } from "@/lib/editor/textBackground";
 import {
   clearTextBoxMeasurementCache,
   resolveSnugTextBox,
@@ -82,13 +85,42 @@ import {
   splitWordsForMotion,
   layoutWordsSingleLine,
 } from "@/lib/editor/animationGlyph";
-import { resolveCssFontFamily } from "@/lib/templates/fontCatalog";
+import { resolveCssFontFamily, resolveFontByName } from "@/lib/templates/fontCatalog";
 import {
   getPageDurationMs,
   getTimelinePageEntries,
   isElementVisibleAtPlayhead,
   resolveTimelineWindow,
 } from "@/lib/editor/animationTimeline";
+
+// Families the browser draws without any @font-face (so none is ever declared for them). The
+// snug-fit waits for a library font's face to be declared; these never will be, and need no wait.
+const SYSTEM_FONT_FAMILIES = new Set([
+  "arial", "helvetica", "helvetica neue", "times new roman", "times", "georgia", "verdana",
+  "tahoma", "trebuchet ms", "courier new", "courier", "segoe ui", "system-ui", "sans-serif",
+  "serif", "monospace", "cursive", "fantasy",
+]);
+
+const fontFamilyKey = (value: unknown) => String(value || "").replace(/^['"]+|['"]+$/g, "").trim().toLowerCase();
+
+/**
+ * Whether a text's family can be measured yet. A library font (anything outside the built-in
+ * catalog, which maps to system stacks, and the web-safe families) is declared asynchronously once
+ * the font list arrives. Until then `document.fonts.check()` and `document.fonts.load()` both
+ * succeed at once — they are true for a family with no @font-face at all — so a measurement would
+ * silently use the FALLBACK's glyphs. Pass one Set per pass to scan the declared faces only once.
+ */
+function isTextFontDeclared(fontFamily: unknown, declared: { current: Set<string> | null }) {
+  if (typeof document === "undefined" || !document.fonts) return true;
+  const key = fontFamilyKey(fontFamily);
+  if (!key || resolveFontByName(String(fontFamily || "")) || SYSTEM_FONT_FAMILIES.has(key)) return true;
+  if (!declared.current) {
+    const families = new Set<string>();
+    document.fonts.forEach((face) => families.add(fontFamilyKey(face.family)));
+    declared.current = families;
+  }
+  return declared.current.has(key);
+}
 
 interface PreviewMediaController {
   /**
@@ -2026,7 +2058,7 @@ function CanvasFrameNodeImpl({
       <Shape
         width={element.width}
         height={element.height}
-        stroke={isContentEditing ? "#ff5c7a" : isDropTarget ? "#2c68be" : element.stroke || "#94a3b8"}
+        stroke={isContentEditing ? "#ff5c7a" : isDropTarget ? "#22828c" : element.stroke || "#94a3b8"}
         strokeWidth={isContentEditing || isDropTarget ? Math.max(3, element.strokeWidth || 2) : element.strokeWidth || 2}
         dash={isContentEditing ? [8, 6] : undefined}
         fillEnabled={false}
@@ -2648,6 +2680,23 @@ function CanvasPageSceneImpl({
                     }
                   : {};
               const hasTextCurve = isCurvedText(element);
+              // The background box, in the node's own coordinates. Drawn INSIDE the text's node
+              // (a scene-function underlay, or the first child of its group) so it moves, rotates,
+              // scales and animates with the glyphs — including mid-drag and mid-transform, which
+              // a sibling layer driven by React state would trail.
+              const textBackground = resolveTextBackgroundBox(element);
+              const textBackgroundRect = textBackground ? (
+                <Rect
+                  x={textBackground.x}
+                  y={textBackground.y}
+                  width={textBackground.width}
+                  height={textBackground.height}
+                  cornerRadius={textBackground.radius}
+                  fill={textBackground.fill}
+                  opacity={textBackground.opacity}
+                  listening={false}
+                />
+              ) : null;
 
               if (hasTextCurve) {
                 return (
@@ -2666,6 +2715,8 @@ function CanvasPageSceneImpl({
                     }
                   >
                     <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
+                    {/* The app keeps a curved layer's box on the UN-curved frame; so do we. */}
+                    {textBackgroundRect}
                     <TextPath
                       {...textStrokeProps}
                       data={resolveTextCurvePath(element)}
@@ -2711,6 +2762,7 @@ function CanvasPageSceneImpl({
                       direction: direction === "rtl" ? "rtl" : "ltr",
                       letterSpacing: element.letterSpacing || 0,
                       fill: element.color || element.fill,
+                      background: textBackground,
                       ...(textStrokeWidthPx > 0 && String(element.stroke || "").trim()
                         ? { stroke: element.stroke, strokeWidth: textStrokeWidthPx }
                         : {}),
@@ -2747,6 +2799,7 @@ function CanvasPageSceneImpl({
                   const lineHeightPx = element.fontSize * (element.lineHeight || 1);
                   return (
                     <Group key={element.id} {...commonProps}>
+                      {textBackgroundRect}
                       {boxes.map((b) => {
                         const gv = glyphVisual(gm.type, gm.progress, gm.durationMs, 0, 1, b.wordIndex, words.length);
                         if (!gv || gv.alpha <= 0.001) return null; // ONE_WORD hides inactive words
@@ -2809,6 +2862,8 @@ function CanvasPageSceneImpl({
                 };
                 return (
                   <Group key={element.id} {...commonProps}>
+                    {/* Outside the reveal clip: the box is the layer's, not part of the reveal. */}
+                    {textBackgroundRect}
                     <Group
                       listening={false}
                       clipFunc={
@@ -2866,6 +2921,19 @@ function CanvasPageSceneImpl({
                   direction={direction}
                   letterSpacing={element.letterSpacing}
                   textDecoration={element.textDecoration}
+                  // The plain path stays a single Konva.Text (the Transformer, inline editing and
+                  // the snug-fit all address it as one), so the box is painted as an underlay in
+                  // its own scene function rather than as a sibling node.
+                  sceneFunc={
+                    textBackground
+                      ? (context, shape) => {
+                          drawTextBackground(context._context, textBackground);
+                          (shape as unknown as { _sceneFunc: (ctx: Konva.Context) => void })._sceneFunc(
+                            context
+                          );
+                        }
+                      : undefined
+                  }
                   onDblClick={
                     interactive
                       ? (event) => onBeginInlineTextEdit?.(event.target as Konva.Text, element)
@@ -3056,7 +3124,9 @@ function resolveTextCurvePath(element: EditorElement) {
   const width = Math.max(2, Number(element.width) || 2);
   const height = Math.max(2, Number(element.height) || 2);
   const fontSize = Math.max(1, Number(element.fontSize) || 1);
-  const amount = clamp(Number(element.textCurveAmount || 0), -100, 100);
+  // ±100 is the slider's reach; an imported Canva arc may carry up to ±200 (the extension
+  // measured a tighter bend than the slider offers), and the path honours it.
+  const amount = clamp(Number(element.textCurveAmount || 0), -200, 200);
   const middleY = height / 2;
   const maxCurveOffset = clamp(width * 0.42, Math.max(12, fontSize), Math.max(16, fontSize * 6));
   const curveOffset = (amount / 100) * maxCurveOffset;
@@ -3254,10 +3324,12 @@ export default function CanvasEditor() {
   // because it needs its wrapping width and line spacing.
   const fittedTextIdsRef = useRef<Set<string>>(new Set());
   const autofitDoneRef = useRef(false);
+  const autofitStartedAtRef = useRef(0);
   useEffect(() => {
     if (autofitDoneRef.current) return;
     let disposed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let detachRetry: (() => void) | undefined;
     const MAX_LINE_HEIGHT = 1.15;
 
     const measureInk = (cfg: Konva.TextConfig) => {
@@ -3300,7 +3372,15 @@ export default function CanvasEditor() {
         /* ignore */
       }
       if (disposed) return;
+      if (autofitStartedAtRef.current === 0) autofitStartedAtRef.current = Date.now();
       const snapshot = useEditorStore.getState().pages;
+      // A text whose library font has no @font-face yet would be measured as the fallback (see
+      // isTextFontDeclared) — and this pass moves x/y by the ink it measures. Leave those for a
+      // later pass, for as long as fonts are still arriving (10 s at most, so the one-time fit
+      // never turns into a fit-on-edit).
+      const declaredFamilies: { current: Set<string> | null } = { current: null };
+      const deferUndeclared = Date.now() - autofitStartedAtRef.current < 10_000;
+      let deferred = false;
 
       // Preload every text font up-front so the measurement pass below is fully
       // synchronous: calling updateElement mid-pass would churn `pages` and could
@@ -3332,6 +3412,10 @@ export default function CanvasEditor() {
           const fontSize = Number(element.fontSize) || 0;
           if (fontSize <= 0) return;
           const fontFamily = resolveCssFontFamily(element.fontFamily);
+          if (deferUndeclared && !isTextFontDeclared(element.fontFamily, declaredFamilies)) {
+            deferred = true;
+            return;
+          }
           try {
             if (!document.fonts.check(`${fontSize}px ${fontFamily}`)) return; // font not ready
           } catch {
@@ -3424,8 +3508,17 @@ export default function CanvasEditor() {
       });
 
       if (disposed) return;
-      autofitDoneRef.current = true;
+      if (!deferred) autofitDoneRef.current = true;
       fits.forEach((fit) => updateElement(fit.id, fit.patch));
+      if (deferred && document.fonts?.addEventListener) {
+        // Fit the rest once more faces land (already-fitted ids are skipped).
+        const retry = () => {
+          document.fonts.removeEventListener("loadingdone", retry);
+          if (!disposed) void run();
+        };
+        document.fonts.addEventListener("loadingdone", retry);
+        detachRetry = () => document.fonts.removeEventListener("loadingdone", retry);
+      }
     };
 
     // Debounce until the template load settles (pages stop churning), then fit once.
@@ -3438,6 +3531,7 @@ export default function CanvasEditor() {
     return () => {
       disposed = true;
       if (timer) clearTimeout(timer);
+      detachRetry?.();
     };
   }, [pages, updateElement]);
 
@@ -5641,6 +5735,8 @@ export default function CanvasEditor() {
     if (inlineEditActiveRef.current) return; // mid-edit: the textarea owns the box
 
     let waitingOnFonts = false;
+    // Families that have at least one @font-face declared right now. Built lazily, once per pass.
+    const declaredFamilies: { current: Set<string> | null } = { current: null };
 
     elements.forEach((element) => {
       if (element.type !== "text" || isCurvedText(element)) return;
@@ -5651,6 +5747,13 @@ export default function CanvasEditor() {
 
       const fontFamily = resolveCssFontFamily(element.fontFamily);
       try {
+        // Fitting before a library font's face is declared sizes the box to the FALLBACK: an
+        // imported 2-line label hugged a 1-line fallback width, then widened to one line when the
+        // real font landed. Wait for the face; the loadingdone listener below re-runs the fit.
+        if (!isTextFontDeclared(element.fontFamily, declaredFamilies)) {
+          waitingOnFonts = true;
+          return;
+        }
         // Measuring against the fallback font would size the box for glyphs nobody sees.
         if (document.fonts?.check && !document.fonts.check(`${fontSize}px ${fontFamily}`)) {
           waitingOnFonts = true;
@@ -5729,6 +5832,20 @@ export default function CanvasEditor() {
         });
     }
   }, [elements, textMetricsTick, updateElement]);
+
+  // Re-run the fit whenever the browser reports new fonts. `document.fonts.check()` is true for a
+  // family that has no @font-face declared YET (the fallback needs no loading), so until the
+  // library's faces are declared a custom family is measured as the fallback — and the fit hugs
+  // that width. The font then lands, the stage re-lays the text out with it, but nothing re-ran
+  // the fit: a 756 px Hacen Tunisia line stayed boxed at the fallback's 708 px and wrapped
+  // "العالم!" onto a line the box had no height for. Re-running lets a hugging box re-measure.
+  useEffect(() => {
+    const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+    if (!fonts?.addEventListener) return;
+    const refit = () => setTextMetricsTick((tick) => tick + 1);
+    fonts.addEventListener("loadingdone", refit);
+    return () => fonts.removeEventListener("loadingdone", refit);
+  }, []);
 
   // The scene handlers below are hoisted out of the JSX and memoized on purpose:
   // CanvasPageScene is wrapped in React.memo, and a fresh inline arrow on every
@@ -6197,22 +6314,22 @@ export default function CanvasEditor() {
   return (
     <div
       ref={containerRef}
-      className="relative h-full w-full overflow-hidden bg-[#d7d7d9]"
+      className="relative h-full w-full overflow-hidden bg-[#e9eaed]"
       onDragOver={handleCanvasDragOver}
       onDragLeave={() => clearFrameDropTarget(true)}
       onDrop={onDropAsset}
     >
       <div className="pointer-events-none absolute inset-x-0 bottom-4 z-20 flex justify-start px-4">
-        <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full border border-[#d8dde6] bg-white/94 px-3 py-2 shadow-[0_10px_28px_rgba(15,23,42,0.08)] backdrop-blur">
+        <div className="pointer-events-auto inline-flex items-center gap-2 rounded-full bg-white px-2 py-1 shadow-[0_1px_2px_rgba(16,18,21,0.06),0_8px_24px_-6px_rgba(16,18,21,0.14)]">
           <button
             type="button"
             onClick={() => zoomBy(1 / 1.12)}
             aria-label="Zoom out"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#eef2f8]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#f1f2f4]"
           >
             <Minus size={13} />
           </button>
-          <span className="min-w-[42px] text-[13px] font-semibold leading-none tracking-[0.01em] text-[#2b3445]">
+          <span className="min-w-[42px] text-center text-[12px] font-semibold leading-none tabular-nums text-[#2b3445]">
             {zoomPercent}%
           </span>
           <input
@@ -6227,13 +6344,13 @@ export default function CanvasEditor() {
               setZoomScale(nextPercent / 100);
             }}
             aria-label="Canvas zoom"
-            className="h-1.5 w-[150px] cursor-pointer accent-[#9aa5b5]"
+            className="h-1.5 w-[120px] cursor-pointer accent-[var(--brand-teal)]"
           />
           <button
             type="button"
             onClick={() => zoomBy(1.12)}
             aria-label="Zoom in"
-            className="inline-flex h-6 w-6 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#eef2f8]"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-full text-[#5b6472] transition hover:bg-[#f1f2f4]"
           >
             <Plus size={13} />
           </button>
@@ -6453,7 +6570,7 @@ export default function CanvasEditor() {
       ) : null}
 
       {showBlockingPreviewOverlay ? (
-        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#d7d7d9]">
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-[#e9eaed]">
           <div className="rounded-2xl border border-white/80 bg-white/92 px-5 py-3 text-center shadow-lg">
             <div className="text-sm font-semibold text-[#111827]">Generating preview</div>
             <div className="mt-1 text-xs text-[#6b7280]">Please wait while the template preview is rendered.</div>

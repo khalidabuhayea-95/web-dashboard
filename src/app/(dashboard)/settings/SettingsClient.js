@@ -43,8 +43,27 @@ function isBlank(value) {
   return String(value || "").trim().length === 0;
 }
 
+// "12 templates" with the published split on hover. A draft-free count shows no split.
+function TemplateCountBadge({ count, loaded }) {
+  if (!loaded) return null;
+  const total = Number(count?.total) || 0;
+  const published = Number(count?.published) || 0;
+  const drafts = total - published;
+  return (
+    <span
+      className={`inline-flex items-center whitespace-nowrap rounded-full px-2.5 py-0.5 text-xs font-medium ${
+        total > 0 ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"
+      }`}
+      title={drafts > 0 ? `${published} published · ${drafts} draft` : `${published} published`}
+    >
+      {total} {total === 1 ? "template" : "templates"}
+    </span>
+  );
+}
+
 export default function SettingsClient({ canEdit }) {
   const [settings, setSettings] = useState(TEMPLATE_CATEGORY_SETTINGS);
+  const [templateCounts, setTemplateCounts] = useState(null);
   const [expandedCategories, setExpandedCategories] = useState([]);
   const [busy, setBusy] = useState(false);
   const [loading, setLoading] = useState(true);
@@ -101,6 +120,7 @@ export default function SettingsClient({ canEdit }) {
         const payload = await response.json();
         if (isMounted) {
           setSettings(Array.isArray(payload?.settings) ? payload.settings : TEMPLATE_CATEGORY_SETTINGS);
+          setTemplateCounts(payload?.templateCounts || null);
           setStatus("");
         }
       } catch (error) {
@@ -645,6 +665,10 @@ export default function SettingsClient({ canEdit }) {
                         <Badge variant={isCategoryPublished ? "success" : "warning"}>
                           {isCategoryPublished ? "Published" : "Unpublished"}
                         </Badge>
+                        <TemplateCountBadge
+                          loaded={Boolean(templateCounts)}
+                          count={templateCounts?.categories?.[String(category?.value || "")]}
+                        />
                       </div>
                       <div className="flex items-center gap-2">
                         {canEdit ? (
@@ -732,9 +756,10 @@ export default function SettingsClient({ canEdit }) {
                         </div>
 
                         <div className="overflow-hidden rounded-xl border border-border">
-                          <div className="grid grid-cols-[1fr_1fr_auto] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                          <div className="grid grid-cols-[1fr_1fr_6.5rem_auto] gap-2 border-b border-border bg-muted/40 px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                             <span>Sub category (EN)</span>
                             <span>Sub category (AR)</span>
+                            <span>Templates</span>
                             <span className="text-right">Actions</span>
                           </div>
                           <div className="space-y-2 p-3">
@@ -854,7 +879,7 @@ export default function SettingsClient({ canEdit }) {
                                 onDragEnd={() => {
                                   resetSubCategoryDragState();
                                 }}
-                                className={`grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-start ${
+                                className={`grid gap-2 md:grid-cols-[1fr_1fr_6.5rem_auto] md:items-start ${
                                   dragOverSubCategory.categoryIndex === categoryIndex &&
                                   dragOverSubCategory.subCategoryIndex === subCategoryIndex
                                     ? dragOverSubCategory.position === "after"
@@ -901,6 +926,16 @@ export default function SettingsClient({ canEdit }) {
                                   {isBlank(subCategory.labelAr) ? (
                                     <p className="field-help text-red-600 dark:text-red-400">Required field.</p>
                                   ) : null}
+                                </div>
+                                <div className="flex h-10 items-center">
+                                  <TemplateCountBadge
+                                    loaded={Boolean(templateCounts)}
+                                    count={
+                                      templateCounts?.subCategories?.[
+                                        `${String(category?.value || "")}|${String(subCategory?.value || "")}`
+                                      ]
+                                    }
+                                  />
                                 </div>
                                 {canEdit ? (
                                   <div className="flex items-center gap-2">

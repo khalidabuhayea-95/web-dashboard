@@ -881,6 +881,157 @@
         if (!solid) return null;
         return { paint: solid.hex, alpha: solid.alpha, defs: "" };
       };
+      // Canva resizes a shape by SLICING, not stretching: `el.slice.source` is the band of the viewBox
+      // that stretches (a 55×64 hexagon stretches only rows 16..48), everything outside keeps its size,
+      // and the sliced result is then scaled UNIFORMLY into the box. Stretching the whole viewBox to the
+      // box (a 739×883 badge) steepened its caps from 105 px to 221 px. The slice record also carries
+      // the stretched sizes of that band under minified names; they are the pair whose sliced viewBox
+      // has the box's own aspect ratio.
+      const readShapeSlice = (el, vbWidth, vbHeight, boxWidth, boxHeight) => {
+        const slice = el.slice && typeof el.slice === "object" ? el.slice : null;
+        const source = slice && slice.source && typeof slice.source === "object" ? slice.source : null;
+        if (!source) return null;
+        const srcLeft = Number(source.left) || 0;
+        const srcTop = Number(source.top) || 0;
+        const srcWidth = Number(source.width) || 0;
+        const srcHeight = Number(source.height) || 0;
+        if (!(srcWidth > 0 && srcHeight > 0)) return null;
+        const sizes = Object.keys(slice)
+          .filter((key) => key !== "source" && key !== "horizontal" && key !== "vertical")
+          .map((key) => Number(slice[key]))
+          .filter((value) => Number.isFinite(value) && value > 0);
+        let best = null;
+        for (let i = 0; i < sizes.length; i += 1) {
+          for (let j = 0; j < sizes.length; j += 1) {
+            if (i === j) continue;
+            const width = sizes[i] + (vbWidth - srcWidth);
+            const height = sizes[j] + (vbHeight - srcHeight);
+            if (!(width > 0 && height > 0)) continue;
+            const error = Math.abs(boxWidth / width - boxHeight / height) / (boxWidth / width);
+            if (!best || error < best.error) best = { error, stretchedWidth: sizes[i], stretchedHeight: sizes[j], width, height };
+          }
+        }
+        if (!best || best.error > 0.01) return null;
+        const axis = (start, size, stretched) => (value) =>
+          value <= start ? value : value >= start + size ? value + (stretched - size) : start + ((value - start) * stretched) / size;
+        return {
+          width: best.width,
+          height: best.height,
+          mapX: axis(srcLeft, srcWidth, best.stretchedWidth),
+          mapY: axis(srcTop, srcHeight, best.stretchedHeight),
+        };
+      };
+      // A path's points mapped through (mapX, mapY): parsed to absolute M/L/C/Q/Z first, since a
+      // piecewise map can't be applied to relative offsets. Null for arcs (their radii can't be sliced)
+      // or anything unparseable — the caller then stretches as before.
+      const mapSvgPathPoints = (d, mapX, mapY) => {
+        const tokens = String(d).match(/[MmLlHhVvCcSsQqTtAaZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g);
+        if (!tokens || !/^[Mm]$/.test(tokens[0])) return null;
+        const out = [];
+        const fmt = (value) => String(Math.round(value * 1000) / 1000);
+        const point = (x, y) => `${fmt(mapX(x))} ${fmt(mapY(y))}`;
+        let index = 0;
+        let command = "";
+        let x = 0;
+        let y = 0;
+        let startX = 0;
+        let startY = 0;
+        let lastControlX = null;
+        let lastControlY = null;
+        let lastCommand = "";
+        const next = () => {
+          const value = Number(tokens[index]);
+          index += 1;
+          if (!Number.isFinite(value)) throw new Error("bad path");
+          return value;
+        };
+        while (index < tokens.length) {
+          if (/^[A-Za-z]$/.test(tokens[index])) {
+            command = tokens[index];
+            index += 1;
+          } else if (!command) {
+            return null;
+          }
+          const relative = command === command.toLowerCase();
+          const upper = command.toUpperCase();
+          const dx = relative ? x : 0;
+          const dy = relative ? y : 0;
+          if (upper === "A") return null;
+          if (upper === "Z") {
+            out.push("Z");
+            x = startX;
+            y = startY;
+            lastControlX = null;
+            lastCommand = "Z";
+            continue;
+          }
+          if (upper === "M") {
+            x = next() + dx;
+            y = next() + dy;
+            startX = x;
+            startY = y;
+            out.push(`M${point(x, y)}`);
+            command = relative ? "l" : "L";
+            lastControlX = null;
+            lastCommand = "M";
+          } else if (upper === "L") {
+            x = next() + dx;
+            y = next() + dy;
+            out.push(`L${point(x, y)}`);
+            lastControlX = null;
+            lastCommand = "L";
+          } else if (upper === "H") {
+            x = next() + (relative ? x : 0);
+            out.push(`L${point(x, y)}`);
+            lastControlX = null;
+            lastCommand = "H";
+          } else if (upper === "V") {
+            y = next() + (relative ? y : 0);
+            out.push(`L${point(x, y)}`);
+            lastControlX = null;
+            lastCommand = "V";
+          } else if (upper === "C" || upper === "S") {
+            let x1;
+            let y1;
+            if (upper === "C") {
+              x1 = next() + dx;
+              y1 = next() + dy;
+            } else {
+              const smooth = lastCommand === "C" && lastControlX !== null;
+              x1 = smooth ? 2 * x - lastControlX : x;
+              y1 = smooth ? 2 * y - lastControlY : y;
+            }
+            const x2 = next() + dx;
+            const y2 = next() + dy;
+            x = next() + dx;
+            y = next() + dy;
+            out.push(`C${point(x1, y1)} ${point(x2, y2)} ${point(x, y)}`);
+            lastControlX = x2;
+            lastControlY = y2;
+            lastCommand = "C";
+          } else if (upper === "Q" || upper === "T") {
+            let x1;
+            let y1;
+            if (upper === "Q") {
+              x1 = next() + dx;
+              y1 = next() + dy;
+            } else {
+              const smooth = lastCommand === "Q" && lastControlX !== null;
+              x1 = smooth ? 2 * x - lastControlX : x;
+              y1 = smooth ? 2 * y - lastControlY : y;
+            }
+            x = next() + dx;
+            y = next() + dy;
+            out.push(`Q${point(x1, y1)} ${point(x, y)}`);
+            lastControlX = x1;
+            lastControlY = y1;
+            lastCommand = "Q";
+          } else {
+            return null;
+          }
+        }
+        return out.join("");
+      };
       const extractVectorShape = (el) => {
         try {
           const paths = Array.isArray(el.paths) ? el.paths : null;
@@ -893,42 +1044,67 @@
           if (!(vbWidth > 0 && vbHeight > 0)) return null;
           const vbLeft = Number(viewBox.left) || 0;
           const vbTop = Number(viewBox.top) || 0;
+          const boxWidth = Math.max(1, Number(el.width) || vbWidth);
+          const boxHeight = Math.max(1, Number(el.height) || vbHeight);
+
+          // Slice the geometry when Canva does (and every path can be mapped); else stretch as before.
+          const slice = readShapeSlice(el, vbWidth, vbHeight, boxWidth, boxHeight);
+          const slicedPaths = slice
+            ? paths.map((p) => (p && typeof p.d === "string" ? mapSvgPathPoints(p.d.trim(), slice.mapX, slice.mapY) : null))
+            : null;
+          const useSlice = Boolean(slicedPaths && slicedPaths.every((d, i) => d || !(paths[i] && paths[i].d)));
+          const outViewBox = useSlice ? `0 0 ${slice.width} ${slice.height}` : `${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}`;
+          // Design px per viewBox unit (uniform when sliced; the geometric mean of a stretch otherwise).
+          const unitScale = useSlice
+            ? boxWidth / slice.width
+            : Math.sqrt((boxWidth / vbWidth) * (boxHeight / vbHeight));
 
           const defs = [];
           const body = [];
           paths.forEach((p, i) => {
-            const d = p && typeof p.d === "string" ? p.d.trim() : "";
+            const rawD = p && typeof p.d === "string" ? p.d.trim() : "";
+            const d = useSlice ? slicedPaths[i] : rawD;
             if (!d) return;
             const fillPaint = svgPaintFromFill(p.fill, `g${i}`);
             const stroke = p.stroke && typeof p.stroke === "object" ? p.stroke : null;
             const strokePaint = stroke ? svgColor(stroke.color, stroke.transparency) : null;
-            const strokeWidth = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
-            if (!fillPaint && !(strokePaint && strokeWidth > 0)) return;
+            const strokeWeight = stroke && Number(stroke.weight) > 0 ? Number(stroke.weight) : 0;
+            if (!fillPaint && !(strokePaint && strokeWeight > 0)) return;
             if (fillPaint && fillPaint.defs) defs.push(fillPaint.defs);
-            const attrs = [
-              `d="${d.replace(/"/g, "'")}"`,
-              fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"',
-              fillPaint && fillPaint.alpha < 1 ? `fill-opacity="${fillPaint.alpha}"` : "",
-              strokePaint && strokeWidth > 0 ? `stroke="${strokePaint.hex}"` : "",
-              strokePaint && strokeWidth > 0 ? `stroke-width="${strokeWidth}"` : "",
-              strokePaint && strokeWidth > 0 && strokePaint.alpha < 1
-                ? `stroke-opacity="${strokePaint.alpha}"`
-                : "",
-            ].filter(Boolean);
-            body.push(`<path ${attrs.join(" ")}/>`);
+            const safeD = d.replace(/"/g, "'");
+            body.push(
+              `<path d="${safeD}" ${fillPaint ? `fill="${fillPaint.paint}"` : 'fill="none"'}${
+                fillPaint && fillPaint.alpha < 1 ? ` fill-opacity="${fillPaint.alpha}"` : ""
+              }/>`
+            );
+            if (strokePaint && strokeWeight > 0) {
+              // Canva's border is `weight` DESIGN px wide and lies INSIDE the shape: it draws a
+              // non-scaling stroke of twice the weight clipped to the path. In viewBox units that is
+              // 2·weight / unitScale; the old rebuild used `weight` viewBox units centred on the edge,
+              // which a 13× stretch turned into a 67 px band (34 px of it left inside the image).
+              const closed = /[Zz]\s*$/.test(d);
+              const widthUnits = ((closed ? 2 : 1) * strokeWeight) / Math.max(0.0001, unitScale);
+              const clipId = `c${i}`;
+              if (closed) defs.push(`<clipPath id="${clipId}"><path d="${safeD}"/></clipPath>`);
+              body.push(
+                `<path d="${safeD}" fill="none" stroke="${strokePaint.hex}" stroke-width="${
+                  Math.round(widthUnits * 10000) / 10000
+                }"${strokePaint.alpha < 1 ? ` stroke-opacity="${strokePaint.alpha}"` : ""}${
+                  closed ? ` clip-path="url(#${clipId})"` : ""
+                }/>`
+              );
+            }
           });
           if (body.length === 0) return null;
 
           // Rasterized server-side, so give it real pixels: the element's own design size, capped.
-          const boxWidth = Math.max(1, Math.round(Number(el.width) || vbWidth));
-          const boxHeight = Math.max(1, Math.round(Number(el.height) || vbHeight));
           const cap = 2048;
           const scale = Math.min(1, cap / Math.max(boxWidth, boxHeight));
           const outWidth = Math.max(1, Math.round(boxWidth * scale));
           const outHeight = Math.max(1, Math.round(boxHeight * scale));
           const svg =
             `<svg xmlns="http://www.w3.org/2000/svg" width="${outWidth}" height="${outHeight}" ` +
-            `viewBox="${vbLeft} ${vbTop} ${vbWidth} ${vbHeight}" preserveAspectRatio="none">` +
+            `viewBox="${outViewBox}" preserveAspectRatio="none">` +
             (defs.length ? `<defs>${defs.join("")}</defs>` : "") +
             body.join("") +
             `</svg>`;
@@ -975,6 +1151,13 @@
         ...readAnimationEntry(el, parentId),
         text: el.type === "text" ? extractText(el) : null,
         image: el.type === "rect" ? extractImage(el) : null,
+        // The fill's own mirroring, whatever it holds. `image` carries it for photo fills, but a
+        // VIDEO fill (Canva's animated stickers) has no image media, so its flip was lost and
+        // five of six watercolours on DAHOhOaWZTw imported un-mirrored.
+        fillFlip:
+          el.type === "rect" && el.fill
+            ? { flipX: Boolean(el.fill.flipX), flipY: Boolean(el.fill.flipY) }
+            : null,
         shape: el.type === "shape" ? extractShape(el) : null,
         line: el.type === "line" ? extractLine(el) : null,
         border: el.type === "shape" ? extractBorder(el) : null,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type MouseEvent as ReactMouseEvent, type UIEvent as ReactUIEvent } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import {
   Check,
@@ -21,6 +21,7 @@ import {
   Lock,
   Palette,
   PanelsTopLeft,
+  RefreshCw,
   Search,
   Shapes,
   SwatchBook,
@@ -52,6 +53,7 @@ import {
   rasterizeSvgDataUrlToPngDataUrl,
   SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
+import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import {
   BUILTIN_SHAPE_ASSETS,
@@ -123,19 +125,25 @@ const ANIMATION_SLOT_TABS: Array<{ key: AnimationCategory; label: string; hint: 
   { key: "EXIT", label: "Exit", hint: "Plays once as the layer leaves (its entrance, reversed)." },
 ];
 
-const TOOL_TABS: Array<{ key: SidebarTab; label: string; icon: ComponentType<{ size?: number; className?: string }> }> = [
-  { key: "templates", label: "Templates", icon: LayoutGrid },
-  { key: "text", label: "Text", icon: TextCursorInput },
-  { key: "videos", label: "Videos", icon: Clapperboard },
-  { key: "shapes", label: "Shapes", icon: Shapes },
-  { key: "elements", label: "Elements", icon: ImagePlus },
-  { key: "frames", label: "Frames", icon: Square },
-  { key: "category", label: "Category", icon: Tags },
-  { key: "upload", label: "Upload", icon: Upload },
-  { key: "backgrounds", label: "Background", icon: SwatchBook },
-  { key: "layers", label: "Layers", icon: PanelsTopLeft },
-  { key: "resize", label: "Resize", icon: Scaling },
-  { key: "animation", label: "Animation", icon: Sparkles },
+// Two groups in the rail: things you add to the canvas, then settings for the design itself.
+const TOOL_TABS: Array<{
+  key: SidebarTab;
+  label: string;
+  icon: ComponentType<{ size?: number; className?: string; strokeWidth?: number }>;
+  group: "add" | "design";
+}> = [
+  { key: "templates", label: "Templates", icon: LayoutGrid, group: "add" },
+  { key: "text", label: "Text", icon: TextCursorInput, group: "add" },
+  { key: "elements", label: "Elements", icon: ImagePlus, group: "add" },
+  { key: "shapes", label: "Shapes", icon: Shapes, group: "add" },
+  { key: "frames", label: "Frames", icon: Square, group: "add" },
+  { key: "videos", label: "Videos", icon: Clapperboard, group: "add" },
+  { key: "backgrounds", label: "Background", icon: SwatchBook, group: "add" },
+  { key: "upload", label: "Upload", icon: Upload, group: "add" },
+  { key: "layers", label: "Layers", icon: PanelsTopLeft, group: "design" },
+  { key: "animation", label: "Animation", icon: Sparkles, group: "design" },
+  { key: "resize", label: "Resize", icon: Scaling, group: "design" },
+  { key: "category", label: "Category", icon: Tags, group: "design" },
 ];
 
 const COLOR_SWATCHES = [
@@ -1279,43 +1287,6 @@ function normalizeTextDecoration(
   return "";
 }
 
-function createSolidFillDataUrl(fill: string, width: number, height: number, radius = 0): string {
-  if (typeof document === "undefined") return "";
-  try {
-    const resolvedWidth = Math.max(1, Math.round(width));
-    const resolvedHeight = Math.max(1, Math.round(height));
-    const canvas = document.createElement("canvas");
-    canvas.width = resolvedWidth;
-    canvas.height = resolvedHeight;
-    const context = canvas.getContext("2d");
-    if (!context) return "";
-    context.clearRect(0, 0, resolvedWidth, resolvedHeight);
-    context.fillStyle = parseColor(fill, "#111827");
-    const safeRadius = Math.max(0, Math.min(Number(radius) || 0, Math.min(resolvedWidth, resolvedHeight) / 2));
-    if (safeRadius <= 0) {
-      context.fillRect(0, 0, resolvedWidth, resolvedHeight);
-    } else {
-      const right = resolvedWidth;
-      const bottom = resolvedHeight;
-      context.beginPath();
-      context.moveTo(safeRadius, 0);
-      context.lineTo(right - safeRadius, 0);
-      context.quadraticCurveTo(right, 0, right, safeRadius);
-      context.lineTo(right, bottom - safeRadius);
-      context.quadraticCurveTo(right, bottom, right - safeRadius, bottom);
-      context.lineTo(safeRadius, bottom);
-      context.quadraticCurveTo(0, bottom, 0, bottom - safeRadius);
-      context.lineTo(0, safeRadius);
-      context.quadraticCurveTo(0, 0, safeRadius, 0);
-      context.closePath();
-      context.fill();
-    }
-    return canvas.toDataURL("image/png");
-  } catch {
-    return "";
-  }
-}
-
 async function readImageFileDimensions(file: File) {
   if (typeof window === "undefined" || !file) {
     return { width: null, height: null };
@@ -1385,8 +1356,17 @@ function isCanvaImportedTemplate(templateData: unknown) {
 function findLikelyBackgroundLayerIndex(elements: EditorElement[], pageWidth: number, pageHeight: number) {
   let bestIndex = -1;
   let bestScore = -1;
+  // Only the BOTTOM-MOST painted layer can be the page's background. A full-page image that sits
+  // above other layers is an overlay — a white sheet with an arch-shaped hole, laid over a carpet
+  // pattern so the pattern shows only through the arch — and hoisting it underneath everything
+  // buried the sheet and left the pattern covering the whole page. Coverage alone cannot tell the
+  // two apart; what is painted beneath can.
+  const bottomPaintedIndex = elements.findIndex(
+    (element) => Boolean(element) && !element.syntheticTextBackground
+  );
   elements.forEach((element, index) => {
     if (!element || element.type !== "image") return;
+    if (index !== bottomPaintedIndex) return;
     const scaleX = Math.max(0.0001, Math.abs(Number(element.scaleX) || 1));
     const scaleY = Math.max(0.0001, Math.abs(Number(element.scaleY) || 1));
     const width = Math.max(1, (Number(element.width) || 0) * scaleX);
@@ -1791,6 +1771,46 @@ function toEditorDesignFromTemplate(
         );
         return;
       }
+      // An imported shaped photo frame (Canva clip-path → polygon, see the extension's
+      // detectClipPathFrameMask): load it as a real FRAME so the outline survives and the photo
+      // stays swappable. The captured photo is already cropped to the frame box, so it fills the
+      // frame at cover / scale 1 exactly as Canva framed it.
+      const importedFrameShape =
+        type === "image" && item.frameShape && typeof item.frameShape === "object"
+          ? (item.frameShape as { presetId?: unknown; kind?: unknown; points?: unknown })
+          : null;
+      const importedFramePoints =
+        importedFrameShape && Array.isArray(importedFrameShape.points)
+          ? (importedFrameShape.points as unknown[]).map((value) => Number(value)).filter(Number.isFinite)
+          : [];
+      if (
+        importedFrameShape &&
+        String(importedFrameShape.kind || "") === "polygon" &&
+        importedFramePoints.length >= 6 &&
+        typeof item.src === "string" &&
+        item.src
+      ) {
+        elements.push(
+          createElementFromAsset(pageId, {
+            ...common,
+            type: "frame",
+            frameShape: {
+              presetId: String(importedFrameShape.presetId || "canva-clip-path"),
+              kind: "polygon",
+              points: importedFramePoints,
+            },
+            frameContent: {
+              kind: "image",
+              src: item.src,
+              sourceWidth: Math.max(1, toNumber(item.sourceWidth, common.width || 1)),
+              sourceHeight: Math.max(1, toNumber(item.sourceHeight, common.height || 1)),
+            },
+            frameContentTransform: { fit: "cover", scale: 1, offsetX: 0, offsetY: 0 },
+          })
+        );
+        return;
+      }
+
       if (type === "image" && typeof item.src === "string" && item.src) {
         const rasterOriginalSrc = String(item.rasterOriginalSrc || "").trim();
         const rasterPalette = Array.isArray(item.rasterPalette)
@@ -1846,25 +1866,24 @@ function toEditorDesignFromTemplate(
           0,
           toNumber(item.textBackgroundRadius, 0) * Math.max(scaleXAbs, scaleYAbs)
         );
-        if (textBackgroundColor) {
-          const backgroundDataUrl = createSolidFillDataUrl(
-            textBackgroundColor,
-            common.width || 1,
-            common.height || 1,
-            textBackgroundRadius
-          );
-          if (backgroundDataUrl) {
-            const backgroundElement = createElementFromAsset(pageId, {
-              ...common,
-              type: "image",
-              name: `${String(common.name || "Text")} Background`,
-              src: backgroundDataUrl,
-              syntheticTextBackground: true,
-            });
-            backgroundElement.importZIndex = importZIndex - 0.25;
-            elements.push(backgroundElement);
-          }
-        }
+        // The box is a property of the text now (lib/editor/textBackground.ts), editable from the
+        // toolbar and shipped to the app as its own background fields — no longer a separate
+        // rasterised image layer glued behind the text. A CSS-detected background only carries a
+        // colour and a px radius; Canva's "Background" effect also carries opacity and padding.
+        const clamp01 = (value: unknown, fallback: number) => {
+          const numeric = Number(value);
+          return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : fallback;
+        };
+        const textBackgroundFields = textBackgroundColor
+          ? {
+              textBackgroundEnabled: item.textBackgroundEnabled === undefined ? true : Boolean(item.textBackgroundEnabled),
+              textBackgroundColor: normalizeHexColor(textBackgroundColor) || textBackgroundColor,
+              textBackgroundOpacity: clamp01(item.textBackgroundOpacity, 1),
+              textBackgroundAngleSize: clamp01(item.textBackgroundAngleSize, Math.min(1, textBackgroundRadius / 28)),
+              textBackgroundPaddingX: clamp01(item.textBackgroundPaddingX, 0),
+              textBackgroundPaddingY: clamp01(item.textBackgroundPaddingY, 0),
+            }
+          : {};
         elements.push(
           createElementFromAsset(pageId, {
             ...common,
@@ -1886,6 +1905,10 @@ function toEditorDesignFromTemplate(
             letterSpacing,
             color: parseColor(item.fill, "#111827"),
             fill: parseColor(item.fill, "#111827"),
+            ...textBackgroundFields,
+            // Imported curved text (Canva's per-letter arc, measured by the extension).
+            textCurveEnabled: Boolean(item.textCurveEnabled) && Math.abs(toNumber(item.textCurveAmount, 0)) > 0.5,
+            textCurveAmount: Math.max(-200, Math.min(200, toNumber(item.textCurveAmount, 0))),
           })
         );
         return;
@@ -2537,6 +2560,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [resizeUnits, setResizeUnits] = useState("px");
   const [storedTemplates, setStoredTemplates] = useState<StoredTemplate[]>([]);
   const [templatesLoading, setTemplatesLoading] = useState(false);
+  // Bumped by the refresh button to refetch the list (e.g. after saving from another tab).
+  const [templatesReloadKey, setTemplatesReloadKey] = useState(0);
   const [templatesError, setTemplatesError] = useState("");
   const [recentBuiltInShapeIds, setRecentBuiltInShapeIds] = useState<string[]>([]);
   const [customFonts, setCustomFonts] = useState<CustomFontRecord[]>([]);
@@ -3670,7 +3695,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeTab]);
+  }, [activeTab, templatesReloadKey]);
 
   useEffect(() => {
     if (activeTab !== "elements" || elementsPanelTab !== "published") return;
@@ -4296,7 +4321,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     return (
       <div
         key={font.id}
-        className={`w-full rounded-md border bg-white p-2 ${isSelected ? "border-[#2c68be]" : "border-[#d3d8e1]"}`}
+        className={`w-full rounded-md border bg-white p-2 ${isSelected ? "border-[#22828c]" : "border-[#d3d8e1]"}`}
       >
         <button
           type="button"
@@ -4329,7 +4354,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                 </span>
               ) : null}
               {isSelected ? (
-                <span className="rounded-full bg-[#e7f0ff] px-2 py-0.5 text-[10px] font-semibold text-[#2c68be]">
+                <span className="rounded-full bg-[#e3f1f2] px-2 py-0.5 text-[10px] font-semibold text-[#22828c]">
                   Selected
                 </span>
               ) : null}
@@ -4343,45 +4368,58 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
   return (
     <aside
-      className={`relative flex min-h-0 shrink-0 border-r border-[#d7dbe1] bg-[#f3f4f6] transition-[width] duration-300 ease-out ${
-        collapsed ? "w-[70px]" : "w-[376px]"
+      className={`relative flex min-h-0 shrink-0 bg-white transition-[width] duration-300 ease-out ${
+        collapsed ? "w-[76px]" : "w-[396px]"
       }`}
     >
-      <div className="flex w-[68px] shrink-0 flex-col items-center border-r border-[#d7dbe1] bg-white py-2">
-        {visibleToolTabs.map((tab) => {
+      <nav
+        aria-label="Editor tools"
+        className="flex w-[76px] shrink-0 flex-col items-center gap-0.5 overflow-y-auto bg-white px-1.5 py-2 [scrollbar-width:none]"
+      >
+        {visibleToolTabs.map((tab, index) => {
           const Icon = tab.icon;
-          const active = tab.key === activeTab;
+          const active = tab.key === activeTab && !collapsed;
+          const startsGroup = index > 0 && visibleToolTabs[index - 1].group !== tab.group;
           return (
-            <button
-              key={tab.key}
-              type="button"
-              onClick={() => {
-                if (active && !collapsed) {
-                  setShowLeftSidebar(false);
-                  return;
-                }
-                setSidebarTab(tab.key);
-                if (collapsed) {
-                  setShowLeftSidebar(true);
-                }
-              }}
-              className={`mb-1 flex w-full flex-col items-center gap-1 py-2.5 text-[11px] transition ${
-                active ? "bg-[#dce9fb] text-[#0f172a]" : "text-[#1f2937] hover:bg-[#eef3fa]"
-              }`}
-            >
-              <Icon size={16} />
-              <span>{tab.label}</span>
-            </button>
+            <Fragment key={tab.key}>
+              {startsGroup ? <span aria-hidden="true" className="my-1.5 h-px w-8 shrink-0 bg-[#e6e8eb]" /> : null}
+              <button
+                type="button"
+                aria-pressed={active}
+                onClick={() => {
+                  if (active) {
+                    setShowLeftSidebar(false);
+                    return;
+                  }
+                  setSidebarTab(tab.key);
+                  if (collapsed) {
+                    setShowLeftSidebar(true);
+                  }
+                }}
+                className={`group flex w-full shrink-0 flex-col items-center gap-1 rounded-xl py-1.5 text-[10.5px] font-medium transition-colors ${
+                  active ? "text-brand-teal" : "text-t-secondary hover:text-t-primary"
+                }`}
+              >
+                <span
+                  className={`flex h-8 w-11 items-center justify-center rounded-[10px] transition-colors ${
+                    active ? "bg-brand-teal/12" : "group-hover:bg-[#f1f2f4]"
+                  }`}
+                >
+                  <Icon size={18} strokeWidth={1.8} />
+                </span>
+                <span className="leading-none">{tab.label}</span>
+              </button>
+            </Fragment>
           );
         })}
-      </div>
+      </nav>
 
       <button
         type="button"
         aria-label="Expand panel"
         title="Expand panel"
         onClick={() => setShowLeftSidebar(true)}
-        className={`absolute left-[65px] top-1/2 z-10 flex h-8 w-6 -translate-y-1/2 items-center justify-center rounded-r-full border border-l-0 border-[#d7dbe1] bg-[#f5f6f8] text-[#8c95a3] shadow-sm transition-opacity duration-150 ${
+        className={`absolute left-full top-1/2 z-10 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-r-lg bg-white text-t-tertiary transition-opacity duration-150 hover:text-t-primary ${
           collapsed ? "opacity-100" : "pointer-events-none opacity-0"
         }`}
       >
@@ -4389,7 +4427,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       </button>
 
       <div
-        className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible bg-[#f5f6f8] transition-[opacity,transform] duration-200 ${
+        className={`relative flex min-h-0 min-w-0 flex-1 flex-col overflow-visible bg-[#f6f7f8] transition-[opacity,transform] duration-200 ${
           collapsed ? "pointer-events-none translate-x-2 opacity-0" : "translate-x-0 opacity-100"
         }`}
         aria-hidden={collapsed}
@@ -4397,8 +4435,9 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         <button
           type="button"
           aria-label="Collapse panel"
+          title="Collapse panel"
           onClick={() => setShowLeftSidebar(false)}
-          className={`absolute -right-3 top-1/2 z-10 flex h-8 w-6 -translate-y-1/2 items-center justify-center rounded-r-full border border-l-0 border-[#d7dbe1] bg-[#f5f6f8] text-[#8c95a3] transition-opacity duration-150 ${
+          className={`absolute left-full top-1/2 z-10 flex h-12 w-4 -translate-y-1/2 items-center justify-center rounded-r-lg bg-[#f6f7f8] text-t-tertiary transition-opacity duration-150 hover:text-t-primary ${
             collapsed ? "pointer-events-none opacity-0" : "opacity-100"
           }`}
         >
@@ -4406,7 +4445,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
         </button>
 
         <div
-          className={`flex-1 overflow-x-hidden overflow-y-auto p-2 transition-opacity duration-150 ${
+          className={`flex-1 overflow-x-hidden overflow-y-auto p-3 transition-opacity duration-150 ${
             collapsed ? "opacity-0" : "opacity-100"
           }`}
         >
@@ -4426,9 +4465,21 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
           {activeTab === "templates" ? (
               <section className="space-y-3">
-                <div className="relative">
-                  <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
-                  <Input className="!h-9 !rounded-full !bg-white !pl-9" placeholder="Search..." value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} />
+                <div className="flex items-center gap-2">
+                  <div className="relative min-w-0 flex-1">
+                    <Search size={16} className="pointer-events-none absolute left-3 top-2.5 text-[#798293]" />
+                    <Input className="!h-9 !rounded-full !bg-white !pl-9" placeholder="Search..." value={templateSearch} onChange={(event) => setTemplateSearch(event.target.value)} />
+                  </div>
+                  <button
+                    type="button"
+                    aria-label="Refresh templates"
+                    title="Refresh templates"
+                    onClick={() => setTemplatesReloadKey((key) => key + 1)}
+                    disabled={templatesLoading}
+                    className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-t-secondary transition-colors hover:text-brand-teal disabled:cursor-wait"
+                  >
+                    <RefreshCw size={16} className={templatesLoading ? "animate-spin" : undefined} />
+                  </button>
                 </div>
 
                 <label className="flex items-center justify-between text-[14px] text-[#202a38]">
@@ -4436,7 +4487,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   <button
                     type="button"
                     onClick={() => setSameSizeOnly((value) => !value)}
-                    className={`relative h-5 w-8 rounded-full transition ${sameSizeOnly ? "bg-[#2f6fca]" : "bg-[#c8ced8]"}`}
+                    className={`relative h-5 w-8 rounded-full transition ${sameSizeOnly ? "bg-[#22828c]" : "bg-[#c8ced8]"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${sameSizeOnly ? "left-3.5" : "left-0.5"}`} />
                   </button>
@@ -4463,7 +4514,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         setTemplatesError("");
                         updateTemplateQueryInUrl(template.id, String(template.updatedAt || ""));
                       }}
-                      className="overflow-hidden rounded-md border border-[#d3d8e1] bg-white text-left shadow-sm hover:border-[#9fb4d6]"
+                      className="overflow-hidden rounded-md border border-[#d3d8e1] bg-white text-left shadow-sm hover:border-[#9ccbcf]"
                     >
                       <div className="relative h-24 bg-[#eef1f6]">
                         {template.thumbnailDataUrl ? (
@@ -4493,7 +4544,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
             {activeTab === "text" ? (
               <section className="min-w-0 w-full space-y-3">
-                <div className="border-b border-[#d7dbe1] pb-2 text-sm font-semibold text-[#2c68be]">
+                <div className="border-b border-[#d7dbe1] pb-2 text-sm font-semibold text-[#22828c]">
                   My fonts
                 </div>
 
@@ -4554,8 +4605,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         type="button"
                         className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
                           fontLanguageTab === "arabic"
-                            ? "bg-[#dce9fb] text-[#0f172a]"
-                            : "text-[#64748b] hover:bg-[#eef3fa]"
+                            ? "bg-[#e3f1f2] text-[#0f172a]"
+                            : "text-[#64748b] hover:bg-[#f1f5f6]"
                         }`}
                         onClick={() => setFontLanguageTab("arabic")}
                       >
@@ -4565,8 +4616,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         type="button"
                         className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
                           fontLanguageTab === "english"
-                            ? "bg-[#dce9fb] text-[#0f172a]"
-                            : "text-[#64748b] hover:bg-[#eef3fa]"
+                            ? "bg-[#e3f1f2] text-[#0f172a]"
+                            : "text-[#64748b] hover:bg-[#f1f5f6]"
                         }`}
                         onClick={() => setFontLanguageTab("english")}
                       >
@@ -4640,7 +4691,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         type="button"
                         onClick={() => setSelectedIds([videoLayer.id])}
                         className={`w-full rounded-md border bg-white p-2 text-left text-sm ${
-                          selectedIds.includes(videoLayer.id) ? "border-[#2c68be]" : "border-[#d3d8e1]"
+                          selectedIds.includes(videoLayer.id) ? "border-[#22828c]" : "border-[#d3d8e1]"
                         }`}
                       >
                         <div className="truncate font-medium text-[#0f172a]">
@@ -4706,7 +4757,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                       );
                                     }}
                                     onClick={() => void addBuiltInShapeToCanvas(shape)}
-                                    className="flex w-[92px] shrink-0 flex-col gap-2 rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9fb4d6] hover:bg-[#eef3fa]"
+                                    className="flex w-[92px] shrink-0 flex-col gap-2 rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9ccbcf] hover:bg-[#f1f5f6]"
                                     title={shape.name}
                                   >
                                     <div className="flex h-16 items-center justify-center rounded-lg bg-white p-2">
@@ -4749,8 +4800,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                       type="button"
                       className={`rounded-md px-2 py-1.5 text-xs font-semibold transition ${
                         elementsPanelTab === item.key
-                          ? "bg-[#dce9fb] text-[#0f172a]"
-                          : "text-[#64748b] hover:bg-[#eef3fa]"
+                          ? "bg-[#e3f1f2] text-[#0f172a]"
+                          : "text-[#64748b] hover:bg-[#f1f5f6]"
                       }`}
                       onClick={() => setElementsPanelTab(item.key as "published" | "queue")}
                     >
@@ -4786,7 +4837,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               aria-label="Upload image"
                               title="Upload image"
                               onClick={() => openImageUploadPicker()}
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#f1f5f6]"
                             >
                               <Upload size={14} />
                             </button>
@@ -4929,7 +4980,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                     event.preventDefault();
                                     addImportedElementToCanvas();
                                   }}
-                                  className="rounded-md border border-[#d3d8e1] bg-[#f3f4f6] p-2 text-left hover:bg-[#eef2f7] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/40"
+                                  className="rounded-md border border-[#d3d8e1] bg-[#f3f4f6] p-2 text-left hover:bg-[#eef2f7] focus:outline-none focus:ring-2 focus:ring-[#22828c]/40"
                                 >
                                   <div className="relative rounded-md bg-[#eef1f5] p-1">
                                     <span
@@ -5242,7 +5293,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   ) : (
                     <div className="mt-2 flex items-center justify-between border-t border-[#e6e9ef] pt-2 text-[11px] text-[#637087]">
                       <span>{publishCandidateIds.length} selected</span>
-                      <span>Use Publish Elements to finish</span>
+                      <span>Publish them from the top bar</span>
                     </div>
                   )}
                 </div>
@@ -5286,7 +5337,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                               );
                             }}
                             onClick={() => addFramePresetToCanvas(preset)}
-                            className="group rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9fb4d6] hover:bg-[#eef3fa] focus:outline-none focus:ring-2 focus:ring-[#2c68be]/30"
+                            className="group rounded-xl border border-[#d3d8e1] bg-[#f8fafc] p-2 text-left transition hover:border-[#9ccbcf] hover:bg-[#f1f5f6] focus:outline-none focus:ring-2 focus:ring-[#22828c]/30"
                             title={preset.name}
                           >
                             <div className="flex h-24 items-center justify-center rounded-lg p-3">
@@ -5541,7 +5592,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                             key={color}
                             type="button"
                             onClick={() => applyBackgroundColorSelection(color)}
-                            className={`h-14 w-14 rounded border shadow-sm ${active ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]" : "border-[#d3d8e1]"}`}
+                            className={`h-14 w-14 rounded border shadow-sm ${active ? "border-[#22828c] ring-2 ring-[#cfe6e8]" : "border-[#d3d8e1]"}`}
                             style={{ backgroundColor: color }}
                             title={color}
                           />
@@ -5555,7 +5606,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                         onClick={() => applyBackgroundColorSelection("transparent")}
                         className={`h-14 w-14 rounded border bg-[conic-gradient(#eceef3_25%,#9ea8ba_0_50%,#eceef3_0_75%,#9ea8ba_0)] [background-size:14px_14px] shadow-sm ${
                           activeBackgroundColor.toLowerCase() === "transparent"
-                            ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]"
+                            ? "border-[#22828c] ring-2 ring-[#cfe6e8]"
                             : "border-[#d3d8e1]"
                         }`}
                       />
@@ -5634,7 +5685,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                 aria-label={`Upload background image to ${group.label}`}
                                 title={`Upload background image to ${group.label}`}
                                 onClick={() => openImageUploadPicker(group.key)}
-                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#eef3fa]"
+                                className="inline-flex h-7 w-7 items-center justify-center rounded-full border border-[#d3d8e1] bg-white text-[#4b5565] transition hover:bg-[#f1f5f6]"
                               >
                                 <Upload size={13} />
                               </button>
@@ -5668,8 +5719,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                                   }
                                   className={`w-[132px] shrink-0 overflow-hidden rounded-xl border bg-[#f8fafc] text-left transition ${
                                     isActive
-                                      ? "border-[#2f6fca] ring-2 ring-[#d9e8ff]"
-                                      : "border-[#d3d8e1] hover:border-[#9fb4d6] hover:bg-[#eef3fa]"
+                                      ? "border-[#22828c] ring-2 ring-[#cfe6e8]"
+                                      : "border-[#d3d8e1] hover:border-[#9ccbcf] hover:bg-[#f1f5f6]"
                                   }`}
                                 >
                                   <div className="relative aspect-[4/3] overflow-hidden rounded-xl bg-white">
@@ -5765,8 +5816,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                           } ${
                             dragOverLayer
                               ? dragOver.position === "after"
-                                ? "border-b-2 border-b-[#2f6fca]"
-                                : "border-t-2 border-t-[#2f6fca]"
+                                ? "border-b-2 border-b-[#22828c]"
+                                : "border-t-2 border-t-[#22828c]"
                               : ""
                           } cursor-grab`}
                         >
@@ -5823,7 +5874,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                   <button
                     type="button"
                     onClick={() => setResizeUseMagic(!resizeUseMagic)}
-                    className={`relative h-5 w-8 rounded-full transition ${resizeUseMagic ? "bg-[#2f6fca]" : "bg-[#c8ced8]"}`}
+                    className={`relative h-5 w-8 rounded-full transition ${resizeUseMagic ? "bg-[#22828c]" : "bg-[#c8ced8]"}`}
                   >
                     <span className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${resizeUseMagic ? "left-3.5" : "left-0.5"}`} />
                   </button>

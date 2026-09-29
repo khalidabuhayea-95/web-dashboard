@@ -4,6 +4,7 @@ import dynamic from "next/dynamic";
 import { useEffect, useMemo } from "react";
 
 import Toolbar from "@/components/editor/Toolbar";
+import ContextToolbar from "@/components/editor/ContextToolbar";
 import SidePanel from "@/components/editor/SidePanel";
 import PropertiesPanel from "@/components/editor/PropertiesPanel";
 import PagesTimeline from "@/components/editor/PagesTimeline";
@@ -28,7 +29,7 @@ import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 const CanvasEditor = dynamic(() => import("@/components/editor/CanvasEditor"), {
   ssr: false,
   loading: () => (
-    <div className="flex h-full items-center justify-center bg-slate-100 text-sm text-slate-500 dark:bg-slate-900 dark:text-slate-300">
+    <div className="flex h-full items-center justify-center bg-[#e9eaed] text-sm text-t-secondary">
       Loading canvas engine...
     </div>
   ),
@@ -62,9 +63,11 @@ function isLikelyImageUrl(value: string) {
 interface EditorLayoutProps {
   /** Admins only: pricing a template is a monetization decision, not authoring. */
   canManagePremium?: boolean;
+  /** The dashboard sidebar's items; the header opens them in a drawer. */
+  navItems?: unknown[];
 }
 
-export default function EditorLayout({ canManagePremium = false }: EditorLayoutProps) {
+export default function EditorLayout({ canManagePremium = false, navItems = [] }: EditorLayoutProps) {
   const showLeftSidebar = useEditorStore((state) => state.showLeftSidebar);
   const showRightSidebar = useEditorStore((state) => state.showRightSidebar);
   const timelineCollapsed = useEditorStore((state) => state.timelineCollapsed);
@@ -313,21 +316,18 @@ export default function EditorLayout({ canManagePremium = false }: EditorLayoutP
   }, [addImageElement, addTextElement, pasteFromClipboard]);
 
   return (
-    <div className="flex h-screen min-h-screen flex-col bg-[#d7d7d9] text-[#1f2a39]">
-      <Toolbar
-        onToggleLeft={() => setShowLeftSidebar(!showLeftSidebar)}
-        onToggleRight={() => setShowRightSidebar(!showRightSidebar)}
-        canManagePremium={canManagePremium}
-      />
+    <div className="flex h-screen min-h-screen flex-col bg-[#e9eaed] text-t-primary">
+      <Toolbar navItems={navItems} canManagePremium={canManagePremium} />
 
       <div className="flex min-h-0 flex-1">
         <SidePanel collapsed={!showLeftSidebar} />
 
         <div className="relative flex min-w-0 flex-1 flex-col">
-          <div className="min-h-0 flex-1 bg-[#d7d7d9]">
+          <div className="relative min-h-0 flex-1 bg-[#e9eaed]">
             <ErrorBoundary>
               <CanvasEditor />
             </ErrorBoundary>
+            <ContextToolbar />
           </div>
           {/* The page strip collapses together with the timeline — but only when a timeline is
               actually on screen, otherwise there would be no control left to bring it back. */}

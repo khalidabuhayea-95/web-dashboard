@@ -900,8 +900,8 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   // while this is on, so the canvas gets the entire height back.
   if (timelineCollapsed) {
     return (
-      <div className="border-t border-[#cbd1da] bg-[#eef1f5] px-3 py-2">
-        <div className="flex items-center gap-2 rounded-full border border-[#cad1db] bg-white px-2 py-1 shadow-sm">
+      <div className="bg-[#f6f7f8] px-3 py-2">
+        <div className="flex items-center gap-2 rounded-full bg-white px-2 py-1">
           <button
             type="button"
             onClick={() => setTimelineCollapsed(false)}
@@ -961,8 +961,8 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   }
 
   return (
-    <div className="border-t border-[#cbd1da] bg-[#eef1f5] px-3 py-3">
-      <div className="rounded-[24px] border border-[#cad1db] bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] px-4 pb-4 pt-2 shadow-sm">
+    <div className="bg-[#f6f7f8] px-3 py-3">
+      <div className="rounded-3xl bg-white px-4 pb-4 pt-2">
           <div className="grid grid-cols-[28px_1fr] gap-x-3">
             <div className="flex flex-col items-center justify-between pb-1 pt-4">
               <button

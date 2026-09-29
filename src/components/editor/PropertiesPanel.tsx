@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { SlidersHorizontal } from "lucide-react";
+import { SlidersHorizontal, X } from "lucide-react";
 
 import Button from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/form";
@@ -104,6 +104,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const pages = useEditorStore((state) => state.pages);
   const activePageId = useEditorStore((state) => state.activePageId);
   const selectedIds = useEditorStore((state) => state.selectedIds);
+  const setShowRightSidebar = useEditorStore((state) => state.setShowRightSidebar);
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
 
   const updateElement = useEditorStore((state) => state.updateElement);
@@ -407,10 +408,8 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   return (
     <aside
-      className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width,padding,opacity,border-color] duration-300 ease-out dark:bg-slate-950 ${
-        collapsed
-          ? "w-0 border-l border-transparent p-0 opacity-0"
-          : "w-[320px] border-l border-slate-200 p-3 opacity-100 dark:border-slate-800"
+      className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width,padding,opacity] duration-300 ease-out ${
+        collapsed ? "w-0 p-0 opacity-0" : "w-[320px] px-4 pb-4 pt-3 opacity-100"
       }`}
       aria-hidden={collapsed}
     >
@@ -419,12 +418,23 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
           collapsed ? "pointer-events-none opacity-0" : "opacity-100"
         }`}
       >
-        <div className="mb-3 flex items-center gap-2 text-sm font-semibold text-slate-800 dark:text-slate-100">
-          <SlidersHorizontal size={16} /> Properties
+        <div className="mb-3 flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-[14px] font-semibold text-t-primary">
+            <SlidersHorizontal size={16} /> Properties
+          </div>
+          <button
+            type="button"
+            aria-label="Close properties"
+            title="Close properties"
+            onClick={() => setShowRightSidebar(false)}
+            className="inline-flex h-8 w-8 items-center justify-center rounded-full text-t-secondary transition-colors hover:bg-[#f1f2f4] hover:text-t-primary"
+          >
+            <X size={16} />
+          </button>
         </div>
 
         {selectedElements.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 p-4 text-xs text-slate-500 dark:border-slate-700 dark:text-slate-400">
+          <div className="rounded-2xl bg-[#f6f7f8] p-4 text-xs leading-5 text-t-secondary">
             Select an element to edit position, size, styles, and text/image settings.
           </div>
         ) : null}
@@ -662,7 +672,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                           }
                           className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
                             active
-                              ? "border-sky-500 bg-sky-50 text-sky-600 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300"
+                              ? "border-brand-teal bg-brand-teal/10 text-brand-teal"
                               : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500"
                           }`}
                         >
@@ -705,7 +715,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                           }
                           className={`flex h-9 w-9 items-center justify-center rounded-lg border transition-colors ${
                             active
-                              ? "border-sky-500 bg-sky-50 text-sky-600 dark:border-sky-400 dark:bg-sky-950/40 dark:text-sky-300"
+                              ? "border-brand-teal bg-brand-teal/10 text-brand-teal"
                               : "border-slate-200 bg-white text-slate-400 hover:border-slate-300 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-500"
                           }`}
                         >
@@ -749,7 +759,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                     }
                     onPointerUp={() => recordHistory()}
                     onKeyUp={() => recordHistory()}
-                    className="w-full accent-sky-500"
+                    className="w-full accent-[var(--brand-teal)]"
                   />
                 </div>
               ) : null}
@@ -850,7 +860,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                     }
                     onPointerUp={() => recordHistory()}
                     onKeyUp={() => recordHistory()}
-                    className="h-9 w-full accent-sky-500"
+                    className="h-9 w-full accent-[var(--brand-teal)]"
                   />
                 </div>
               </div>
@@ -895,7 +905,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   }}
                   onPointerUp={() => recordHistory()}
                   onKeyUp={() => recordHistory()}
-                  className="w-full accent-sky-500"
+                  className="w-full accent-[var(--brand-teal)]"
                 />
               </div>
             </div>
@@ -961,7 +971,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                     }
                     onPointerUp={() => recordHistory()}
                     onKeyUp={() => recordHistory()}
-                    className="h-9 w-full accent-sky-500"
+                    className="h-9 w-full accent-[var(--brand-teal)]"
                   />
                 </div>
               </div>
@@ -989,7 +999,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   }
                   onPointerUp={() => recordHistory()}
                   onKeyUp={() => recordHistory()}
-                  className="w-full accent-sky-500"
+                  className="w-full accent-[var(--brand-teal)]"
                 />
               </div>
 
@@ -1142,7 +1152,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 }
                 onPointerUp={() => recordHistory()}
                 onKeyUp={() => recordHistory()}
-                className="w-full accent-sky-500"
+                className="w-full accent-[var(--brand-teal)]"
               />
             </div>
           ) : null}

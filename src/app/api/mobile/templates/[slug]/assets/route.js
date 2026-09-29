@@ -17,6 +17,7 @@ import {
 import { trimShapeSvg } from "@/lib/mobile/shapeSvgTrim.server";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
+import { resolveFrameContent } from "@/lib/templates/mobileProject";
 
 export const runtime = "nodejs";
 
@@ -100,9 +101,7 @@ function normalizeFrameContentTransform(value) {
 }
 
 function resolveFramePreviewLayout(object) {
-  const frameContent = object?.frameContent && typeof object.frameContent === "object"
-    ? object.frameContent
-    : {};
+  const frameContent = resolveFrameContent(object) || {};
   const frameWidth = Math.max(1, Math.round(numberOr(object?.width, 1)));
   const frameHeight = Math.max(1, Math.round(numberOr(object?.height, 1)));
   const sourceWidth = Math.max(1, numberOr(frameContent.sourceWidth, frameWidth));
@@ -149,9 +148,8 @@ async function readImageSourceBytes(source) {
 }
 
 async function renderFrameContentPreviewWebp(object) {
-  const frameContent = object?.frameContent && typeof object.frameContent === "object"
-    ? object.frameContent
-    : null;
+  // Same resolution the payload uses: an imported shaped frame keeps its photo in `src`.
+  const frameContent = resolveFrameContent(object);
   if (!frameContent) return null;
 
   const source = String(

@@ -187,7 +187,7 @@ export default function PageBar() {
   );
 
   return (
-    <div className="border-t border-[#cbd1da] bg-[#eef1f5] px-3 py-2">
+    <div className="bg-[#f6f7f8] px-3 py-2">
       <div
         ref={scrollerRef}
         className="flex items-start gap-2 overflow-x-auto pb-1"
@@ -228,10 +228,10 @@ export default function PageBar() {
                     handleDrop(page.id, event.clientX - rect.left > rect.width / 2 ? "after" : "before");
                   }}
                   onClick={() => handleSelectPage(page.id)}
-                  className={`group relative cursor-pointer overflow-hidden rounded-lg border-2 bg-white shadow-sm transition ${
+                  className={`group relative cursor-pointer overflow-hidden rounded-lg border-2 bg-white transition ${
                     isActive
-                      ? "border-[#22828C] ring-2 ring-[#22828C]/25"
-                      : "border-[#cad1db] hover:border-[#9aa8b6]"
+                      ? "border-[#22828C] ring-2 ring-[#22828C]/20"
+                      : "border-transparent ring-1 ring-black/5 hover:border-[#c9ced4]"
                   } ${
                     isDropTarget
                       ? dragOver?.position === "after"
@@ -296,7 +296,7 @@ export default function PageBar() {
                       aria-hidden="true"
                     />
                     <div
-                      className="fixed z-50 w-40 -translate-x-1/2 -translate-y-full rounded-xl border border-[#cad1db] bg-white p-1 shadow-lg"
+                      className="fixed z-50 w-40 -translate-x-1/2 -translate-y-full rounded-xl bg-white p-1 shadow-[0_1px_2px_rgba(16,18,21,0.06),0_8px_24px_-6px_rgba(16,18,21,0.14)]"
                       style={{ left: `${menu.anchorX}px`, top: `${menu.anchorY - 6}px` }}
                     >
                       <button
@@ -341,7 +341,7 @@ export default function PageBar() {
             <button
               type="button"
               onClick={handleAddPage}
-              className="flex items-center justify-center rounded-lg border-2 border-dashed border-[#9aa8b6] bg-white/60 text-[#4f5d72] transition hover:border-[#22828C] hover:text-[#22828C]"
+              className="flex items-center justify-center rounded-lg border-2 border-dashed border-[#c9ced4] bg-white/60 text-t-secondary transition hover:border-[#22828C] hover:text-[#22828C]"
               style={{ width: `${tileWidthPx}px`, height: `${TILE_HEIGHT_PX}px` }}
               aria-label="Add page"
               title="Add page"
