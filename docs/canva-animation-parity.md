@@ -566,3 +566,7 @@ Everything below runs in the extension on Canva's own model values (design px, p
 * **Not ported, by design** (import warnings say so): Canva's "animations are overlapping" error path
   (Canva leaves such an element static; we animate it), NEON below intensity 0.5 running past its window
   (the tail is cut at the window), and captions sync (`NV` 2). Canva's indefinite-page mode is treated as off.
+* **Un-timed page length** (2026-09-30): a page with no `durationUs` of its own runs for its longest
+  timed element (a 12.72 s animated sticker kept DAHOnhalEeI at 0:12), never under the nominal 5 s.
+  All three fiber walks now derive it that way (`longestTimedElementEndMs` in the shared extract
+  block), so untimed layers on such a page no longer end at 5 s in the import.

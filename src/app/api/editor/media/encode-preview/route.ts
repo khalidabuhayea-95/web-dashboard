@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -8,6 +7,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { MediaToolMissingError, runFfmpeg, runFfprobe } from "@/lib/media/ffmpeg.server";
 import { getEditorSession } from "@/lib/templates/server";
 
 export const runtime = "nodejs";
@@ -38,52 +38,6 @@ function formatDurationSeconds(durationMs: number) {
   return (Math.max(0, Number(durationMs) || 0) / 1000).toFixed(3);
 }
 
-function runProcess(command: string, args: string[]) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    const stderrChunks: Buffer[] = [];
-    child.stderr.on("data", (chunk) => {
-      stderrChunks.push(Buffer.from(chunk));
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-      reject(new Error(stderr || `${command} exited with code ${code}`));
-    });
-  });
-}
-
-function runProcessCapture(command: string, args: string[]) {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn(command, args, {
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    child.stdout.on("data", (chunk) => {
-      stdoutChunks.push(Buffer.from(chunk));
-    });
-    child.stderr.on("data", (chunk) => {
-      stderrChunks.push(Buffer.from(chunk));
-    });
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve(Buffer.concat(stdoutChunks).toString("utf8").trim());
-        return;
-      }
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-      reject(new Error(stderr || `${command} exited with code ${code}`));
-    });
-  });
-}
-
 function parseFps(value: unknown) {
   const raw = String(value || "").trim();
   if (!raw) return 0;
@@ -97,7 +51,7 @@ function parseFps(value: unknown) {
 }
 
 async function probeVideo(filePath: string) {
-  const output = await runProcessCapture("ffprobe", [
+  const output = await runFfprobe([
     "-v",
     "error",
     "-count_frames",
@@ -174,7 +128,7 @@ export async function POST(request: NextRequest) {
         await fs.writeFile(sourcePath, bytes);
         const expectedDurationSeconds = formatDurationSeconds(expectedDurationMs);
 
-        await runProcess("ffmpeg", [
+        await runFfmpeg([
           "-y",
           "-hide_banner",
           "-loglevel",
@@ -221,7 +175,7 @@ export async function POST(request: NextRequest) {
           await fs.writeFile(framePath, bytes);
         }
 
-        await runProcess("ffmpeg", [
+        await runFfmpeg([
           "-y",
           "-hide_banner",
           "-loglevel",
@@ -295,6 +249,12 @@ export async function POST(request: NextRequest) {
       await fs.rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
     }
   } catch (error) {
+    if (error instanceof MediaToolMissingError) {
+      return handleApiError(
+        error,
+        "ffmpeg is not installed on this server, so the preview cannot be encoded"
+      );
+    }
     return handleApiError(error, "Failed to encode preview video");
   }
 }

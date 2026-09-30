@@ -574,6 +574,24 @@
         const us = obj ? readRawMicros(obj.durationUs) : undefined;
         return us !== undefined && us > 0 ? us : undefined;
       };
+      // The end of the longest timed element on a page, in ms (0 when nothing on it is timed). A page
+      // whose own length is unset runs for its longest video / animated element: the 12.7 s blooming
+      // stickers on DAHOnhalEeI kept the page at 0:12 while its untimed texts imported with the nominal
+      // 5 s and vanished from the preview at 0:05.
+      const longestTimedElementEndMs = (elements) => {
+        let endMs = 0;
+        if (!elements || typeof elements !== "object") return endMs;
+        for (const key of Object.keys(elements)) {
+          if (key.startsWith("__")) continue;
+          const entry = elements[key];
+          if (!entry || typeof entry !== "object") continue;
+          const durationUs = Number(entry.durationUs);
+          if (!Number.isFinite(durationUs) || durationUs <= 0) continue;
+          const startUs = Number.isFinite(Number(entry.startUs)) ? Number(entry.startUs) : 0;
+          endMs = Math.max(endMs, Math.round((startUs + durationUs) / 1000));
+        }
+        return endMs;
+      };
       const readPageSize = (obj) => {
         try {
           if (!obj || typeof obj !== "object") return null;
@@ -1425,18 +1443,19 @@
             },
           ];
         };
-        // A Canva page's own length. Unset on a page the author never re-timed, where Canva
-        // still plays it as its nominal 5s (what the editor's 0:05 shows), so that is the default.
+        // A Canva page's own length. Unset on a page the author never re-timed, where Canva plays
+        // it for its longest timed element (a 12.7 s animated sticker keeps the page at 0:12) and
+        // never shorter than its nominal 5s (what the editor's 0:05 shows on an empty page).
         // (Page animation, page size and the page list come from the shared
         // canva-animation-extract block: readPageAnimation / readPageSize / listCanvaPages.)
-        const readPageDurationMs = (obj, fillRecord) => {
+        const readPageDurationMs = (obj, fillRecord, elements) => {
           try {
             const us = Number(unwrapObservable(obj && obj.durationUs));
             if (Number.isFinite(us) && us > 0) return Math.round(us / 1000);
             // A page whose background is a VIDEO runs for the video's length, which the model does
-            // not state — the importer fills it in from the captured clip. Everything else plays
-            // for Canva's nominal 5s.
-            return fillRecord && fillRecord.video ? 0 : 5000;
+            // not state — the importer fills it in from the captured clip.
+            if (fillRecord && fillRecord.video) return 0;
+            return Math.max(5000, longestTimedElementEndMs(elements));
           } catch (_e) {
             return 5000;
           }
@@ -1453,7 +1472,8 @@
           const pageAnimation = readPageAnimation(livePages[0]) || readPageAnimation(pageObj);
           if (pageAnimation) result.__pageAnimation = pageAnimation;
           result.__pageDurationMs =
-            readPageDurationMs(livePages[0], pageFill) || readPageDurationMs(pageObj, pageFill);
+            readPageDurationMs(livePages[0], pageFill, result) ||
+            readPageDurationMs(pageObj, pageFill, result);
           const pageDimensions = readPageSize(livePages[0]) || readPageSize(pageObj) || readPageSize(doc);
           if (pageDimensions) {
             result.__pageWidth = pageDimensions.width;
@@ -1577,7 +1597,7 @@
                     : null,
                 fill: pageFillForPage,
                 animation: readPageAnimation(pageRoot) || readPageAnimation(findPageObjIn(pageRoot)),
-                durationMs: readPageDurationMs(pageRoot, pageFillForPage),
+                durationMs: readPageDurationMs(pageRoot, pageFillForPage, pageElements),
                 ...(readPageSize(pageRoot) || readPageSize(findPageObjIn(pageRoot)) || {}),
               });
             }

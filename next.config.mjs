@@ -2,7 +2,16 @@
 const nextConfig = {
   // Native (.node) addons used in server code must be loaded at runtime via
   // require() rather than bundled — Turbopack cannot place them in ESM chunks.
-  serverExternalPackages: ["@neplex/vectorizer", "canvas", "sharp", "ag-psd"],
+  // The ffmpeg/ffprobe packages find their binary next to their own files,
+  // which bundling rewrites (see src/lib/media/ffmpeg.server.ts).
+  serverExternalPackages: [
+    "@neplex/vectorizer",
+    "canvas",
+    "sharp",
+    "ag-psd",
+    "ffmpeg-static",
+    "@ffprobe-installer/ffprobe",
+  ],
   // Added when pre-existing type errors blocked the production build. `npx tsc --noEmit`
   // is clean again as of 2026-09-24, so this is only a safety net now — drop it once CI
   // runs the type check. Type/lint checks run via `npx tsc --noEmit` and `npm run lint`.

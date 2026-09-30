@@ -46,7 +46,7 @@ function loadExtraction(file = "canva-fiber-main.js") {
     const decodeMotionPath = () => null;
   `;
   return vm.runInNewContext(
-    `${prelude}\n${extractBlocks[file]}\n;({ extractAnimation, extractRepeating, readScheduleFacts, readAnimationEntry, collectCanvaElements, readPageAnimation, readPageSize, readPageDurationUs, listCanvaPages });`,
+    `${prelude}\n${extractBlocks[file]}\n;({ extractAnimation, extractRepeating, readScheduleFacts, readAnimationEntry, collectCanvaElements, readPageAnimation, readPageSize, readPageDurationUs, listCanvaPages, longestTimedElementEndMs });`,
     {}
   );
 }
@@ -964,4 +964,37 @@ test("a captured background video's length re-times the page (the model states n
   const page = importPage([element("LB1", { type: "sequenced", animation: 4, Xw: { qg: {}, Bf: {} } })], { pageDurationMs: 0, overridePageMs: 12000 });
   // 12 s: out from 11000 for 500.
   assert.deepEqual(windowOf(page.LB1), [0, 11500]);
+});
+
+test("an un-timed page runs for its longest timed element, never under the nominal 5 s", () => {
+  const { longestTimedElementEndMs } = loadExtraction();
+  // DAHOnhalEeI: two 12.72 s animated stickers and one timed text on a page with no length of
+  // its own; the other texts are untimed (startUs / durationUs undefined — never 0).
+  const elements = {
+    __pageWidth: 1080,
+    LBsticker1: { type: "rect", startUs: 0, durationUs: 12720000 },
+    LBsticker2: { type: "rect", durationUs: 12720000 },
+    LBtext: { type: "text" },
+    LBshort: { type: "text", startUs: 1000000, durationUs: 2000000 },
+  };
+  assert.equal(longestTimedElementEndMs(elements), 12720);
+  assert.equal(longestTimedElementEndMs({ LBtext: { type: "text" } }), 0);
+  assert.equal(longestTimedElementEndMs(null), 0);
+  // A timed element shorter than the page adds nothing: the importer keeps the nominal 5 s.
+  assert.equal(Math.max(5000, longestTimedElementEndMs({ LBshort: elements.LBshort })), 5000);
+  // The scheduler then runs every untimed layer to that page end.
+  const { scheduleCanvaPage } = loadMapping();
+  const page = {
+    durationMs: 12720,
+    width: 1080,
+    height: 1920,
+    hasNextPage: false,
+    animation: null,
+    background: null,
+    elements: [
+      { id: "LBtext", type: "text", zOrder: 0, left: 100, top: 300, width: 700, height: 60, animationState: "present", animationType: "independent", animation: { preset: 4, config: null, repeating: null }, text: { maxFontSize: 52 }, hasMediaFill: false, children: [] },
+    ],
+  };
+  const scheduled = scheduleCanvaPage(page);
+  assert.equal(scheduled.elements.LBtext.window.endMs, 12720);
 });

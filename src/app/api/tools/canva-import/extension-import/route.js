@@ -468,6 +468,43 @@ function readEmbeddedFontFamily(dataUrl) {
   }
 }
 
+// Canva reports a text box's width rounded to whole pixels, and an auto-width box is exactly as
+// wide as its text: "التخرج" measured 537.04 px and arrived in a 537 px box. Konva (and the app's text
+// layout) break a word that overflows its box between characters, so the ج dropped onto a second
+// line. Every imported text box gets a little slack — the editor's own snug-fit epsilon, or 1% for
+// the big display sizes where another text engine's metrics drift further — and moves back along
+// its own x axis by the alignment rule, so the glyphs stay exactly where Canva drew them.
+const IMPORTED_TEXT_BOX_SLACK_PX = 2;
+function widenImportedTextBoxes(objects) {
+  if (!Array.isArray(objects)) return 0;
+  let changed = 0;
+  objects.forEach((object) => {
+    if (!object || typeof object !== "object") return;
+    if (Array.isArray(object.objects)) {
+      changed += widenImportedTextBoxes(object.objects);
+      return;
+    }
+    const type = String(object.type || "").toLowerCase();
+    if (type !== "text" && type !== "textbox" && type !== "i-text") return;
+    const width = Number(object.width);
+    if (!Number.isFinite(width) || width <= 0) return;
+    const align = String(object.textAlign || "").toLowerCase();
+    // Justified text is stretched to the box, so a wider box would respace it.
+    if (align === "justify") return;
+    const slack = Math.max(IMPORTED_TEXT_BOX_SLACK_PX, width * 0.01);
+    const scaleX = Number(object.scaleX) || 1;
+    const anchorShift = align === "center" ? slack / 2 : align === "right" ? slack : 0;
+    // The box grows along its own x axis (mirrored by a flip), in page space through its rotation.
+    const localShift = anchorShift * scaleX * (object.flipX ? -1 : 1);
+    const radians = ((Number(object.angle) || 0) * Math.PI) / 180;
+    object.left = (Number(object.left) || 0) - localShift * Math.cos(radians);
+    object.top = (Number(object.top) || 0) - localShift * Math.sin(radians);
+    object.width = width + slack;
+    changed += 1;
+  });
+  return changed;
+}
+
 // Point every text object that asks for `fromFamily` at `toFamily`, groups included.
 function remapFontFamilyInObjects(objects, fromFamily, toFamily) {
   if (!Array.isArray(objects)) return 0;
@@ -2054,6 +2091,7 @@ export async function POST(request) {
       }
     }
   }
+  if (hasFabricData) widenImportedTextBoxes(fabricData.objects);
   importMetadata.warnings = Array.from(new Set(importWarnings.map((item) => String(item || "").trim()).filter(Boolean)));
   // Provenance markers used to sit in `tags`, where the mobile search matched them. They are
   // diagnostics, not search terms, so they live here now.

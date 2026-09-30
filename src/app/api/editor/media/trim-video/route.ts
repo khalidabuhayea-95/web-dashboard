@@ -10,7 +10,6 @@
  * moves the boundary by up to a second and is exactly the mismatch this route exists to remove.
  */
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
 import { promises as fs } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -19,6 +18,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
+import { MediaToolMissingError, runFfmpeg, runFfprobe } from "@/lib/media/ffmpeg.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -42,42 +42,6 @@ const TRIM_LIMIT = { limit: 10, windowMs: 60_000 };
 const MAX_SOURCE_BYTES = 250 * 1024 * 1024;
 const MIN_CLIP_SECONDS = 0.1;
 
-function runProcess(command: string, args: string[]) {
-  return new Promise<void>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "ignore", "pipe"] });
-    const stderrChunks: Buffer[] = [];
-    child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve();
-        return;
-      }
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-      reject(new Error(stderr || `${command} exited with code ${code}`));
-    });
-  });
-}
-
-function runProcessCapture(command: string, args: string[]) {
-  return new Promise<string>((resolve, reject) => {
-    const child = spawn(command, args, { stdio: ["ignore", "pipe", "pipe"] });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
-    child.stdout.on("data", (chunk) => stdoutChunks.push(Buffer.from(chunk)));
-    child.stderr.on("data", (chunk) => stderrChunks.push(Buffer.from(chunk)));
-    child.on("error", reject);
-    child.on("close", (code) => {
-      if (code === 0) {
-        resolve(Buffer.concat(stdoutChunks).toString("utf8").trim());
-        return;
-      }
-      const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
-      reject(new Error(stderr || `${command} exited with code ${code}`));
-    });
-  });
-}
-
 async function objectBodyToBuffer(body: unknown): Promise<Buffer | null> {
   if (!body) return null;
   const candidate = body as {
@@ -98,7 +62,7 @@ async function objectBodyToBuffer(body: unknown): Promise<Buffer | null> {
 }
 
 async function probeDurationSeconds(filePath: string): Promise<number> {
-  const output = await runProcessCapture("ffprobe", [
+  const output = await runFfprobe([
     "-v",
     "error",
     "-show_entries",
@@ -183,7 +147,7 @@ export async function POST(request: NextRequest) {
       const safeEnd = sourceDuration > 0 ? Math.min(endSec, sourceDuration) : endSec;
       const spanSeconds = Math.max(MIN_CLIP_SECONDS, safeEnd - safeStart);
 
-      await runProcess("ffmpeg", [
+      await runFfmpeg([
         "-y",
         "-hide_banner",
         "-loglevel",
@@ -253,7 +217,7 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    if (/ENOENT/.test(message) && /ffmpeg|ffprobe/i.test(message)) {
+    if (error instanceof MediaToolMissingError) {
       logger.error("editor.trimVideo.missingFfmpeg", { message });
       return handleApiError(
         error,

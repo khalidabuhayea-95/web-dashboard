@@ -136,10 +136,26 @@ export function measureTextBox(input: TextBoxInput, wrapWidth: number | null = n
  */
 export function resolveSnugTextBox(input: TextBoxInput, boxWidth: number | null): SnugTextBox | null {
   const requestedWidth = boxWidth !== null && boxWidth > 1 ? boxWidth : null;
-  const measured = measureTextBox(input, requestedWidth);
+  let measured = measureTextBox(input, requestedWidth);
   if (!measured) return null;
 
   const hardLineCount = String(input.text ?? "").split(/\r\n|\r|\n/).length;
+  // A box that folds a line is normally the wrap column and is left alone (below). But a box can
+  // fold by a hair: an imported box carries Canva's width rounded to whole pixels, and a word that
+  // measures 537.04 px in a 537 px box is broken between its last two letters (Konva breaks an
+  // over-long word between characters). When the text fits the box within the epsilon once it is
+  // measured free of it, the fold is a rounding artefact, not a wrap column, and the box hugs the
+  // text instead.
+  if (requestedWidth !== null && measured.lineCount > hardLineCount) {
+    const unconstrained = measureTextBox(input, null);
+    if (
+      unconstrained &&
+      unconstrained.lineCount <= hardLineCount &&
+      unconstrained.lineWidth <= requestedWidth + TEXT_BOX_WIDTH_EPSILON
+    ) {
+      measured = unconstrained;
+    }
+  }
   let nextWidth = requestedWidth ?? Math.max(2, Math.ceil(measured.lineWidth) + TEXT_BOX_WIDTH_EPSILON);
   let hugging = false;
 

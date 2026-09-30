@@ -808,6 +808,24 @@
             const us = obj ? readRawMicros(obj.durationUs) : undefined;
             return us !== undefined && us > 0 ? us : undefined;
           };
+          // The end of the longest timed element on a page, in ms (0 when nothing on it is timed). A page
+          // whose own length is unset runs for its longest video / animated element: the 12.7 s blooming
+          // stickers on DAHOnhalEeI kept the page at 0:12 while its untimed texts imported with the nominal
+          // 5 s and vanished from the preview at 0:05.
+          const longestTimedElementEndMs = (elements) => {
+            let endMs = 0;
+            if (!elements || typeof elements !== "object") return endMs;
+            for (const key of Object.keys(elements)) {
+              if (key.startsWith("__")) continue;
+              const entry = elements[key];
+              if (!entry || typeof entry !== "object") continue;
+              const durationUs = Number(entry.durationUs);
+              if (!Number.isFinite(durationUs) || durationUs <= 0) continue;
+              const startUs = Number.isFinite(Number(entry.startUs)) ? Number(entry.startUs) : 0;
+              endMs = Math.max(endMs, Math.round((startUs + durationUs) / 1000));
+            }
+            return endMs;
+          };
           const readPageSize = (obj) => {
             try {
               if (!obj || typeof obj !== "object") return null;
@@ -1376,6 +1394,12 @@
             if (pageAnimation) result.__pageAnimation = pageAnimation;
             const pageDurationUs = readPageDurationUs(firstPage);
             if (pageDurationUs) result.__pageDurationMs = Math.round(pageDurationUs / 1000);
+            else {
+              // An un-timed page runs for its longest timed element (never under the nominal 5s,
+              // which the consumers already assume when this stays unset).
+              const longestMs = longestTimedElementEndMs(result);
+              if (longestMs > 5000) result.__pageDurationMs = longestMs;
+            }
             const pageSize = readPageSize(firstPage) || readPageSize(doc);
             if (pageSize) {
               result.__pageWidth = pageSize.width;
@@ -6251,6 +6275,30 @@
                 layer.text = modelText;
               }
             }
+            // ── Model-authoritative TEXT SIZE when the DOM read is off by a scale factor ─────
+            // The DOM font size is a CSS px × the transforms up to the layer node; a pass that walks
+            // further (the fallback pass, through the page's zoom wrapper) or a DOM caught mid-render
+            // returns a screen size instead. The model's run font-size × Canva's own font scale
+            // (width / wb, exactly what background.js applies to maxFontSize) is the rendered size in
+            // design px. Take it only when the DOM value is off by more than a quarter — a
+            // mixed-size paragraph never drifts that far, a zoom factor always does (0.24).
+            if (
+              String(layer.kind || "") === "text" &&
+              model.text &&
+              Number(model.text.fontSize) > 0 &&
+              Number(layer.fontSize) > 0
+            ) {
+              const fontScale =
+                Number(model.layoutWidth) > 0 && Number(model.width) > 0
+                  ? Number(model.width) / Number(model.layoutWidth)
+                  : 1;
+              const modelFontSize = Number(model.text.fontSize) * fontScale;
+              const ratio = Number(layer.fontSize) / modelFontSize;
+              if (Number.isFinite(ratio) && (ratio < 0.8 || ratio > 1.25)) {
+                layer.fontSize = modelFontSize;
+                layer.fontSizeFromModel = true;
+              }
+            }
             // ── Model-authoritative ROTATION (+ frame geometry for rotated layers) ────────────
             // The DOM transform read is unreliable — it missed a -15.3° ice-cream (imported upright
             // at 0°) while its +14.7° twin was detected. The capture pipeline fetches the UN-rotated
@@ -6481,14 +6529,24 @@
 
             const textStyle = window.getComputedStyle(node);
             const fontFamily = normalizeFontFamilyName(textStyle.fontFamily || "Arial") || "Arial";
+            // This scale runs up to the PAGE node, so it includes Canva's zoom wrapper (scale(0.24)
+            // at 24%) — the CSS font size × it is a SCREEN size, and like the box geometry above it
+            // needs the design scale to land in design px. Without it every text this pass picked
+            // up (DAHOnhalEeI imported mid-playback, its texts still transparent from their entrance
+            // fade) came in at the zoom factor: 52 px → 12.46, 223.87 → 53.6.
             const textScale = getCompositeScaleToAncestor(node, bestPage.node);
             const textFontSize = Number.parseFloat(textStyle.fontSize || "") || 0;
-            const resolvedFontSize = Math.max(8, (textFontSize || 24) * Math.max(0.01, textScale.y));
+            const resolvedFontSize = Math.max(
+              8,
+              (textFontSize || 24) * Math.max(0.01, textScale.y) * Math.max(0.0001, designScaleY)
+            );
             const textLineHeightRaw = Number.parseFloat(textStyle.lineHeight || "");
             const textLineHeight =
               textLineHeightRaw && textFontSize > 0 ? textLineHeightRaw / textFontSize : 1.2;
             const textLetterSpacing =
-              parseNumericPx(textStyle.letterSpacing || "") * Math.max(0.01, textScale.x);
+              parseNumericPx(textStyle.letterSpacing || "") *
+              Math.max(0.01, textScale.x) *
+              Math.max(0.0001, designScaleX);
             const textDecoration = String(
               textStyle.textDecorationLine || textStyle.textDecoration || ""
             ).toLowerCase();

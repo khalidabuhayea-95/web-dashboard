@@ -4237,6 +4237,24 @@ function extractCanvaFiberModel() {
       const us = obj ? readRawMicros(obj.durationUs) : undefined;
       return us !== undefined && us > 0 ? us : undefined;
     };
+    // The end of the longest timed element on a page, in ms (0 when nothing on it is timed). A page
+    // whose own length is unset runs for its longest video / animated element: the 12.7 s blooming
+    // stickers on DAHOnhalEeI kept the page at 0:12 while its untimed texts imported with the nominal
+    // 5 s and vanished from the preview at 0:05.
+    const longestTimedElementEndMs = (elements) => {
+      let endMs = 0;
+      if (!elements || typeof elements !== "object") return endMs;
+      for (const key of Object.keys(elements)) {
+        if (key.startsWith("__")) continue;
+        const entry = elements[key];
+        if (!entry || typeof entry !== "object") continue;
+        const durationUs = Number(entry.durationUs);
+        if (!Number.isFinite(durationUs) || durationUs <= 0) continue;
+        const startUs = Number.isFinite(Number(entry.startUs)) ? Number(entry.startUs) : 0;
+        endMs = Math.max(endMs, Math.round((startUs + durationUs) / 1000));
+      }
+      return endMs;
+    };
     const readPageSize = (obj) => {
       try {
         if (!obj || typeof obj !== "object") return null;
@@ -4795,6 +4813,12 @@ function extractCanvaFiberModel() {
       if (pageAnimation) result.__pageAnimation = pageAnimation;
       const pageDurationUs = readPageDurationUs(firstPage);
       if (pageDurationUs) result.__pageDurationMs = Math.round(pageDurationUs / 1000);
+      else {
+        // An un-timed page runs for its longest timed element (never under the nominal 5s, which
+        // the consumers already assume when this stays unset).
+        const longestMs = longestTimedElementEndMs(result);
+        if (longestMs > 5000) result.__pageDurationMs = longestMs;
+      }
       const pageSize = readPageSize(firstPage) || readPageSize(doc);
       if (pageSize) {
         result.__pageWidth = pageSize.width;
