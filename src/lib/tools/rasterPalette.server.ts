@@ -310,7 +310,9 @@ function collectTargetImageNodes(node: unknown, results: Record<string, unknown>
   const objectNode = node as Record<string, unknown>
   const type = asString(objectNode.type).toLowerCase()
   const source = asString(objectNode.rasterOriginalSrc || objectNode.src)
-  if (type === "image" && source) {
+  // An animated GIF layer is not recolorable (a recolor would bake it into one still frame), so it
+  // gets no palette — and its first frame is often blank anyway.
+  if (type === "image" && source && !objectNode.animatedImage) {
     results.push(objectNode)
   }
 

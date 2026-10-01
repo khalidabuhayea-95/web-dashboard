@@ -2812,7 +2812,8 @@ async function layerToFabricObject(layer, index) {
   if (!imageSrc || /^blob:/i.test(imageSrc)) return null;
   let intrinsicWidth = Math.max(0, numberOr(layer?.sourceWidth, 0));
   let intrinsicHeight = Math.max(0, numberOr(layer?.sourceHeight, 0));
-  if (isAxisAlignedImage && imageSrc.startsWith("data:image/")) {
+  // An animated sticker keeps every frame: trimming would re-encode the GIF into one still PNG.
+  if (isAxisAlignedImage && !layer?.animatedImage && imageSrc.startsWith("data:image/")) {
     try {
       const sourceMimeType = parseMimeTypeFromDataUrl(imageSrc);
       const shouldForceRasterizeThinSvg =
@@ -2879,6 +2880,20 @@ async function layerToFabricObject(layer, index) {
     sourceWidth: objectWidth,
     sourceHeight: objectHeight,
   };
+
+  // Animated sticker (a Canva GIF): `src` is the GIF itself, `posterSrc` its settled frame — for
+  // thumbnails, palettes and clients that cannot play it — and `animatedImage` the loop's shape.
+  if (layer?.animatedImage && typeof layer.animatedImage === "object") {
+    imageObject.animatedImage = {
+      kind: "gif",
+      frameCount: Math.max(1, Math.round(numberOr(layer.animatedImage.frameCount, 1))),
+      durationMs: Math.max(1, Math.round(numberOr(layer.animatedImage.durationMs, 1))),
+      loop: layer.animatedImage.loop !== false,
+    };
+    if (String(layer.posterDataUrl || "").startsWith("data:image/")) {
+      imageObject.posterSrc = String(layer.posterDataUrl);
+    }
+  }
 
   // Canva photo-frame outline + rounded corners → the editor reads stroke/strokeWidth/cornerRadius
   // on the image object and renders them around the display-sized element (strokeScaleEnabled off),

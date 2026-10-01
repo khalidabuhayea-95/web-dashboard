@@ -158,6 +158,12 @@ export interface EditorElement {
    */
   posterSrc?: string;
   /**
+   * Image layers whose `src` is an animated image (a Canva animated sticker is a looping GIF).
+   * The canvas plays its frames (lib/editor/animatedImage.ts); `posterSrc` holds the settled still
+   * for thumbnails and for clients that cannot play it. Ships to mobile as `animatedImage`.
+   */
+  animatedImage?: { kind: "gif"; frameCount: number; durationMs: number; loop: boolean };
+  /**
    * Original resolution-independent SVG source (`data:image/svg+xml`) for shapes placed from the
    * built-in catalog. `src` holds a rasterized PNG for crisp on-canvas display; this preserves the
    * vector so it can ship to mobile (assetKind:"vector") and stay sharp at any scale.

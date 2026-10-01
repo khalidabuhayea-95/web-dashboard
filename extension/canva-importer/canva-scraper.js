@@ -2488,6 +2488,77 @@
         return "";
       };
 
+      // The ANIMATED counterpart of readRemoteImageAssetAsDataUrl: fetches the asset and, when it
+      // is a real multi-frame GIF / WebP, returns the untouched bytes (so the layer keeps moving in
+      // the editor and the app) together with the settled frame as a poster and the animation's
+      // frame count / length. Null for a still image or when nothing could be decoded.
+      const readRemoteAnimatedImageAsset = async (sourceUrl) => {
+        const normalizedUrl = normalizeAssetUrl(sourceUrl);
+        if (!normalizedUrl || /^data:/i.test(normalizedUrl) || /^blob:/i.test(normalizedUrl)) return null;
+        if (typeof ImageDecoder !== "function") return null;
+        const modes = shouldSendCredentialsForUrl(normalizedUrl) ? ["include", "omit"] : ["omit", "include"];
+        for (let index = 0; index < modes.length; index += 1) {
+          let decoder = null;
+          try {
+            const response = await fetch(normalizedUrl, { credentials: modes[index], cache: "force-cache" });
+            if (!response.ok) continue;
+            const blob = await response.blob();
+            if (!blob || blob.size <= 0 || blob.size > ANIMATED_IMAGE_MAX_BYTES) continue;
+            let typedBlob = blob;
+            const mimeType = String(blob.type || "").trim().toLowerCase();
+            if (!mimeType.startsWith("image/")) {
+              const sniffed = await sniffImageMimeType(blob);
+              if (!sniffed) continue;
+              typedBlob = new Blob([blob], { type: sniffed });
+            }
+            if (typedBlob.type !== "image/gif" && typedBlob.type !== "image/webp") return null;
+            if (!(await ImageDecoder.isTypeSupported(typedBlob.type))) return null;
+            const bytes = await typedBlob.arrayBuffer();
+            decoder = new ImageDecoder({ data: bytes, type: typedBlob.type });
+            await decoder.tracks.ready;
+            await decoder.completed;
+            const track = decoder.tracks.selectedTrack;
+            const frameCount = Number(track?.frameCount || 0);
+            if (!track || !track.animated || frameCount <= 1) return null;
+            let durationUs = 0;
+            let width = 0;
+            let height = 0;
+            for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
+              const { image } = await decoder.decode({ frameIndex });
+              try {
+                // A GIF frame with no delay plays at the browsers' 100 ms floor.
+                durationUs += Math.max(20000, Number(image.duration || 0) || 100000);
+                width = width || Number(image.displayWidth || image.codedWidth || 0);
+                height = height || Number(image.displayHeight || image.codedHeight || 0);
+              } finally {
+                image.close();
+              }
+            }
+            const posterDataUrl = await settledFrameOfAnimatedImage(typedBlob, typedBlob.type);
+            const dataUrl = await toDataUrlFromBlob(typedBlob);
+            if (!String(dataUrl).startsWith("data:image/")) return null;
+            return {
+              dataUrl,
+              posterDataUrl: String(posterDataUrl || ""),
+              width,
+              height,
+              frameCount,
+              durationMs: Math.max(1, Math.round(durationUs / 1000)),
+              repetitionCount: Number.isFinite(Number(track.repetitionCount)) ? Number(track.repetitionCount) : null,
+            };
+          } catch (_error) {
+            // Try the next credentials mode.
+          } finally {
+            try {
+              decoder?.close();
+            } catch (_closeError) {
+              /* already closed */
+            }
+          }
+        }
+        return null;
+      };
+
       // Acquire an image for a given <img>/<image> element by trying strategies
       // in correctness-priority order: original-bytes paths first, lossy raster
       // last. Returns { src, dataUrl, provenance } where provenance is:
@@ -2497,6 +2568,28 @@
         const initialSrc = getImageElementSource(element);
         const fitFetchedToTarget = Boolean(options?.fitFetchedToTarget);
         const cropRegion = options?.cropRegion || null;
+
+        // An animated sticker keeps its animation: the raw GIF is the asset, its settled frame the
+        // poster. A GIF that turns out to be a still falls through to the ordinary paths below.
+        if (options?.keepAnimated && /^https?:\/\//i.test(String(initialSrc))) {
+          const animated = await readRemoteAnimatedImageAsset(initialSrc);
+          if (animated) {
+            return {
+              src: animated.dataUrl,
+              dataUrl: animated.dataUrl,
+              provenance: "fetch",
+              sourceWidth: animated.width,
+              sourceHeight: animated.height,
+              posterDataUrl: animated.posterDataUrl,
+              animatedImage: {
+                kind: "gif",
+                frameCount: animated.frameCount,
+                durationMs: animated.durationMs,
+                loop: true,
+              },
+            };
+          }
+        }
 
         // (1) Already a data: URL — done.
         if (String(initialSrc).startsWith("data:image/")) {
@@ -4986,10 +5079,26 @@
           const styleHeight = parseStyleDimension(styleText, "height");
           const hasStyleGeometry = styleWidth >= 2 && styleHeight >= 2;
           const imageElements = scopedImageElements;
+          // Canva stacks a low-res placeholder <img> and the full asset at IDENTICAL geometry
+          // (586×800 under 1757×2400 on DAHOnpYP5LI), so a tie on rendered area must go to the
+          // copy with the real pixels — document order picked the placeholder and the 3D "8"
+          // imported soft.
+          const naturalPixels = (element) =>
+            (Number(element?.naturalWidth) || 0) * (Number(element?.naturalHeight) || 0);
           const imageElement =
             imageElements
               .map((element) => ({ element, rect: element.getBoundingClientRect() }))
-              .sort((a, b) => rectArea(b.rect) - rectArea(a.rect))[0]?.element || null;
+              .sort((a, b) => {
+                const areaDelta = rectArea(b.rect) - rectArea(a.rect);
+                return Math.abs(areaDelta) > 1 ? areaDelta : naturalPixels(b.element) - naturalPixels(a.element);
+              })[0]?.element || null;
+          // Canva's animated stickers are looping GIFs (video-public.canva.com/…/v/….gif). Such a
+          // layer takes the plain fetch path at the model frame — no fit, no snapshot, no crop —
+          // so the animation survives (see keepAnimated / readRemoteAnimatedImageAsset); a GIF that
+          // is really a still image is handled like any other picture by the reader's fallback.
+          const isAnimatedImageCandidate = Boolean(
+            imageElement && /\.gif(?:[?#]|$)/i.test(getImageElementSource(imageElement))
+          );
           const imageTitleHint = getImageElementTitleHint(imageElement);
           // Only a genuinely MASKED image (clipped by a frame / clip-path) uses the
           // page-clipped visible rect + a crop. A non-masked image that merely bleeds past
@@ -5218,7 +5327,36 @@
               imageProvenance = "data";
             } else {
               // Defer acquisition; resolve all jobs in parallel after the loop.
-              imageAcquisitionJob = { kind: "element", element: imageElement, width, height };
+              // The fit target must be the box the asset is finally DRAWN into. For a ROTATED
+              // element `width`/`height` here are the DOM's rotated AABB, while the model block
+              // further down swaps the frame for the model's un-rotated box — so the fit cropped
+              // the asset to the AABB's aspect (0.79 for a 599×817 frame at -7.8°) and the frame
+              // then stretched that crop 8% taller (the 3D "8" on DAHOnpYP5LI). Fit to the model
+              // frame instead, which is exactly what that block will hand the editor.
+              const modelFrameForFit = fiberModelById[String(node.id || "")] || null;
+              const fitToModelFrame =
+                !shouldUseVisibleGeometry &&
+                modelFrameForFit &&
+                Math.abs(Number(modelFrameForFit.rotation) || 0) > 0.5 &&
+                Number(modelFrameForFit.width) > 1 &&
+                Number(modelFrameForFit.height) > 1;
+              // The other responsive copies of this image (same rect): the full-res one often
+              // finishes loading AFTER the placeholder, so the pick is settled when the job runs.
+              const imageRectForCopies = imageElement.getBoundingClientRect();
+              const sameRectCopies = imageElements.filter(
+                (candidate) =>
+                  candidate !== imageElement &&
+                  candidate.tagName === "IMG" &&
+                  occupiesSameRectAsMain(candidate, imageRectForCopies)
+              );
+              imageAcquisitionJob = {
+                kind: "element",
+                element: imageElement,
+                alternates: sameRectCopies,
+                keepAnimated: isAnimatedImageCandidate,
+                width: fitToModelFrame ? Number(modelFrameForFit.width) : width,
+                height: fitToModelFrame ? Number(modelFrameForFit.height) : height,
+              };
             }
           }
 
@@ -5248,6 +5386,7 @@
           if (imageElement && (imageSrc || imageDataUrl)) {
             preferSnapshot =
               !forceFullAssetOverSnapshot &&
+              !isAnimatedImageCandidate &&
               (shouldUseVisibleGeometry || shouldPreferRenderedImageSnapshot(node, imageElement));
           }
           if (
@@ -5405,6 +5544,7 @@
             imageElement &&
             kind === "image" &&
             !forceFullAssetOverSnapshot &&
+            !isAnimatedImageCandidate &&
             (
               shouldUseVisibleGeometry ||
               prefersRenderedImageSnapshot ||
@@ -5451,7 +5591,7 @@
           // path the fetched asset is drawn whole into the frame; with it but no region, the
           // centre-crop-to-aspect fallback slices the middle — which is how a square floral
           // vignette masked to a tall strip came in as a 91x382 sliver stretched 5x.
-          if (modelCropRegion && imageAcquisitionJob?.kind === "element") {
+          if (modelCropRegion && imageAcquisitionJob?.kind === "element" && !isAnimatedImageCandidate) {
             imageAcquisitionJob = { ...imageAcquisitionJob, fitFetchedToTarget: true };
           }
 
@@ -5690,21 +5830,53 @@
           }
         }
 
+        // Canva stacks responsive copies of one image at identical geometry, and the full-res copy
+        // often finishes loading after the placeholder (DAHOnpYP5LI: 586×800 was already decoded,
+        // 1757×2400 still loading, so the 3D "8" imported soft). Give every copy a moment to load,
+        // then acquire the one with the most real pixels.
+        const waitForImageLoad = (element, timeoutMs = 2500) =>
+          new Promise((resolve) => {
+            if (!element || element.tagName !== "IMG") return resolve();
+            if (element.complete && element.naturalWidth > 0) return resolve();
+            let settled = false;
+            const finish = () => {
+              if (settled) return;
+              settled = true;
+              element.removeEventListener("load", finish);
+              element.removeEventListener("error", finish);
+              resolve();
+            };
+            element.addEventListener("load", finish);
+            element.addEventListener("error", finish);
+            setTimeout(finish, timeoutMs);
+          });
+        const pickLargestImageCopy = async (job) => {
+          const candidates = [job.element, ...(Array.isArray(job.alternates) ? job.alternates : [])].filter(Boolean);
+          if (candidates.length < 2) return job.element;
+          await Promise.all(candidates.map((candidate) => waitForImageLoad(candidate)));
+          const pixels = (element) => (Number(element?.naturalWidth) || 0) * (Number(element?.naturalHeight) || 0);
+          return candidates.reduce((best, candidate) => (pixels(candidate) > pixels(best) ? candidate : best), candidates[0]);
+        };
+
         // Drain deferred image acquisitions in parallel.
         const layersNeedingImages = layers.filter((layer) => layer.imageAcquisitionJob);
         await runWithConcurrency(layersNeedingImages, 6, async (layer) => {
           const job = layer.imageAcquisitionJob;
           if (!job) return;
           if (job.kind === "element") {
-            const acquired = await acquireImageForElement(job.element, job.width, job.height, {
+            const sourceElement = await pickLargestImageCopy(job);
+            const acquired = await acquireImageForElement(sourceElement, job.width, job.height, {
               fitFetchedToTarget: Boolean(job.fitFetchedToTarget),
               cropRegion: job.cropRegion || null,
+              keepAnimated: Boolean(job.keepAnimated),
             });
             if (acquired.src) layer.imageSrc = acquired.src;
             if (acquired.dataUrl) layer.imageDataUrl = acquired.dataUrl;
             if (acquired.provenance) layer.imageProvenance = acquired.provenance;
             if (acquired.sourceWidth) layer.sourceWidth = acquired.sourceWidth;
             if (acquired.sourceHeight) layer.sourceHeight = acquired.sourceHeight;
+            if (acquired.posterDataUrl) layer.posterDataUrl = acquired.posterDataUrl;
+            if (acquired.animatedImage) layer.animatedImage = acquired.animatedImage;
             // If Canva served a background-baked version of this decoration (the page colour
             // composited into the asset), the raw asset looks wrong on its own. Drop the
             // lossy-fallback flag so background.js keeps its isolation snapshot, which
@@ -6273,30 +6445,6 @@
               const stripWs = (s) => String(s || "").replace(/\s+/g, "");
               if (stripWs(modelText) === stripWs(layer.text) && modelText !== layer.text) {
                 layer.text = modelText;
-              }
-            }
-            // ── Model-authoritative TEXT SIZE when the DOM read is off by a scale factor ─────
-            // The DOM font size is a CSS px × the transforms up to the layer node; a pass that walks
-            // further (the fallback pass, through the page's zoom wrapper) or a DOM caught mid-render
-            // returns a screen size instead. The model's run font-size × Canva's own font scale
-            // (width / wb, exactly what background.js applies to maxFontSize) is the rendered size in
-            // design px. Take it only when the DOM value is off by more than a quarter — a
-            // mixed-size paragraph never drifts that far, a zoom factor always does (0.24).
-            if (
-              String(layer.kind || "") === "text" &&
-              model.text &&
-              Number(model.text.fontSize) > 0 &&
-              Number(layer.fontSize) > 0
-            ) {
-              const fontScale =
-                Number(model.layoutWidth) > 0 && Number(model.width) > 0
-                  ? Number(model.width) / Number(model.layoutWidth)
-                  : 1;
-              const modelFontSize = Number(model.text.fontSize) * fontScale;
-              const ratio = Number(layer.fontSize) / modelFontSize;
-              if (Number.isFinite(ratio) && (ratio < 0.8 || ratio > 1.25)) {
-                layer.fontSize = modelFontSize;
-                layer.fontSizeFromModel = true;
               }
             }
             // ── Model-authoritative ROTATION (+ frame geometry for rotated layers) ────────────

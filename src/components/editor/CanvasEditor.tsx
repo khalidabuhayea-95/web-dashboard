@@ -6,6 +6,7 @@ import Konva from "konva";
 // Side effect: RTL letter-spacing is measured the way Konva draws it (see the module).
 import "@/lib/editor/konvaTextPatches";
 import useImage from "use-image";
+import { animatedFrameIndexAtMs, loadAnimatedImageFrames, type AnimatedImageFrames } from "@/lib/editor/animatedImage";
 import { Minus, Plus } from "lucide-react";
 import {
   Arrow,
@@ -715,11 +716,27 @@ function buildMediaShapePath(context: Konva.Context, element: EditorElement) {
   context.closePath();
 }
 
+/** Sentinel frame index for "the poster is showing" (see paintAnimatedFrameAt). */
+const ANIMATED_POSTER_FRAME_INDEX = -2;
+/**
+ * How long an EXPLICIT frame (a scrub, a thumbnail capture, one recorded frame) holds an animated
+ * image before its free-running loop resumes. The page scene always renders with
+ * `forceTimelineSync`, so the playhead effect fires on mount and on every scrub; a hold, rather
+ * than a latch, is what lets the sticker loop at rest like Canva's and still show exact frames
+ * while the playhead is being dragged or a recording pulls frames one by one.
+ */
+const ANIMATED_SYNC_HOLD_MS = 350;
+
 function CanvasImageNodeImpl({
   element,
   pose,
   interactive,
   canTransform,
+  playheadFrame = 0,
+  previewFps = 60,
+  pageDurationMs = 0,
+  forceTimelineSync = false,
+  registerPreviewMediaController,
   onSelect,
   onContextMenu,
   onDragMove,
@@ -884,24 +901,129 @@ function CanvasImageNodeImpl({
     onContentReadyRef.current?.();
   }, [image]);
 
+  // ── Animated image (a Canva animated sticker is a looping GIF) ─────────────────────────────
+  // Canvas drawImage() paints only an animated <img>'s FIRST frame — blank, for Canva's stickers —
+  // so the frames are decoded once (lib/editor/animatedImage.ts) and the Konva node is handed the
+  // frame for the current time, imperatively (no React state per frame): a free-running loop at
+  // rest and during playback (Canva loops a sticker continuously), the exact frame while scrubbing
+  // (forceTimelineSync) or recording (the preview controller below). Without ImageDecoder the
+  // layer stays the still <img>.
+  // Gated on a REAL recolor (a non-empty color map), not on `shouldRecolorRaster`: that flag is on
+  // for every raster (an empty map serialises to "[]", never "{}") and its recolor is then a no-op
+  // that hands the source straight back — so the GIF URL is what plays here.
+  const hasRasterColorMap = Object.keys(normalizedRasterColorMap).length > 0;
+  const animatedCandidate =
+    !canRenderVectorShape && !hasRasterColorMap && (Boolean(element.animatedImage) || isGif);
+  const [animatedEntry, setAnimatedEntry] = useState<{ key: string; frames: AnimatedImageFrames | null }>({
+    key: "",
+    frames: null,
+  });
+  const animatedFrames = animatedCandidate && animatedEntry.key === resolvedSource ? animatedEntry.frames : null;
+  const animatedFramesRef = useRef<AnimatedImageFrames | null>(null);
+  const animatedFrameIndexRef = useRef(-1);
+  // The settled still the importer stored next to the GIF. A Canva sticker's frame 0 is blank (it
+  // paints in from nothing), so an EXPLICIT sync to the start — the thumbnail capture, a scrub to
+  // 0:00 — shows this instead; the free-running loop plays the real first frame.
+  const [animatedPosterImage] = useImage(animatedCandidate ? String(element.posterSrc || "").trim() : "", "anonymous");
+  const animatedPosterRef = useRef<HTMLImageElement | null>(null);
   useEffect(() => {
-    if (!isGif || !image) return;
-    let frame = 0;
-    const redraw = () => {
-      imageRef.current?.getLayer()?.batchDraw();
-      frame = window.requestAnimationFrame(redraw);
+    animatedPosterRef.current = animatedPosterImage || null;
+  }, [animatedPosterImage]);
+  useEffect(() => {
+    if (!animatedCandidate || !resolvedSource) return undefined;
+    let cancelled = false;
+    const requestKey = resolvedSource;
+    void loadAnimatedImageFrames(requestKey).then((frames) => {
+      if (cancelled) return;
+      animatedFramesRef.current = frames;
+      animatedFrameIndexRef.current = frames ? 0 : -1;
+      setAnimatedEntry({ key: requestKey, frames });
+    });
+    return () => {
+      cancelled = true;
     };
-    frame = window.requestAnimationFrame(redraw);
-    return () => window.cancelAnimationFrame(frame);
-  }, [isGif, image]);
+  }, [animatedCandidate, resolvedSource]);
+  const animatedLayerStartMs = useMemo(
+    () => (animatedCandidate ? Math.max(0, resolveTimelineWindow(element, pageDurationMs).startMs) : 0),
+    [animatedCandidate, element, pageDurationMs]
+  );
+  const paintAnimatedFrameAt = useCallback(
+    (timelineMs: number, posterAtFirstFrame = false) => {
+      const frames = animatedFramesRef.current;
+      const node = imageRef.current;
+      if (!frames || !node) return;
+      const frameIndex = animatedFrameIndexAtMs(frames, timelineMs - animatedLayerStartMs);
+      const usePoster = posterAtFirstFrame && frameIndex === 0 && Boolean(animatedPosterRef.current);
+      const index = usePoster ? ANIMATED_POSTER_FRAME_INDEX : frameIndex;
+      if (index === animatedFrameIndexRef.current) return;
+      const painted = usePoster ? animatedPosterRef.current : frames.frames[frameIndex];
+      if (!painted) return;
+      animatedFrameIndexRef.current = index;
+      node.image(painted);
+      node.getLayer()?.batchDraw();
+    },
+    [animatedLayerStartMs]
+  );
+  // Who owns the frame: an explicit sync holds it for ANIMATED_SYNC_HOLD_MS (`animatedHoldUntilRef`,
+  // a timestamp), after which the free-running clock takes over again.
+  const animatedHoldUntilRef = useRef(0);
+  const animatedClockRef = useRef<{ anchorNow: number; anchorMs: number } | null>(null);
+  useEffect(() => {
+    if (!animatedFrames || !forceTimelineSync) return;
+    // The scrubber / export renderer placed the playhead: show that exact frame (the poster at the
+    // very start) and hold it briefly so the loop does not fight a drag.
+    animatedHoldUntilRef.current = performance.now() + ANIMATED_SYNC_HOLD_MS;
+    paintAnimatedFrameAt((playheadFrame / Math.max(1, previewFps)) * 1000, true);
+  }, [animatedFrames, forceTimelineSync, playheadFrame, previewFps, paintAnimatedFrameAt]);
+  useEffect(() => {
+    if (!animatedFrames) return undefined;
+    let handle = 0;
+    const tick = (now: number) => {
+      if (now >= animatedHoldUntilRef.current) {
+        const clock =
+          animatedClockRef.current || (animatedClockRef.current = { anchorNow: now, anchorMs: animatedLayerStartMs });
+        paintAnimatedFrameAt(clock.anchorMs + (now - clock.anchorNow));
+      }
+      handle = window.requestAnimationFrame(tick);
+    };
+    handle = window.requestAnimationFrame(tick);
+    return () => window.cancelAnimationFrame(handle);
+  }, [animatedFrames, animatedLayerStartMs, paintAnimatedFrameAt]);
+  useEffect(() => {
+    if (!registerPreviewMediaController || !animatedCandidate) return undefined;
+    registerPreviewMediaController(element.id, {
+      syncToFrame: async (frame, fps) => {
+        // A recording pulls frames one by one, each within the hold, so the loop stays out of it.
+        animatedHoldUntilRef.current = performance.now() + ANIMATED_SYNC_HOLD_MS;
+        paintAnimatedFrameAt((frame / Math.max(1, fps)) * 1000, true);
+      },
+      beginPlayback: async (atMs) => {
+        animatedClockRef.current = { anchorNow: performance.now(), anchorMs: atMs };
+        animatedHoldUntilRef.current = 0;
+      },
+      resyncPlayback: (targetMs) => {
+        animatedClockRef.current = { anchorNow: performance.now(), anchorMs: targetMs };
+      },
+      endPlayback: () => {
+        animatedHoldUntilRef.current = 0;
+      },
+      waitUntilDrawable: async (timeoutMs = 4000) => {
+        const startedAt = performance.now();
+        while (!animatedFramesRef.current && performance.now() - startedAt < timeoutMs) {
+          await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+      },
+    });
+    return () => registerPreviewMediaController(element.id, null);
+  }, [animatedCandidate, element.id, paintAnimatedFrameAt, registerPreviewMediaController]);
 
   const crop = useMemo(
     () => (canRenderVectorShape ? undefined : resolveKonvaImageCrop(element, image || undefined)),
     [canRenderVectorShape, element, image]
   );
   const alphaHitRects = useMemo(
-    () => computeAlphaHitRects(element, image || undefined, crop),
-    [crop, element, image]
+    () => (animatedFrames ? null : computeAlphaHitRects(element, image || undefined, crop)),
+    [animatedFrames, crop, element, image]
   );
 
   return (
@@ -911,7 +1033,9 @@ function CanvasImageNodeImpl({
         registerRef(element.id, node);
       }}
       id={element.id}
-      image={image || undefined}
+      // The first frame is the prop; react-konva re-applies a prop only when it CHANGES, so the
+      // frames the loop above sets on the node imperatively survive every re-render.
+      image={animatedFrames ? animatedFrames.frames[0] : image || undefined}
       x={pose.x}
       y={pose.y}
       width={element.width}
@@ -952,11 +1076,12 @@ function CanvasImageNodeImpl({
               context.fillStrokeShape(shape);
               buildMediaShapePath(context, element);
               context.clip();
-              if (image) {
+              const painted = (shape as Konva.Image).image();
+              if (painted) {
                 const { cropX, cropY, cropWidth, cropHeight } = shape.attrs;
                 if (cropWidth && cropHeight) {
                   context.drawImage(
-                    image,
+                    painted,
                     cropX || 0,
                     cropY || 0,
                     cropWidth,
@@ -967,7 +1092,7 @@ function CanvasImageNodeImpl({
                     element.height
                   );
                 } else {
-                  context.drawImage(image, 0, 0, element.width, element.height);
+                  context.drawImage(painted, 0, 0, element.width, element.height);
                 }
               }
             }
@@ -2627,6 +2752,7 @@ function CanvasPageSceneImpl({
                   previewFps={previewFps}
                   pageDurationMs={pageDurationMs}
                   forceTimelineSync={forceTimelineSync}
+                  registerPreviewMediaController={safeRegisterPreviewMediaController}
                   registerRef={safeRegisterRef}
                   onSelect={elementHandlers.onSelect}
                   onContextMenu={elementHandlers.onContextMenu}

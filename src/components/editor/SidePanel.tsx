@@ -1834,11 +1834,28 @@ function toEditorDesignFromTemplate(
             )
           : {};
 
+        // An imported animated sticker (Canva GIF): the GIF stays in `src` and plays on the canvas;
+        // `posterSrc` is its settled still (see lib/editor/animatedImage.ts).
+        const importedPosterSrc = String(item.posterSrc || "").trim();
+        const importedAnimatedImage =
+          item.animatedImage && typeof item.animatedImage === "object"
+            ? (item.animatedImage as { frameCount?: unknown; durationMs?: unknown; loop?: unknown })
+            : null;
+        const animatedImage = importedAnimatedImage
+          ? {
+              kind: "gif" as const,
+              frameCount: Math.max(1, Math.round(toNumber(importedAnimatedImage.frameCount, 1))),
+              durationMs: Math.max(1, Math.round(toNumber(importedAnimatedImage.durationMs, 1))),
+              loop: importedAnimatedImage.loop !== false,
+            }
+          : null;
         elements.push(
           createElementFromAsset(pageId, {
             ...common,
             type: "image",
             src: item.src,
+            ...(importedPosterSrc ? { posterSrc: importedPosterSrc } : {}),
+            ...(animatedImage ? { animatedImage } : {}),
             ...(rasterOriginalSrc ? { rasterOriginalSrc } : {}),
             ...(rasterPalette.length > 0 ? { rasterPalette } : {}),
             ...(rasterPaletteVersion > 0 ? { rasterPaletteVersion } : {}),

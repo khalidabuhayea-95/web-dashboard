@@ -1226,6 +1226,40 @@ function mapImageLayer(item, index, canvasSize, options) {
     ([key, value]) => key.toLowerCase() !== value.toLowerCase()
   );
   const isVectorLayer = vectorSourceRaw.startsWith("data:image/svg");
+  // An animated sticker (Canva GIF, see the editor's lib/editor/animatedImage.ts): the GIF ships
+  // under `animatedImage.uri` and the layer's `imageUri` is its settled POSTER, so a client without
+  // GIF playback shows exactly the still it shows today. Not recolorable — a recolor would bake the
+  // animation into one frame.
+  const animatedImageMeta =
+    item.animatedImage && typeof item.animatedImage === "object" && !isVectorLayer ? item.animatedImage : null;
+  const animatedPosterRaw = String(item.posterSrc || "").trim();
+  const animatedImage = animatedImageMeta
+    ? {
+        kind: "gif",
+        uri: resolveMediaUri(item.src || item.imageUri || "", {
+          assetResolver: options?.assetResolver,
+          mediaUrlResolver: options?.mediaUrlResolver,
+          scope: "layer",
+          elementId: item.id || item.layerId || "",
+          index,
+          field: "src",
+        }),
+        durationMs: Math.max(1, Math.round(numberOr(animatedImageMeta.durationMs, 1))),
+        frameCount: Math.max(1, Math.round(numberOr(animatedImageMeta.frameCount, 1))),
+        loop: animatedImageMeta.loop !== false,
+      }
+    : null;
+  const animatedPosterUri =
+    animatedImage && animatedPosterRaw
+      ? resolveMediaUri(animatedPosterRaw, {
+          assetResolver: options?.assetResolver,
+          mediaUrlResolver: options?.mediaUrlResolver,
+          scope: "layer",
+          elementId: item.id || item.layerId || "",
+          index,
+          field: "posterSrc",
+        })
+      : "";
   const normalizedCrop = mapCropRect(item, sourceWidth, sourceHeight);
   // The served vector (?field=vector) is already cropped to the shape's content, so it must NOT
   // also carry the raster's crop — that double-crops it (clipping the shape, e.g. the pointed top).
@@ -1255,6 +1289,9 @@ function mapImageLayer(item, index, canvasSize, options) {
       : // ?field=vector URL: the asset route bakes the recolor; bust the cache when it changes.
         appendQueryParam(imageUri, "rcm", colorMapFingerprint(rasterColorMap));
   }
+  if (animatedImage && animatedPosterUri) {
+    imageUri = animatedPosterUri;
+  }
   return {
     ...base,
     transform: buildTransform({
@@ -1278,10 +1315,11 @@ function mapImageLayer(item, index, canvasSize, options) {
     cropRect: isVectorLayer ? { left: 0, top: 0, right: 1, bottom: 1 } : normalizedCrop,
     filters: mediaFilters(item),
     assetKind: isVectorLayer ? "vector" : "raster",
-    colorEditMode: isVectorLayer ? "none" : rasterPalette.length > 0 ? "raster" : "none",
-    rasterOriginalUri: rasterUri || null,
-    rasterPalette,
-    rasterColorMap,
+    colorEditMode: isVectorLayer || animatedImage ? "none" : rasterPalette.length > 0 ? "raster" : "none",
+    rasterOriginalUri: animatedImage ? null : rasterUri || null,
+    rasterPalette: animatedImage ? [] : rasterPalette,
+    rasterColorMap: animatedImage ? {} : rasterColorMap,
+    ...(animatedImage ? { animatedImage } : {}),
   };
 }
 
@@ -2122,6 +2160,8 @@ function slimMobileLayer(layer) {
         ...(layer.rasterColorMap && typeof layer.rasterColorMap === "object"
           ? { rasterColorMap: layer.rasterColorMap }
           : {}),
+        // Animated sticker: the GIF to loop in place of the poster `imageUri` (see mapImageLayer).
+        ...(layer.animatedImage ? { animatedImage: layer.animatedImage } : {}),
       };
     case "VIDEO_CLIP":
       return {
