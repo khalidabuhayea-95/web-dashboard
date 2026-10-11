@@ -5,6 +5,7 @@ import {
 } from "@/lib/storage/objectStorage.server";
 import { trimTransparentPaddingForImportedFrameObject } from "@/lib/tools/canvaFrameTrim.server";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
+import { isFragmentedMp4, remuxToProgressiveMp4 } from "@/lib/media/progressiveMp4.server";
 
 export const IMPORT_ASSET_MANIFEST_VERSION = 1;
 
@@ -769,6 +770,16 @@ export async function sanitizeImportPayloadAssets({
     const kind = detectAssetKind({ mimeType, extension, fieldName });
 
     validateAssetBytes({ kind, bytes });
+    // A captured Canva clip is DASH fragments glued together; browsers stall on that served as a
+    // file, so store it as an ordinary progressive MP4 (see progressiveMp4.server).
+    if (kind === "video" && isFragmentedMp4(bytes)) {
+      try {
+        bytes = await remuxToProgressiveMp4(bytes);
+        mimeType = "video/mp4";
+      } catch (error) {
+        warnings.push(`${fieldPath}: fragmented video kept as captured (${error instanceof Error ? error.message : String(error)})`);
+      }
+    }
     const objectPath = makeObjectPath({
       ownerId: safeOwnerId,
       kind,

@@ -33,12 +33,16 @@ import {
   normalizeAnimationSlots,
   type EditorAnimationSlots,
 } from "@/lib/editor/animationSlots";
+import type { TextFill } from "@/lib/editor/textFill";
 import {
   DEFAULT_FRAME_CONTENT_TRANSFORM,
   createFrameShapeFromPreset,
   normalizeFrameContentTransform,
   resolveFramePreset,
   type FrameContent,
+  frameStrokeWidthForMediaBorder,
+  mediaBorderWidthForFrameStroke,
+  resolveFrameMediaAsLayerBox,
   type FrameContentTransform,
   type FrameShape,
 } from "@/lib/editor/frames";
@@ -184,6 +188,8 @@ export interface EditorElement {
   letterSpacing: number;
   textCurveEnabled?: boolean;
   textCurveAmount?: number;
+  /** The arc Canva drew, measured on import; wins over the amount until the curve is edited. */
+  textCurveArcDegrees?: number;
   /**
    * Background box behind the text — the mobile app's model field for field (see
    * lib/editor/textBackground.ts): angle 0..1 → radius angle×28 px, padding 0..1 → fontSize×ratio×0.5.
@@ -194,6 +200,11 @@ export interface EditorElement {
   textBackgroundAngleSize?: number;
   textBackgroundPaddingX?: number;
   textBackgroundPaddingY?: number;
+  /**
+   * Gradient glyph fill (lib/editor/textFill.ts) — the mobile app's `TextLayer.fill`. Absent = the
+   * flat `color`, which also stays the fallback for every path that cannot texture glyphs.
+   */
+  textFill?: TextFill;
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
@@ -252,6 +263,12 @@ export interface PageBackground {
   color: string;
   gradientFrom: string;
   gradientTo: string;
+  /**
+   * Direction of a gradient background in the mobile app's convention (0 = left→right,
+   * 90 = top→bottom; lib/editor/textFill.ts's resolveLinearGradientEndpoints). Absent on
+   * gradients authored before it existed, which keep the editor's original corner-to-corner ramp.
+   */
+  angle?: number;
   imageUri?: string;
   imageThumbnailUri?: string;
   sourceAssetId?: string;
@@ -335,6 +352,12 @@ interface StageApi {
     height: number;
   } | null>;
   mergeSelectedLayers: () => Promise<{ merged: boolean; message?: string }>;
+  /**
+   * A frame back to a plain layer that still LOOKS like the frame: the clipped content (shape,
+   * stroke) is rendered to an image at the media's resolution and takes the frame's place.
+   * Video content, which cannot be baked, drops the mask instead.
+   */
+  convertFrameToLayer: (id: string) => Promise<{ converted: boolean; message?: string }>;
 }
 
 interface UpdateOptions {
@@ -345,6 +368,11 @@ interface ConvertMediaElementToFrameOptions extends UpdateOptions {
   sourcePatch?: Partial<EditorElement>;
 }
 
+interface ConvertFrameElementToMediaOptions extends UpdateOptions {
+  /** The frame rendered to an image (shape baked in): becomes the layer's picture over the frame's whole box. */
+  baked?: { src: string; width: number; height: number };
+}
+
 interface MergeSelectionPayload {
   src: string;
   x: number;
@@ -352,6 +380,18 @@ interface MergeSelectionPayload {
   width: number;
   height: number;
   name?: string;
+}
+
+/** A text-only selection merged into one text layer (lib/editor/mergeTextLayers.ts). */
+interface TextMergeSelectionPayload {
+  /** The selected text layer whose style and settings the merged text keeps. */
+  primaryId: string;
+  text: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  lineHeight: number;
 }
 
 interface EditorClipboard {
@@ -460,6 +500,8 @@ interface EditorStore {
   updateFrameContentTransform: (id: string, patch: Partial<FrameContentTransform>, options?: UpdateOptions) => void;
   clearFrameContent: (id: string, options?: UpdateOptions) => void;
   convertMediaElementToFrame: (id: string, options?: ConvertMediaElementToFrameOptions) => boolean;
+  /** The inverse: a frame with content becomes a plain image/video layer showing the same thing. */
+  convertFrameElementToMedia: (id: string, options?: ConvertFrameElementToMediaOptions) => boolean;
   updateSelectedElements: (patch: Partial<EditorElement>, options?: UpdateOptions) => void;
   deleteElement: (id: string) => void;
   deleteSelected: () => void;
@@ -467,6 +509,7 @@ interface EditorStore {
   copySelectedToClipboard: () => boolean;
   pasteFromClipboard: () => string[];
   replaceSelectedWithImageLayer: (payload: MergeSelectionPayload) => string;
+  replaceSelectedWithTextLayer: (payload: TextMergeSelectionPayload) => string;
   toggleVisibility: (id: string) => void;
   toggleLock: (id: string) => void;
   reorderLayer: (sourceId: string, targetId: string, position: "before" | "after") => void;
@@ -605,6 +648,9 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     letterSpacing: partial.letterSpacing ?? 0,
     textCurveEnabled: partial.textCurveEnabled ?? false,
     textCurveAmount: partial.textCurveAmount ?? 0,
+    ...(Number.isFinite(Number(partial.textCurveArcDegrees)) && Math.abs(Number(partial.textCurveArcDegrees)) >= 1
+      ? { textCurveArcDegrees: Number(partial.textCurveArcDegrees) }
+      : {}),
     ...(partial.textBackgroundEnabled !== undefined || partial.textBackgroundColor !== undefined
       ? {
           textBackgroundEnabled: Boolean(partial.textBackgroundEnabled),
@@ -1735,11 +1781,20 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           name: element.name || (targetElement.type === "video" ? "Video frame" : "Image frame"),
           fill: "rgba(0,0,0,0)",
           // The frame node draws its stroke along the mask path — the same place an image draws
-          // its border — so a real border carries over. A borderless image keeps the transparent
-          // zero stroke: the node falls back to `strokeWidth || 2`, which would otherwise paint
-          // the image's default stroke colour as an outline.
+          // its border — so a real border carries over, re-expressed in frame units: a frame shows
+          // only the inner half of a stroke that scales with the layer, where the image showed the
+          // whole width unscaled (the round travel photo's 12 px ring came out under 4 px). A
+          // borderless image keeps the transparent zero stroke: the node falls back to
+          // `strokeWidth || 2`, which would otherwise paint the image's default stroke colour.
           ...(Number(preparedElement.strokeWidth) > 0
-            ? { stroke: preparedElement.stroke, strokeWidth: Number(preparedElement.strokeWidth) }
+            ? {
+                stroke: preparedElement.stroke,
+                strokeWidth: frameStrokeWidthForMediaBorder(
+                  preparedElement.strokeWidth,
+                  preparedElement.scaleX,
+                  preparedElement.scaleY
+                ),
+              }
             : { stroke: "rgba(0,0,0,0)", strokeWidth: 0 }),
           frameShape: createFrameShapeFromMediaElement(preparedElement),
           frameContent: framePayload.content,
@@ -1747,6 +1802,125 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           importKind: element.importKind === "video" || element.importKind === "image"
             ? "frame"
             : element.importKind,
+        } as EditorElement;
+      });
+      const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
+      converted = true;
+      return {
+        pages: mutateActivePage(state, (activePage) => ({
+          ...activePage,
+          durationMs: nextPage.durationMs,
+          elements: nextPage.elements,
+        })),
+        selectedIds: [targetId],
+      };
+    });
+
+    if (converted && options.recordHistory !== false) {
+      get().recordHistory();
+    }
+
+    return converted;
+  },
+
+  convertFrameElementToMedia: (id, options = {}) => {
+    const targetId = String(id || "").trim();
+    if (!targetId) return false;
+
+    let converted = false;
+    set((state) => {
+      const page = findActivePage(state);
+      if (!page) return state;
+      const frame = page.elements.find((element) => element.id === targetId);
+      if (!frame || frame.type !== "frame") return state;
+      const content = frame.frameContent;
+      const src = String(content?.src || "").trim();
+      if (!content || !src) return state;
+
+      const frameWidth = Math.max(1, positiveDimension(frame.width, 1));
+      const frameHeight = Math.max(1, positiveDimension(frame.height, 1));
+      const baked =
+        options.baked && String(options.baked.src || "").trim() && options.baked.width > 0 && options.baked.height > 0
+          ? options.baked
+          : null;
+      // A baked picture already holds the frame's whole box (shape and stroke included).
+      const box = baked
+        ? {
+            localX: 0,
+            localY: 0,
+            width: frameWidth,
+            height: frameHeight,
+            crop: { x: 0, y: 0, width: baked.width, height: baked.height },
+          }
+        : resolveFrameMediaAsLayerBox(
+            frameWidth,
+            frameHeight,
+            content.sourceWidth,
+            content.sourceHeight,
+            frame.frameContentTransform
+          );
+      if (!box) return state;
+
+      // The visible part of the media becomes the layer's box. Its offset inside the frame runs
+      // along the frame's own axes — through its scale and rotation — since x/y live in page space.
+      const scaleX = Number(frame.scaleX) || 1;
+      const scaleY = Number(frame.scaleY) || 1;
+      const radians = ((Number(frame.rotation) || 0) * Math.PI) / 180;
+      const localDx = box.localX * scaleX;
+      const localDy = box.localY * scaleY;
+      const nextX = (Number(frame.x) || 0) + localDx * Math.cos(radians) - localDy * Math.sin(radians);
+      const nextY = (Number(frame.y) || 0) + localDx * Math.sin(radians) + localDy * Math.cos(radians);
+      const sourceWidth = Math.max(1, positiveDimension(baked ? baked.width : content.sourceWidth, box.width));
+      const sourceHeight = Math.max(1, positiveDimension(baked ? baked.height : content.sourceHeight, box.height));
+      const fullSource =
+        Math.abs(box.crop.x) < 0.0001 &&
+        Math.abs(box.crop.y) < 0.0001 &&
+        Math.abs(box.crop.width - sourceWidth) < 0.0001 &&
+        Math.abs(box.crop.height - sourceHeight) < 0.0001;
+
+      const previousPageDurationMs = getPageDurationMs(page);
+      const nextElements = page.elements.map((element) => {
+        if (element.id !== targetId) return element;
+        const {
+          frameShape: _frameShape,
+          frameContent: _frameContent,
+          frameContentTransform: _frameContentTransform,
+          ...rest
+        } = element;
+        const isVideo = !baked && content.kind === "video";
+        return {
+          ...rest,
+          type: isVideo ? "video" : "image",
+          name: element.name || (isVideo ? "Video" : "Image"),
+          x: nextX,
+          y: nextY,
+          width: box.width,
+          height: box.height,
+          fill: "#e5e7eb",
+          src: baked ? baked.src : src,
+          sourceWidth,
+          sourceHeight,
+          // The baked picture carries the frame's stroke; a visible image border would double it.
+          // A video keeps its stroke as a media border of the same visible thickness (see
+          // convertMediaElementToFrame for the two conventions).
+          ...(baked
+            ? { stroke: "rgba(0,0,0,0)", strokeWidth: 0, rasterOriginalSrc: baked.src }
+            : Number(rest.strokeWidth) > 0
+              ? { strokeWidth: mediaBorderWidthForFrameStroke(rest.strokeWidth, rest.scaleX, rest.scaleY) }
+              : {}),
+          // A video layer has no crop of its own; the image keeps the frame's slice.
+          ...(isVideo || fullSource
+            ? { cropX: undefined, cropY: undefined, cropWidth: undefined, cropHeight: undefined }
+            : { cropX: box.crop.x, cropY: box.crop.y, cropWidth: box.crop.width, cropHeight: box.crop.height }),
+          ...(isVideo
+            ? {
+                posterSrc: content.posterSrc,
+                videoStart: content.videoStart,
+                videoEnd: content.videoEnd,
+                videoDuration: content.videoDuration,
+              }
+            : {}),
+          importKind: element.importKind === "frame" ? (isVideo ? "video" : "image") : element.importKind,
         } as EditorElement;
       });
       const nextPage = reconcilePageWithElements(page, nextElements, previousPageDurationMs);
@@ -2062,6 +2236,52 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
       syntheticTextBackground: false,
       isBackgroundLayer: false,
     } as EditorElement;
+
+    nextElements.splice(Math.min(nextInsertionIndex, nextElements.length), 0, mergedElement);
+
+    set({
+      pages: mutateActivePage(state, (activePage) => ({
+        ...activePage,
+        elements: nextElements,
+      })),
+      selectedIds: [mergedElement.id],
+    });
+
+    get().recordHistory();
+    return mergedElement.id;
+  },
+
+  replaceSelectedWithTextLayer: (payload) => {
+    const state = get();
+    const page = findActivePage(state);
+    const text = trimTrailingBlankTextLines(payload?.text);
+    if (!page || !text.trim() || state.selectedIds.length < 2) return "";
+
+    const selectedSet = new Set(state.selectedIds);
+    const selected = page.elements.filter((element) => selectedSet.has(element.id));
+    const primary = selected.find((element) => element.id === payload.primaryId);
+    if (selected.length < 2 || !primary || primary.type !== "text") return "";
+
+    // Same slot as the raster merge: where the top-most selected layer was.
+    const selectedIndexes = page.elements.flatMap((element, index) => (selectedSet.has(element.id) ? [index] : []));
+    const insertionAnchor = Math.max(...selectedIndexes);
+    const removedBeforeAnchor = selectedIndexes.filter((index) => index < insertionAnchor).length;
+    const nextInsertionIndex = Math.max(0, insertionAnchor - removedBeforeAnchor);
+    const nextElements = page.elements.filter((element) => !selectedSet.has(element.id));
+
+    // The primary layer carries over whole — font, colour, effects, animation, timeline — so the
+    // merged text looks like the line it was read from; only the content and the box change.
+    const mergedElement: EditorElement = {
+      ...primary,
+      id: uid("el"),
+      text,
+      x: payload.x,
+      y: payload.y,
+      width: Math.max(2, payload.width),
+      height: Math.max(1, payload.height),
+      lineHeight: payload.lineHeight,
+      groupId: selected.every((element) => element.groupId === primary.groupId) ? primary.groupId : null,
+    };
 
     nextElements.splice(Math.min(nextInsertionIndex, nextElements.length), 0, mergedElement);
 

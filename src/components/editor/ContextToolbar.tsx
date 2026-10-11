@@ -48,6 +48,7 @@ import {
   computeTrimTransparentPaddingPatch,
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
+import { textFillCssBackground } from "@/lib/editor/textFill";
 import {
   extractImagePaletteFromSource,
   extractSvgPaletteColors,
@@ -899,6 +900,8 @@ export default function ContextToolbar() {
   const AlignIcon = textAlign === "center" ? AlignCenter : textAlign === "right" ? AlignRight : AlignLeft;
   const nextTextAlign = textAlign === "left" ? "center" : textAlign === "center" ? "right" : "left";
   const textColor = activeTextElement ? activeTextElement.color || activeTextElement.fill || "#111827" : "#111827";
+  // A gradient-coloured text shows its ramp on the swatch; picking a colour replaces it.
+  const textFillSwatch = activeTextElement ? textFillCssBackground(activeTextElement.textFill) : "";
   const fontSize = activeTextElement ? Math.round(activeTextElement.fontSize) : 0;
   const setFontSize = (value: number) => {
     if (!activeTextElement) return;
@@ -919,7 +922,13 @@ export default function ContextToolbar() {
       showLabel
       onClick={() => void mergeSelectedLayers()}
       disabled={hasVideoInSelection}
-      title={hasVideoInSelection ? "Video layers are not supported in merge yet" : "Merge selected layers into one image layer (Ctrl+Shift+M)"}
+      title={
+        hasVideoInSelection
+          ? "Video layers are not supported in merge yet"
+          : hasOnlyTextSelection
+            ? "Merge selected text layers into one editable text layer (Ctrl+Shift+M)"
+            : "Merge selected layers into one image layer (Ctrl+Shift+M)"
+      }
     />
   ) : null;
 
@@ -947,13 +956,18 @@ export default function ContextToolbar() {
                 className="relative inline-flex h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-full transition-colors hover:bg-[#eef0f2]"
                 title="Text color"
               >
-                <span className="h-5 w-5 rounded-full ring-1 ring-black/10" style={{ backgroundColor: textColor }} />
+                <span
+                  className="h-5 w-5 rounded-full ring-1 ring-black/10"
+                  style={textFillSwatch ? { background: textFillSwatch } : { backgroundColor: textColor }}
+                />
                 <input
                   type="color"
                   aria-label="Text color"
                   className="absolute inset-0 cursor-pointer opacity-0"
                   value={textColor}
-                  onChange={(event) => updateSelectedElements({ color: event.target.value, fill: event.target.value })}
+                  onChange={(event) =>
+                    updateSelectedElements({ color: event.target.value, fill: event.target.value, textFill: undefined })
+                  }
                 />
               </label>
 
@@ -1103,6 +1117,7 @@ export default function ContextToolbar() {
                       updateSelectedElements({
                         textCurveEnabled: !textCurveEnabled,
                         textCurveAmount: !textCurveEnabled && textCurveAmount === 0 ? 40 : textCurveAmount,
+                        textCurveArcDegrees: undefined,
                       })
                     }
                   />
@@ -1113,7 +1128,10 @@ export default function ContextToolbar() {
                   max={100}
                   value={textCurveAmount}
                   disabled={!textCurveEnabled}
-                  onChange={(value) => updateSelectedElements({ textCurveEnabled: true, textCurveAmount: value || 0 })}
+                  onChange={(value) =>
+                    // Editing the curve hands it to the slider: a measured Canva arc no longer applies.
+                    updateSelectedElements({ textCurveEnabled: true, textCurveAmount: value || 0, textCurveArcDegrees: undefined })
+                  }
                   display={
                     <input
                       type="number"
@@ -1128,6 +1146,7 @@ export default function ContextToolbar() {
                         updateSelectedElements({
                           textCurveEnabled: true,
                           textCurveAmount: Math.max(-200, Math.min(200, Number(event.target.value) || 0)),
+                          textCurveArcDegrees: undefined,
                         })
                       }
                     />
@@ -1138,7 +1157,7 @@ export default function ContextToolbar() {
                   <button
                     type="button"
                     className="shrink-0 rounded-full px-2.5 py-1 text-[12px] font-medium text-t-secondary hover:bg-[#f1f2f4] hover:text-t-primary"
-                    onClick={() => updateSelectedElements({ textCurveEnabled: false, textCurveAmount: 0 })}
+                    onClick={() => updateSelectedElements({ textCurveEnabled: false, textCurveAmount: 0, textCurveArcDegrees: undefined })}
                   >
                     Reset
                   </button>

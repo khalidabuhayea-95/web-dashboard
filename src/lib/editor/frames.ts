@@ -305,3 +305,92 @@ export function pointIntersectsFrameBounds(
   const localY = dx * Math.sin(radians) + dy * Math.cos(radians) + height / 2;
   return localX >= 0 && localX <= width && localY >= 0 && localY <= height;
 }
+
+export interface FrameMediaLayerBox {
+  /** Where the media's visible part sits inside the frame's own (unscaled) box. */
+  localX: number;
+  localY: number;
+  width: number;
+  height: number;
+  /** That same part in the media's source pixels — the image layer's crop. */
+  crop: { x: number; y: number; width: number; height: number };
+}
+
+/**
+ * The plain image layer a frame's content becomes when the frame is turned back into a layer —
+ * the inverse of converting a layer to a frame. The media keeps exactly the placement the frame
+ * showed: its visible part (the media rect clipped to the frame box) is the layer's box, and the
+ * same part in source pixels is the layer's crop. Null when the media lies wholly outside the
+ * frame, in which case there is nothing to show.
+ */
+export function resolveFrameMediaAsLayerBox(
+  frameWidth: number,
+  frameHeight: number,
+  sourceWidth: number | undefined,
+  sourceHeight: number | undefined,
+  transform: Partial<FrameContentTransform> | null | undefined
+): FrameMediaLayerBox | null {
+  const width = Math.max(1, Number(frameWidth) || 1);
+  const height = Math.max(1, Number(frameHeight) || 1);
+  const contentWidth = Math.max(1, Number(sourceWidth) || width);
+  const contentHeight = Math.max(1, Number(sourceHeight) || height);
+  const layout = resolveFrameContentLayout(width, height, contentWidth, contentHeight, transform);
+  const visibleX = Math.max(0, layout.x);
+  const visibleY = Math.max(0, layout.y);
+  const visibleRight = Math.min(width, layout.x + layout.width);
+  const visibleBottom = Math.min(height, layout.y + layout.height);
+  if (visibleRight - visibleX < 1 || visibleBottom - visibleY < 1) return null;
+  const scaleX = layout.width / contentWidth;
+  const scaleY = layout.height / contentHeight;
+  const cropX = Math.max(0, (visibleX - layout.x) / scaleX);
+  const cropY = Math.max(0, (visibleY - layout.y) / scaleY);
+  return {
+    localX: visibleX,
+    localY: visibleY,
+    width: visibleRight - visibleX,
+    height: visibleBottom - visibleY,
+    crop: {
+      x: cropX,
+      y: cropY,
+      width: Math.max(1, Math.min(contentWidth - cropX, (visibleRight - visibleX) / scaleX)),
+      height: Math.max(1, Math.min(contentHeight - cropY, (visibleBottom - visibleY) / scaleY)),
+    },
+  };
+}
+
+/**
+ * The frame stroke that shows the same ring a media layer's border showed.
+ *
+ * A media layer strokes its outline centred and unclipped with stroke scaling off, so its border is
+ * `strokeWidth` page px however the layer is scaled. A frame strokes the same outline inside its
+ * clip, in its own local units: only the inner half shows, and it scales with the layer. The frame
+ * therefore needs twice the width, divided by the layer's scale, for a ring of the same thickness.
+ * The mobile app draws frame strokes the same way (inside the clipped shape, in project px).
+ */
+export function frameStrokeWidthForMediaBorder(
+  strokeWidth: number | undefined,
+  scaleX: number | undefined,
+  scaleY: number | undefined
+): number {
+  const width = Math.max(0, Number(strokeWidth) || 0);
+  if (width <= 0) return 0;
+  return (width * 2) / layerStrokeScale(scaleX, scaleY);
+}
+
+/** The inverse: a frame's stroke becomes the media border that shows the same ring. */
+export function mediaBorderWidthForFrameStroke(
+  strokeWidth: number | undefined,
+  scaleX: number | undefined,
+  scaleY: number | undefined
+): number {
+  const width = Math.max(0, Number(strokeWidth) || 0);
+  if (width <= 0) return 0;
+  return (width * layerStrokeScale(scaleX, scaleY)) / 2;
+}
+
+function layerStrokeScale(scaleX: number | undefined, scaleY: number | undefined) {
+  const sx = Math.abs(Number(scaleX) || 0);
+  const sy = Math.abs(Number(scaleY) || 0);
+  const scale = sx > 0 && sy > 0 ? (sx + sy) / 2 : sx > 0 ? sx : sy > 0 ? sy : 1;
+  return Math.max(scale, 0.0001);
+}

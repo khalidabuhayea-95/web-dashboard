@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { isInfrastructureError } from "@/lib/api/infrastructureErrors";
 import {
   BACKGROUND_CATEGORY_SETTINGS,
   sanitizeBackgroundCategorySettings,
@@ -23,7 +24,9 @@ export async function getBackgroundCategorySettings() {
     }
 
     return sanitizeBackgroundCategorySettings(record.value);
-  } catch (_error) {
+  } catch (error) {
+    // The built-in list is not the saved one; never serve it for an outage (production audit H-24).
+    if (isInfrastructureError(error)) throw error;
     return BACKGROUND_CATEGORY_SETTINGS;
   }
 }

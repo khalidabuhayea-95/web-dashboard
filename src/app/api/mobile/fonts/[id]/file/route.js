@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import {
   attachRequestIdHeader,
   getRequestLogContext,
@@ -162,12 +163,15 @@ export async function GET(request, { params }) {
     return attachRequestIdHeader(response, requestId);
   } catch (error) {
     requestLogger.error("Failed to resolve font file", {}, error);
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return attachRequestIdHeader(
       NextResponse.json(
         {
           error: "Failed to resolve font file.",
         },
-        { status: 500 }
+        // This route's success is cached for a year; its failure must not be cached at all.
+        { status: 500, headers: { "Cache-Control": "no-store" } }
       ),
       requestId
     );

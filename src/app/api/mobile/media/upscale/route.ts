@@ -25,11 +25,14 @@ import {
   checkRateLimit,
   createRateLimitResponse,
 } from "@/lib/security/rateLimit.server";
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
+import { runPaidMediaOperation } from "@/lib/media/credits/paidRun.server";
 
 export const runtime = "nodejs";
 export const maxDuration = 300;
+// Refund and give up a little before the platform would kill the request.
+const RUN_TIMEOUT_MS = (maxDuration - 10) * 1000;
 
 const logger = createLogger("api.mobile.media.upscale");
 const UPSCALE_LIMIT = {
@@ -64,7 +67,7 @@ export async function POST(request: NextRequest) {
       requestLogger.warn("Image upscale rejected: unauthenticated", {
         reason: auth.reason,
       });
-      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+      return jsonResponse(requestId, { error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status, {
         "Cache-Control": "no-store",
       });
     }
@@ -84,17 +87,6 @@ export async function POST(request: NextRequest) {
         ),
         requestId
       );
-    }
-
-    const insufficientCredits = await enforceMediaCredits({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.UPSCALE,
-    });
-    if (insufficientCredits) {
-      requestLogger.info("Image upscale rejected: insufficient credits", {
-        mobileUserId: mobileUser.id,
-      });
-      return attachRequestIdHeader(insufficientCredits, requestId);
     }
 
     const formData = await request.formData().catch(() => null);
@@ -134,62 +126,65 @@ export async function POST(request: NextRequest) {
     const scaleValue = formData.get("scale");
     const imageBytes = await imageFile.arrayBuffer().then((value) => Buffer.from(value));
 
-    const result = await upscaleImageWithAi({
-      imageBytes,
-      imageMimeType: imageFile.type,
-      imageFileName: imageFile.name,
-      scale: scaleValue,
-      modelId: configuredModel,
-    });
-
-    await recordMediaUsage({
+    // Credits are reserved atomically before the provider runs and refunded if it fails, times
+    // out, or the client leaves before the image is delivered; an Idempotency-Key retry replays
+    // instead of charging again (production audit H-13). The wallet AFTER this run rides the
+    // response as X-Credits-* (2026-09-08 direction).
+    const response = await runPaidMediaOperation({
+      request,
+      logger: requestLogger,
       mobileUserId: mobileUser.id,
       feature: MEDIA_CREDIT_FEATURES.UPSCALE,
-      provider: result.provider,
-      model: result.model,
+      idempotencyScope: "media:upscale",
+      fingerprint: `${configuredModel}:${String(scaleValue ?? "")}`,
+      timeoutMs: RUN_TIMEOUT_MS,
+      execute: () =>
+        upscaleImageWithAi({
+          imageBytes,
+          imageMimeType: imageFile.type,
+          imageFileName: imageFile.name,
+          scale: scaleValue,
+          modelId: configuredModel,
+        }),
+      respond: (result) => {
+        requestLogger.info("Image upscale completed", {
+          mobileUserId: mobileUser.id,
+          inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
+          inputBytes: imageBytes.length,
+          inputWidth: result.inputWidth || null,
+          inputHeight: result.inputHeight || null,
+          scale: result.scale,
+          outputBytes: result.bytes.length,
+          width: result.width || null,
+          height: result.height || null,
+          provider: result.provider,
+          model: result.model,
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          usage: { provider: result.provider, model: result.model },
+          headers: {
+            "Content-Type": result.mimeType || "image/png",
+            "Content-Disposition": `inline; filename="${result.fileName || "upscaled-image.png"}"`,
+            "X-Output-Width": String(result.width || ""),
+            "X-Output-Height": String(result.height || ""),
+            "X-Upscale-Scale": String(result.scale || ""),
+            "X-Upscale-Provider": String(result.provider || ""),
+            "X-Upscale-Model": String(result.model || ""),
+          },
+          body: new Uint8Array(result.bytes),
+        };
+      },
     });
-
-    // The wallet AFTER this run, so the app updates its shared balance from this very
-    // response instead of asking again (2026-09-08 direction).
-    const creditHeaders = await creditBalanceHeaders({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.UPSCALE,
-    });
-
-    requestLogger.info("Image upscale completed", {
-      mobileUserId: mobileUser.id,
-      inputMimeType: String(imageFile.type || "").trim().toLowerCase() || null,
-      inputBytes: imageBytes.length,
-      inputWidth: result.inputWidth || null,
-      inputHeight: result.inputHeight || null,
-      scale: result.scale,
-      outputBytes: result.bytes.length,
-      width: result.width || null,
-      height: result.height || null,
-      provider: result.provider,
-      model: result.model,
-      durationMs: Date.now() - startedAt,
-    });
-
-    return attachRequestIdHeader(
-      new NextResponse(new Uint8Array(result.bytes), {
-        status: 200,
-        headers: {
-          ...creditHeaders,
-
-          "Content-Type": result.mimeType || "image/png",
-          "Content-Disposition": `inline; filename="${result.fileName || "upscaled-image.png"}"`,
-          "Cache-Control": "no-store",
-          "X-Output-Width": String(result.width || ""),
-          "X-Output-Height": String(result.height || ""),
-          "X-Upscale-Scale": String(result.scale || ""),
-          "X-Upscale-Provider": String(result.provider || ""),
-          "X-Upscale-Model": String(result.model || ""),
-        },
-      }),
-      requestId
-    );
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) {
+      requestLogger.error("Image upscale failed: service unavailable", error, {
+        durationMs: Date.now() - startedAt,
+      });
+      return attachRequestIdHeader(unavailable, requestId);
+    }
     const statusCode =
       isImageUpscaleError(error) && Number.isFinite(Number(error.statusCode))
         ? Number(error.statusCode)

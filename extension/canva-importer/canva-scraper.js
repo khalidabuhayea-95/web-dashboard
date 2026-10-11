@@ -16,6 +16,30 @@
           Number(style.opacity || 1) > 0.01
         );
       };
+      // The 80px floor above is for page frames and image candidates; an SVG shape is real at any
+      // size — the 45px-on-screen dashed connectors of DAHP1gDecK4 (and DAHP1vJ1HHw's) were
+      // "invisible" to it and never got serialized, so their layers fell to solid rects.
+      // ── canva-page-slice-gate:start
+      // Whether a layer is on the page enough to import. A layer mostly outside the page used to
+      // be dropped once under 20% of its own box showed — but Canva clips to the page, so what
+      // matters is how much of the PAGE the slice covers: DAHR4D4QJR4's torn-paper strips hang
+      // above and below the page and show only 17% / 6% of themselves, yet paint 11% / 4% of the
+      // page (the white torn edges at its top and bottom). A slice worth 2% of the page is real.
+      const layerShowsOnPage = ({ coverage, visibleArea, pageArea }) =>
+        (Number(coverage) || 0) >= 0.2 ||
+        ((Number(pageArea) || 0) > 0 && (Number(visibleArea) || 0) >= (Number(pageArea) || 0) * 0.02);
+      // ── canva-page-slice-gate:end
+
+      const isVisibleSvg = (element, rect) => {
+        if (!element || !rect) return false;
+        if (rect.width < 4 || rect.height < 4) return false;
+        const style = window.getComputedStyle(element);
+        return (
+          style.display !== "none" &&
+          style.visibility !== "hidden" &&
+          Number(style.opacity || 1) > 0.01
+        );
+      };
 
       const scoreRect = (rect) => {
         const area = rect.width * rect.height;
@@ -675,6 +699,21 @@
             if (fillHasMedia(el.fill) || (Array.isArray(el.paths) && el.paths.some((p) => p && fillHasMedia(p.fill)))) {
               facts.hasMediaFill = true;
             }
+            // A VIDEO fill's Canva video id (VA…): the scraper keeps such an element's clip outline and the
+            // background captures the clip by this id (attachCapturedElementVideos).
+            const readVideoId = (fill) => {
+              if (!isPlainObject(fill) || !isPlainObject(fill.video)) return "";
+              const raw = fill.video.video;
+              const value = raw && typeof raw.get === "function" ? raw.get() : raw;
+              return typeof value === "string" ? value : "";
+            };
+            const videoId =
+              readVideoId(el.fill) ||
+              (Array.isArray(el.paths) ? el.paths.map((p) => (p ? readVideoId(p.fill) : "")).find(Boolean) || "" : "");
+            if (videoId) facts.videoId = videoId;
+            // The element's Canva type ("grid", "shape", "text"…): a grid's cells are imported one by one.
+            const elementType = el.type && typeof el.type.get === "function" ? el.type.get() : el.type;
+            if (typeof elementType === "string" && elementType) facts.elementType = elementType;
             return facts;
           };
           // Every element under a page's element array, in Canva's paint order (a group before its own
@@ -904,12 +943,33 @@
           // Image media reference + in-frame crop from a rect's fill. media.id is shared across every
           // instance of the same image (Canva instances one media many times), so one rendered
           // instance resolves the pixels for all — each element supplies its own crop (fill.sb).
+          // The media's draw rect inside its element frame ({ left, top, width, height, rotation }). Canva
+          // re-minifies this key with releases (`sb` → `xb` → `wb`, seen 2026-10-05) and a stale name read no
+          // crop at all — a 90°-turned photo then had its slice measured on screen and came in squeezed. Find
+          // it by SHAPE: the image record's plain object carrying numeric left/top/width/height.
+          const findMediaDrawRect = (record) => {
+            if (!record || typeof record !== "object") return null;
+            const isRect = (value) =>
+              Boolean(value) &&
+              typeof value === "object" &&
+              !Array.isArray(value) &&
+              ["left", "top", "width", "height"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key]));
+            for (const key of ["wb", "xb", "sb"]) if (isRect(record[key])) return record[key];
+            for (const key of Object.keys(record)) {
+              try {
+                if (isRect(record[key])) return record[key];
+              } catch (_error) {
+                // A throwing getter is not the rect.
+              }
+            }
+            return null;
+          };
           const extractImage = (el) => {
             try {
               const img = el.fill && el.fill.image;
               const media = img && img.media;
               if (!media || typeof media.id !== "string") return null;
-              const sb = img.sb && typeof img.sb === "object" ? img.sb : null;
+              const sb = findMediaDrawRect(img);
               return {
                 mediaId: media.id,
                 version: Number(media.version) || undefined,
@@ -1068,6 +1128,22 @@
             if (t > 1) t /= 100;
             return { hex, alpha: Math.max(0, Math.min(1, 1 - t)) };
           };
+          // ── canva-gradient-line:start
+          // Canva's linear gradient `rotation` (degrees) turns the colour line from top→bottom (0) toward
+          // left→right (90 — what Canva's own DOM draws for it: x1=0 → x2=width at mid-height on
+          // DAHR9xcvsOU's fade bands). The line runs through the box centre along (sin r, cos r), in
+          // objectBoundingBox units. Kept identical in canva-fiber-main.js, background.js and
+          // canva-scraper.js (extension/canva-importer/test/gradient-line.test.mjs checks all three).
+          const canvaGradientLine = (rotation) => {
+            const raw = rotation && typeof rotation.get === "function" ? rotation.get() : rotation;
+            const degrees = Number(raw);
+            const radians = ((Number.isFinite(degrees) ? degrees : 0) * Math.PI) / 180;
+            const round = (value) => Math.round(value * 10000) / 10000 + 0;
+            const dx = Math.sin(radians) / 2;
+            const dy = Math.cos(radians) / 2;
+            return { x1: round(0.5 - dx), y1: round(0.5 - dy), x2: round(0.5 + dx), y2: round(0.5 + dy) };
+          };
+          // ── canva-gradient-line:end
           const svgPaintFromFill = (fill, gradientId) => {
             if (!fill || typeof fill !== "object") return null;
             const gradient = fill.gradient && typeof fill.gradient === "object" ? fill.gradient : null;
@@ -1082,13 +1158,14 @@
                 .filter(Boolean);
               if (stops.length === 0) return null;
               const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+              const line = canvaGradientLine(gradient.rotation);
               const cx = Number(gradient.center && gradient.center.left);
               const cy = Number(gradient.center && gradient.center.top);
               const defs = isRadial
                 ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
                     Number.isFinite(cy) ? cy : 0.5
                   }" r="0.75">${stops.join("")}</radialGradient>`
-                : `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+                : `<linearGradient id="${gradientId}" x1="${line.x1}" y1="${line.y1}" x2="${line.x2}" y2="${line.y2}">${stops.join("")}</linearGradient>`;
               return { paint: `url(#${gradientId})`, alpha: 1, defs };
             }
             const solid = svgColor(fill.color, fill.transparency);
@@ -2189,6 +2266,484 @@
         return lacks;
       };
 
+      // The same question for LATIN letters, asked per text. A display font drawn for Arabic often
+      // has no a–z, and Canva then draws them with `_fb_`'s Latin face — Noto Sans: HS Headline's
+      // "www.nayroz.com" measured 899 px in Canva's own stack, 899 in `_fb_` alone and 776 in HS
+      // Headline alone, and Noto Sans Bold sits within 0.15% of `_fb_`. Our editor and app have no
+      // `_fb_`, so they fell back to their own default — a serif. Measured where the fonts are
+      // loaded: a character the family lacks renders identically in "family, _fb_" and "_fb_", and
+      // in "family, monospace" and "monospace". True only when EVERY letter and digit of the text
+      // falls back (HS Headline does carry digits and dots); a mixed text keeps its family.
+      const textFallsBackToCanvaLatin = (cssFontFamily, fontWeight, fontStyle, text) => {
+        const family =
+          String(cssFontFamily || "").split(",")[0]?.replace(/^['"]+|['"]+$/g, "").trim() || "";
+        if (!family || family === "_fb_" || GENERIC_FONT_FAMILIES.has(family.toLowerCase())) return false;
+        const characters = [
+          ...new Set(Array.from(String(text || "")).filter((character) => /[A-Za-z0-9\u00C0-\u024F]/.test(character))),
+        ];
+        if (!characters.length) return false;
+        try {
+          arabicCoverageContext = arabicCoverageContext || document.createElement("canvas").getContext("2d");
+          const context = arabicCoverageContext;
+          const prefix = `${String(fontStyle || "") === "italic" ? "italic " : ""}${fontWeight || 400} 40px`;
+          const quoted = `"${family.replace(/"/g, "")}"`;
+          const sample = characters.join("");
+          // An unloaded face measures as whatever comes next, which would prove nothing.
+          if (!document.fonts.check(`${prefix} ${quoted}`, sample) || !document.fonts.check(`${prefix} _fb_`, sample)) {
+            return false;
+          }
+          context.fontKerning = "none";
+          const width = (font, value) => {
+            context.font = font;
+            return context.measureText(value).width;
+          };
+          return characters.every(
+            (character) =>
+              Math.abs(width(`${prefix} ${quoted}, _fb_`, character) - width(`${prefix} _fb_`, character)) < 0.01 &&
+              Math.abs(width(`${prefix} ${quoted}, monospace`, character) - width(`${prefix} monospace`, character)) < 0.01
+          );
+        } catch (_error) {
+          return false;
+        }
+      };
+
+      // Canva's own line breaks, as the range of box widths that reproduce them in OUR renderers.
+      // Canva lays text out with kerning and the liga/clig/calt features OFF and draws the letters a
+      // font lacks with `_fb_`; the editor (Konva) and the app measure with kerning ON and draw the
+      // whole text in the family the import stores (Noto Sans Arabic when the Canva font has no
+      // Arabic). Same box, different line widths: an 819 px paragraph Canva broke 1.7 px before
+      // "القهوة." pulled that word up onto the line above in the editor. So each of Canva's lines is
+      // measured here the way our renderers measure (canvas measureText, default kerning, the stored
+      // family) and the import is told
+      //   min — the widest line: any narrower box breaks one of Canva's lines;
+      //   max — the narrowest "line + space + next line's first word": any wider box joins two.
+      // Both in em of the font size, so they hold through any later rescale of the text. Only plain
+      // single-style text Canva soft-wrapped at spaces gets a range; anything else → null and the
+      // import keeps its usual box.
+      let wrapMeasureContext = null;
+      // ── canva-glyph-lines:start
+      // Rendered lines in logical order from per-glyph client rects. A new line starts where the
+      // glyph box's TOP moves (every glyph of one line shares its inline box, so their tops agree
+      // to a hair), or where the paragraph changes (a hard break — words never wrap across it).
+      // It used to start where the glyph box's middle dropped by half the box's height, which
+      // never fires when the box is taller than the line pitch: FS Albert Arabic's inline box is
+      // two em tall while its lines sit 1.1 em apart, so a three-line paragraph on DAHFEg4hhOk
+      // measured as two lines and its wrap range came out double (box 1088 px for a 541 px text).
+      const groupGlyphsIntoLines = (chars) => {
+        const lines = [];
+        let pendingHardBreak = false;
+        for (const item of chars) {
+          const last = lines[lines.length - 1];
+          if (item.hardBreak) {
+            pendingHardBreak = true;
+            continue;
+          }
+          const newBlock = Boolean(last) && item.block !== last.block;
+          const movedDown =
+            Boolean(last) &&
+            (Number.isFinite(item.top) && Number.isFinite(last.top)
+              ? Math.abs(item.top - last.top) > Math.max(1.5, Math.min(last.h, item.h) * 0.05)
+              : item.mid - last.mid > Math.max(2, Math.min(last.h, item.h) * 0.5));
+          if (!last || pendingHardBreak || newBlock || movedDown) {
+            if (last) last.hardBreak = pendingHardBreak || newBlock;
+            lines.push({ text: item.ch, top: item.top, mid: item.mid, h: item.h, block: item.block, hardBreak: false });
+            pendingHardBreak = false;
+          } else {
+            last.text += item.ch;
+          }
+        }
+        return lines;
+      };
+      // ── canva-glyph-lines:end
+
+      const measureTextWrapRange = (layerNode, text, lacksArabic) => {
+        try {
+          if (!layerNode) return null;
+          // A Latin font on mixed Latin + Arabic keeps its own family, and every renderer then
+          // falls back to a different system Arabic font: nothing to measure against.
+          if (lacksArabic && /[A-Za-z]/.test(String(text || ""))) return null;
+          const styleKey = (s) => `${s.fontFamily}|${s.fontSize}|${s.fontWeight}|${s.fontStyle}|${s.letterSpacing}`;
+          // The letters' own style: the first visible run sets it, every other run must match. (A
+          // paragraph's <p> can say 400 while every span in it is 700.)
+          let glyphStyle = null;
+
+          const chars = [];
+          const range = document.createRange();
+          // One copy of the paragraphs. A gradient-coloured text is laid out twice (an invisible copy
+          // for layout and a second one carrying the gradient paint) — both copies' letters in one
+          // walk would merge into a single impossible line.
+          const paragraphs = Array.from(layerNode.querySelectorAll(TEXT_BLOCK_SELECTOR));
+          const firstCopy = paragraphs.filter((paragraph) => paragraph.parentElement === paragraphs[0]?.parentElement);
+          const walkers = (firstCopy.length ? firstCopy : [layerNode]).map((root) =>
+            document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+          );
+          const nextTextNode = () => {
+            while (walkers.length) {
+              const next = walkers[0].nextNode();
+              if (next) return next;
+              walkers.shift();
+            }
+            return null;
+          };
+          let textNode = nextTextNode();
+          while (textNode) {
+            const data = String(textNode.data || "");
+            const parent = textNode.parentElement;
+            let checkedStyle = false;
+            for (let index = 0; parent && index < data.length; ) {
+              const size = data.codePointAt(index) > 0xffff ? 2 : 1;
+              const ch = data.slice(index, index + size);
+              range.setStart(textNode, index);
+              range.setEnd(textNode, index + size);
+              const rect = Array.from(range.getClientRects()).find((candidate) => candidate.height > 0);
+              if (ch === "\n") {
+                chars.push({ ch, hardBreak: true });
+              } else if (rect) {
+                if (!checkedStyle) {
+                  // Mixed sizes / families / spacing: one font string cannot measure it.
+                  const parentStyle = window.getComputedStyle(parent);
+                  if (!glyphStyle) glyphStyle = parentStyle;
+                  else if (styleKey(parentStyle) !== styleKey(glyphStyle)) return null;
+                  checkedStyle = true;
+                }
+                chars.push({
+                  ch,
+                  top: rect.top,
+                  mid: rect.top + rect.height / 2,
+                  h: rect.height,
+                  block: parent.closest(`${TEXT_BLOCK_SELECTOR},li`),
+                });
+              }
+              index += size;
+            }
+            textNode = nextTextNode();
+          }
+
+          const lines = groupGlyphsIntoLines(chars);
+          if (lines.length < 2 || !glyphStyle) return null;
+          const fontSizeCss = Number.parseFloat(glyphStyle.fontSize || "") || 0;
+          if (!(fontSizeCss > 0)) return null;
+          if (String(glyphStyle.textTransform || "none") !== "none") return null;
+          if (parseNumericPx(glyphStyle.wordSpacing || "") !== 0) return null;
+          if (/^(nowrap|pre)$/.test(String(glyphStyle.whiteSpace || ""))) return null;
+          const letterSpacingCss = parseNumericPx(glyphStyle.letterSpacing || "");
+
+          const families = lacksArabic
+            ? ["_fb_"]
+            : String(glyphStyle.fontFamily || "")
+                .split(",")
+                .map((family) => family.trim().replace(/^['"]+|['"]+$/g, ""))
+                .filter((family) => family && !/^(auto|inherit|initial|unset)$/i.test(family));
+          if (!families.length) return null;
+          wrapMeasureContext = wrapMeasureContext || document.createElement("canvas").getContext("2d");
+          const context = wrapMeasureContext;
+          if (!context) return null;
+          context.font = "10px sans-serif";
+          context.font = `${glyphStyle.fontStyle === "italic" ? "italic " : ""}${glyphStyle.fontWeight || 400} ${fontSizeCss}px ${families
+            .map((family) => (GENERIC_FONT_FAMILIES.has(family.toLowerCase()) ? family : `"${family.replace(/"/g, "")}"`))
+            .join(", ")}`;
+          if (!String(context.font).includes(families[0])) return null;
+          // Konva and the app keep the browser's / platform's default kerning.
+          context.fontKerning = "auto";
+          if ("letterSpacing" in context) context.letterSpacing = `${letterSpacingCss || 0}px`;
+          else if (letterSpacingCss) return null;
+          const measure = (value) => context.measureText(value).width / fontSizeCss;
+
+          let min = 0;
+          let max = Number.POSITIVE_INFINITY;
+          let softBreaks = 0;
+          for (let index = 0; index < lines.length; index += 1) {
+            const line = lines[index];
+            const body = line.text.trim();
+            if (!body) continue;
+            min = Math.max(min, measure(body));
+            const next = lines[index + 1];
+            if (!next || line.hardBreak) continue;
+            // A break inside a word (an over-long word Canva split) has no space to wrap at.
+            if (!/\s$/.test(line.text) && !/^\s/.test(next.text)) return null;
+            const nextWord = next.text.trim().split(/\s+/)[0];
+            if (!nextWord) continue;
+            max = Math.min(max, measure(`${body} ${nextWord}`));
+            softBreaks += 1;
+          }
+          if (!softBreaks || !(max > min)) return null;
+          return {
+            minEm: Math.round(min * 1e5) / 1e5,
+            maxEm: Math.round(max * 1e5) / 1e5,
+            lines: lines.length,
+          };
+        } catch (_error) {
+          return null;
+        }
+      };
+
+      // ── canva-text-gradient:start
+      // Canva paints a gradient text colour as an SVG image clipped to the glyphs
+      // (`background-clip: text`): <svg viewBox width height> holding one linear/radial gradient
+      // that fills a rect over the viewBox, drawn at the paragraph's background-position. The
+      // editor and the app paint a gradient over the text BOX instead (src/lib/editor/textFill.ts):
+      // an angle, and stops along the ramp from the box centre out to its farthest corners. So the
+      // SVG's user space is mapped into the box's content coordinates, each Canva stop lands where
+      // its point falls on that ramp, and the ends are clipped to 0..1 with the colour Canva shows
+      // there. Pure (string + numbers in, plain object out) so the test can run it as shipped.
+      //   layout: { width, height } content box, { bgX, bgY } background-position (px),
+      //   { originOffsetX, originOffsetY } content-box offset from the background origin,
+      //   { imageWidth, imageHeight } drawn image size, or null for the SVG's own size.
+      const canvaTextGradientToFill = (svgText, layout) => {
+        const svg = String(svgText || "");
+        const attr = (tag, name) => {
+          const match = String(tag || "").match(new RegExp(`\\s${name}\\s*=\\s*(['"])(.*?)\\1`, "i"));
+          return match ? match[2].trim() : null;
+        };
+        const styleProp = (tag, name) => {
+          const style = attr(tag, "style") || "";
+          const match = style.match(new RegExp(`(?:^|;)\\s*${name}\\s*:\\s*([^;]+)`, "i"));
+          return match ? match[1].trim() : null;
+        };
+        const toHex = (value) => {
+          const raw = String(value || "").trim().toLowerCase();
+          if (/^#[0-9a-f]{6}$/.test(raw)) return raw;
+          if (/^#[0-9a-f]{3}$/.test(raw)) return `#${raw.slice(1).split("").map((d) => d + d).join("")}`;
+          const rgb = raw.match(/^rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/);
+          if (!rgb) return "";
+          return `#${rgb.slice(1, 4).map((n) => Math.max(0, Math.min(255, Math.round(Number(n)))).toString(16).padStart(2, "0")).join("")}`;
+        };
+        const width = Number(layout?.width);
+        const height = Number(layout?.height);
+        if (!(width > 0) || !(height > 0)) return null;
+
+        const svgTag = (svg.match(/<svg\b[^>]*>/i) || [])[0];
+        const gradientTag = (svg.match(/<(linear|radial)Gradient\b[^>]*>/i) || [])[0];
+        if (!svgTag || !gradientTag) return null;
+        const radial = /^<radial/i.test(gradientTag);
+        const viewBox = String(attr(svgTag, "viewBox") || "").split(/[\s,]+/).map(Number);
+        const hasViewBox = viewBox.length === 4 && viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0;
+        const [vbX, vbY, vbW, vbH] = hasViewBox ? viewBox : [0, 0, Number(attr(svgTag, "width")), Number(attr(svgTag, "height"))];
+        if (!(vbW > 0) || !(vbH > 0)) return null;
+        const drawnWidth = Number(layout.imageWidth) > 0 ? Number(layout.imageWidth) : Number(attr(svgTag, "width")) || vbW;
+        const drawnHeight = Number(layout.imageHeight) > 0 ? Number(layout.imageHeight) : Number(attr(svgTag, "height")) || vbH;
+        const scaleX = drawnWidth / vbW;
+        const scaleY = drawnHeight / vbH;
+        const toBox = (point) => ({
+          x: (point.x - vbX) * scaleX + (Number(layout.bgX) || 0) - (Number(layout.originOffsetX) || 0),
+          y: (point.y - vbY) * scaleY + (Number(layout.bgY) || 0) - (Number(layout.originOffsetY) || 0),
+        });
+
+        // The painted rect = the gradient's bounding box when its units are objectBoundingBox.
+        const rectTag = (svg.match(/<rect\b[^>]*>/i) || [])[0];
+        const bbox = {
+          x: Number(attr(rectTag, "x")) || vbX,
+          y: Number(attr(rectTag, "y")) || vbY,
+          width: Number(attr(rectTag, "width")) || vbW,
+          height: Number(attr(rectTag, "height")) || vbH,
+        };
+        const userSpace = String(attr(gradientTag, "gradientUnits") || "").toLowerCase() === "userspaceonuse";
+        const length = (value, fallback, axis) => {
+          const raw = value === null ? fallback : value;
+          const percent = /%$/.test(raw);
+          const numeric = Number.parseFloat(raw);
+          if (!Number.isFinite(numeric)) return Number.parseFloat(fallback) / (/%$/.test(fallback) ? 100 : 1);
+          if (!percent) return numeric;
+          return userSpace ? (numeric / 100) * (axis === "x" ? vbW : vbH) + (axis === "x" ? vbX : vbY) : numeric / 100;
+        };
+        // gradientTransform, as one matrix [a b c d e f].
+        let matrix = [1, 0, 0, 1, 0, 0];
+        const multiply = (m, n) => [
+          m[0] * n[0] + m[2] * n[1],
+          m[1] * n[0] + m[3] * n[1],
+          m[0] * n[2] + m[2] * n[3],
+          m[1] * n[2] + m[3] * n[3],
+          m[0] * n[4] + m[2] * n[5] + m[4],
+          m[1] * n[4] + m[3] * n[5] + m[5],
+        ];
+        for (const op of String(attr(gradientTag, "gradientTransform") || "").matchAll(/(\w+)\s*\(([^)]*)\)/g)) {
+          const args = op[2].split(/[\s,]+/).filter(Boolean).map(Number);
+          const name = op[1].toLowerCase();
+          if (name === "matrix" && args.length === 6) matrix = multiply(matrix, args);
+          else if (name === "translate") matrix = multiply(matrix, [1, 0, 0, 1, args[0] || 0, args[1] || 0]);
+          else if (name === "scale") matrix = multiply(matrix, [args[0] ?? 1, 0, 0, args[1] ?? args[0] ?? 1, 0, 0]);
+          else if (name === "rotate") {
+            const r = ((args[0] || 0) * Math.PI) / 180;
+            const cx = args[1] || 0;
+            const cy = args[2] || 0;
+            matrix = multiply(matrix, [1, 0, 0, 1, cx, cy]);
+            matrix = multiply(matrix, [Math.cos(r), Math.sin(r), -Math.sin(r), Math.cos(r), 0, 0]);
+            matrix = multiply(matrix, [1, 0, 0, 1, -cx, -cy]);
+          } else return null;
+        }
+        const toUser = (point) => {
+          const p = {
+            x: matrix[0] * point.x + matrix[2] * point.y + matrix[4],
+            y: matrix[1] * point.x + matrix[3] * point.y + matrix[5],
+          };
+          return userSpace ? p : { x: bbox.x + p.x * bbox.width, y: bbox.y + p.y * bbox.height };
+        };
+
+        const stops = Array.from(svg.matchAll(/<stop\b[^>]*>/gi))
+          .map(([tag]) => {
+            const color = toHex(attr(tag, "stop-color") || styleProp(tag, "stop-color"));
+            const opacityRaw = attr(tag, "stop-opacity") ?? styleProp(tag, "stop-opacity");
+            const opacity = opacityRaw === null ? 1 : Math.max(0, Math.min(1, Number(opacityRaw)));
+            const offsetRaw = attr(tag, "offset") || "0";
+            const offset = Number.parseFloat(offsetRaw) / (/%$/.test(offsetRaw) ? 100 : 1);
+            return color && Number.isFinite(offset) && Number.isFinite(opacity)
+              ? { color, opacity, offset: Math.max(0, Math.min(1, offset)) }
+              : null;
+          })
+          .filter(Boolean)
+          .sort((a, b) => a.offset - b.offset);
+        if (stops.length < 2) return null;
+
+        let angle = 0;
+        let mapped;
+        if (radial) {
+          // The renderers' radial ramp runs from the box centre to half its diagonal; Canva's from
+          // its own centre to `r`. Scale the stops by the radius ratio (the centres coincide for
+          // Canva's default radial text gradient).
+          const center = toBox(toUser({ x: length(attr(gradientTag, "cx"), "50%", "x"), y: length(attr(gradientTag, "cy"), "50%", "y") }));
+          const edge = toBox(toUser({ x: length(attr(gradientTag, "cx"), "50%", "x") + length(attr(gradientTag, "r"), "50%", "x"), y: length(attr(gradientTag, "cy"), "50%", "y") }));
+          const radius = Math.hypot(edge.x - center.x, edge.y - center.y);
+          const ramp = Math.hypot(width, height) / 2;
+          if (!(radius > 0)) return null;
+          mapped = stops.map((stop) => ({ ...stop, position: (stop.offset * radius) / ramp }));
+        } else {
+          const start = toBox(toUser({ x: length(attr(gradientTag, "x1"), "0%", "x"), y: length(attr(gradientTag, "y1"), "0%", "y") }));
+          const end = toBox(toUser({ x: length(attr(gradientTag, "x2"), "100%", "x"), y: length(attr(gradientTag, "y2"), "0%", "y") }));
+          const dx = end.x - start.x;
+          const dy = end.y - start.y;
+          const span = Math.hypot(dx, dy);
+          if (!(span > 1e-6)) return null;
+          const ux = dx / span;
+          const uy = dy / span;
+          const half = Math.abs(ux) * (width / 2) + Math.abs(uy) * (height / 2);
+          const rampStartX = width / 2 - ux * half;
+          const rampStartY = height / 2 - uy * half;
+          const startAlong = (start.x - rampStartX) * ux + (start.y - rampStartY) * uy;
+          mapped = stops.map((stop) => ({ ...stop, position: (startAlong + stop.offset * span) / (2 * half) }));
+          angle = (((Math.atan2(dy, dx) * 180) / Math.PI) % 360 + 360) % 360;
+        }
+
+        // Clip the ramp to the box: whatever Canva shows at 0 and 1 becomes the end stop there.
+        const mix = (a, b, t) => {
+          const channel = (index) =>
+            Math.round(
+              Number.parseInt(a.color.slice(index, index + 2), 16) * (1 - t) +
+                Number.parseInt(b.color.slice(index, index + 2), 16) * t
+            )
+              .toString(16)
+              .padStart(2, "0");
+          return { color: `#${channel(1)}${channel(3)}${channel(5)}`, opacity: a.opacity * (1 - t) + b.opacity * t };
+        };
+        const colorAt = (position) => {
+          if (position <= mapped[0].position) return mapped[0];
+          const last = mapped[mapped.length - 1];
+          if (position >= last.position) return last;
+          for (let index = 1; index < mapped.length; index += 1) {
+            const a = mapped[index - 1];
+            const b = mapped[index];
+            if (position <= b.position) {
+              const span = b.position - a.position;
+              return span > 0 ? mix(a, b, (position - a.position) / span) : b;
+            }
+          }
+          return last;
+        };
+        let clipped = mapped.filter((stop) => stop.position >= 0 && stop.position <= 1);
+        if (mapped[0].position < 0) clipped.unshift({ ...colorAt(0), position: 0 });
+        if (mapped[mapped.length - 1].position > 1) clipped.push({ ...colorAt(1), position: 1 });
+        if (clipped.length < 2) clipped = [{ ...colorAt(0), position: 0 }, { ...colorAt(1), position: 1 }];
+        return {
+          type: "gradient",
+          gradientKind: radial ? "radial" : "linear",
+          angle: Math.round(angle * 1000) / 1000,
+          stops: clipped.map((stop) => ({
+            color: stop.color,
+            ...(stop.opacity < 1 ? { opacity: Math.round(stop.opacity * 1000) / 1000 } : {}),
+            position: Math.round(stop.position * 1e4) / 1e4,
+          })),
+        };
+      };
+      // ── canva-text-gradient:end
+
+      // The gradient fill of a text layer, from the paragraph Canva paints it on; null when the
+      // text is a flat colour (or painted with something this cannot express yet, like a photo).
+      const readTextGradientFill = (layerNode) => {
+        try {
+          const painted = [layerNode, ...getScopedDescendants(layerNode)].filter((element) => {
+            const style = window.getComputedStyle(element);
+            return isTextClippedBackground(style) && /url\(\s*['"]?data:image\/svg\+xml/i.test(String(style.backgroundImage || ""));
+          });
+          for (const element of painted) {
+            const style = window.getComputedStyle(element);
+            const url = (String(style.backgroundImage || "").match(/url\((['"]?)(.*?)\1\)/s) || [])[2] || "";
+            if (!/^data:image\/svg\+xml/i.test(url)) continue;
+            const comma = url.indexOf(",");
+            const svgText = /;base64,/i.test(url.slice(0, comma + 1))
+              ? atob(url.slice(comma + 1))
+              : decodeURIComponent(url.slice(comma + 1));
+            const pad = {
+              left: parseNumericPx(style.paddingLeft),
+              top: parseNumericPx(style.paddingTop),
+              right: parseNumericPx(style.paddingRight),
+              bottom: parseNumericPx(style.paddingBottom),
+            };
+            const contentWidth = element.clientWidth - pad.left - pad.right;
+            const contentHeight = element.clientHeight - pad.top - pad.bottom;
+            const position = String(style.backgroundPosition || "").trim().split(/\s+/);
+            const size = String(style.backgroundSize || "auto").trim().split(/\s+/);
+            if (!(contentWidth > 0 && contentHeight > 0)) continue;
+            if (!position.every((part) => /^-?[\d.]+px$/.test(part))) continue;
+            const sizeIsAuto = size.every((part) => part === "auto");
+            if (!sizeIsAuto && !size.every((part) => /^[\d.]+px$/.test(part))) continue;
+            const origin = String(style.backgroundOrigin || "padding-box");
+            const originOffsetX =
+              origin === "content-box" ? 0 : pad.left + (origin === "border-box" ? parseNumericPx(style.borderLeftWidth) : 0);
+            const originOffsetY =
+              origin === "content-box" ? 0 : pad.top + (origin === "border-box" ? parseNumericPx(style.borderTopWidth) : 0);
+            // Canva runs the ramp across the LETTERS. A single line gets a box exactly that wide in the
+            // editor (snug fit) and in the app (natural width), so measure the ramp against the line's
+            // own extent there — against the paragraph box, a right-aligned title's ramp started 10%
+            // into its letters. Wrapped text keeps the paragraph box: that is its box on our side too.
+            let inkLeft = 0;
+            let inkWidth = contentWidth;
+            try {
+              const textRange = document.createRange();
+              textRange.selectNodeContents(element);
+              const rects = Array.from(textRange.getClientRects()).filter((rect) => rect.width > 0 && rect.height > 0);
+              const mids = rects.map((rect) => rect.top + rect.height / 2);
+              const shortest = Math.min(...rects.map((rect) => rect.height));
+              const elementRect = element.getBoundingClientRect();
+              const screenPerCss = element.offsetWidth > 0 ? elementRect.width / element.offsetWidth : 0;
+              // One painted paragraph on one line; a text of several paragraphs is multi-line.
+              const singleLine = painted.length === 1 && Math.max(...mids) - Math.min(...mids) < shortest * 0.5;
+              if (rects.length && screenPerCss > 0 && singleLine) {
+                const left = Math.min(...rects.map((rect) => rect.left));
+                const right = Math.max(...rects.map((rect) => rect.right));
+                inkLeft = (left - elementRect.left) / screenPerCss - pad.left;
+                inkWidth = (right - left) / screenPerCss;
+              }
+            } catch (_error) {
+              inkLeft = 0;
+              inkWidth = contentWidth;
+            }
+            const fill = canvaTextGradientToFill(svgText, {
+              width: inkWidth > 0 ? inkWidth : contentWidth,
+              height: contentHeight,
+              bgX: Number.parseFloat(position[0]),
+              bgY: Number.parseFloat(position[1] ?? position[0]),
+              originOffsetX: originOffsetX + (inkWidth > 0 ? inkLeft : 0),
+              originOffsetY,
+              imageWidth: sizeIsAuto ? null : Number.parseFloat(size[0]),
+              imageHeight: sizeIsAuto ? null : Number.parseFloat(size[1] ?? size[0]),
+            });
+            if (fill) return fill;
+          }
+        } catch (_error) {
+          return null;
+        }
+        return null;
+      };
+
       const normalizeFontFamilyName = (value) => {
         const input = String(value || "").trim();
         if (!input) return "";
@@ -2568,6 +3123,7 @@
         const initialSrc = getImageElementSource(element);
         const fitFetchedToTarget = Boolean(options?.fitFetchedToTarget);
         const cropRegion = options?.cropRegion || null;
+        const quarterTurns = Number(options?.quarterTurns) || 0;
 
         // An animated sticker keeps its animation: the raw GIF is the asset, its settled frame the
         // poster. A GIF that turns out to be a still falls through to the ordinary paths below.
@@ -2610,7 +3166,8 @@
                 blobDataUrl,
                 targetWidth,
                 targetHeight,
-                cropRegion
+                cropRegion,
+                quarterTurns
               );
               if (fitted && String(fitted.dataUrl || "").startsWith("data:image/")) {
                 return {
@@ -2638,7 +3195,8 @@
                 fetched,
                 targetWidth,
                 targetHeight,
-                cropRegion
+                cropRegion,
+                quarterTurns
               );
               if (fitted && String(fitted.dataUrl || "").startsWith("data:image/")) {
                 return {
@@ -2976,12 +3534,20 @@
         return match?.[2] ? normalizeAssetUrl(match[2]) : "";
       };
 
+      // A background clipped to the TEXT is the glyphs' own paint (Canva's gradient text colour), not
+      // a box behind them. Read as a background image it turned every gradient-coloured text into an
+      // image layer: a solid gradient slab with a flat-colour copy of the words on top.
+      const TEXT_CLIP_PATTERN = /(^|[\s,])text([\s,]|$)/;
+      const isTextClippedBackground = (style) =>
+        TEXT_CLIP_PATTERN.test(String(style?.backgroundClip || "")) ||
+        TEXT_CLIP_PATTERN.test(String(style?.webkitBackgroundClip || ""));
+
       const findCssImageUrl = (element) => {
         if (!element) return "";
         const searchSources = [];
         const pushStyle = (style) => {
           if (!style) return;
-          searchSources.push(style.backgroundImage);
+          if (!isTextClippedBackground(style)) searchSources.push(style.backgroundImage);
           searchSources.push(style.maskImage);
           searchSources.push(style.webkitMaskImage);
           searchSources.push(style.content);
@@ -3153,8 +3719,189 @@
         return best;
       };
 
+      // A text box's paragraphs. Canva renders text styled as a title/heading in <h1>–<h6>, not <p>
+      // ("عــادات صحية" came as an <h3>), and a scan for <p> alone found no paragraph at all: the
+      // style fell to a wrapper div's defaults and the title imported as 10px black Times.
+      const TEXT_BLOCK_SELECTOR = "p,h1,h2,h3,h4,h5,h6";
+      const isTextBlockTag = (tagName) => /^(P|H[1-6])$/.test(String(tagName || ""));
+
+      // ── canva-list-markers:start
+      // Canva lays a list item out as <ul><li><p>: the marker is the browser's own (::marker), never
+      // a glyph in the text, so it never reached the import (DAHP1vJ1HHw's six cards lost their
+      // bullets). The editor and the app have no lists, so the marker becomes a character at the
+      // START of the item's text; the paragraph-direction pass then moves it to the end it shows at
+      // (an Arabic item in Canva's left-to-right list keeps its bullet on the left).
+      const listMarkerText = (listStyleType, ordinal) => {
+        const type = String(listStyleType || "").trim().toLowerCase();
+        if (!type || type === "none") return "";
+        if (type === "circle") return "\u25E6 ";
+        if (type === "square") return "\u25AA ";
+        if (type === "disc") return "\u2022 ";
+        const index = Math.max(1, Math.round(Number(ordinal) || 1));
+        if (/^decimal/.test(type)) return `${index}. `;
+        if (/^(lower|upper)-alpha$|^(lower|upper)-latin$/.test(type)) {
+          const letter = String.fromCharCode(96 + ((index - 1) % 26) + 1);
+          return `${type.startsWith("upper") ? letter.toUpperCase() : letter}. `;
+        }
+        if (/^(lower|upper)-roman$/.test(type)) {
+          const numerals = [[1000, "m"], [900, "cm"], [500, "d"], [400, "cd"], [100, "c"], [90, "xc"], [50, "l"], [40, "xl"], [10, "x"], [9, "ix"], [5, "v"], [4, "iv"], [1, "i"]];
+          let rest = index;
+          let out = "";
+          for (const [value, glyph] of numerals) while (rest >= value) { out += glyph; rest -= value; }
+          return `${type.startsWith("upper") ? out.toUpperCase() : out}. `;
+        }
+        return "\u2022 ";
+      };
+      // ── canva-list-markers:end
+
+      // A Canva line's SVG as an image covering everything it paints: the paths' bounds plus half
+      // the widest stroke (an arrow chevron at the end sits partly outside the element box). The
+      // svg has no viewBox, so its user units are the element's own CSS px; `x/y/w/h` are the
+      // element's design-px box, and the result's box is grown by the same overflow.
+      const serializeLineSvgToDataUrl = (svgElement, x, y, w, h) => {
+        try {
+          const paths = Array.from(svgElement.querySelectorAll("path")).filter(
+            (path) => Number(window.getComputedStyle(path).opacity) > 0.01
+          );
+          if (!paths.length) return null;
+          const cssWidth = Number.parseFloat(window.getComputedStyle(svgElement).width) || svgElement.getBoundingClientRect().width;
+          const cssHeight = Number.parseFloat(window.getComputedStyle(svgElement).height) || svgElement.getBoundingClientRect().height;
+          if (!(cssWidth > 0) || !(cssHeight > 0)) return null;
+          let minX = 0;
+          let minY = 0;
+          let maxX = cssWidth;
+          let maxY = cssHeight;
+          let pad = 1;
+          paths.forEach((path) => {
+            const box = path.getBBox();
+            const strokeWidth = parseNumericPx(window.getComputedStyle(path).strokeWidth || "");
+            pad = Math.max(pad, strokeWidth / 2 + 1);
+            minX = Math.min(minX, box.x);
+            minY = Math.min(minY, box.y);
+            maxX = Math.max(maxX, box.x + box.width);
+            maxY = Math.max(maxY, box.y + box.height);
+          });
+          minX -= pad;
+          minY -= pad;
+          maxX += pad;
+          maxY += pad;
+          const unitX = w / cssWidth;
+          const unitY = h / cssHeight;
+          const clone = svgElement.cloneNode(true);
+          copyComputedSvgStyles(svgElement, clone);
+          const width = Math.max(1, Math.round((maxX - minX) * unitX));
+          const height = Math.max(1, Math.round((maxY - minY) * unitY));
+          clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
+          clone.setAttribute("xmlns:xlink", "http://www.w3.org/1999/xlink");
+          clone.setAttribute("width", String(width));
+          clone.setAttribute("height", String(height));
+          clone.setAttribute("viewBox", `${minX} ${minY} ${maxX - minX} ${maxY - minY}`);
+          clone.setAttribute("preserveAspectRatio", "none");
+          clone.style.removeProperty("transform");
+          const serialized = new XMLSerializer().serializeToString(clone);
+          if (!serialized.includes("<svg")) return null;
+          return {
+            dataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`,
+            x: x + minX * unitX,
+            y: y + minY * unitY,
+            width,
+            height,
+          };
+        } catch (_error) {
+          return null;
+        }
+      };
+
+      // ── canva-vector-line:start
+      // A Canva `line` element the editable-rect path cannot express: dashed/dotted, carrying an
+      // arrowhead (a second painted path), or bent (elbow/curve commands) — the dashed connectors
+      // with arrowheads on DAHP1vJ1HHw's mind map imported as six solid purple blocks. Takes the
+      // visible paths as `{ dashed, filled, d }` and says whether the line must stay a vector image.
+      const lineNeedsVector = (paths) => {
+        const visible = (Array.isArray(paths) ? paths : []).filter((path) => path && typeof path.d === "string" && path.d.trim());
+        if (!visible.length) return false;
+        if (visible.length > 1) return true;
+        const [only] = visible;
+        if (only.dashed) return true;
+        if (/[CcQqSsTtAa]/.test(only.d)) return true;
+        // A polyline that changes direction (an elbow) has both axes moving between its points.
+        const points = (only.d.match(/-?\d*\.?\d+(?:e[-+]?\d+)?/g) || []).map(Number);
+        const xs = new Set();
+        const ys = new Set();
+        for (let index = 0; index + 1 < points.length; index += 2) {
+          xs.add(Math.round(points[index]));
+          ys.add(Math.round(points[index + 1]));
+        }
+        return xs.size > 1 && ys.size > 1 && points.length > 4;
+      };
+      // ── canva-vector-line:end
+
+      // ── canva-text-stroke:start
+      // Canva's outline text effects (Hollow, Splice, Outline) draw the paragraph TWICE: one copy
+      // with a transparent fill and `-webkit-text-stroke`, one with the plain fill on top. The
+      // import kept the fill copy only, so DAHP1vJ1HHw's purple-outlined white labels came in as
+      // invisible white text. The stroke is kept as a fraction of the font size (both read from
+      // the same computed style, so no unit conversion) and background.js turns it into the text
+      // layer's 0–100 outline width (lib/editor/textStroke.ts: px = fontSize × width/100 × 0.22).
+      const textStrokeFromCopies = (copies) => {
+        for (const copy of Array.isArray(copies) ? copies : []) {
+          const width = Number(copy?.strokeWidthPx) || 0;
+          const fontSize = Number(copy?.fontSizePx) || 0;
+          const color = String(copy?.strokeColor || "").trim();
+          if (!(width > 0) || !(fontSize > 0) || !color) continue;
+          return { color, widthRatio: Math.round((width / fontSize) * 1e4) / 1e4 };
+        }
+        return null;
+      };
+      // ── canva-text-stroke:end
+
+      // ── canva-paragraph-styles:start
+      // A text layer carries ONE font weight/size/colour, but Canva styles paragraphs on their own:
+      // DAHP1gDecK4's title is "الفكــــرة" at 700 over "الرئيسيـــة" at 400, and the import made
+      // both bold, so the second line grew past the box and folded. Given each paragraph's style key
+      // (null when a paragraph mixes styles inside itself), says whether the paragraphs should
+      // become one layer each. Only when every paragraph is uniform and at least two differ.
+      const paragraphStylesDiffer = (keys) => {
+        if (!Array.isArray(keys) || keys.length < 2) return false;
+        if (keys.some((key) => typeof key !== "string" || !key)) return false;
+        return new Set(keys).size > 1;
+      };
+      // ── canva-paragraph-styles:end
+
+      // ── canva-paragraph-direction:start
+      // Canva lays a paragraph out in its text box's direction, while the editor and the app lay any
+      // text with Arabic in it out right-to-left. For an Arabic paragraph the letters come out the
+      // same either way; the punctuation at its ends does not. Typed as "!مستوى الحماس في القمة" in a
+      // left-to-right box, Canva shows the "!" on the LEFT — where an Arabic sentence ends — and ours
+      // drew it on the right (DAHPQG4ffsM). Moving end punctuation to the end it shows at makes the
+      // right-to-left layout put it in the same place, and leaves the text in natural Arabic order
+      // for whoever edits it. Only an LTR paragraph whose letters are all right-to-left is touched:
+      // mixed with Latin words, the two directions also order the words differently.
+      const RTL_LETTER = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
+      const BIDI_MIRRORED_PAIRS = { "(": ")", ")": "(", "[": "]", "]": "[", "{": "}", "}": "{", "<": ">", ">": "<", "«": "»", "»": "«" };
+      const matchCanvaParagraphDirection = (text, canvaDirection) => {
+        const value = String(text ?? "");
+        if (canvaDirection !== "ltr") return value;
+        return value
+          .split("\n")
+          .map((line) => {
+            const [, outerStart, inner, outerEnd] = line.match(/^(\s*)([\s\S]*?)(\s*)$/u);
+            const letters = inner.match(/\p{L}/gu) || [];
+            if (letters.length === 0 || !letters.every((letter) => RTL_LETTER.test(letter))) return line;
+            // Marks (tashkeel, tanween) belong to their letter, never to the punctuation.
+            const [, leading, body, trailing] = inner.match(/^([^\p{L}\p{N}\p{M}]*)([\s\S]*?)([^\p{L}\p{N}\p{M}]*)$/u);
+            if (!leading && !trailing) return line;
+            // A run that joins the right-to-left flow reads right to left: reverse it, and swap the
+            // paired brackets the right-to-left layout mirrors back.
+            const flip = (run) => [...run].reverse().map((char) => BIDI_MIRRORED_PAIRS[char] || char).join("");
+            return `${outerStart}${flip(trailing)}${body}${flip(leading)}${outerEnd}`;
+          })
+          .join("\n");
+      };
+      // ── canva-paragraph-direction:end
+
       const findBestTextStyleElement = (node, ownerNode = node) => {
-        const candidates = Array.from(node.querySelectorAll("p,span,div")).filter(
+        const candidates = Array.from(node.querySelectorAll(`${TEXT_BLOCK_SELECTOR},span,div`)).filter(
           (candidate) =>
             !isInsideForeignLayer(candidate, ownerNode) &&
             String(candidate.innerText || "").trim()
@@ -3168,7 +3915,7 @@
           const color = style.color;
           const hasVar = String(candidate.getAttribute("style") || "").includes("--H97cbQ");
           const score =
-            (candidate.tagName === "P" ? 12 : 0) +
+            (isTextBlockTag(candidate.tagName) ? 12 : 0) +
             (hasVar ? 8 : 0) +
             (!isTransparentColor(color) ? 5 : 0) +
             (fontSize >= 10 ? 3 : 0);
@@ -3194,7 +3941,7 @@
       // own curve model once the layer's design-space width is known.
       const detectTextCurve = (layerNode) => {
         if (!layerNode) return null;
-        const paragraphs = Array.from(layerNode.querySelectorAll("p")).filter(
+        const paragraphs = Array.from(layerNode.querySelectorAll(TEXT_BLOCK_SELECTOR)).filter(
           (item) => !isInsideForeignLayer(item, layerNode)
         );
         // The same duplicated logical copy dedupeTextLines collapses: read the first copy only.
@@ -3266,6 +4013,37 @@
       // turns through a quarter circle, so |dx| = |dy| = r), and how far it reaches past the text —
       // horizontally past the widest line's ink, vertically past the element's line box. All in
       // design px, via the element's own css→design scale.
+      // The outline a text's stroke copy draws, from the paragraph copies' computed styles.
+      const detectTextStrokeEffect = (layerNode) => {
+        try {
+          if (!layerNode) return null;
+          const paragraphs = Array.from(layerNode.querySelectorAll(TEXT_BLOCK_SELECTOR)).filter(
+            (item) => !isInsideForeignLayer(item, layerNode)
+          );
+          const copies = paragraphs.map((paragraph) => {
+            const glyph = paragraph.querySelector("span") || paragraph;
+            const style = window.getComputedStyle(glyph);
+            const strokeColor = String(style.webkitTextStrokeColor || "").trim();
+            return {
+              strokeWidthPx: parseNumericPx(style.webkitTextStrokeWidth || ""),
+              strokeColor: isTransparentColor(strokeColor) ? "" : strokeColor,
+              fontSizePx: Number.parseFloat(style.fontSize || "") || 0,
+            };
+          });
+          const stroke = textStrokeFromCopies(copies);
+          if (!stroke) return null;
+          const rgb = /rgba?\(\s*([\d.]+)\s*,\s*([\d.]+)\s*,\s*([\d.]+)/i.exec(stroke.color);
+          const color = rgb
+            ? `#${[rgb[1], rgb[2], rgb[3]]
+                .map((part) => Math.max(0, Math.min(255, Math.round(Number(part)))).toString(16).padStart(2, "0"))
+                .join("")}`
+            : stroke.color;
+          return { color, widthRatio: stroke.widthRatio };
+        } catch (_error) {
+          return null;
+        }
+      };
+
       const detectTextBackgroundEffect = (layerNode, designWidth) => {
         if (!layerNode || !(Number(designWidth) > 0)) return null;
         const nodeRect = layerNode.getBoundingClientRect();
@@ -3287,7 +4065,7 @@
         if (!best) return null;
 
         // Widest rendered line of ink (first logical copy only — Canva keeps two).
-        const paragraphs = Array.from(layerNode.querySelectorAll("p")).filter(
+        const paragraphs = Array.from(layerNode.querySelectorAll(TEXT_BLOCK_SELECTOR)).filter(
           (item) => !isInsideForeignLayer(item, layerNode)
         );
         const firstCopy = paragraphs.slice(0, Math.max(1, Math.ceil(paragraphs.length / 2)));
@@ -3357,8 +4135,31 @@
           radiusPx: round1(Math.max(0, radiusPx)),
           padXPx: round1(Math.max(0, (best.rect.width - inkWidth) / 2) * toDesign),
           padYPx: round1(Math.max(0, (best.rect.height - nodeRect.height) / 2) * toDesign),
+          // The ink the padding was measured against, so the layer's box can hug it (the
+          // editor and the app draw the background around the BOX).
+          inkWidthPx: round1(inkWidth * toDesign),
+          lineCount: Math.max(1, lines.size),
         };
       };
+
+      // ── canva-text-background-hug:start
+      // Canva draws a text's Background effect around the ink of each line; the editor and the
+      // app draw it around the text BOX. A one-line text in a wide box (a centred label in a
+      // full-width box, as Canva lays most out) therefore needs its box hugged to the ink, shifted
+      // by its alignment so the glyphs stay put — otherwise the pill spans the whole box (the
+      // yellow "خصم خاص للأخوة" on DAHP0ZiJiNE came in as an 873 px bar). Multi-line texts keep
+      // their box: it is the wrap width. Returns the box to use.
+      const hugTextBoxToInk = ({ x, width, inkWidth, lineCount, align, slack = 2 }) => {
+        const boxWidth = Number(width) || 0;
+        const ink = Number(inkWidth) || 0;
+        if (!(ink > 0) || Number(lineCount) !== 1 || boxWidth <= 0) return { x, width: boxWidth };
+        const hugged = Math.min(boxWidth, Math.ceil(ink) + slack);
+        if (boxWidth - hugged < 1) return { x, width: boxWidth };
+        const normalizedAlign = String(align || "").toLowerCase();
+        const shift = normalizedAlign === "center" ? (boxWidth - hugged) / 2 : normalizedAlign === "right" ? boxWidth - hugged : 0;
+        return { x: (Number(x) || 0) + shift, width: hugged };
+      };
+      // ── canva-text-background-hug:end
 
       // Canva's shaped photo frames (arches, blobs, badges…) are a `shape` element whose image is
       // clipped by an SVG <clipPath> path — `clip-path: url(#id)` on a wrapper div. The importer
@@ -3366,20 +4167,240 @@
       // clip outline into a polygon in the frame's own 0..100 space (the editor's and the app's
       // frame-shape unit): userSpaceOnUse clip coordinates are the clipped element's CSS box, so
       // they normalise by its layout size; objectBoundingBox ones are already 0..1.
-      const detectClipPathFrameMask = (layerNode) => {
+      // Canva also writes a clip INLINE as a CSS `clip-path: path("M …")` in the clipped element's
+      // own px — that is how an image's "corner rounding" is drawn. Read its path data.
+      const readCssClipPathData = (element) => {
+        const clip = String(window.getComputedStyle(element).clipPath || "");
+        const match = clip.match(/^path\(\s*(?:(?:nonzero|evenodd)\s*,\s*)?(["'])([\s\S]*)\1\s*\)$/);
+        return match ? match[2] : "";
+      };
+      const detachedSvgPath = (d) => {
+        const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+        path.setAttribute("d", d);
+        return path;
+      };
+
+      // ── canva-rounded-rect-fit:start
+      // The corner radius of the rounded rectangle that traces an outline sampled in px, as a
+      // fraction of its shorter side (0..0.5) — or null when none fits within a hair: square
+      // corners, an arch, an ellipse, any free shape. Pure, so it is tested on its own
+      // (extension/canva-importer/test/rounded-rect-clip.test.mjs).
+      const fitRoundedRectCornerFraction = (points) => {
+        if (!Array.isArray(points) || points.length < 8) return null;
+        const xs = points.map(([x]) => x);
+        const ys = points.map(([, y]) => y);
+        const minX = Math.min(...xs);
+        const minY = Math.min(...ys);
+        const width = Math.max(...xs) - minX;
+        const height = Math.max(...ys) - minY;
+        const shorter = Math.min(width, height);
+        if (!(shorter > 0)) return null;
+        // Distance from a point to the outline of a width×height rectangle with corner radius r.
+        const outlineDistance = ([px, py], radius) => {
+          const x = px - minX;
+          const y = py - minY;
+          const cx = Math.min(Math.max(x, radius), width - radius);
+          const cy = Math.min(Math.max(y, radius), height - radius);
+          if (x >= radius && x <= width - radius) return Math.min(Math.abs(y), Math.abs(height - y));
+          if (y >= radius && y <= height - radius) return Math.min(Math.abs(x), Math.abs(width - x));
+          return Math.abs(Math.hypot(x - cx, y - cy) - radius);
+        };
+        let best = { radius: 0, error: Infinity };
+        const STEPS = 200;
+        for (let step = 0; step <= STEPS; step += 1) {
+          const radius = (shorter / 2) * (step / STEPS);
+          let worst = 0;
+          for (const point of points) {
+            worst = Math.max(worst, outlineDistance(point, radius));
+            if (worst >= best.error) break;
+          }
+          if (worst < best.error) best = { radius, error: worst };
+        }
+        if (best.error > Math.max(0.6, shorter * 0.008) || best.radius < 0.5) return null;
+        return Math.min(0.5, best.radius / shorter);
+      };
+      // ── canva-rounded-rect-fit:end
+
+      // A CSS path() clip that traces a ROUNDED RECTANGLE over its whole element — Canva's image
+      // corner rounding (a pill behind a URL imported with square corners: only url(#clipPath)
+      // masks were read, and the radius lives under a minified model key). The radius comes back
+      // as a fraction of the box's shorter side, which the editor and the app reproduce exactly
+      // with the image's own corner radius. Anything else → null (the frame-mask path samples it).
+      const detectRoundedRectClip = (layerNode) => {
+        try {
+          if (!layerNode) return null;
+          const element = [layerNode, ...Array.from(layerNode.querySelectorAll("*"))].find(
+            (candidate) =>
+              (candidate === layerNode || !isInsideForeignLayer(candidate, layerNode)) && readCssClipPathData(candidate)
+          );
+          if (!element) return null;
+          const path = detachedSvgPath(readCssClipPathData(element));
+          const total = path.getTotalLength();
+          if (!(total > 0)) return null;
+          const SAMPLES = 360;
+          const points = [];
+          for (let index = 0; index < SAMPLES; index += 1) {
+            const point = path.getPointAtLength((total * index) / SAMPLES);
+            points.push([point.x, point.y]);
+          }
+          const xs = points.map(([x]) => x);
+          const ys = points.map(([, y]) => y);
+          const [minX, minY, maxX, maxY] = [Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys)];
+          // The clip must cover the element's own box, or it is a shape inside it, not its corners.
+          const boxWidth = element.offsetWidth;
+          const boxHeight = element.offsetHeight;
+          if (!(boxWidth > 0 && boxHeight > 0)) return null;
+          if (Math.abs(minX) > 1.5 || Math.abs(minY) > 1.5 || Math.abs(maxX - boxWidth) > 1.5 || Math.abs(maxY - boxHeight) > 1.5) {
+            return null;
+          }
+          const fraction = fitRoundedRectCornerFraction(points);
+          return fraction === null ? null : { fraction };
+        } catch (_error) {
+          return null;
+        }
+      };
+
+      // ── canva-clip-window:start
+      // A clip whose outline sits well inside the clipped element's box is a WINDOW (a polaroid's
+      // photo opening), not the element's silhouette: the frame then IS that window. Everything is
+      // measured in the layer's own un-rotated layout px (see localBoxWithin), so a tilted polaroid
+      // works like a straight one. Returns the window as fractions of the layer's frame, plus the
+      // slice of the media that shows through it (window ∩ media, as fractions of the media), or
+      // null when the outline fills the box, i.e. a plain shaped mask like an arch.
+      const clipWindowGeometry = ({ bounds, boxWidth, boxHeight, clippedLocal, layerWidth, layerHeight, mediaLocal }) => {
+        if (!bounds || !(bounds.width > 0) || !(bounds.height > 0)) return null;
+        if (!(boxWidth > 0) || !(boxHeight > 0)) return null;
+        const inset =
+          bounds.x > boxWidth * 0.02 ||
+          bounds.y > boxHeight * 0.02 ||
+          bounds.x + bounds.width < boxWidth * 0.98 ||
+          bounds.y + bounds.height < boxHeight * 0.98;
+        if (!inset) return null;
+        if (!clippedLocal || !(clippedLocal.width > 0) || !(clippedLocal.height > 0)) return null;
+        if (!(layerWidth > 0) || !(layerHeight > 0)) return null;
+        const scaleX = clippedLocal.width / boxWidth;
+        const scaleY = clippedLocal.height / boxHeight;
+        const clamp01 = (value) => Math.max(0, Math.min(1, value));
+        let crop = null;
+        if (mediaLocal && mediaLocal.width > 0 && mediaLocal.height > 0) {
+          const left = Math.max(bounds.x, mediaLocal.x);
+          const top = Math.max(bounds.y, mediaLocal.y);
+          const right = Math.min(bounds.x + bounds.width, mediaLocal.x + mediaLocal.width);
+          const bottom = Math.min(bounds.y + bounds.height, mediaLocal.y + mediaLocal.height);
+          if (right - left > 0 && bottom - top > 0) {
+            crop = {
+              x: clamp01((left - mediaLocal.x) / mediaLocal.width),
+              y: clamp01((top - mediaLocal.y) / mediaLocal.height),
+              width: clamp01((right - left) / mediaLocal.width),
+              height: clamp01((bottom - top) / mediaLocal.height),
+            };
+          }
+        }
+        return {
+          x: (clippedLocal.x + bounds.x * scaleX) / layerWidth,
+          y: (clippedLocal.y + bounds.y * scaleY) / layerHeight,
+          width: (bounds.width * scaleX) / layerWidth,
+          height: (bounds.height * scaleY) / layerHeight,
+          crop,
+        };
+      };
+
+      // Where the window frame sits on the page: its box is the layer's un-rotated frame scaled by
+      // the window's fractions; its centre is the layer's centre moved by the window's offset,
+      // turned with the layer, since that offset runs along the layer's own axes.
+      const placeClipWindow = ({ frameWidth, frameHeight, centerX, centerY, angle, opening }) => {
+        const width = frameWidth * opening.width;
+        const height = frameHeight * opening.height;
+        const dx = (opening.x + opening.width / 2 - 0.5) * frameWidth;
+        const dy = (opening.y + opening.height / 2 - 0.5) * frameHeight;
+        const radians = ((Number(angle) || 0) * Math.PI) / 180;
+        return {
+          width,
+          height,
+          centerX: centerX + dx * Math.cos(radians) - dy * Math.sin(radians),
+          centerY: centerY + dx * Math.sin(radians) + dy * Math.cos(radians),
+        };
+      };
+      // ── canva-clip-window:end
+
+      // An element's box in an ancestor's own (un-rotated) layout px: its layout offsets plus the
+      // translate/scale transforms between the two. Null when a rotation, skew or flip sits in
+      // between — the box is then not axis-aligned in that space and the window path stays off.
+      const localBoxWithin = (element, ancestor) => {
+        if (!element || !ancestor || !ancestor.contains(element) || element === ancestor) return null;
+        let box = { x: 0, y: 0, width: element.offsetWidth, height: element.offsetHeight };
+        for (let node = element; node && node !== ancestor; node = node.parentElement) {
+          const style = window.getComputedStyle(node);
+          const transformText = String(style.transform || "").trim();
+          if (transformText && transformText !== "none") {
+            let matrix = null;
+            try {
+              matrix = new DOMMatrixReadOnly(transformText);
+            } catch (_error) {
+              return null;
+            }
+            if (!matrix.is2D) return null;
+            const { a, b, c, d, e, f } = matrix;
+            if (Math.abs(b) > 0.001 || Math.abs(c) > 0.001 || !(a > 0) || !(d > 0)) return null;
+            const origin = String(style.transformOrigin || "").split(/\s+/).map((value) => Number.parseFloat(value) || 0);
+            const originX = origin[0] || 0;
+            const originY = origin[1] || 0;
+            box = {
+              x: originX + (box.x - originX) * a + e,
+              y: originY + (box.y - originY) * d + f,
+              width: box.width * a,
+              height: box.height * d,
+            };
+          }
+          const parent = node.parentElement;
+          if (!parent) return null;
+          if (node.offsetParent === parent) {
+            box = { ...box, x: box.x + node.offsetLeft, y: box.y + node.offsetTop };
+          } else if (node.offsetLeft || node.offsetTop) {
+            return null;
+          }
+        }
+        return box;
+      };
+
+      const detectClipPathFrameMask = (layerNode, imageElement = null, options = {}) => {
         if (!layerNode) return null;
-        const clipped = [layerNode, ...Array.from(layerNode.querySelectorAll("*"))].find((element) => {
-          if (element !== layerNode && isInsideForeignLayer(element, layerNode)) return false;
+        const isClippedElement = (element) => {
           const clip = window.getComputedStyle(element).clipPath;
-          return typeof clip === "string" && clip.startsWith("url(");
-        });
+          return typeof clip === "string" && (clip.startsWith("url(") || clip.startsWith("path("));
+        };
+        // The clip that shapes the PHOTO is the one on its own wrapper. A Canva polaroid stacks a
+        // card (clipped to its outline minus the photo window), the photo inside the window and
+        // two trim rings; document order found the card first, so the polygon was that ring and
+        // the photo showed only AROUND its window (DAHR4NoHFpw's three postcards).
+        let clipped = null;
+        for (let element = imageElement; element && layerNode.contains(element); element = element.parentElement) {
+          if (isClippedElement(element)) {
+            clipped = element;
+            break;
+          }
+          if (element === layerNode) break;
+        }
+        if (!clipped) {
+          clipped = [layerNode, ...Array.from(layerNode.querySelectorAll("*"))].find((element) => {
+            if (element !== layerNode && isInsideForeignLayer(element, layerNode)) return false;
+            return isClippedElement(element);
+          });
+        }
         if (!clipped) return null;
-        const id = /url\(["']?#([^"')]+)["']?\)/.exec(window.getComputedStyle(clipped).clipPath || "")?.[1];
-        const clipElement = id ? document.getElementById(id) : null;
-        const paths = clipElement ? Array.from(clipElement.querySelectorAll("path")) : [];
-        if (paths.length !== 1 || typeof paths[0].getTotalLength !== "function") return null;
-        const path = paths[0];
-        const boundingBoxUnits = clipElement.getAttribute("clipPathUnits") === "objectBoundingBox";
+        const cssPathData = readCssClipPathData(clipped);
+        let path = null;
+        let boundingBoxUnits = false;
+        if (cssPathData) {
+          path = detachedSvgPath(cssPathData);
+        } else {
+          const id = /url\(["']?#([^"')]+)["']?\)/.exec(window.getComputedStyle(clipped).clipPath || "")?.[1];
+          const clipElement = id ? document.getElementById(id) : null;
+          const paths = clipElement ? Array.from(clipElement.querySelectorAll("path")) : [];
+          if (paths.length !== 1 || typeof paths[0].getTotalLength !== "function") return null;
+          path = paths[0];
+          boundingBoxUnits = clipElement.getAttribute("clipPathUnits") === "objectBoundingBox";
+        }
         const boxWidth = clipped.offsetWidth || clipped.getBoundingClientRect().width;
         const boxHeight = clipped.offsetHeight || clipped.getBoundingClientRect().height;
         if (!boundingBoxUnits && !(boxWidth > 0 && boxHeight > 0)) return null;
@@ -3390,12 +4411,47 @@
           return null;
         }
         if (!(total > 0)) return null;
-        const SAMPLES = 160;
+        // The outline's own bounds: a window frame normalises its polygon to them, so the frame
+        // box is the window and the photo inside is clipped to its real opening.
+        const fullWidth = boundingBoxUnits ? 1 : boxWidth;
+        const fullHeight = boundingBoxUnits ? 1 : boxHeight;
+        let bounds = { x: 0, y: 0, width: fullWidth, height: fullHeight };
+        let opening = null;
+        if (options.allowWindow && !cssPathData) {
+          let bbox = null;
+          try {
+            bbox = path.getBBox();
+          } catch (_error) {
+            bbox = null;
+          }
+          if (bbox && bbox.width > 0 && bbox.height > 0) {
+            // objectBoundingBox outlines are 0..1 of the clipped box; bring them to its px.
+            const unitX = boundingBoxUnits ? boxWidth : 1;
+            const unitY = boundingBoxUnits ? boxHeight : 1;
+            opening = clipWindowGeometry({
+              bounds: { x: bbox.x * unitX, y: bbox.y * unitY, width: bbox.width * unitX, height: bbox.height * unitY },
+              boxWidth,
+              boxHeight,
+              clippedLocal: localBoxWithin(clipped, layerNode),
+              layerWidth: layerNode.offsetWidth,
+              layerHeight: layerNode.offsetHeight,
+              mediaLocal: imageElement ? localBoxWithin(imageElement, clipped) : null,
+            });
+            if (opening) bounds = { x: bbox.x, y: bbox.y, width: bbox.width, height: bbox.height };
+          }
+        }
+        // Sample about every 0.25% of the box's shorter side along the outline: 160 samples drew
+        // DAHR4D4QJR4's torn-paper edge (a 1142-unit path round a 302x256 box) as 90 soft bumps
+        // where Canva has hundreds of sharp ones. Straight runs still collapse to their ends below.
+        const outlineLength = boundingBoxUnits
+          ? total * 100
+          : (total / Math.max(1, Math.min(boxWidth, boxHeight))) * 100;
+        const SAMPLES = Math.max(160, Math.min(2000, Math.round(outlineLength / 0.25)));
         const raw = [];
         for (let index = 0; index < SAMPLES; index += 1) {
           const point = path.getPointAtLength((total * index) / SAMPLES);
-          const x = boundingBoxUnits ? point.x * 100 : (point.x / boxWidth) * 100;
-          const y = boundingBoxUnits ? point.y * 100 : (point.y / boxHeight) * 100;
+          const x = ((point.x - bounds.x) / bounds.width) * 100;
+          const y = ((point.y - bounds.y) / bounds.height) * 100;
           raw.push([Math.max(0, Math.min(100, x)), Math.max(0, Math.min(100, y))]);
         }
         // Drop points a straight line already explains (Ramer–Douglas–Peucker, 0.12% of the box):
@@ -3435,11 +4491,13 @@
         const secondHalf = simplify([...raw.slice(far), raw[0]], 0.12);
         const simplified = [...firstHalf.slice(0, -1), ...secondHalf.slice(0, -1)];
         if (simplified.length < 3) return null;
-        // A clip that is just the box itself is not a shape worth a frame.
+        // A clip that is just the box itself is not a shape worth a frame — unless it is a window,
+        // where the frame is the point.
         const onEdge = (value) => value <= 0.5 || value >= 99.5;
-        if (simplified.length <= 4 && simplified.every(([x, y]) => onEdge(x) && onEdge(y))) return null;
+        if (!opening && simplified.length <= 4 && simplified.every(([x, y]) => onEdge(x) && onEdge(y))) return null;
         return {
           points: simplified.flatMap(([x, y]) => [Math.round(x * 100) / 100, Math.round(y * 100) / 100]),
+          window: opening,
         };
       };
 
@@ -3639,6 +4697,132 @@
       // layer drawn above the photo (both captures show it → diff = transparent), punching a
       // hole through the stored pixels right where e.g. a button pill sits on the photo, and
       // bakes the frame stroke into the edge pixels.
+      // ── canva-grid-cells:start
+      // The cells of a Canva GRID element as the page lays them out: each cell is the nearest
+      // clipping box (overflow ≠ visible) around a photo, and a real grid's cells sit side by side
+      // inside the element without covering each other. Takes [{key, rect}] (screen rects, one per
+      // photo, already grouped by cell) and the element's rect; returns the cells in reading order,
+      // or [] when they do not look like a grid (fewer than two, overlapping, outside the element,
+      // or covering too little of it). DAHQBtMqXd8's before/after post is one 2-cell grid: a
+      // black-and-white photo and a colour one, which imported as ONE colour photo over both halves.
+      const resolveGridCells = (cells, elementRect) => {
+        const list = (Array.isArray(cells) ? cells : []).filter(
+          (cell) => cell && cell.rect && cell.rect.width > 1 && cell.rect.height > 1
+        );
+        if (list.length < 2 || !elementRect || !(elementRect.width > 0) || !(elementRect.height > 0)) return [];
+        const slack = 2;
+        const inside = (r) =>
+          r.left >= elementRect.left - slack &&
+          r.top >= elementRect.top - slack &&
+          r.left + r.width <= elementRect.left + elementRect.width + slack &&
+          r.top + r.height <= elementRect.top + elementRect.height + slack;
+        if (!list.every((cell) => inside(cell.rect))) return [];
+        for (let i = 0; i < list.length; i += 1) {
+          for (let j = i + 1; j < list.length; j += 1) {
+            const a = list[i].rect;
+            const b = list[j].rect;
+            const overlapW = Math.min(a.left + a.width, b.left + b.width) - Math.max(a.left, b.left);
+            const overlapH = Math.min(a.top + a.height, b.top + b.height) - Math.max(a.top, b.top);
+            const overlap = overlapW > 0 && overlapH > 0 ? overlapW * overlapH : 0;
+            const smaller = Math.min(a.width * a.height, b.width * b.height);
+            if (overlap > smaller * 0.02) return [];
+          }
+        }
+        const covered = list.reduce((sum, cell) => sum + cell.rect.width * cell.rect.height, 0);
+        if (covered < elementRect.width * elementRect.height * 0.5) return [];
+        return list
+          .slice()
+          .sort((a, b) => (Math.abs(a.rect.top - b.rect.top) > 2 ? a.rect.top - b.rect.top : a.rect.left - b.rect.left));
+      };
+      // ── canva-grid-cells:end
+
+      // ── canva-whole-box-clip:start
+      // Whether a clip outline is just the clipped element's own rectangle: Canva wraps every
+      // cropped photo in a `clip-path: url(#…)` whose path is M0,0 L w,0 L w,h L 0,h Z on the
+      // wrapper's own box — a no-op that the fetched asset, cropped to the frame, reproduces
+      // exactly. Read as a mask it forced the isolation snapshot, which cannot recover a
+      // translucent photo: DAHR9xcvsOU's 11%-opacity clock tower came back as a blue page capture
+      // with the price card baked in. Straight segments only, every corner present, within 1%.
+      const isWholeBoxRectPath = (d, boxWidth, boxHeight) => {
+        const source = String(d || "").trim();
+        const width = Number(boxWidth);
+        const height = Number(boxHeight);
+        if (!source || !(width > 0) || !(height > 0)) return false;
+        if (/[^MmLlHhVvZz0-9eE.,+\-\s]/.test(source)) return false;
+        const tokens = source.match(/[MmLlHhVvZz]|[-+]?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?/g) || [];
+        if (!/^[Mm]$/.test(tokens[0] || "")) return false;
+        const points = [];
+        let command = "";
+        let x = 0;
+        let y = 0;
+        let index = 0;
+        const next = () => Number(tokens[index++]);
+        while (index < tokens.length) {
+          if (/^[A-Za-z]$/.test(tokens[index])) {
+            command = tokens[index++];
+            if (command === "Z" || command === "z") continue;
+          }
+          if (!command || command === "Z" || command === "z") return false;
+          const relative = command === command.toLowerCase();
+          const upper = command.toUpperCase();
+          if (upper === "M" || upper === "L") {
+            const nx = next();
+            const ny = next();
+            if (!Number.isFinite(nx) || !Number.isFinite(ny)) return false;
+            x = relative ? x + nx : nx;
+            y = relative ? y + ny : ny;
+            if (upper === "M") command = relative ? "l" : "L";
+          } else if (upper === "H") {
+            const nx = next();
+            if (!Number.isFinite(nx)) return false;
+            x = relative ? x + nx : nx;
+          } else if (upper === "V") {
+            const ny = next();
+            if (!Number.isFinite(ny)) return false;
+            y = relative ? y + ny : ny;
+          } else {
+            return false;
+          }
+          points.push([x, y]);
+          if (points.length > 12) return false;
+        }
+        const tolX = Math.max(1, width * 0.01);
+        const tolY = Math.max(1, height * 0.01);
+        const near = (value, target, tolerance) => Math.abs(value - target) <= tolerance;
+        const onCorner = ([px, py]) =>
+          (near(px, 0, tolX) || near(px, width, tolX)) && (near(py, 0, tolY) || near(py, height, tolY));
+        if (points.length < 4 || !points.every(onCorner)) return false;
+        const corners = [[0, 0], [width, 0], [width, height], [0, height]];
+        return corners.every(([cx, cy]) => points.some(([px, py]) => near(px, cx, tolX) && near(py, cy, tolY)));
+      };
+      // ── canva-whole-box-clip:end
+
+      // The DOM side: an element whose clip is a url(#id) to a single path, or an inline path(),
+      // that only traces its own box.
+      const clipIsElementsOwnBox = (element) => {
+        try {
+          const clip = String(window.getComputedStyle(element).clipPath || "");
+          let d = readCssClipPathData(element);
+          let unitsWidth = element.offsetWidth;
+          let unitsHeight = element.offsetHeight;
+          if (!d) {
+            const id = /url\(["']?#([^"')]+)["']?\)/.exec(clip)?.[1];
+            const clipElement = id ? document.getElementById(id) : null;
+            const shapes = clipElement ? Array.from(clipElement.children) : [];
+            if (shapes.length !== 1 || String(shapes[0].tagName).toLowerCase() !== "path") return false;
+            if (shapes[0].getAttribute("transform")) return false;
+            d = shapes[0].getAttribute("d") || "";
+            if (clipElement.getAttribute("clipPathUnits") === "objectBoundingBox") {
+              unitsWidth = 1;
+              unitsHeight = 1;
+            }
+          }
+          return isWholeBoxRectPath(d, unitsWidth, unitsHeight);
+        } catch (_error) {
+          return false;
+        }
+      };
+
       const snapshotRequiredForLayer = (layerNode, imageElement, modelBorder) => {
         if (!layerNode || !imageElement) return false;
         if (hasRotationOrFlipBetween(imageElement, layerNode)) return true;
@@ -3654,7 +4838,7 @@
         while (node && depth < 12) {
           const style = window.getComputedStyle(node);
           if (
-            style.clipPath !== "none" ||
+            (style.clipPath !== "none" && !clipIsElementsOwnBox(node)) ||
             style.maskImage !== "none" ||
             style.webkitMaskImage !== "none" ||
             (!modelHandlesRoundedCorners && parseNumericPx(style.borderRadius) > 2) ||
@@ -3696,6 +4880,7 @@
         ).filter((candidate) => !candidate.closest("defs"));
         let bestColor = "";
         let bestStrokeOnly = false;
+        let bestDashed = false;
         let bestScore = -1;
 
         for (let index = 0; index < vectorNodes.length; index += 1) {
@@ -3715,6 +4900,10 @@
           bestScore = score;
           bestColor = strokeVisible ? stroke : fill;
           bestStrokeOnly = strokeVisible && !fillVisible;
+          // A dotted/dashed rule (stroke-dasharray) is not a solid bar: it keeps its SVG image
+          // instead of becoming a plain rect (DAHFEg4hhOk's dotted signature lines came in solid).
+          const dashArray = String(style.strokeDasharray || "").trim().toLowerCase();
+          bestDashed = strokeVisible && Boolean(dashArray) && dashArray !== "none" && dashArray !== "0" && dashArray !== "0px";
         }
 
         if (!bestColor) {
@@ -3732,6 +4921,7 @@
         return {
           color: bestColor,
           strokeOnly: bestStrokeOnly,
+          dashed: bestDashed,
         };
       };
 
@@ -4115,7 +5305,7 @@
           if (!(candidate instanceof SVGElement)) return;
           if (!hasRenderableSvgContent(candidate)) return;
           const rect = candidate.getBoundingClientRect();
-          if (!isVisible(candidate, rect)) return;
+          if (!isVisibleSvg(candidate, rect)) return;
           const area = Math.max(1, rect.width * rect.height);
           if (area > bestArea) {
             best = candidate;
@@ -4160,11 +5350,11 @@
           const rect = svgElement.getBoundingClientRect();
           const width = Math.max(
             1,
-            Math.round(targetWidth || parseNumericDimension(svgElement.getAttribute("width")) || rect.width || 1)
+            Math.round(targetWidth || parseNumericPx(svgElement.getAttribute("width")) || rect.width || 1)
           );
           const height = Math.max(
             1,
-            Math.round(targetHeight || parseNumericDimension(svgElement.getAttribute("height")) || rect.height || 1)
+            Math.round(targetHeight || parseNumericPx(svgElement.getAttribute("height")) || rect.height || 1)
           );
 
           clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
@@ -4179,6 +5369,75 @@
           const serialized = new XMLSerializer().serializeToString(clone);
           if (!serialized.includes("<svg")) return "";
           return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(serialized)}`;
+        } catch (_error) {
+          return "";
+        }
+      };
+
+      // ── canva-stacked-svg:start
+      // One SVG document that draws `items` (each a serialized <svg> with its box inside a
+      // width×height frame) on top of each other, in order. Each item is nested as its own <svg>
+      // so its viewBox keeps meaning; `none` aspect so it fills exactly the box it was measured at.
+      const buildStackedSvgMarkup = (items, width, height) => {
+        const safeWidth = Math.max(1, Math.round(Number(width) || 1));
+        const safeHeight = Math.max(1, Math.round(Number(height) || 1));
+        const parts = (Array.isArray(items) ? items : [])
+          .filter((item) => item && typeof item.markup === "string" && /<svg\b/i.test(item.markup))
+          .map((item) => {
+            const x = Number(item.x) || 0;
+            const y = Number(item.y) || 0;
+            const w = Math.max(1, Number(item.width) || 1);
+            const h = Math.max(1, Number(item.height) || 1);
+            const inner = item.markup.replace(
+              /<svg\b([^>]*)>/i,
+              (_match, attrs) =>
+                `<svg${String(attrs)
+                  .replace(/\s(?:x|y|width|height|preserveAspectRatio)\s*=\s*(["']).*?\1/gi, "")} x="${x}" y="${y}" width="${w}" height="${h}" preserveAspectRatio="none">`
+            );
+            return inner;
+          });
+        if (!parts.length) return "";
+        return `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="${safeWidth}" height="${safeHeight}" viewBox="0 0 ${safeWidth} ${safeHeight}">${parts.join("")}</svg>`;
+      };
+      // ── canva-stacked-svg:end
+
+      const isCanvaTableLayer = (layerNode) =>
+        Boolean(layerNode?.querySelector?.("table")) &&
+        !Array.from(layerNode.querySelectorAll("table")).every((table) => isInsideForeignLayer(table, layerNode));
+
+      // Every visible SVG the layer paints (fills, grid, decorations), stacked in DOM order onto
+      // the layer's own box, scaled to the target size.
+      const serializeStackedSvgsToDataUrl = (layerNode, targetWidth, targetHeight, options = {}) => {
+        try {
+          const layerRect = layerNode.getBoundingClientRect();
+          if (!(layerRect.width > 0) || !(layerRect.height > 0)) return "";
+          const width = Math.max(1, Math.round(targetWidth || layerRect.width));
+          const height = Math.max(1, Math.round(targetHeight || layerRect.height));
+          const scaleX = width / layerRect.width;
+          const scaleY = height / layerRect.height;
+          const items = Array.from(layerNode.querySelectorAll("svg"))
+            .filter((candidate) => candidate instanceof SVGElement && !isInsideForeignLayer(candidate, layerNode))
+            .filter((candidate) => !candidate.closest("table") && hasRenderableSvgContent(candidate))
+            .map((candidate) => {
+              const rect = candidate.getBoundingClientRect();
+              if (!isVisibleSvg(candidate, rect)) return null;
+              const clone = candidate.cloneNode(true);
+              copyComputedSvgStyles(candidate, clone);
+              if (options?.excludeTextNodes) stripTextNodesFromElement(clone);
+              if (!clone.getAttribute("viewBox")) {
+                clone.setAttribute("viewBox", `0 0 ${Math.max(1, rect.width)} ${Math.max(1, rect.height)}`);
+              }
+              return {
+                markup: new XMLSerializer().serializeToString(clone),
+                x: (rect.left - layerRect.left) * scaleX,
+                y: (rect.top - layerRect.top) * scaleY,
+                width: rect.width * scaleX,
+                height: rect.height * scaleY,
+              };
+            })
+            .filter(Boolean);
+          const markup = buildStackedSvgMarkup(items, width, height);
+          return markup ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(markup)}` : "";
         } catch (_error) {
           return "";
         }
@@ -4348,6 +5607,89 @@
         }
       };
 
+      // ── canva-supplement-geometry:start
+      // Whether a model-supplemented element takes its DOM rect (page space, but an axis-aligned
+      // bounding box) or its model box (its own frame, but group-LOCAL for nested elements). A
+      // TOP-LEVEL element's model box is page space already, so a turned one keeps its frame and
+      // angle — its DOM box is the rotated footprint, and a ribbon turned 64.5° that the main walk
+      // skipped (mostly off-page) was stretched into that footprint at 0° (DAHFEg4hhOk). Nested or
+      // unrotated elements keep the DOM rect, exactly as before.
+      const supplementUsesDomRect = ({ hasDomRect, nestedInGroup, rotation, modelWidth, modelHeight }) => {
+        if (!hasDomRect) return false;
+        const turned = Math.abs(Number(rotation) || 0) > 0.5;
+        const modelBoxUsable = Number(modelWidth) > 0.5 && Number(modelHeight) > 0.5;
+        return !(turned && !nestedInGroup && modelBoxUsable);
+      };
+      // ── canva-supplement-geometry:end
+
+      // ── canva-layer-frame-size:start
+      // A layer's frame in design px: the un-rotated style box when it agrees with the measured
+      // bounding box (both in design px), else the bounding box itself. The viewport rect is the
+      // ROTATED footprint, while the style width/height describe the element's own un-rotated
+      // frame. For a layer turned by ~90° the two are swapped, so compare against the swapped
+      // rect or the styled geometry is wrongly rejected and the fit target becomes the portrait
+      // footprint of a landscape asset — which centre-cropped a 1600x382 floral strip (in a
+      // 1920x458 frame, rotated -90°) to a 91x382 sliver that fabric then stretched 21x. Anchor
+      // placement is centre-based, so keeping the un-rotated frame does not move the layer; and
+      // when the styled box is unusable, a quarter turn swaps the raw box back instead.
+      const resolveLayerFrameSize = ({ rawWidth, rawHeight, styledWidth, styledHeight, isQuarterTurned }) => {
+        const raw = { width: Math.max(1, Number(rawWidth) || 1), height: Math.max(1, Number(rawHeight) || 1) };
+        const comparableWidth = isQuarterTurned ? raw.height : raw.width;
+        const comparableHeight = isQuarterTurned ? raw.width : raw.height;
+        const widthRatio = styledWidth > 0 ? styledWidth / comparableWidth : 0;
+        const heightRatio = styledHeight > 0 ? styledHeight / comparableHeight : 0;
+        const styledMatches =
+          styledWidth > 0 && styledHeight > 0 && widthRatio >= 0.8 && widthRatio <= 1.25 && heightRatio >= 0.8 && heightRatio <= 1.25;
+        if (styledMatches) return { width: styledWidth, height: styledHeight };
+        if (isQuarterTurned) return { width: raw.height, height: raw.width };
+        return raw;
+      };
+      // ── canva-layer-frame-size:end
+
+      // ── canva-page-fill-quarter-turn:start
+      // A page-fill photo placed TURNED by a quarter (`__pageFill.image.box.rotation` ±90: a
+      // portrait photo laid sideways to fill a landscape page). modelCropRegionForFrame refuses
+      // rotated boxes, so the page took a centre slice of the UN-turned photo (DAHFEzrP4PM: the
+      // floral certificate frame came in sideways and cropped). The box turns about its centre,
+      // so its on-page footprint is the box with its sides swapped; the part of the page it covers
+      // maps back into the un-turned photo (the same axis swap the layer crop uses) and the slice
+      // is then turned by `quarterTurns` (+1 clockwise, -1 counter-clockwise) to lie as Canva
+      // shows it. Null for anything that is not a quarter turn — the other paths stay as they are.
+      const quarterTurnedPageFillCrop = (box, pageWidth, pageHeight) => {
+        if (!box || !(box.width > 0) || !(box.height > 0) || !(pageWidth > 0) || !(pageHeight > 0)) return null;
+        const turn = ((Math.round(Number(box.rotation) || 0) % 360) + 360) % 360;
+        const quarterTurns = Math.abs(turn - 90) <= 1 ? 1 : Math.abs(turn - 270) <= 1 ? -1 : 0;
+        if (!quarterTurns) return null;
+        const centerX = box.left + box.width / 2;
+        const centerY = box.top + box.height / 2;
+        const footprint = { x: centerX - box.height / 2, y: centerY - box.width / 2, width: box.height, height: box.width };
+        const visX = Math.max(0, footprint.x);
+        const visY = Math.max(0, footprint.y);
+        const visRight = Math.min(pageWidth, footprint.x + footprint.width);
+        const visBottom = Math.min(pageHeight, footprint.y + footprint.height);
+        if (visRight - visX < 1 || visBottom - visY < 1) return null;
+        // The visible part as fractions of the turned footprint…
+        const turned = {
+          x: (visX - footprint.x) / footprint.width,
+          y: (visY - footprint.y) / footprint.height,
+          width: (visRight - visX) / footprint.width,
+          height: (visBottom - visY) / footprint.height,
+        };
+        // …then in the un-turned photo: a clockwise turn sends the photo's top edge to the right
+        // (x′ = y, y′ = 1 − x − w), a counter-clockwise one sends it to the left (x′ = 1 − y − h, y′ = x).
+        const region =
+          quarterTurns === 1
+            ? { x: turned.y, y: 1 - turned.x - turned.width, width: turned.height, height: turned.width }
+            : { x: 1 - turned.y - turned.height, y: turned.x, width: turned.height, height: turned.width };
+        const clamp01 = (value) => Math.max(0, Math.min(1, value));
+        return {
+          quarterTurns,
+          region: { x: clamp01(region.x), y: clamp01(region.y), width: clamp01(region.width), height: clamp01(region.height) },
+        };
+      };
+      // ── canva-page-fill-quarter-turn:end
+
+      // ── canva-model-crop-region:start
       /**
        * Turns the fiber model's in-frame crop (`fill.sb` — the media's draw rect in the element's
        * OWN frame coordinates, design px) into the normalized source region fitDataUrlToDisplayedBox
@@ -4385,7 +5727,20 @@
         };
       };
 
-      const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null) => {
+      // Whether a layer's model crop stands in for measuring the DOM. A masked layer is laid out on
+      // its page-clipped box, and its crop must describe that same rectangle — which the model's
+      // full-frame crop does as long as the page clips nothing. A flipped fill stays on the DOM
+      // path, whose remap knows how a mirror moves the slice. Everything else takes the model: it
+      // is exact and pre-rotation, while the DOM measures axis-aligned screen boxes — the -74.8°
+      // coffee cup on DAHPQG4ffsM came in as a 715x1114 portrait slice squeezed into its square
+      // frame.
+      const modelCropAppliesToLayer = ({ usesVisibleGeometry, pageClipped, fillFlipX, fillFlipY }) =>
+        !usesVisibleGeometry || (!pageClipped && !fillFlipX && !fillFlipY);
+      // ── canva-model-crop-region:end
+
+      // `quarterTurns` (+1 clockwise, -1 counter-clockwise) turns the cropped slice — a page fill
+      // laid sideways is cut from the un-turned photo, then turned to lie as Canva shows it.
+      const fitDataUrlToDisplayedBox = async (dataUrl, targetWidth, targetHeight, cropRegion = null, quarterTurns = 0) => {
         if (!String(dataUrl || "").startsWith("data:image/")) return null;
         const MAX_FITTED_IMAGE_SIDE = 1920;
         // A JPEG source is opaque, so re-encode the (now full-resolution) crop as JPEG to
@@ -4436,18 +5791,25 @@
           const outScale = Math.min(1, MAX_FITTED_IMAGE_SIDE / Math.max(nativeWidth, nativeHeight, 1));
           const width = Math.max(1, Math.round(nativeWidth * outScale));
           const height = Math.max(1, Math.round(nativeHeight * outScale));
+          const turned = quarterTurns === 1 || quarterTurns === -1;
           const canvas = document.createElement("canvas");
-          canvas.width = width;
-          canvas.height = height;
+          canvas.width = turned ? height : width;
+          canvas.height = turned ? width : height;
           const context = canvas.getContext("2d");
           if (!context) return null;
           context.imageSmoothingEnabled = true;
           context.imageSmoothingQuality = "high";
-          context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
+          if (turned) {
+            context.translate(canvas.width / 2, canvas.height / 2);
+            context.rotate((quarterTurns * Math.PI) / 2);
+            context.drawImage(image, sx, sy, sw, sh, -width / 2, -height / 2, width, height);
+          } else {
+            context.drawImage(image, sx, sy, sw, sh, 0, 0, width, height);
+          }
           const outDataUrl = encodeAsJpeg
             ? canvas.toDataURL("image/jpeg", 0.92)
             : canvas.toDataURL("image/png");
-          return { dataUrl: outDataUrl, width, height };
+          return { dataUrl: outDataUrl, width: canvas.width, height: canvas.height };
         } catch (_error) {
           return null;
         }
@@ -4493,12 +5855,9 @@
         return best;
       };
 
-      const serializeClipPathShapeToDataUrl = (
-        layerNode,
-        clipPathShapeCandidate,
-        targetWidth,
-        targetHeight
-      ) => {
+      // One clipped, filled element as an SVG group in the layer's design-px box — the piece both
+      // serializers below are built from.
+      const clipPathShapeGroupMarkup = (layerNode, clipPathShapeCandidate, width, height) => {
         if (!layerNode || !clipPathShapeCandidate?.clipPathId) return "";
         try {
           const clipPathElement = Array.from(layerNode.querySelectorAll("clipPath")).find(
@@ -4521,14 +5880,28 @@
 
           const layerRect = layerNode.getBoundingClientRect();
           const candidateRect = clipPathShapeCandidate.rect;
-          const width = Math.max(1, Math.round(targetWidth || layerRect.width || candidateRect.width || 1));
-          const height = Math.max(1, Math.round(targetHeight || layerRect.height || candidateRect.height || 1));
-          const scaleX = candidateRect.width / Math.max(1, clipBounds.width);
-          const scaleY = candidateRect.height / Math.max(1, clipBounds.height);
-          const translateX =
-            candidateRect.left - layerRect.left - clipBounds.x * scaleX;
-          const translateY =
-            candidateRect.top - layerRect.top - clipBounds.y * scaleY;
+          // The rects are measured on screen (editor zoom applied) but the SVG is
+          // drawn in DESIGN px (targetWidth × targetHeight). Without converting,
+          // the shape filled only `zoom` of its own box — at 60% zoom a rounded
+          // panel came out 40% smaller, pinned to the top-left corner.
+          // A TURNED layer's screen rects are rotated footprints, so its pieces come with their
+          // boxes in the layer's own layout px instead (localBox + layerLocalSize).
+          const localBox = clipPathShapeCandidate.localBox || null;
+          const layerLocalSize = clipPathShapeCandidate.layerLocalSize || null;
+          const designPerScreenX = localBox
+            ? width / Math.max(1, layerLocalSize.width)
+            : layerRect.width > 0 ? width / layerRect.width : 1;
+          const designPerScreenY = localBox
+            ? height / Math.max(1, layerLocalSize.height)
+            : layerRect.height > 0 ? height / layerRect.height : 1;
+          const pieceWidth = localBox ? localBox.width : candidateRect.width;
+          const pieceHeight = localBox ? localBox.height : candidateRect.height;
+          const pieceLeft = localBox ? localBox.x : candidateRect.left - layerRect.left;
+          const pieceTop = localBox ? localBox.y : candidateRect.top - layerRect.top;
+          const scaleX = (pieceWidth * designPerScreenX) / Math.max(1, clipBounds.width);
+          const scaleY = (pieceHeight * designPerScreenY) / Math.max(1, clipBounds.height);
+          const translateX = pieceLeft * designPerScreenX - clipBounds.x * scaleX;
+          const translateY = pieceTop * designPerScreenY - clipBounds.y * scaleY;
           const serializer = new XMLSerializer();
           const serializedShapes = shapeElements
             .map((shapeElement) => {
@@ -4551,18 +5924,88 @@
             })
             .join("");
           if (!serializedShapes) return "";
-
-          const svgMarkup = [
-            `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`,
+          return [
             `<g fill="${clipPathShapeCandidate.backgroundColor}" opacity="${clipPathShapeCandidate.opacity}" transform="translate(${translateX} ${translateY}) scale(${scaleX} ${scaleY})">`,
             serializedShapes,
             "</g>",
-            "</svg>",
           ].join("");
-          return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
         } catch (_error) {
           return "";
         }
+      };
+
+      const wrapSvgGroupsAsDataUrl = (groups, width, height) => {
+        if (!groups.length) return "";
+        const svgMarkup = [
+          `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" preserveAspectRatio="none">`,
+          ...groups,
+          "</svg>",
+        ].join("");
+        return `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgMarkup)}`;
+      };
+
+      const serializeClipPathShapeToDataUrl = (
+        layerNode,
+        clipPathShapeCandidate,
+        targetWidth,
+        targetHeight
+      ) => {
+        if (!layerNode || !clipPathShapeCandidate?.clipPathId) return "";
+        const layerRect = layerNode.getBoundingClientRect();
+        const candidateRect = clipPathShapeCandidate.rect || layerRect;
+        const width = Math.max(1, Math.round(targetWidth || layerRect.width || candidateRect.width || 1));
+        const height = Math.max(1, Math.round(targetHeight || layerRect.height || candidateRect.height || 1));
+        const group = clipPathShapeGroupMarkup(layerNode, clipPathShapeCandidate, width, height);
+        return group ? wrapSvgGroupsAsDataUrl([group], width, height) : "";
+      };
+
+      // A window frame's artwork: every clipped, filled element of the layer that does not hold
+      // the photo (a polaroid's card and its trim rings), stacked in document order.
+      const serializeClipPathArtworkToDataUrl = (layerNode, imageElement, targetWidth, targetHeight, options = {}) => {
+        if (!layerNode) return "";
+        const width = Math.max(1, Math.round(targetWidth || 1));
+        const height = Math.max(1, Math.round(targetHeight || 1));
+        const layerLocalSize = { width: layerNode.offsetWidth, height: layerNode.offsetHeight };
+        const groups = [];
+        [layerNode, ...getScopedDescendants(layerNode)].forEach((candidate) => {
+          if (!(candidate instanceof Element)) return;
+          if (imageElement && candidate.contains(imageElement)) return;
+          let style = null;
+          try {
+            style = window.getComputedStyle(candidate);
+          } catch (_error) {
+            style = null;
+          }
+          if (!style) return;
+          const clipPathId =
+            extractUrlFragmentId(style.clipPath) ||
+            extractUrlFragmentId(style.webkitClipPath) ||
+            extractUrlFragmentId(candidate.getAttribute("style"));
+          if (!clipPathId) return;
+          const backgroundColor = String(style.backgroundColor || "").trim();
+          if (isTransparentColor(backgroundColor)) return;
+          const candidateRect = candidate.getBoundingClientRect();
+          if (!isVisibleSvg(candidate, candidateRect)) return;
+          // A turned layer's pieces are placed by their layout boxes; one that cannot be read
+          // (a rotation inside the layer) is left out rather than drawn at its rotated footprint.
+          const localBox = options.rotated ? localBoxWithin(candidate, layerNode) : null;
+          if (options.rotated && !localBox) return;
+          const group = clipPathShapeGroupMarkup(
+            layerNode,
+            {
+              candidate,
+              rect: candidateRect,
+              clipPathId,
+              backgroundColor,
+              opacity: Math.max(0, Math.min(1, Number.parseFloat(style.opacity || "1") || 1)),
+              ...(localBox ? { localBox, layerLocalSize } : {}),
+            },
+            width,
+            height
+          );
+          if (group) groups.push(group);
+        });
+        return wrapSvgGroupsAsDataUrl(groups, width, height);
       };
 
       const extractShapeImageDataUrl = (layerNode, targetWidth, targetHeight, options = {}) => {
@@ -4578,6 +6021,16 @@
           );
           if (clipPathDataUrl.startsWith("data:image/")) {
             return clipPathDataUrl;
+          }
+        }
+
+        // A Canva TABLE paints its cell fills and its grid lines as SEPARATE page-sized SVGs
+        // (plus a 2px-per-cell <table> skeleton that only positions the texts). Taking the one
+        // biggest SVG kept the fills and lost every line on DAHP0JQMv10 — stack them all instead.
+        if (isCanvaTableLayer(layerNode)) {
+          const stackedDataUrl = serializeStackedSvgsToDataUrl(layerNode, targetWidth, targetHeight, options);
+          if (stackedDataUrl.startsWith("data:image/")) {
+            return stackedDataUrl;
           }
         }
 
@@ -5013,7 +6466,11 @@
           const isVectorLayerLargeEnough =
             viewportRect.width >= minVectorLayerSide && viewportRect.height >= 1.5;
           const hasEnoughVectorArea = viewportArea >= minVectorLayerArea;
-          const isInsidePageFrame = viewportInfo.coverage >= 0.2;
+          const isInsidePageFrame = layerShowsOnPage({
+            coverage: viewportInfo.coverage,
+            visibleArea: viewportArea,
+            pageArea: rect.width * rect.height,
+          });
           const passesDefaultSizeGate = isLargeEnough && hasEnoughArea;
           const passesSmallTextGate =
             hasTextPreview && isTextLayerLargeEnough && hasEnoughTextArea;
@@ -5117,21 +6574,61 @@
           // canvas keep its off-canvas part, exactly like Canva: an ellipse frame running past
           // the page's left edge imported inset at (0,0) instead of hanging off the edge.
           // The editor clips the overflow for display, so the layer stays repositionable.
-          const modelFrameBorder = (fiberModelById[String(node.id || "")] || {}).border || null;
+          // Canva's image "corner rounding" is no model frame at all — it is a rounded-rect CSS
+          // path() clip on the element — yet the editor reproduces it just as exactly, with the
+          // image's own corner radius. Treat it as a plain rect frame.
+          const modelOnlyFrameBorder = (fiberModelById[String(node.id || "")] || {}).border || null;
+          const domRoundedClip = imageElement && !modelOnlyFrameBorder ? detectRoundedRectClip(node) : null;
+          const modelFrameBorder =
+            modelOnlyFrameBorder ||
+            (domRoundedClip
+              ? { rectFrame: true, circleFrame: false, strokeColor: null, strokeWidth: 0, cornerRadius: 1 }
+              : null);
           const isReproducibleModelFrame = Boolean(
             imageElement &&
               modelFrameBorder &&
               (modelFrameBorder.rectFrame || modelFrameBorder.circleFrame)
           );
-          const shouldUseVisibleGeometry = isMaskedImage && !isReproducibleModelFrame;
-          // A clip-path frame is imported as a real frame (polygon shape + the photo inside) only
-          // when the layer keeps its FULL box; a frame cut off by the page edge keeps the old
-          // snapshot path, because its polygon is normalised to the full box.
           const layerIsPageClipped = Boolean(
             viewportInfo.rawRect &&
               (Math.abs(Number(viewportInfo.rawRect.width) - Number(viewportRect.width)) > 2 ||
                 Math.abs(Number(viewportInfo.rawRect.height) - Number(viewportRect.height)) > 2)
           );
+          // A clip-path frame is imported as a real frame (polygon shape + the photo inside). One
+          // that is cut off by the page edge keeps its FULL box the way a model frame does — its
+          // polygon is normalised to that box and the editor clips the overflow — with the fetched
+          // asset, cropped to the full box, as its content: a snapshot can only hold on-canvas
+          // pixels. Before, such a frame fell to the snapshot path, which failed, and the torn-paper
+          // photo on DAHR4D4QJR4 (19px past both page edges) came in as a plain rectangle. A frame
+          // wholly on the page keeps its proven snapshot path (the polygon is read later).
+          const clipPathFrame =
+            isMaskedImage && !isReproducibleModelFrame
+              ? detectClipPathFrameMask(node, imageElement, {
+                  // A mirrored layer would need the window's offset mirrored too; left to the old path.
+                  allowWindow: !isBackgroundNode && !transform.flipX && !transform.flipY && !transform.hasReflection,
+                })
+              : null;
+          // A WINDOW clip (a polaroid's photo opening, well inside the layer's box): the frame is
+          // the window itself — its box, its outline, the fetched photo cropped to it — and the
+          // card + trim rings around it become a companion shape above (see frameArtworkRecord).
+          // Measured in the layer's own axes, so the tilted polaroids of DAHR4MPh4ls get it too.
+          const clipWindow = clipPathFrame?.window || null;
+          // An element whose fill is a VIDEO (the model's videoId, or a poster served from
+          // video-public.canva.com/<id>/p/) is scraped as that poster; keep its clip outline so the
+          // background can swap in the captured clip as a video FRAME (DAHR94gu0m0's arched Kaaba
+          // video came in as a plain poster rectangle with no arch).
+          const elementVideoId =
+            String((fiberModelById[String(node.id || "")] || {}).videoId || "") ||
+            (imageElement
+              ? /video-public\.canva\.com\/([A-Za-z0-9_-]+)\/p\//.exec(getImageElementSource(imageElement) || "")?.[1] || ""
+              : "");
+          const videoClipFrame =
+            elementVideoId && !clipPathFrame ? detectClipPathFrameMask(node, imageElement, { allowWindow: false }) : null;
+          const pageClippedClipPathFrame =
+            clipPathFrame && layerIsPageClipped && !clipWindow ? clipPathFrame : null;
+          const keepsFullFrameBox =
+            isReproducibleModelFrame || Boolean(pageClippedClipPathFrame) || Boolean(clipWindow);
+          const shouldUseVisibleGeometry = isMaskedImage && !keepsFullFrameBox;
           // A non-masked image whose FULL frame extends past the canvas edge can NEVER be
           // faithfully captured by a rendered snapshot (the snapshot/isolation pass only sees
           // on-canvas pixels), so it must keep the full fetched asset — otherwise the bleeding
@@ -5156,7 +6653,7 @@
           // crop call. (getBoundingClientRect gives x/y; the synthetic full-page-background
           // rawRect only has left/top.)
           const frameRectForCrop =
-            isReproducibleModelFrame && viewportInfo.rawRect
+            keepsFullFrameBox && viewportInfo.rawRect
               ? {
                   x: viewportInfo.rawRect.x ?? viewportInfo.rawRect.left ?? viewportRect.x,
                   y: viewportInfo.rawRect.y ?? viewportInfo.rawRect.top ?? viewportRect.y,
@@ -5173,55 +6670,50 @@
             (rawRect.x - rect.x + rawRect.width / 2) * designScaleX;
           const centerDesignY =
             (rawRect.y - rect.y + rawRect.height / 2) * designScaleY;
+          // The style width/height are the element's own un-rotated frame in the page's CSS px;
+          // nodeScale carries the page zoom (Canva scales the whole page with one transform), so
+          // multiplying by the design scale brings them to DESIGN px like rawDesignWidth. They
+          // used to stay in SCREEN px: at a zoom inside the 0.8–1.25 match window (81% is the
+          // fit zoom of an A4 landscape) they "matched" the raw box and became the layer's size,
+          // shrinking every unrotated layer on DAHFE4GgR2Q to 81% around its centre.
           const styledWidth = hasStyleGeometry
-            ? Math.max(1, styleWidth * nodeScale.x * layerScaleX)
+            ? Math.max(1, styleWidth * nodeScale.x * layerScaleX * designScaleX)
             : 0;
           const styledHeight = hasStyleGeometry
-            ? Math.max(1, styleHeight * nodeScale.y * layerScaleY)
+            ? Math.max(1, styleHeight * nodeScale.y * layerScaleY * designScaleY)
             : 0;
-          // The viewport rect is the ROTATED footprint, while the style width/height describe
-          // the element's own un-rotated frame. For a layer turned by ~90° the two are swapped,
-          // so compare against the swapped rect or the styled geometry is wrongly rejected and
-          // the fit target becomes the portrait footprint of a landscape asset — which centre-
-          // cropped a 1600x382 floral strip (in a 1920x458 frame, rotated -90°) to a 91x382
-          // sliver that fabric then stretched 21x. Anchor placement is centre-based, so keeping
-          // the un-rotated frame does not move the layer.
           const rotationSourceAngle = styleTransform.hasAngle ? styleTransform.angle : transform.angle;
           const normalizedRotation = ((Number(rotationSourceAngle || 0) % 180) + 180) % 180;
           const isQuarterTurned = Math.abs(normalizedRotation - 90) <= 1.5;
-          const comparableWidth = isQuarterTurned ? rawDesignHeight : rawDesignWidth;
-          const comparableHeight = isQuarterTurned ? rawDesignWidth : rawDesignHeight;
-          const styleWidthRatio = styledWidth > 0 ? styledWidth / comparableWidth : 0;
-          const styleHeightRatio = styledHeight > 0 ? styledHeight / comparableHeight : 0;
-          const styleGeometryMatchesViewport =
-            hasStyleGeometry &&
-            styleWidthRatio >= 0.8 &&
-            styleWidthRatio <= 1.25 &&
-            styleHeightRatio >= 0.8 &&
-            styleHeightRatio <= 1.25;
-          // rawDesignWidth/Height are the layer's screen bounding box in design px — for a
-          // layer turned by a multiple of 90° that box is the frame with its sides SWAPPED.
-          // (The styled comparison cannot be relied on here: styledWidth carries the page zoom
-          // via nodeScale — measured 650x155 for a 1920x458 frame at 34% — so it is in screen
-          // px while rawDesign is in design px, and the two never match.) Swapping the raw box
-          // back is exact for quarter turns and keeps the centre, so the layer does not move.
-          const quarterTurnedFallback = isQuarterTurned && !styleGeometryMatchesViewport;
+          const layerFrameSize = resolveLayerFrameSize({
+            rawWidth: rawDesignWidth,
+            rawHeight: rawDesignHeight,
+            styledWidth,
+            styledHeight,
+            isQuarterTurned,
+          });
+          // A window frame is the window's share of that frame, turned with the layer.
+          const windowPlacement = clipWindow
+            ? placeClipWindow({
+                frameWidth: layerFrameSize.width,
+                frameHeight: layerFrameSize.height,
+                centerX: centerDesignX,
+                centerY: centerDesignY,
+                angle: rotationSourceAngle,
+                opening: clipWindow,
+              })
+            : null;
+          const frameSize = windowPlacement
+            ? { width: windowPlacement.width, height: windowPlacement.height }
+            : layerFrameSize;
           const width = isFullPageBackground
             ? Math.max(1, Number(designWidth || rect.width))
-            : styleGeometryMatchesViewport
-              ? styledWidth
-              : quarterTurnedFallback
-                ? rawDesignHeight
-                : rawDesignWidth;
+            : frameSize.width;
           const height = isFullPageBackground
             ? Math.max(1, Number(designHeight || rect.height))
-            : styleGeometryMatchesViewport
-              ? styledHeight
-              : quarterTurnedFallback
-                ? rawDesignWidth
-                : rawDesignHeight;
-          const x = isFullPageBackground ? 0 : centerDesignX - width / 2;
-          const y = isFullPageBackground ? 0 : centerDesignY - height / 2;
+            : frameSize.height;
+          const x = isFullPageBackground ? 0 : (windowPlacement ? windowPlacement.centerX : centerDesignX) - width / 2;
+          const y = isFullPageBackground ? 0 : (windowPlacement ? windowPlacement.centerY : centerDesignY) - height / 2;
           const layerAngle = isFullPageBackground
             ? 0
             : transform.hasReflection
@@ -5236,9 +6728,20 @@
           const layerFlipY = isFullPageBackground ? Boolean(pageFill?.flipY) : Boolean(transform.flipY);
           if (width < 2 || height < 2) continue;
 
-          const textFromParagraphs = Array.from(node.querySelectorAll("p"))
+          const listMarkerFor = (item) => {
+            const listItem = item.closest("li");
+            if (!listItem || isInsideForeignLayer(listItem, node)) return "";
+            const siblings = Array.from(listItem.parentElement?.children || []).filter((child) => child.tagName === "LI");
+            return listMarkerText(window.getComputedStyle(listItem).listStyleType, siblings.indexOf(listItem) + 1);
+          };
+          const textFromParagraphs = Array.from(node.querySelectorAll(TEXT_BLOCK_SELECTOR))
             .filter((item) => !isInsideForeignLayer(item, node))
-            .map((item) => item.innerText || "")
+            .map((item) =>
+              matchCanvaParagraphDirection(
+                `${listMarkerFor(item)}${item.innerText || ""}`,
+                window.getComputedStyle(item).direction
+              )
+            )
             .filter(Boolean)
             .join("\n");
           const text = dedupeTextLines(textFromParagraphs || textPreview);
@@ -5364,6 +6867,8 @@
             const backgroundCandidates = [node, ...getScopedDescendants(node)];
             for (let index = 0; index < backgroundCandidates.length; index += 1) {
               const candidate = backgroundCandidates[index];
+              // The glyphs' own paint (gradient text), not an image behind the layer.
+              if (isTextClippedBackground(window.getComputedStyle(candidate))) continue;
               const inlineStyle = candidate.getAttribute("style") || "";
               const inlineBackgroundImage = parseBackgroundImageUrl(inlineStyle);
               if (inlineBackgroundImage) {
@@ -5460,6 +6965,7 @@
             !text &&
             hasVectorSignal &&
             thinVectorStrokeStyle.strokeOnly &&
+            !thinVectorStrokeStyle.dashed &&
             Boolean(thinVectorStrokeStyle.color) &&
             vectorAspectRatio >= 12 &&
             (roundedWidth <= 8 ||
@@ -5559,11 +7065,7 @@
           // the snapshot is only a lossy fallback.
           const hasGenuineMaskOrComposite =
             Boolean(shouldPreserveRenderedImagePixels) &&
-            snapshotRequiredForLayer(
-              node,
-              imageElement,
-              (fiberModelById[String(node.id || "")] || {}).border || null
-            );
+            snapshotRequiredForLayer(node, imageElement, modelFrameBorder);
           const snapshotIsLossyFallback =
             Boolean(shouldPreserveRenderedImagePixels) && !hasGenuineMaskOrComposite;
 
@@ -5577,22 +7079,40 @@
           // is the same contract as an element's media crop, so it feeds the same region math —
           // the slice the page shows, in the media's own space. Before, the photo was blindly
           // cover-fitted, which only matches Canva when the placement happens to be centred.
-          const modelCropRegion = shouldUseVisibleGeometry
+          // (The model's crop is laid out on the whole element; a window frame measures the DOM.)
+          const modelCropRegion = clipWindow || !modelCropAppliesToLayer({
+            usesVisibleGeometry: shouldUseVisibleGeometry,
+            pageClipped: layerIsPageClipped,
+            fillFlipX: Boolean(modelFillImage?.flipX),
+            fillFlipY: Boolean(modelFillImage?.flipY),
+          })
             ? null
             : isFullPageBackground && pageFillImageBox
-              ? modelCropRegionForFrame(pageFillImageBox, designWidth, designHeight)
+              ? modelCropRegionForFrame(pageFillImageBox, designWidth, designHeight) ||
+                quarterTurnedPageFillCrop(pageFillImageBox, designWidth, designHeight)?.region ||
+                null
               : modelCropRegionForFrame(
                   modelFillImage?.crop,
                   modelElementForCrop?.width,
                   modelElementForCrop?.height
                 );
+          // The slice of a quarter-turned page fill is cut from the un-turned photo and turned to
+          // lie as Canva shows it (the background layer itself stays unrotated, full page).
+          const pageFillQuarterTurns =
+            isFullPageBackground && pageFillImageBox && modelCropRegion
+              ? quarterTurnedPageFillCrop(pageFillImageBox, designWidth, designHeight)?.quarterTurns || 0
+              : 0;
 
           // A model-reported crop means the element shows a SLICE of its media. Without the fit
           // path the fetched asset is drawn whole into the frame; with it but no region, the
           // centre-crop-to-aspect fallback slices the middle — which is how a square floral
           // vignette masked to a tall strip came in as a 91x382 sliver stretched 5x.
           if (modelCropRegion && imageAcquisitionJob?.kind === "element" && !isAnimatedImageCandidate) {
-            imageAcquisitionJob = { ...imageAcquisitionJob, fitFetchedToTarget: true };
+            imageAcquisitionJob = {
+              ...imageAcquisitionJob,
+              fitFetchedToTarget: true,
+              ...(pageFillQuarterTurns ? { quarterTurns: pageFillQuarterTurns } : {}),
+            };
           }
 
           if ((shouldPreserveRenderedImagePixels || modelCropRegion) && imageAcquisitionJob?.kind === "element") {
@@ -5604,6 +7124,25 @@
             // must be cut from the pre-image location.
             const remapRegionForOrientation = (region) => {
               if (!region) return region;
+              // A quarter turn swaps the axes: the source's width runs down the screen at +90° and
+              // up it at -90°. Measured on screen, a landscape slice of a turned photo reads as a
+              // portrait one — the vegetable strip on DAHPQABmz_M came in as a narrow column of
+              // the photo stretched 2.4x. Undo the turn first, then the fill mirroring.
+              const quarter = ((Math.round(normalizedLayerAngle) % 360) + 360) % 360;
+              if (Math.abs(quarter - 90) <= 1 || Math.abs(quarter - 270) <= 1) {
+                const turned =
+                  Math.abs(quarter - 90) <= 1
+                    ? { x: region.y, y: 1 - region.x - region.width, width: region.height, height: region.width }
+                    : { x: 1 - region.y - region.height, y: region.x, width: region.height, height: region.width };
+                if (normalizedLayerFlipX) turned.x = 1 - turned.x - turned.width;
+                if (normalizedLayerFlipY) turned.y = 1 - turned.y - turned.height;
+                return {
+                  x: Math.max(0, Math.min(1, turned.x)),
+                  y: Math.max(0, Math.min(1, turned.y)),
+                  width: Math.max(0, Math.min(1, turned.width)),
+                  height: Math.max(0, Math.min(1, turned.height)),
+                };
+              }
               const near180 = Math.abs(Math.abs(normalizedLayerAngle) - 180) <= 1;
               const mirrorX = near180 !== Boolean(normalizedLayerFlipX);
               const mirrorY = near180 !== Boolean(normalizedLayerFlipY);
@@ -5622,6 +7161,7 @@
               // geometry is the full box too (see shouldUseVisibleGeometry), and the two must
               // describe the same rectangle or the photo slides inside its frame.
               cropRegion:
+                (clipWindow && clipWindow.crop) ||
                 modelCropRegion ||
                 (isMaskedImage
                   ? remapRegionForOrientation(
@@ -5645,11 +7185,21 @@
           // same page imported clean, so this is decided per layer by DOM heuristics that the
           // model can settle outright.
           // (isReproducibleModelFrame is computed with the geometry above — it decides both.)
-          if (isReproducibleModelFrame) {
+          if (keepsFullFrameBox) {
             preferSnapshot = false;
           }
 
           const layerAnimation = (fiberModelById[String(node.id || "")] || {}).animation || null;
+          const textBackgroundEffect = kind === "text" ? detectTextBackgroundEffect(node, width) : null;
+          const textBox = textBackgroundEffect
+            ? hugTextBoxToInk({
+                x,
+                width: roundedWidth,
+                inkWidth: textBackgroundEffect.inkWidthPx,
+                lineCount: textBackgroundEffect.lineCount,
+                align: textStyle?.textAlign,
+              })
+            : { x, width: roundedWidth };
           const layerRecord = {
             id: String(node.id || `layer-${layerIndex + 1}`),
             parentId: parentId || null,
@@ -5660,9 +7210,9 @@
               `${kind === "text" ? "Text" : shapeImageDataUrl ? "Shape" : kind === "shape" ? "Shape" : "Image"} ${layerIndex + 1}`,
             kind,
             ...(layerAnimation ? { animation: layerAnimation } : {}),
-            x,
+            x: textBox.x,
             y,
-            width: roundedWidth,
+            width: textBox.width,
             height: roundedHeight,
             angle: normalizedLayerAngle,
             flipX: normalizedLayerFlipX,
@@ -5674,9 +7224,9 @@
               height: viewportRect.height,
             },
             pageRelativeRect: {
-              x,
+              x: textBox.x,
               y,
-              width: roundedWidth,
+              width: textBox.width,
               height: roundedHeight,
             },
             imageSrc,
@@ -5686,7 +7236,20 @@
             preferSnapshot,
             // Same override: a reproducible frame always prefers its fetched asset, so mark the
             // snapshot as a lossy fallback even when the preserve-pixels branch didn't.
-            snapshotIsLossyFallback: isReproducibleModelFrame ? true : snapshotIsLossyFallback,
+            snapshotIsLossyFallback: keepsFullFrameBox ? true : snapshotIsLossyFallback,
+            // The corner radius of a rounded-rect clip, in design px on this layer's own box (the
+            // timeline pass only attaches MODEL borders, so a DOM-read one rides here).
+            ...(domRoundedClip
+              ? {
+                  modelBorder: {
+                    rectFrame: true,
+                    circleFrame: false,
+                    strokeColor: null,
+                    strokeWidth: 0,
+                    cornerRadius: domRoundedClip.fraction * Math.min(roundedWidth, roundedHeight),
+                  },
+                }
+              : {}),
             sourceWidth:
               shouldPreserveRenderedImagePixels
                 ? roundedWidth
@@ -5711,6 +7274,15 @@
               kind === "text" && ARABIC_LETTER_PATTERN.test(String(text || ""))
                 ? fontLacksArabicGlyphs(textStyle?.fontFamily, textStyle?.fontWeight, textStyle?.fontStyle)
                 : false,
+            fontLacksLatin:
+              kind === "text" && !ARABIC_LETTER_PATTERN.test(String(text || ""))
+                ? textFallsBackToCanvaLatin(
+                    textStyle?.fontFamily,
+                    resolveEffectiveFontWeight(textStyleElement, node, textStyle),
+                    textStyle?.fontStyle,
+                    text
+                  )
+                : false,
             fontSize: resolvedFontSize,
             fontStyle: textStyle?.fontStyle || "normal",
             fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
@@ -5719,13 +7291,25 @@
             textDecoration,
             textBackgroundColor,
             textBackgroundRadius,
+            textStroke: kind === "text" ? detectTextStrokeEffect(node) : null,
             textCurve: kind === "text" ? detectTextCurve(node) : null,
             textShiftY: kind === "text" && textStyleElement ? getInnerTextShiftY(textStyleElement, node) : 0,
-            textBackgroundEffect: kind === "text" ? detectTextBackgroundEffect(node, width) : null,
-            frameMask:
-              kind === "image" && isMaskedImage && !isReproducibleModelFrame && !layerIsPageClipped
-                ? detectClipPathFrameMask(node)
+            textWrapRange:
+              kind === "text" && textStyleElement
+                ? measureTextWrapRange(
+                    node,
+                    text,
+                    ARABIC_LETTER_PATTERN.test(String(text || "")) &&
+                      fontLacksArabicGlyphs(textStyle?.fontFamily, textStyle?.fontWeight, textStyle?.fontStyle)
+                  )
                 : null,
+            textFill: kind === "text" ? readTextGradientFill(node) : null,
+            textBackgroundEffect,
+            frameMask:
+              kind === "image" && (clipPathFrame || videoClipFrame)
+                ? { points: (clipPathFrame || videoClipFrame).points }
+                : null,
+            elementVideoId: kind === "image" ? elementVideoId : "",
             fill: isThinVectorDividerLayer ? thinVectorStrokeStyle.color : shapeFill || "",
             zIndex: zIndex ?? layerIndex,
             opacity: effectiveOpacity,
@@ -5744,8 +7328,203 @@
             fallbackReason,
             hasCompanionText,
           };
+          // One text record per table-cell paragraph, in the paragraph's own box and style (the
+          // same fields the companion record carries, read per cell instead of once for the node).
+          function buildTableCellTextRecords(options = {}) {
+            const idSuffix = String(options.idSuffix || "cell");
+            const allParagraphs = Array.from(node.querySelectorAll(TEXT_BLOCK_SELECTOR)).filter(
+              (paragraph) => !isInsideForeignLayer(paragraph, node) && String(paragraph.innerText || "").trim()
+            );
+            // One copy of the paragraphs (an outlined/gradient text is laid out twice).
+            const paragraphs = options.firstCopyOnly
+              ? allParagraphs.filter((paragraph) => paragraph.parentElement === allParagraphs[0]?.parentElement)
+              : allParagraphs;
+            if (paragraphs.length < 2) return [];
+            const records = [];
+            paragraphs.forEach((paragraph, cellIndex) => {
+              const cellText = String(paragraph.innerText || "").replace(/[\r\n]+$/, "");
+              const styleElement = paragraph.querySelector("span") || paragraph;
+              const cellStyle = window.getComputedStyle(styleElement);
+              const cellViewport = getTransformedViewportRect(paragraph, rect);
+              if (!cellViewport) return;
+              const cellScale = getCompositeScaleToAncestor(styleElement, node);
+              const cellCustomSize = findCustomFontSizeFromNode(styleElement, node);
+              const cellCssSize = Number.parseFloat(cellStyle.fontSize || "") || 0;
+              const cellFontSize = Math.max(8, (cellCustomSize > 0 ? cellCustomSize : cellCssSize > 0 ? cellCssSize : 28) * cellScale.y);
+              const cellLineHeightRaw = Number.parseFloat(cellStyle.lineHeight || "");
+              const cellWidth = Math.max(1, Math.round(cellViewport.width * designScaleX));
+              const cellHeight = Math.max(1, Math.round(cellViewport.height * designScaleY));
+              const cellX = (cellViewport.x - rect.x) * designScaleX;
+              const cellY = (cellViewport.y - rect.y) * designScaleY;
+              const cellWeight = resolveEffectiveFontWeight(styleElement, node, cellStyle);
+              records.push({
+                id: `${String(node.id || `layer-${layerIndex + 1}`)}__${idSuffix}${cellIndex + 1}`,
+                parentId: options.topLevel ? null : String(node.id || "").trim() || null,
+                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} ${cellIndex + 1}`,
+                kind: "text",
+                x: cellX,
+                y: cellY,
+                width: cellWidth,
+                height: cellHeight,
+                angle: 0,
+                flipX: false,
+                flipY: false,
+                viewportRect: { x: cellViewport.x, y: cellViewport.y, width: cellViewport.width, height: cellViewport.height },
+                pageRelativeRect: { x: cellX, y: cellY, width: cellWidth, height: cellHeight },
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text: matchCanvaParagraphDirection(cellText, cellStyle.direction),
+                textAlign: cellStyle.textAlign || "center",
+                color: cellStyle.color || "#111827",
+                fontFamily: normalizeFontFamilyName(cellStyle.fontFamily || "Arial") || "Arial",
+                fontLacksArabic: ARABIC_LETTER_PATTERN.test(cellText)
+                  ? fontLacksArabicGlyphs(cellStyle.fontFamily, cellWeight, cellStyle.fontStyle)
+                  : false,
+                fontLacksLatin: !ARABIC_LETTER_PATTERN.test(cellText)
+                  ? textFallsBackToCanvaLatin(cellStyle.fontFamily, cellWeight, cellStyle.fontStyle, cellText)
+                  : false,
+                fontSize: cellFontSize,
+                fontStyle: cellStyle.fontStyle || "normal",
+                fontWeight: cellWeight,
+                lineHeight: Math.max(0.8, cellLineHeightRaw && cellCssSize > 0 ? cellLineHeightRaw / cellCssSize : 1.2),
+                letterSpacing: parseNumericPx(cellStyle.letterSpacing || "") * Math.max(0.01, cellScale.x),
+                textDecoration: String(cellStyle.textDecorationLine || cellStyle.textDecoration || "").toLowerCase(),
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                zIndex: (zIndex ?? layerIndex) + 0.25 + cellIndex * 0.001,
+                opacity: effectiveOpacity,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                fallback: false,
+                fallbackReason: "",
+              });
+            });
+            return records;
+          }
+
+          // A TEXT layer whose paragraphs carry different styles becomes one layer per paragraph
+          // (each uniform inside). Kept whole when it curves, has a background or an outline — those
+          // effects belong to the whole box — or when a paragraph mixes styles within itself.
+          const paragraphStyleKey = (paragraph) => {
+            const keys = new Set();
+            const walker = document.createTreeWalker(paragraph, NodeFilter.SHOW_TEXT);
+            let textNode;
+            while ((textNode = walker.nextNode())) {
+              if (!String(textNode.data || "").trim()) continue;
+              const style = window.getComputedStyle(textNode.parentElement);
+              keys.add(`${style.fontWeight}|${style.fontSize}|${style.fontFamily}|${style.color}|${style.fontStyle}`);
+            }
+            return keys.size === 1 ? [...keys][0] : null;
+          };
+          const splitParagraphRecords = (() => {
+            if (kind !== "text" || layerRecord.textCurve || textBackgroundEffect || layerRecord.textStroke) return [];
+            const allParagraphs = Array.from(node.querySelectorAll(TEXT_BLOCK_SELECTOR)).filter(
+              (paragraph) => !isInsideForeignLayer(paragraph, node) && String(paragraph.innerText || "").trim()
+            );
+            const firstCopy = allParagraphs.filter((paragraph) => paragraph.parentElement === allParagraphs[0]?.parentElement);
+            if (!paragraphStylesDiffer(firstCopy.map(paragraphStyleKey))) return [];
+            return buildTableCellTextRecords({ idSuffix: "p", topLevel: true, firstCopyOnly: true });
+          })();
+
+          // A Canva GRID: one image record per cell, each its own photo cropped to the cell, in place
+          // of one picture stretched over the whole element (see resolveGridCells). Unrotated grids
+          // only; anything else keeps the old single-record path.
+          const gridCellRecords = (() => {
+            if (kind !== "image") return [];
+            if (String((fiberModelById[String(node.id || "")] || {}).elementType || "") !== "grid") return [];
+            if (Math.abs(Number(normalizedLayerAngle) || 0) >= 0.5) return [];
+            const byCell = new Map();
+            getScopedImageElements(node).forEach((image) => {
+              if (String(image.tagName).toLowerCase() !== "img") return;
+              let cell = image.parentElement;
+              while (cell && cell !== node && window.getComputedStyle(cell).overflow === "visible") cell = cell.parentElement;
+              if (!cell || cell === node) return;
+              const entry = byCell.get(cell) || { cell, images: [] };
+              entry.images.push(image);
+              byCell.set(cell, entry);
+            });
+            const candidates = Array.from(byCell.values()).map((entry) => {
+              const r = entry.cell.getBoundingClientRect();
+              const image = entry.images
+                .slice()
+                .sort((a, b) => b.naturalWidth * b.naturalHeight - a.naturalWidth * a.naturalHeight)[0];
+              return { key: entry.cell, image, rect: { left: r.left, top: r.top, width: r.width, height: r.height } };
+            });
+            const nodeRect = node.getBoundingClientRect();
+            const cells = resolveGridCells(candidates, {
+              left: nodeRect.left,
+              top: nodeRect.top,
+              width: nodeRect.width,
+              height: nodeRect.height,
+            });
+            return cells
+              .map((cell, cellIndex) => {
+                const visible = intersectRects(
+                  { x: cell.rect.left, y: cell.rect.top, width: cell.rect.width, height: cell.rect.height },
+                  rect
+                );
+                if (!visible || !(visible.width > 1) || !(visible.height > 1)) return null;
+                const cellX = (visible.x - rect.x) * designScaleX;
+                const cellY = (visible.y - rect.y) * designScaleY;
+                const cellWidth = Math.max(1, visible.width * designScaleX);
+                const cellHeight = Math.max(1, visible.height * designScaleY);
+                const cellTitle = getImageElementTitleHint(cell.image) || imageTitleHint;
+                return {
+                  ...layerRecord,
+                  id: `${String(node.id || `layer-${layerIndex + 1}`)}__cell${cellIndex + 1}`,
+                  name: cellTitle || `${String(layerRecord.name || "Grid")} ${cellIndex + 1}`,
+                  x: cellX,
+                  y: cellY,
+                  width: cellWidth,
+                  height: cellHeight,
+                  angle: 0,
+                  flipX: false,
+                  flipY: false,
+                  viewportRect: { x: visible.x, y: visible.y, width: visible.width, height: visible.height },
+                  pageRelativeRect: { x: cellX, y: cellY, width: cellWidth, height: cellHeight },
+                  imageSrc: getImageElementSource(cell.image),
+                  imageDataUrl: "",
+                  imageProvenance: "",
+                  imageAcquisitionJob: {
+                    kind: "element",
+                    element: cell.image,
+                    alternates: [],
+                    keepAnimated: false,
+                    width: cellWidth,
+                    height: cellHeight,
+                    fitFetchedToTarget: true,
+                    cropRegion: buildDisplayedImageCropRegion(cell.image, visible),
+                  },
+                  preferSnapshot: false,
+                  snapshotIsLossyFallback: true,
+                  sourceWidth: undefined,
+                  sourceHeight: undefined,
+                  frameMask: null,
+                  modelBorder: undefined,
+                  elementVideoId: "",
+                  zIndex: (zIndex ?? layerIndex) + cellIndex * 0.001,
+                  titleEn: cellTitle,
+                  tagsEn: cellTitle ? uniqueMetadataStrings(tokenizeMetadataLabel(cellTitle)) : [],
+                  labelsEn: cellTitle ? uniqueMetadataStrings([cellTitle, ...tokenizeMetadataLabel(cellTitle)]) : [],
+                  fallback: false,
+                  fallbackReason: "",
+                  hasCompanionText: false,
+                };
+              })
+              .filter(Boolean);
+          })();
+
           let companionTextRecord = null;
-          if (hasCompanionText) {
+          // A Canva table's labels are one paragraph per cell, laid out by the table: splitting
+          // them keeps each where Canva drew it (the single companion stacked all twelve of
+          // DAHP0JQMv10's headers into its first cell's box, one per line).
+          const tableCellTextRecords = hasCompanionText && isCanvaTableLayer(node) ? buildTableCellTextRecords() : [];
+          if (hasCompanionText && tableCellTextRecords.length === 0) {
             const textViewportInfo = getTransformedViewportRect(textStyleElement, rect);
             if (textViewportInfo) {
               const textViewportRect = {
@@ -5790,6 +7569,14 @@
                   ARABIC_LETTER_PATTERN.test(String(text || ""))
                     ? fontLacksArabicGlyphs(textStyle?.fontFamily, textStyle?.fontWeight, textStyle?.fontStyle)
                     : false,
+                fontLacksLatin: !ARABIC_LETTER_PATTERN.test(String(text || ""))
+                  ? textFallsBackToCanvaLatin(
+                      textStyle?.fontFamily,
+                      resolveEffectiveFontWeight(textStyleElement, node, textStyle),
+                      textStyle?.fontStyle,
+                      text
+                    )
+                  : false,
                 fontSize: resolvedFontSize,
                 fontStyle: textStyle?.fontStyle || "normal",
                 fontWeight: resolveEffectiveFontWeight(textStyleElement, node, textStyle),
@@ -5809,6 +7596,62 @@
               };
             }
           }
+          // The card and trim rings a window frame was cut out of: every clipped, filled element
+          // of the layer that does not hold the photo, drawn over the layer's WHOLE box as one
+          // shape above the frame (the rings overlap the window's edge, the card has it cut out).
+          let frameArtworkRecord = null;
+          if (kind === "image" && clipWindow && viewportInfo.rawRect) {
+            const fullRect = viewportInfo.rawRect;
+            const fullWidth = Math.max(1, Math.round(layerFrameSize.width));
+            const fullHeight = Math.max(1, Math.round(layerFrameSize.height));
+            const fullX = centerDesignX - fullWidth / 2;
+            const fullY = centerDesignY - fullHeight / 2;
+            const artworkDataUrl = serializeClipPathArtworkToDataUrl(node, imageElement, fullWidth, fullHeight, {
+              rotated: Math.abs(Number(normalizedLayerAngle) || 0) >= 0.5,
+            });
+            if (artworkDataUrl.startsWith("data:image/")) {
+              frameArtworkRecord = {
+                id: `${String(node.id || `layer-${layerIndex + 1}`)}__frame`,
+                parentId: parentId || null,
+                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} Frame`,
+                kind: "image",
+                x: fullX,
+                y: fullY,
+                width: fullWidth,
+                height: fullHeight,
+                angle: normalizedLayerAngle,
+                flipX: false,
+                flipY: false,
+                viewportRect: {
+                  x: fullRect.left ?? fullRect.x ?? 0,
+                  y: fullRect.top ?? fullRect.y ?? 0,
+                  width: fullRect.width,
+                  height: fullRect.height,
+                },
+                pageRelativeRect: { x: fullX, y: fullY, width: fullWidth, height: fullHeight },
+                imageSrc: "",
+                imageDataUrl: artworkDataUrl,
+                imageProvenance: "shape-svg",
+                imageAcquisitionJob: null,
+                preferSnapshot: false,
+                snapshotIsLossyFallback: false,
+                sourceWidth: fullWidth,
+                sourceHeight: fullHeight,
+                text: "",
+                fill: "",
+                zIndex: (zIndex ?? layerIndex) + 0.5,
+                opacity: effectiveOpacity,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+                fallback: false,
+                fallbackReason: "",
+                hasCompanionText: false,
+              };
+            }
+          }
           if (kind === "image") {
             imageMetadataCandidates.push({
               id: layerRecord.id,
@@ -5822,12 +7665,26 @@
               isFullPageBackground,
             });
           }
-          if (!isDuplicateLayerEntry(layerRecord)) {
+          if (gridCellRecords.length > 0) {
+            gridCellRecords.forEach((record) => {
+              if (!isDuplicateLayerEntry(record)) layers.push(record);
+            });
+          } else if (splitParagraphRecords.length > 0) {
+            splitParagraphRecords.forEach((record) => {
+              if (!isDuplicateLayerEntry(record)) layers.push(record);
+            });
+          } else if (!isDuplicateLayerEntry(layerRecord)) {
             layers.push(layerRecord);
           }
           if (companionTextRecord && !isDuplicateLayerEntry(companionTextRecord)) {
             layers.push(companionTextRecord);
           }
+          if (frameArtworkRecord && !isDuplicateLayerEntry(frameArtworkRecord)) {
+            layers.push(frameArtworkRecord);
+          }
+          tableCellTextRecords.forEach((record) => {
+            if (!isDuplicateLayerEntry(record)) layers.push(record);
+          });
         }
 
         // Canva stacks responsive copies of one image at identical geometry, and the full-res copy
@@ -5868,6 +7725,7 @@
             const acquired = await acquireImageForElement(sourceElement, job.width, job.height, {
               fitFetchedToTarget: Boolean(job.fitFetchedToTarget),
               cropRegion: job.cropRegion || null,
+              quarterTurns: Number(job.quarterTurns) || 0,
               keepAnimated: Boolean(job.keepAnimated),
             });
             if (acquired.src) layer.imageSrc = acquired.src;
@@ -5978,9 +7836,182 @@
           // gates), so "not visible at the current frame" would be the wrong diagnosis.
           let unresolvedRendered = 0;
           let backgroundPosterAdded = false;
+
+          // ── Pattern groups ─────────────────────────────────────────────────────────────────────
+          // A group made of many small pieces of image — a graph-paper grid of 238 hairlines, a dot
+          // screen, confetti — is ONE visual layer. Every piece is too small for the layer walk (a
+          // 2 px line at editor zoom) and its media went unresolved, so the whole grid vanished;
+          // importing 238 layers instead would bury the editor. Paint the group into one
+          // transparent image at design resolution: each piece's on-page box comes from its
+          // rendered node (which already folds in the group's own scale), its turn, mirroring and
+          // opacity from the model, its pixels from its own <img>.
+          const PATTERN_MIN_PIECES = 12;
+          const patternHandled = new Set();
+          try {
+            const childIdsByGroup = new Map();
+            for (const id of Object.keys(fiberModelById)) {
+              const el = fiberModelById[id];
+              if (id.startsWith("__") || !el || !el.parentId) continue;
+              if (!childIdsByGroup.has(el.parentId)) childIdsByGroup.set(el.parentId, []);
+              childIdsByGroup.get(el.parentId).push(id);
+            }
+            const pieceBitmaps = new Map();
+            const loadPieceBitmap = async (src) => {
+              if (pieceBitmaps.has(src)) return pieceBitmaps.get(src);
+              let bitmap = null;
+              try {
+                const dataUrl = src.startsWith("data:image/")
+                  ? src
+                  : src.startsWith("blob:")
+                    ? await blobUrlToDataUrl(src)
+                    : await readRemoteImageAssetAsDataUrl(src);
+                if (String(dataUrl || "").startsWith("data:image/")) {
+                  bitmap = await createImageBitmap(await (await fetch(dataUrl)).blob());
+                }
+              } catch (_error) {
+                bitmap = null;
+              }
+              pieceBitmaps.set(src, bitmap);
+              return bitmap;
+            };
+            for (const [groupId, childIds] of childIdsByGroup) {
+              const group = fiberModelById[groupId];
+              if (!group || group.type !== "group" || capturedIds.has(groupId)) continue;
+              if (childIds.length < PATTERN_MIN_PIECES || childIds.some((id) => capturedIds.has(id))) continue;
+              const pieces = childIds.map((id) => ({ id, el: fiberModelById[id], node: document.getElementById(id) }));
+              if (!pieces.every((piece) => piece.el && piece.el.type === "rect" && piece.el.image && piece.node)) continue;
+              const groupNode = document.getElementById(groupId);
+              const groupRect = groupNode ? groupNode.getBoundingClientRect() : null;
+              if (!groupRect || groupRect.width < 1 || groupRect.height < 1) continue;
+              const fit = Math.min(1, 2048 / Math.max(groupRect.width * sx, groupRect.height * sy));
+              const pxX = sx * fit; // canvas px per screen px
+              const pxY = sy * fit;
+              const canvas = document.createElement("canvas");
+              canvas.width = Math.max(1, Math.round(groupRect.width * pxX));
+              canvas.height = Math.max(1, Math.round(groupRect.height * pxY));
+              const context = canvas.getContext("2d");
+              if (!context) continue;
+              let painted = 0;
+              let failed = false;
+              for (const piece of pieces) {
+                const imageNode = piece.node.querySelector("img");
+                const src = imageNode ? String(imageNode.currentSrc || imageNode.src || "") : "";
+                const bitmap = src ? await loadPieceBitmap(src) : null;
+                if (!bitmap) {
+                  failed = true;
+                  break;
+                }
+                const box = piece.node.getBoundingClientRect();
+                if (!(box.width > 0 && box.height > 0)) continue;
+                const theta = (((Number(group.rotation) || 0) + (Number(piece.el.rotation) || 0)) * Math.PI) / 180;
+                const w0 = Math.max(0.01, Number(piece.el.width) || 0);
+                const h0 = Math.max(0.01, Number(piece.el.height) || 0);
+                const cos = Math.abs(Math.cos(theta));
+                const sin = Math.abs(Math.sin(theta));
+                // The node's box is the turned piece's bounding box: solve the piece's own size.
+                const perUnit = (box.width + box.height) / (w0 * cos + h0 * sin + w0 * sin + h0 * cos);
+                const drawWidth = w0 * perUnit * pxX;
+                const drawHeight = h0 * perUnit * pxY;
+                const region = piece.el.image.crop
+                  ? modelCropRegionForFrame(piece.el.image.crop, w0, h0)
+                  : null;
+                context.save();
+                context.globalAlpha = clampOpacity(piece.el.transparency);
+                context.translate(
+                  (box.left + box.width / 2 - groupRect.left) * pxX,
+                  (box.top + box.height / 2 - groupRect.top) * pxY
+                );
+                context.rotate(theta);
+                if (piece.el.image.flipX || piece.el.image.flipY) {
+                  context.scale(piece.el.image.flipX ? -1 : 1, piece.el.image.flipY ? -1 : 1);
+                }
+                if (region) {
+                  context.drawImage(
+                    bitmap,
+                    region.x * bitmap.width,
+                    region.y * bitmap.height,
+                    region.width * bitmap.width,
+                    region.height * bitmap.height,
+                    -drawWidth / 2,
+                    -drawHeight / 2,
+                    drawWidth,
+                    drawHeight
+                  );
+                } else {
+                  context.drawImage(bitmap, -drawWidth / 2, -drawHeight / 2, drawWidth, drawHeight);
+                }
+                context.restore();
+                painted += 1;
+              }
+              if (failed || painted === 0) continue;
+              let dataUrl = "";
+              try {
+                dataUrl = canvas.toDataURL("image/png");
+              } catch (_error) {
+                dataUrl = "";
+              }
+              if (!dataUrl.startsWith("data:image/")) continue;
+              const x = (groupRect.left - rect.x) * sx;
+              const y = (groupRect.top - rect.y) * sy;
+              const width = Math.max(1, Math.round(groupRect.width * sx));
+              const height = Math.max(1, Math.round(groupRect.height * sy));
+              layers.push({
+                id: groupId,
+                parentId: null,
+                name: `Pattern (${pieces.length} pieces)`,
+                kind: "image",
+                x,
+                y,
+                width,
+                height,
+                angle: 0,
+                domGeometry: true,
+                flipX: false,
+                flipY: false,
+                viewportRect: { x: groupRect.left, y: groupRect.top, width: groupRect.width, height: groupRect.height },
+                pageRelativeRect: { x, y, width, height },
+                // The model z-order pass puts it back at the group's own depth.
+                zIndex: 1000 + supplementText + supplementImages.length,
+                opacity: clampOpacity(group.transparency),
+                imageSrc: dataUrl,
+                imageDataUrl: dataUrl,
+                imageProvenance: "model-pattern-composite",
+                preferSnapshot: false,
+                sourceWidth: canvas.width,
+                sourceHeight: canvas.height,
+                text: "",
+                textAlign: "left",
+                color: "#111827",
+                fontFamily: "",
+                fontSize: 0,
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                fill: "",
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+                fallback: false,
+                fallbackReason: "",
+                hasCompanionText: false,
+                fromModel: true,
+              });
+              patternHandled.add(groupId);
+              pieces.forEach((piece) => patternHandled.add(piece.id));
+            }
+          } catch (patternError) {
+            console.warn("[canva-scraper] pattern group composite failed:", patternError);
+          }
+
           for (const id of Object.keys(fiberModelById)) {
             if (id.startsWith("__")) continue; // meta entries (e.g. __background), not elements
-            if (capturedIds.has(id)) continue;
+            if (capturedIds.has(id) || patternHandled.has(id)) continue;
             const el = fiberModelById[id];
             if (!el || !el.type) continue;
             // The model's left/top/width/height are LOCAL to the element's GROUP. For a top-level
@@ -5994,7 +8025,15 @@
             // its bounding box. Axis-aligned dividers (the case this path exists for) are exact.
             const domNode = document.getElementById(id);
             const domRect = domNode ? domNode.getBoundingClientRect() : null;
-            const useDomRect = Boolean(domRect && domRect.width > 0.5 && domRect.height > 0.5);
+            const useDomRect = supplementUsesDomRect({
+              hasDomRect: Boolean(domRect && domRect.width > 0.5 && domRect.height > 0.5),
+              nestedInGroup: Boolean(domNode?.parentElement?.closest?.('[id^="LB"]')),
+              // A `line` is drawn already resolved into its axis-aligned DOM box (no transform on
+              // the node), so its model rotation must not be re-applied.
+              rotation: el.type === "line" ? 0 : Number(el.rotation) || 0,
+              modelWidth: Number(el.width) || 0,
+              modelHeight: Number(el.height) || 0,
+            });
             const w = Math.max(1, Math.round(useDomRect ? domRect.width * sx : el.width));
             const h = Math.max(1, Math.round(useDomRect ? domRect.height * sy : el.height));
             // A hairline divider is legitimately 1px tall — don't drop lines on the thin-axis gate.
@@ -6106,6 +8145,66 @@
               layers.push(record);
               supplementImages.push(record);
             } else if (el.type === "line" && el.line && el.line.color) {
+              // A dashed, arrowed or bent line keeps its own SVG as a vector image: a solid rect
+              // could only ever draw a straight bar.
+              const lineSvg = domNode ? domNode.querySelector("svg") : null;
+              const linePaths = lineSvg
+                ? Array.from(lineSvg.querySelectorAll("path"))
+                    .filter((path) => Number(window.getComputedStyle(path).opacity) > 0.01)
+                    .map((path) => {
+                      const style = window.getComputedStyle(path);
+                      const dash = String(style.strokeDasharray || "").trim().toLowerCase();
+                      return {
+                        dashed: Boolean(dash) && dash !== "none" && dash !== "0" && dash !== "0px",
+                        filled: !isTransparentColor(String(style.fill || "")) && String(style.fill || "") !== "none",
+                        d: String(path.getAttribute("d") || ""),
+                      };
+                    })
+                : [];
+              // The arrowhead and half the stroke reach past the element box, and a `0 0 w h` viewBox
+              // would clip them: draw the paths' own bounds (plus the stroke) and grow the box to it.
+              const lineVector =
+                lineSvg && useDomRect && lineNeedsVector(linePaths) ? serializeLineSvgToDataUrl(lineSvg, x, y, w, h) : null;
+              if (lineVector && lineVector.dataUrl.startsWith("data:image/")) {
+                const record = {
+                  ...base,
+                  x: lineVector.x,
+                  y: lineVector.y,
+                  width: lineVector.width,
+                  height: lineVector.height,
+                  pageRelativeRect: { x: lineVector.x, y: lineVector.y, width: lineVector.width, height: lineVector.height },
+                  name: `Line ${supplementLines + 1}`,
+                  kind: "image",
+                  imageSrc: lineVector.dataUrl,
+                  imageDataUrl: lineVector.dataUrl,
+                  imageProvenance: "shape-svg",
+                  preferSnapshot: false,
+                  sourceWidth: undefined,
+                  sourceHeight: undefined,
+                  text: "",
+                  textAlign: "left",
+                  color: "#111827",
+                  fontFamily: "",
+                  fontSize: 0,
+                  fontStyle: "normal",
+                  fontWeight: 400,
+                  lineHeight: 1.2,
+                  letterSpacing: 0,
+                  textDecoration: "none",
+                  textBackgroundColor: "",
+                  textBackgroundRadius: 0,
+                  fill: "",
+                  titleEn: "",
+                  tagsEn: [],
+                  labelsEn: [],
+                  isBackgroundNode: false,
+                  isFullPageBackground: false,
+                };
+                layers.push(record);
+                supplementImages.push(record);
+                supplementLines += 1;
+                continue;
+              }
               // Recover a divider LINE the DOM thin-vector gate dropped. Emit it as a thin solid
               // rect through the editable-shape path (background.js turns modelShape {shapeKind:
               // "rect"} into a fill:color rect). `base` already carries the model geometry — for a
@@ -6663,7 +8762,7 @@
             };
           };
 
-          const textNodes = Array.from(bestPage.node.querySelectorAll("p,span,div"));
+          const textNodes = Array.from(bestPage.node.querySelectorAll(`${TEXT_BLOCK_SELECTOR},span,div`));
           for (let index = 0; index < textNodes.length; index += 1) {
             const node = textNodes[index];
             if (!node) continue;
@@ -6970,6 +9069,37 @@
         usedFontTargetsByFamily
       );
 
+      // A gradient page colour. Canva paints it as a page-level <svg><rect fill="url(#g)"> the
+      // size of the page, outside every layer (the model's page fill carries it as `gradient`
+      // with no `color`), so the import used to flatten it to one sampled colour. Re-expressed on
+      // the page box exactly like a gradient text colour, in the app's own convention.
+      const pageBackgroundGradient = (() => {
+        try {
+          if (!bestPage?.node) return null;
+          const pageWidth = Math.max(1, Number(designWidth || rect.width));
+          const pageHeight = Math.max(1, Number(designHeight || rect.height));
+          const svg = Array.from(bestPage.node.querySelectorAll("svg")).find((candidate) => {
+            if (candidate.closest('[id^="LB"]')) return false;
+            if (!candidate.querySelector("linearGradient,radialGradient")) return false;
+            const box = candidate.getBoundingClientRect();
+            return box.width >= rect.width * 0.98 && box.height >= rect.height * 0.98;
+          });
+          if (!svg) return null;
+          return canvaTextGradientToFill(svg.outerHTML, {
+            width: pageWidth,
+            height: pageHeight,
+            bgX: 0,
+            bgY: 0,
+            originOffsetX: 0,
+            originOffsetY: 0,
+            imageWidth: pageWidth,
+            imageHeight: pageHeight,
+          });
+        } catch (_error) {
+          return null;
+        }
+      })();
+
       return {
         ok: true,
         title: document.title || "",
@@ -6983,6 +9113,7 @@
         layers,
         fontAssets: resolvedFontAssets,
         timelineSupplement: timelineSupplementSummary,
+        pageBackgroundGradient,
       };
       
   }

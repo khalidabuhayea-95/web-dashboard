@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { isInfrastructureError } from "@/lib/api/infrastructureErrors";
 
 import {
   MobileAppSettingsValidationError,
@@ -28,7 +29,10 @@ export async function getMobileAppSettings() {
     }
 
     return normalizeStoredMobileAppSettings(record.value);
-  } catch {
+  } catch (error) {
+    // Defaults are not the configured prices, gates and models — serving them as if they were
+    // during an outage is the fabricated-200 failure of production audit H-24.
+    if (isInfrastructureError(error)) throw error;
     return normalizeStoredMobileAppSettings();
   }
 }

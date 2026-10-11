@@ -48,8 +48,12 @@ function backgroundPreviewStyle(background: PageBackground | undefined) {
     };
   }
   if (background.type === "gradient") {
+    // The app's angle (0 = left→right) is CSS's minus 90°; a gradient without one keeps the
+    // original corner-to-corner preview.
+    const angle = Number(background.angle);
+    const cssAngle = Number.isFinite(angle) ? `${Math.round(angle + 90)}deg` : "135deg";
     return {
-      backgroundImage: `linear-gradient(135deg, ${background.gradientFrom || "#ffffff"}, ${background.gradientTo || "#f3f4f6"})`,
+      backgroundImage: `linear-gradient(${cssAngle}, ${background.gradientFrom || "#ffffff"}, ${background.gradientTo || "#f3f4f6"})`,
     };
   }
   return { backgroundColor: background.color || "#ffffff" };

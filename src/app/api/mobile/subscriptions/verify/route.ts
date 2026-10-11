@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { AppleVerificationError, verifyAppleTransactionJws } from "@/lib/billing/appleVerifier.server";
 import { GoogleVerificationError, fetchGoogleSubscriptionState } from "@/lib/billing/googleVerifier.server";
 import {
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
     const auth = await resolveMobileBearerUser(request);
     if (!auth.ok) {
       return attachRequestIdHeader(
-        NextResponse.json({ error: auth.error }, { status: auth.status, headers: NO_STORE }),
+        NextResponse.json({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, { status: auth.status, headers: NO_STORE }),
         requestId
       );
     }
@@ -150,6 +151,9 @@ export async function POST(request: NextRequest) {
     return attachRequestIdHeader(NextResponse.json(status, { headers: NO_STORE }), requestId);
   } catch (error) {
     requestLogger.error("Failed to verify purchase", error);
+    // An outage is retryable: the store proof stays valid, so the app can post it again.
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return attachRequestIdHeader(
       NextResponse.json(
         { error: "Failed to verify the purchase." },

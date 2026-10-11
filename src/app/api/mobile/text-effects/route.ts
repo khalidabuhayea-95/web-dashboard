@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -58,6 +59,8 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     requestLogger.error("Text effects list failed", error);
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return attachRequestIdHeader(
       NextResponse.json(
         { error: "Failed to load the text effects." },

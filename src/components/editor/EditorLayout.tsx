@@ -23,8 +23,11 @@ import {
   readImageSourceFromAsyncClipboard,
   renderClipboardHtmlToImageDataUrl,
   writeInternalEditorClipboardMarker,
+  importCanvaClipboardImages,
+  isCanvaClipboardHtml,
 } from "@/lib/editor/clipboardImport";
 import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
+import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
 
 const CanvasEditor = dynamic(() => import("@/components/editor/CanvasEditor"), {
   ssr: false,
@@ -249,6 +252,34 @@ export default function EditorLayout({ canManagePremium = false, navItems = [] }
       }
 
       const html = getClipboardHtml(event);
+      // Copied in Canva: element boxes + media ids, pictures via the extension's enrichment or
+      // Canva's public CDN. Handled before the generic HTML paths, which see no image in it.
+      if (isCanvaClipboardHtml(html)) {
+        event.preventDefault();
+        const state = useEditorStore.getState();
+        const activePage = state.pages.find((page) => page.id === state.activePageId) || null;
+        void importCanvaClipboardImages(html, {
+          pageWidth: Number(activePage?.width) || 1080,
+          pageHeight: Number(activePage?.height) || 1080,
+          addImageElement: (src, partial) => addImageElement(src, partial as Parameters<typeof addImageElement>[1]),
+          uploadDataUrl: async (dataUrl, fileName) => {
+            const mimeType = /^data:([^;]+);/.exec(dataUrl)?.[1] || "image/png";
+            const uploaded = await uploadEditorMediaFile(dataUrlToFile(dataUrl, fileName, mimeType), "image");
+            return uploaded.url;
+          },
+        })
+          .then((result) => {
+            if (result.added === 0 && result.unavailable > 0) {
+              window.alert(
+                "Canva's copy holds only a reference to this picture. Install or enable the Canva Importer extension, copy again in Canva, then paste."
+              );
+            }
+          })
+          .catch(() => {
+            // Keep the editor responsive; nothing was added.
+          });
+        return;
+      }
       const htmlImageSource = extractImageSourceFromClipboardHtml(html);
       if (htmlImageSource) {
         event.preventDefault();

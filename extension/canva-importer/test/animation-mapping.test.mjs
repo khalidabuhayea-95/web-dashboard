@@ -867,7 +867,8 @@ test("the config is found structurally under any prop name, keeps Canva's raw µ
   // The schedule facts tell "no animation field" (a page animation applies) from "cleared".
   assert.equal(extraction.readScheduleFacts(element("LB1")).animationState, "absent");
   assert.equal(extraction.readScheduleFacts(element("LB1", { type: "none" })).animationState, "none");
-  assert.deepEqual(plain(extraction.readScheduleFacts(element("LB1", { type: "independent", animation: 3 }))), { animationState: "present", animationType: "independent" });
+  // (elementType is the element's own Canva type — the fixture element is a rect.)
+  assert.deepEqual(plain(extraction.readScheduleFacts(element("LB1", { type: "independent", animation: 3 }))), { animationState: "present", animationType: "independent", elementType: "rect" });
 });
 
 test("page animation reading: Xw by name, a strict structural fallback, and no config when the page stores none", () => {

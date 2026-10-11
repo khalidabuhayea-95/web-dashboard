@@ -97,6 +97,15 @@ interface PropertiesPanelProps {
   collapsed: boolean;
 }
 
+/** A media layer whose circle/rounded mask or border already defines the frame it converts into. */
+function mediaKeepsOwnFrameShape(element: EditorElement) {
+  return (
+    element.mediaShape === "circle" ||
+    Number(element.cornerRadius) > 0 ||
+    Number(element.strokeWidth) > 0
+  );
+}
+
 export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const [isConvertingMediaToFrame, setIsConvertingMediaToFrame] = useState(false);
   const [isCuttingVideoFile, setIsCuttingVideoFile] = useState(false);
@@ -111,6 +120,9 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const recordHistory = useEditorStore((state) => state.recordHistory);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const convertMediaElementToFrame = useEditorStore((state) => state.convertMediaElementToFrame);
+  const convertFrameElementToMedia = useEditorStore((state) => state.convertFrameElementToMedia);
+  const stageApi = useEditorStore((state) => state.stageApi);
+  const [isConvertingFrameToLayer, setIsConvertingFrameToLayer] = useState(false);
   const setPageDuration = useEditorStore((state) => state.setPageDuration);
 
   const activePage = useMemo(
@@ -366,7 +378,11 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const convertSelectedMediaToFrame = async () => {
     if (!activeMediaElement || isConvertingMediaToFrame) return;
 
-    if (activeMediaElement.type !== "image") {
+    // An image that already says what shape its frame is — a circle or rounded mask, or a border —
+    // converts as it is. The white-edge cleanup below is for pictures OF frames on a white
+    // background; on a photo it erased the light edges (a cloudy sky), trimmed the box to what was
+    // left and swapped the circle for the alpha outline of the remains, so the frame "disappeared".
+    if (activeMediaElement.type !== "image" || mediaKeepsOwnFrameShape(activeMediaElement)) {
       convertMediaElementToFrame(activeMediaElement.id);
       return;
     }
@@ -515,7 +531,43 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 {isConvertingMediaToFrame ? "Converting to frame..." : "Convert layer to frame"}
               </Button>
               <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
-                Make white edge background transparent while keeping the same layer dimensions.
+                {mediaKeepsOwnFrameShape(activeMediaElement)
+                  ? "The frame takes this layer's shape and border; the whole picture becomes its content."
+                  : "Make white edge background transparent while keeping the same layer dimensions."}
+              </p>
+            </div>
+          ) : null}
+
+          {activeElement.type === "frame" && String(activeElement.frameContent?.src || "").trim() ? (
+            <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50 p-3 dark:border-slate-700 dark:bg-slate-900">
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={isConvertingFrameToLayer}
+                onClick={() => {
+                  const frameId = activeElement.id;
+                  if (!stageApi?.convertFrameToLayer) {
+                    if (!convertFrameElementToMedia(frameId)) {
+                      window.alert("The frame's media lies outside the frame, so there is nothing to turn into a layer.");
+                    }
+                    return;
+                  }
+                  setIsConvertingFrameToLayer(true);
+                  void stageApi
+                    .convertFrameToLayer(frameId)
+                    .then((result) => {
+                      if (!result.converted && result.message) window.alert(result.message);
+                    })
+                    .finally(() => setIsConvertingFrameToLayer(false));
+                }}
+                className="w-full justify-start !rounded-lg !px-3 !text-sm !font-semibold"
+              >
+                {isConvertingFrameToLayer ? "Converting to layer..." : "Convert frame to layer"}
+              </Button>
+              <p className="text-xs leading-5 text-slate-500 dark:text-slate-400">
+                {activeElement.frameContent?.kind === "video"
+                  ? "Keep the video as a plain layer exactly where the frame showed it; the frame shape is dropped."
+                  : "Keep the image as a plain layer in this exact frame shape, where the frame showed it."}
               </p>
             </div>
           ) : null}
@@ -635,7 +687,14 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   <Input
                     type="color"
                     value={activeElement.color || "#111827"}
-                    onChange={(event) => updateElement(activeElement.id, { color: event.target.value, fill: event.target.value })}
+                    onChange={(event) =>
+                      updateElement(activeElement.id, {
+                        color: event.target.value,
+                        fill: event.target.value,
+                        // A picked colour replaces a gradient fill rather than hiding behind it.
+                        textFill: undefined,
+                      })
+                    }
                   />
                 </div>
               </div>

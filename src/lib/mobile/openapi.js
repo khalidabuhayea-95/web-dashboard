@@ -32,6 +32,97 @@ const ACCOUNT_DISABLED_RESPONSE = {
   },
 };
 
+// Every mobile route answers an infrastructure outage (database unreachable, pool exhausted, …)
+// with this — never a fabricated 200 and never a 401 (production audit H-24). buildMobileOpenApiSpec
+// adds it to every mobile operation.
+const SERVICE_UNAVAILABLE_RESPONSE = {
+  description:
+    'Temporarily unavailable (`code: "service_unavailable"`): a backing service such as the database is down. Never cached (`Cache-Control: no-store`), carries no internal detail, and **never means the session is invalid** — keep the tokens and retry after `Retry-After` seconds.',
+  headers: {
+    "Retry-After": { schema: { type: "integer" }, description: "Seconds to wait before retrying." },
+    "Cache-Control": { schema: { type: "string", enum: ["no-store"] } },
+  },
+  content: {
+    "application/json": {
+      schema: { $ref: "#/components/schemas/ErrorResponse" },
+    },
+  },
+};
+
+// The paid AI routes (production audit H-13): credits reserved atomically before the provider
+// runs, refunded when the user does not get the result, and an optional Idempotency-Key.
+// buildMobileOpenApiSpec applies these to every path in PAID_AI_PATHS.
+const PAID_AI_PATHS = [
+  "/api/mobile/ai-tools/run",
+  "/api/mobile/media/generate-image",
+  "/api/mobile/media/remove-background",
+  "/api/mobile/media/object-remove",
+  "/api/mobile/media/ai-expand",
+  "/api/mobile/media/upscale",
+  "/api/mobile/media/edit-image",
+  "/api/mobile/text/tashkeel",
+];
+
+const IDEMPOTENCY_KEY_PARAMETER = {
+  name: "Idempotency-Key",
+  in: "header",
+  required: false,
+  description:
+    "Optional, recommended: a fresh UUID per run, reused verbatim on every retry of THAT run (after a timeout, a dropped connection, the app returning from the background). While the first request is still running a retry gets 409 `idempotency_in_progress` (+ `Retry-After`); once it has succeeded a retry gets the same result again with `Idempotent-Replayed: true` and is not charged; if it failed or was refunded the retry runs (and is charged) fresh. Keys are scoped per user and per route and remembered for 10 minutes. 8–255 visible ASCII characters.",
+  schema: { type: "string", minLength: 8, maxLength: 255 },
+  example: "6f1c2c58-1b1e-4a0b-9d63-8a8f2b7f4e21",
+};
+
+const PAID_RUN_BILLING_NOTE =
+  "\n\n**Billing (every paid AI route):** the run's credits are **reserved atomically before the provider is called** — two concurrent runs can no longer both pass the balance check and overdraw the wallet — and are **refunded in full** when the user does not get the result: the provider fails, the run times out (504 `ai_run_timeout`), or the client disconnects before the response finished downloading (Back, cancel, iOS suspension). A database outage refuses the run with 503 before anything is charged. On success the X-Credits-* headers report the wallet AFTER the run. See the optional `Idempotency-Key` header for safe retries.";
+
+const PAID_RUN_RESPONSES = {
+  409: {
+    description:
+      'Idempotency-Key conflict: `code: "idempotency_in_progress"` — the first request with this key is still running, retry after `Retry-After`; or `code: "idempotency_key_spent"` — it completed but its result is no longer held, start a new run with a new key.',
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
+  },
+  422: {
+    description:
+      'The Idempotency-Key was already used for a different run on this route (`code: "idempotency_key_reused"`). Nothing is charged.',
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
+  },
+  504: {
+    description:
+      'The run did not finish in time (`code: "ai_run_timeout"`); nothing was charged. Safe to retry.',
+    content: { "application/json": { schema: { $ref: "#/components/schemas/ErrorResponse" } } },
+  },
+};
+
+const IDEMPOTENT_REPLAYED_HEADER = {
+  schema: { type: "string", enum: ["true"] },
+  description:
+    "Present on a response replayed for a retried Idempotency-Key: the original result, not charged again (the X-Credits-* headers are re-read and current).",
+};
+
+// Adds the cross-cutting contracts to the hand-written paths: the outage response on every mobile
+// operation, and the reservation/idempotency contract on the paid AI routes.
+function withMobileApiContracts(spec) {
+  for (const [path, operations] of Object.entries(spec.paths)) {
+    if (!path.startsWith("/api/mobile/") || path === "/api/mobile/openapi") continue;
+    for (const operation of Object.values(operations)) {
+      if (!operation || typeof operation !== "object" || !operation.responses) continue;
+      operation.responses[503] ??= SERVICE_UNAVAILABLE_RESPONSE;
+      if (!PAID_AI_PATHS.includes(path)) continue;
+      operation.parameters = [...(operation.parameters || []), IDEMPOTENCY_KEY_PARAMETER];
+      operation.description = `${operation.description || ""}${PAID_RUN_BILLING_NOTE}`;
+      for (const [status, response] of Object.entries(PAID_RUN_RESPONSES)) {
+        operation.responses[status] ??= response;
+      }
+      const success = operation.responses[200];
+      if (success) {
+        success.headers = { ...(success.headers || {}), "Idempotent-Replayed": IDEMPOTENT_REPLAYED_HEADER };
+      }
+    }
+  }
+  return spec;
+}
+
 function normalizeServerUrl(url) {
   const raw = String(url || "").trim();
   if (!raw) return "";
@@ -179,7 +270,8 @@ const reusableParameters = {
     name: "query",
     in: "query",
     required: false,
-    description: "Template name partial match (case-insensitive).",
+    description:
+      "Arabic-aware search. The query and the searchable text are both normalised — tashkeel and tatweel removed, أ إ آ ٱ → ا, ة → ه, ى → ي, ؤ → و, ئ → ي, Arabic-Indic digits → ASCII, Latin lowercased — then split into tokens, and a template must contain EVERY token in its title, its tags, or the Arabic/English label of a category or sub category it is placed in (so \"Ramadan\" finds the Ramadan rail, «أدعية» the «أدعية وأذكار» rail). A leading «ال» on a token is ignored when three or more letters remain («عيد فطر» = «عيد الفطر»). Results are ranked: the exact phrase in the title first, then more tokens in the title, then tag/label matches; featured → occasion-boosted → recency order applies inside each rank. A query with no letters or digits matches nothing.",
     schema: {
       type: "string",
     },
@@ -711,6 +803,11 @@ const schemas = {
     required: ["error"],
     properties: {
       error: { type: "string" },
+      code: {
+        type: "string",
+        description:
+          'Stable machine-readable reason when there is one — e.g. "service_unavailable", "account_disabled", "insufficient_credits", "idempotency_in_progress", "ai_run_timeout". Branch on this, never on `error` (human text).',
+      },
     },
   },
   // Shared by GET /api/mobile/subscriptions/status and the success body of
@@ -902,6 +999,12 @@ const schemas = {
       labelEn: { type: "string" },
       labelAr: { type: "string" },
       published: { type: "boolean" },
+      templateCount: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Only on /api/mobile/templates/taxonomy. How many templates /api/mobile/templates?categoryId=<this> returns for the same caller (published; drafts too for a tester account). A template filed under two sub categories of this category counts once. 0 = empty: skip the category without probing it. Optional — older servers omit it.",
+      },
       subCategories: {
         type: "array",
         items: {
@@ -921,6 +1024,12 @@ const schemas = {
       labelEn: { type: "string" },
       labelAr: { type: "string" },
       published: { type: "boolean" },
+      templateCount: {
+        type: "integer",
+        minimum: 0,
+        description:
+          "Only on /api/mobile/templates/taxonomy. How many templates /api/mobile/templates?categoryId=…&subCategoryId=<this> returns for the same caller. Optional — older servers omit it.",
+      },
     },
   },
   MobileProject: {
@@ -952,7 +1061,7 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. IMAGE layers that are animated stickers (Canva GIFs) carry an `animatedImage` object (`kind: \"gif\"`, `uri` = the GIF, `durationMs`, `frameCount`, `loop`); such a layer's `imageUri` is the settled POSTER still, so a client without GIF playback renders exactly today's look — a client that can, loops `animatedImage.uri` in its place (it is never recolorable: `colorEditMode` is `none`). TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
+          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. IMAGE layers that are animated stickers (Canva GIFs) carry an `animatedImage` object (`kind: \"gif\"`, `uri` = the GIF, `durationMs`, `frameCount`, `loop`); such a layer's `imageUri` is the settled POSTER still, so a client without GIF playback renders exactly today's look — a client that can, loops `animatedImage.uri` in its place (it is never recolorable: `colorEditMode` is `none`). TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
         items: {
           type: "object",
           additionalProperties: true,
@@ -1667,7 +1776,7 @@ const schemas = {
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. IMAGE layers that are animated stickers carry `animatedImage` (`kind: \"gif\"`, `uri`, `durationMs`, `frameCount`, `loop`) with `imageUri` as the poster still (see the list endpoint). TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor. The same `filters` object also carries the layer's own `blurRadius` (0–40 project px) and its drop shadow (`shadowColorHex`/`shadowOpacity`/`shadowBlurRadius`/`shadowOffsetX`/`shadowOffsetY`) — both authored in the web editor's Blur and Shadow controls.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. IMAGE layers that are animated stickers carry `animatedImage` (`kind: \"gif\"`, `uri`, `durationMs`, `frameCount`, `loop`) with `imageUri` as the poster still (see the list endpoint). TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor. The same `filters` object also carries the layer's own `blurRadius` (0–40 project px) and its drop shadow (`shadowColorHex`/`shadowOpacity`/`shadowBlurRadius`/`shadowOffsetX`/`shadowOffsetY`) — both authored in the web editor's Blur and Shadow controls.",
             items: {
               type: "object",
               additionalProperties: true,
@@ -2399,13 +2508,13 @@ const schemas = {
 };
 
 export function buildMobileOpenApiSpec(serverOrigin) {
-  return {
+  return withMobileApiContracts({
     openapi: "3.0.3",
     info: {
       title: "Web Dashboard Mobile Templates API",
       version: "1.0.0",
       description:
-        "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; write-heavy media routes may require signed mobile headers.\n\nThe **Website** tag covers public endpoints that back nayroz.com rather than the app — they are documented here so one page describes every public surface.",
+        "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; account and AI routes take the session's bearer token.\n\n**Outages:** any mobile route can answer 503 `service_unavailable` (no-store, `Retry-After`) when a backing service is down — retry later; it never means the session is invalid.\n\n**Request signing (report-only):** a client may sign each request with `x-mobile-key`, `x-mobile-ts` (unix ms or s) and `x-mobile-sign` = hex HMAC-SHA256 of `METHOD\\npath\\nsearch\\ntimestamp` (`search` includes the leading `?`, empty when none). The server verifies and counts every signature but does NOT reject unsigned or mis-signed requests unless it runs with `MOBILE_REQUEST_SIGNING_MODE=enforce`, which then answers 401 `invalid_request_signature`.\n\nThe **Website** tag covers public endpoints that back nayroz.com rather than the app — they are documented here so one page describes every public surface.",
     },
     servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
@@ -2855,7 +2964,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "List published templates",
           description:
-            "Returns grouped, localized template summaries. Use template id with /api/mobile/templates/{id} to fetch the full project payload.\n\nOrder: featured templates first (newest-featured first), then templates linked to an active occasion, then the most recently updated. Pinning only reorders — `total` and paging are unaffected, and featuring never changes a template's `updatedAt` or `version`.",
+            "Returns grouped, localized template summaries. Use template id with /api/mobile/templates/{id} to fetch the full project payload.\n\nOrder: featured templates first (newest-featured first), then templates linked to an active occasion, then the most recently updated. Pinning only reorders — `total` and paging are unaffected, and featuring never changes a template's `updatedAt` or `version`.\n\nWith `query`, the list is the same Arabic-aware search as /api/mobile/templates/search (see the parameter), narrowed by `categoryId`/`subCategoryId`/`tag`; pages are ranked exact-title matches first, so a client that still filters the page by raw title keeps full pages until those run out.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -2885,7 +2994,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "Search published templates",
           description:
-            "Returns the same paginated, grouped template payload as /api/mobile/templates. The `query` parameter performs a case-insensitive partial search across template names and tags.\n\nMatches follow the same order — featured first (newest-featured first), then occasion-boosted, then the most recently updated — within each sub category group.",
+            "Returns the same paginated, grouped template payload as /api/mobile/templates. `query` is an Arabic-aware, token-AND search over template titles, tags and the AR/EN labels of the categories and sub categories each template is placed in — see the parameter for the normalisation.\n\nRanking: the exact query in the title first, then templates whose title holds more of the tokens, then tag/label matches; inside each rank featured first (newest-featured first), then occasion-boosted, then the most recently updated. Groups in `templatesBySubCategory` follow that ranking (a group sits where its best-ranked template does), so flattening the groups in order keeps the ranking. `total` and paging count matching templates.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -3030,6 +3139,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
         get: {
           tags: ["Mobile Templates"],
           summary: "Get localized taxonomy options",
+          description:
+            "The published categories and sub categories, localized. Each carries `templateCount` — what /api/mobile/templates returns for that category / sub category for the same caller (send the bearer token: a tester account's counts include drafts) — so the app can skip empty categories without probing them one request at a time.\n\nCaching: `public, max-age=300, stale-while-revalidate=600` (the same horizon as the template lists, since counts move when templates are published); `private, no-store` for a tester; `Vary: Authorization`.\n\n**Outage:** 503 `service_unavailable` with `no-store`. A placeholder taxonomy is never served.",
           parameters: [...localeHeaderParameters, ...localeQueryParameters],
           responses: {
             200: {
@@ -3050,7 +3161,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile Templates"],
           summary: "List published templates grouped by sub category",
           description:
-            "Returns every configured sub category with its templates (default 10 per sub category): featured first (newest-featured first), then templates linked to an active occasion, then the most recently updated.",
+            "Returns every configured sub category with its templates (default 10 per sub category): featured first (newest-featured first), then templates linked to an active occasion, then the most recently updated.\n\nWith `query`, each rail holds only templates matching the same Arabic-aware search as /api/mobile/templates/search, exact-title matches first.",
           parameters: [
             ...localeHeaderParameters,
             ...localeQueryParameters,
@@ -3365,7 +3476,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           tags: ["Mobile AI Tools"],
           summary: "Run an AI tool on a photo",
           description:
-            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Entitlement:** credits alone — there is no subscription check. A free account that can afford the tool may run it; a plan is simply how most wallets get funded.\n\n**Credits:** each tool prices itself. The run is charged `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`), and **only after the provider returns a result** — a failed run costs nothing. `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
+            "Runs one catalogue tool over the user's photo and returns the finished image as raw bytes — the same response shape as `/api/mobile/media/edit-image`, so an existing download path handles it unchanged.\n\nSend the `id` from `/api/mobile/ai-tools` as `toolId`. The prompt, model and per-tool settings are resolved on the server; the client sends no prompt and cannot choose a model.\n\n**Entitlement:** credits alone — there is no subscription check. A free account that can afford the tool may run it; a plan is simply how most wallets get funded.\n\n**Credits:** each tool prices itself. The run costs `creditCost` credits from the shared monthly wallet (see `/api/mobile/media/credits`): reserved before the model runs and refunded in full if it fails, times out or the result is not delivered (see Billing below). `X-Credits-Charged` echoes what was deducted. An empty wallet answers 429 with `code: \"insufficient_credits\"`; the burst limiter also answers 429 but without that code.\n\n**Limits:** upload max 15 MB, image types only; the photo is EXIF-rotated and downscaled to ≤1024px on its longest edge before the run, so the result matches what the tool's sample card advertises. Rate limited to 6 runs per 5 minutes per user.\n\n**Processing time:** synchronous. Usually 5–20s, but up to ~4 minutes during provider queue spikes (the server waits 240s). Set the client timeout to at least 4 minutes.\n\n**Output:** usually `image/png`. Background removal returns a **transparent** PNG — preserve the alpha channel rather than flattening it onto white.",
           security: [{ bearerAuth: [] }],
           requestBody: {
             required: true,
@@ -4901,8 +5012,16 @@ export function buildMobileOpenApiSpec(serverOrigin) {
           scheme: "bearer",
           bearerFormat: "JWT",
         },
+        // Documentation only — not required by any operation (report-only; see info.description).
+        mobileRequestSignature: {
+          type: "apiKey",
+          in: "header",
+          name: "x-mobile-sign",
+          description:
+            "Optional HMAC request signature, sent with `x-mobile-key` and `x-mobile-ts`. Verified and counted server-side; rejected only when the server runs with MOBILE_REQUEST_SIGNING_MODE=enforce.",
+        },
       },
       schemas,
     },
-  };
+  });
 }

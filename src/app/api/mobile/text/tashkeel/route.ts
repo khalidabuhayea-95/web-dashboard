@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -8,7 +11,7 @@ import {
 } from "@/lib/logging/request";
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
+import { runPaidMediaOperation } from "@/lib/media/credits/paidRun.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -21,6 +24,8 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
+// Refund and give up a little before the platform would kill the request.
+const RUN_TIMEOUT_MS = (maxDuration - 5) * 1000;
 
 const logger = createLogger("api.mobile.text.tashkeel");
 // Text is cheap to run but a user can hammer it while typing, so the window is
@@ -47,7 +52,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await resolveMobileBearerUser(request);
     if (!auth.ok) {
-      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+      return jsonResponse(requestId, { error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status, {
         "Cache-Control": "no-store",
       });
     }
@@ -78,43 +83,44 @@ export async function POST(request: NextRequest) {
 
     const text = normalizeTashkeelInput((body as { text?: unknown }).text);
 
-    const insufficientCredits = await enforceMediaCredits({
+    // Credits are reserved atomically before the worker runs and refunded if it fails, times out,
+    // or the client leaves before the text is delivered; an Idempotency-Key retry replays instead
+    // of charging again (production audit H-13). The wallet AFTER this run rides the response as
+    // X-Credits-* (2026-09-08 direction).
+    const response = await runPaidMediaOperation({
+      request,
+      logger: requestLogger,
       mobileUserId: mobileUser.id,
       feature: MEDIA_CREDIT_FEATURES.TASHKEEL,
+      idempotencyScope: "text:tashkeel",
+      // The text is what was asked for; only its digest is kept.
+      fingerprint: createHash("sha256").update(text).digest("hex").slice(0, 16),
+      timeoutMs: RUN_TIMEOUT_MS,
+      execute: () => diacritizeArabicText(text),
+      respond: (result) => {
+        requestLogger.info("Diacritization completed", {
+          mobileUserId: mobileUser.id,
+          inputChars: text.length,
+          outputChars: result.text.length,
+          model: result.model,
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          usage: { provider: result.provider, model: `selfhost/${result.model}` },
+          headers: { "Content-Type": "application/json" },
+          body: new TextEncoder().encode(JSON.stringify({ text: result.text })),
+        };
+      },
     });
-    if (insufficientCredits) {
-      return attachRequestIdHeader(insufficientCredits, requestId);
-    }
-
-    const result = await diacritizeArabicText(text);
-
-    await recordMediaUsage({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.TASHKEEL,
-      provider: result.provider,
-      model: `selfhost/${result.model}`,
-    });
-
-    // The wallet AFTER this run, so the app updates its shared balance from this very
-    // response instead of asking again (2026-09-08 direction).
-    const creditHeaders = await creditBalanceHeaders({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.TASHKEEL,
-    });
-
-    requestLogger.info("Diacritization completed", {
-      mobileUserId: mobileUser.id,
-      inputChars: text.length,
-      outputChars: result.text.length,
-      model: result.model,
-      durationMs: Date.now() - startedAt,
-    });
-
-    return jsonResponse(requestId, { text: result.text }, 200, {
-      "Cache-Control": "no-store",
-      ...creditHeaders,
-    });
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) {
+      requestLogger.error("Diacritization failed: service unavailable", error, {
+        durationMs: Date.now() - startedAt,
+      });
+      return attachRequestIdHeader(unavailable, requestId);
+    }
     if (error instanceof TashkeelError) {
       requestLogger.warn("Diacritization rejected", { code: error.code, error: error.message });
       return jsonResponse(requestId, { error: error.message, code: error.code }, error.status, {

@@ -33,8 +33,14 @@ export function signMobileRequest({ method, path, search = "", timestamp, secret
   return crypto.createHmac("sha256", secret).update(payload).digest("hex");
 }
 
-export function verifyMobileRequest(request) {
-  const { keyId, secret } = getConfig();
+/**
+ * Checks the x-mobile-key / x-mobile-ts / x-mobile-sign headers. `reason` is a stable code for
+ * metrics (src/lib/mobile/requestSigning.server.js counts them): "skipped" when signing is not
+ * configured, "verified", or one of "missing_headers" | "invalid_key" | "invalid_timestamp" |
+ * "expired" | "invalid_signature". `config`/`now` default to the environment and the clock.
+ */
+export function verifyMobileRequest(request, { config = getConfig(), now = Date.now() } = {}) {
+  const { keyId, secret } = config;
 
   // Keep local development simple if signing is not configured.
   if (!keyId || !secret) {
@@ -46,28 +52,27 @@ export function verifyMobileRequest(request) {
   const timestampValue = request.headers.get("x-mobile-ts") || "";
 
   if (!incomingKey || !incomingSignature || !timestampValue) {
-    return { ok: false, error: "Missing mobile signature headers." };
+    return { ok: false, reason: "missing_headers", error: "Missing mobile signature headers." };
   }
 
   if (!timingSafeEqual(incomingKey, keyId)) {
-    return { ok: false, error: "Invalid mobile key." };
+    return { ok: false, reason: "invalid_key", error: "Invalid mobile key." };
   }
 
   const timestampMs = toTimestampMs(timestampValue);
   if (!Number.isFinite(timestampMs)) {
-    return { ok: false, error: "Invalid mobile timestamp." };
+    return { ok: false, reason: "invalid_timestamp", error: "Invalid mobile timestamp." };
   }
 
-  const now = Date.now();
   if (Math.abs(now - timestampMs) > MAX_SKEW_MS) {
-    return { ok: false, error: "Mobile signature expired." };
+    return { ok: false, reason: "expired", error: "Mobile signature expired." };
   }
 
   const payload = buildSigningPayload(request, timestampValue);
   const expected = crypto.createHmac("sha256", secret).update(payload).digest("hex");
 
   if (!timingSafeEqual(incomingSignature, expected)) {
-    return { ok: false, error: "Invalid mobile signature." };
+    return { ok: false, reason: "invalid_signature", error: "Invalid mobile signature." };
   }
 
   return { ok: true, reason: "verified" };

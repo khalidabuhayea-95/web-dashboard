@@ -532,12 +532,15 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
         const pageId = String(page?.id || "").trim();
         if (!pageId) continue;
 
+        // ★Always capture fresh. The PageBar cache holds 168px strip tiles (or, on a loaded
+        // template, the stored URLs of earlier ones) — shipping those made a multi-page card on
+        // mobile slide through ~3x-upscaled, visibly pixelated pages. The cache is only the
+        // fallback, so a failed capture keeps the page's previous preview instead of dropping it.
         const cached = String(pageThumbnails[pageId] || "").trim();
-        if (cached) {
-          collected[pageId] = cached;
+        if (!stageApi?.captureThumbnailDataUrlForPage) {
+          if (cached) collected[pageId] = cached;
           continue;
         }
-        if (!stageApi?.captureThumbnailDataUrlForPage) continue;
         try {
           // Hard ceiling per page. Rendering a page off-screen depends on image decoding and
           // frame scheduling, neither of which is guaranteed to make progress (a backgrounded
@@ -551,8 +554,10 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
             ])) || ""
           ).trim();
           if (captured) collected[pageId] = captured;
+          else if (cached) collected[pageId] = cached;
         } catch {
           // Keep saving: a missing page preview only means mobile renders that tile itself.
+          if (cached) collected[pageId] = cached;
         }
       }
 

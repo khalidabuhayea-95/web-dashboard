@@ -1,0 +1,107 @@
+[
+ {
+  "id": "9b077862-d1f6-412c-b871-abcca28da2d5",
+  "fontId": "22f70df9-977f-421a-b557-39ea74513a7f",
+  "kind": "mobile@500",
+  "fontWeight": 500,
+  "fontStyle": "normal",
+  "format": "ttf",
+  "mimeType": "font/ttf",
+  "fileName": "font.ttf",
+  "storageBucket": "nayroz-media-dev",
+  "storagePath": "fonts/22f70df9-977f-421a-b557-39ea74513a7f/mobile@500/c8fa6996b214ddf7-font.ttf",
+  "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/22f70df9-977f-421a-b557-39ea74513a7f/mobile%40500/c8fa6996b214ddf7-font.ttf",
+  "sizeBytes": 86480,
+  "checksum": "c8fa6996b214ddf787cb661e2984cf0dd85c17eb14b3ef0cdd74dfdc1c0896dc",
+  "status": "ready",
+  "createdAt": "2026-08-10T17:23:07.043Z",
+  "updatedAt": "2026-08-10T17:23:07.043Z",
+  "font": {
+   "family": "YADK4CNr_R8_0"
+  }
+ },
+ {
+  "id": "022c58ae-3e1c-4a54-9d84-1a2ba53087a9",
+  "fontId": "22f70df9-977f-421a-b557-39ea74513a7f",
+  "kind": "mobile@300",
+  "fontWeight": 300,
+  "fontStyle": "normal",
+  "format": "ttf",
+  "mimeType": "font/ttf",
+  "fileName": "font.ttf",
+  "storageBucket": "nayroz-media-dev",
+  "storagePath": "fonts/22f70df9-977f-421a-b557-39ea74513a7f/mobile@300/c8fa6996b214ddf7-font.ttf",
+  "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/22f70df9-977f-421a-b557-39ea74513a7f/mobile%40300/c8fa6996b214ddf7-font.ttf",
+  "sizeBytes": 86480,
+  "checksum": "c8fa6996b214ddf787cb661e2984cf0dd85c17eb14b3ef0cdd74dfdc1c0896dc",
+  "status": "ready",
+  "createdAt": "2026-08-10T17:23:07.050Z",
+  "updatedAt": "2026-08-10T17:23:07.050Z",
+  "font": {
+   "family": "YADK4CNr_R8_0"
+  }
+ },
+ {
+  "id": "6aa54608-4c5d-46b1-8463-31e425df8ee2",
+  "fontId": "79ecb540-d06d-425f-9409-582131d5eca6",
+  "kind": "mobile@700",
+  "fontWeight": 700,
+  "fontStyle": "normal",
+  "format": "ttf",
+  "mimeType": "font/ttf",
+  "fileName": "font.ttf",
+  "storageBucket": "nayroz-media-dev",
+  "storagePath": "fonts/79ecb540-d06d-425f-9409-582131d5eca6/mobile@700/f554ee2405188964-font.ttf",
+  "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/79ecb540-d06d-425f-9409-582131d5eca6/mobile%40700/f554ee2405188964-font.ttf",
+  "sizeBytes": 170760,
+  "checksum": "f554ee24051889641ebe87c6f31e511fe8a67677d004f22476b5a16e149f6e16",
+  "status": "ready",
+  "createdAt": "2026-08-10T17:23:09.587Z",
+  "updatedAt": "2026-08-11T13:02:37.729Z",
+  "font": {
+   "family": "YACgEev4gKc_0"
+  }
+ },
+ {
+  "id": "42676464-0a91-48e7-99b0-0b3cfb750cbc",
+  "fontId": "0dfbb5a9-03e2-4f6e-bc55-2f16f5777c10",
+  "kind": "mobile@700",
+  "fontWeight": 700,
+  "fontStyle": "normal",
+  "format": "ttf",
+  "mimeType": "font/ttf",
+  "fileName": "font.ttf",
+  "storageBucket": "nayroz-media-dev",
+  "storagePath": "fonts/0dfbb5a9-03e2-4f6e-bc55-2f16f5777c10/mobile@700/e1e354e047f95764-font.ttf",
+  "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/0dfbb5a9-03e2-4f6e-bc55-2f16f5777c10/mobile%40700/e1e354e047f95764-font.ttf",
+  "sizeBytes": 78944,
+  "checksum": "e1e354e047f957641ce5fddefbe2e7365934dc613744d30ca61bd644e1286c29",
+  "status": "ready",
+  "createdAt": "2026-08-26T07:10:18.346Z",
+  "updatedAt": "2026-08-26T07:10:18.346Z",
+  "font": {
+   "family": "YAFdJpYtCxE_1"
+  }
+ },
+ {
+  "id": "74f5cbc0-d072-4aae-8885-b40d4fd260ba",
+  "fontId": "6547a1e7-904e-4106-8199-8e821da7b2e1",
+  "kind": "mobile@700",
+  "fontWeight": 700,
+  "fontStyle": "normal",
+  "format": "ttf",
+  "mimeType": "font/ttf",
+  "fileName": "font.ttf",
+  "storageBucket": "nayroz-media-dev",
+  "storagePath": "fonts/6547a1e7-904e-4106-8199-8e821da7b2e1/mobile@700/f59a2cfc654d0822-font.ttf",
+  "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/6547a1e7-904e-4106-8199-8e821da7b2e1/mobile%40700/f59a2cfc654d0822-font.ttf",
+  "sizeBytes": 871732,
+  "checksum": "f59a2cfc654d08222595238fd85f0fbb8e3a596c319e1092dd0edc4965e80bfd",
+  "status": "ready",
+  "createdAt": "2026-08-26T07:10:20.559Z",
+  "updatedAt": "2026-08-26T07:10:20.559Z",
+  "font": {
+   "family": "YAFdJhX-538_0"
+  }
+ }
+]

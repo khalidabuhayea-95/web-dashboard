@@ -1,8 +1,10 @@
 import { NextResponse } from "next/server";
 import { enforceIpRateLimit } from "@/lib/security/rateLimit.server";
 
+import { handleApiError } from "@/lib/api/errors";
 import prisma from "@/lib/prisma";
 import { MOBILE_PUBLIC_JSON_CACHE_SHORT } from "@/lib/mobile/cacheControl";
+import { compareSearchRelevance, findTemplateSearchMatches } from "@/lib/mobile/templateSearch.server";
 import { resolveTemplateAudience } from "@/lib/mobile/templateAudience.server";
 import {
   createMobilePublicMediaUrlResolver,
@@ -91,6 +93,15 @@ export async function GET(request) {
   });
   if (limited) return limited;
 
+  try {
+    return await buildBySubCategoryResponse(request);
+  } catch (error) {
+    // An outage answers 503 + no-store (production audit H-24), never an uncaught framework error.
+    return handleApiError(error, "Failed to fetch templates by sub category");
+  }
+}
+
+async function buildBySubCategoryResponse(request) {
   const { searchParams } = new URL(request.url);
   const audience = await resolveTemplateAudience(request);
   const locale = resolveMobileLocale(request, searchParams);
@@ -164,8 +175,16 @@ export async function GET(request) {
         }));
     });
 
+  // A query is matched Arabic-aware over title, tags and placement labels, exactly like
+  // /templates/search (production audit H-18), instead of a raw title substring.
+  const search = query
+    ? await findTemplateSearchMatches({ query, statuses: audience.statuses, taxonomy })
+    : null;
+  const matchedIds = search ? Array.from(search.matches.keys()) : null;
+
   const templateRowsPerSubCategory = await Promise.all(
-    subCategoryDescriptors.map(({ category, subCategory }) => {
+    subCategoryDescriptors.map(async ({ category, subCategory }) => {
+      if (matchedIds && matchedIds.length === 0) return [];
       // A rail that is itself linked to the occasion is all-boosted, so its order is
       // unchanged and the single query stays; other rails pin their boosted templates.
       const railIsLinked = boost.templateCategoryPairs.some(
@@ -173,20 +192,26 @@ export async function GET(request) {
           pair.category === category.value && (!pair.subCategory || pair.subCategory === subCategory.value)
       );
       const boostedIds = railIsLinked ? [] : boost.templateIdsByPair[`${category.value}::${subCategory.value}`] || [];
-      return fetchRailTemplates({
-        // Matches any placement, so a multi-category template shows up on every rail it
-        // was assigned to rather than only its primary one.
-        where: mergeTemplateWhere(
-          audience.statusWhere,
-          templateCategoryWhere({ category: category.value, subCategory: subCategory.value }),
-          {
-            ...(tag ? { tags: { array_contains: [tag] } } : {}),
-            ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
-          }
-        ),
-        take: templatesPerSubCategory,
-        boostedIds,
-      });
+      // Matches any placement, so a multi-category template shows up on every rail it
+      // was assigned to rather than only its primary one.
+      const where = mergeTemplateWhere(
+        audience.statusWhere,
+        templateCategoryWhere({ category: category.value, subCategory: subCategory.value }),
+        tag ? { tags: { array_contains: [tag] } } : {},
+        matchedIds ? { id: { in: matchedIds } } : {}
+      );
+      if (!search) {
+        return fetchRailTemplates({ where, take: templatesPerSubCategory, boostedIds });
+      }
+      // Searching: the whole matched rail in its usual order, then exact title hits first
+      // (a stable sort keeps featured → boosted → recency inside each relevance tier). Shipped
+      // builds re-filter rails by raw title on the device, so those lead.
+      const railRows = await fetchRailTemplates({ where, take: matchedIds.length, boostedIds });
+      return [...railRows]
+        .sort((left, right) =>
+          compareSearchRelevance(search.matches.get(left.id), search.matches.get(right.id))
+        )
+        .slice(0, templatesPerSubCategory);
     })
   );
 

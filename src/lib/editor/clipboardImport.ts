@@ -1,3 +1,10 @@
+import {
+  canvaPublicMediaUrl,
+  parseCanvaClipboardHtml,
+  parseEmbeddedCanvaMedia,
+  placeCanvaPastedImage,
+} from "@/lib/editor/canvaClipboard";
+
 const INTERNAL_EDITOR_CLIPBOARD_TYPE = "application/x-web-dashboard-editor-selection";
 
 function asString(value: unknown) {
@@ -297,4 +304,129 @@ export function extractTextFromClipboardHtml(html: string) {
   } catch {
     return "";
   }
+}
+
+// ── Canva copy → paste ───────────────────────────────────────────────────────────────────────
+// Canva's clipboard carries element boxes and media ids, no pixels (src/lib/editor/canvaClipboard).
+// The pictures come from the Canva Importer extension's enrichment when it is installed, else
+// from Canva's public CDN for the media that live there; each is uploaded like any other editor
+// image and placed where Canva had it.
+
+export interface CanvaClipboardPasteResult {
+  /** Layers added. */
+  added: number;
+  /** Copied elements that carried a picture the editor could not get at. */
+  unavailable: number;
+  /** Copied elements with no picture at all (text, plain shapes). */
+  skipped: number;
+}
+
+function loadImageSize(src: string) {
+  return new Promise<{ width: number; height: number }>((resolve) => {
+    if (typeof Image === "undefined") {
+      resolve({ width: 0, height: 0 });
+      return;
+    }
+    const image = new Image();
+    image.onload = () => resolve({ width: image.naturalWidth, height: image.naturalHeight });
+    image.onerror = () => resolve({ width: 0, height: 0 });
+    image.src = src;
+  });
+}
+
+async function fetchCanvaPublicMediaDataUrl(url: string) {
+  if (!url || typeof fetch === "undefined") return "";
+  try {
+    const response = await fetch(url, { mode: "cors", credentials: "omit" });
+    if (!response.ok) return "";
+    const blob = await response.blob();
+    if (!blob.size || !String(blob.type || "").startsWith("image/")) return "";
+    return await blobToDataUrl(blob);
+  } catch {
+    return "";
+  }
+}
+
+export function isCanvaClipboardHtml(html: string) {
+  return parseCanvaClipboardHtml(html) !== null;
+}
+
+export async function importCanvaClipboardImages(
+  html: string,
+  deps: {
+    pageWidth: number;
+    pageHeight: number;
+    addImageElement: (src: string, partial: Record<string, unknown>) => string;
+    /** Re-hosts a pasted picture; returns "" to keep the data URL as the layer's source. */
+    uploadDataUrl?: (dataUrl: string, fileName: string) => Promise<string>;
+  }
+): Promise<CanvaClipboardPasteResult> {
+  const result: CanvaClipboardPasteResult = { added: 0, unavailable: 0, skipped: 0 };
+  const payload = parseCanvaClipboardHtml(html);
+  if (!payload) return result;
+  const embedded = parseEmbeddedCanvaMedia(html);
+
+  for (const element of payload.elements) {
+    if (!element.media) {
+      result.skipped += 1;
+      continue;
+    }
+    const picture = embedded[element.media.id] || null;
+    let dataUrl = picture?.dataUrl || "";
+    let sourceWidth = picture?.width || 0;
+    let sourceHeight = picture?.height || 0;
+    if (!dataUrl) {
+      dataUrl = await fetchCanvaPublicMediaDataUrl(canvaPublicMediaUrl(element.media));
+    }
+    if (!dataUrl) {
+      result.unavailable += 1;
+      continue;
+    }
+    if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
+      const size = await loadImageSize(dataUrl);
+      sourceWidth = size.width;
+      sourceHeight = size.height;
+    }
+    if (!(sourceWidth > 0) || !(sourceHeight > 0)) {
+      result.unavailable += 1;
+      continue;
+    }
+    let src = dataUrl;
+    if (deps.uploadDataUrl) {
+      try {
+        src = (await deps.uploadDataUrl(dataUrl, `canva-${element.media.id}.png`)) || dataUrl;
+      } catch {
+        src = dataUrl;
+      }
+    }
+    const placed = placeCanvaPastedImage({
+      element,
+      payload,
+      pageWidth: deps.pageWidth,
+      pageHeight: deps.pageHeight,
+      sourceWidth,
+      sourceHeight,
+    });
+    const fullSource =
+      placed.cropX === 0 &&
+      placed.cropY === 0 &&
+      Math.abs(placed.cropWidth - sourceWidth) < 0.5 &&
+      Math.abs(placed.cropHeight - sourceHeight) < 0.5;
+    const id = deps.addImageElement(src, {
+      name: "Canva image",
+      x: placed.x,
+      y: placed.y,
+      width: placed.width,
+      height: placed.height,
+      rotation: placed.rotation,
+      sourceWidth,
+      sourceHeight,
+      ...(fullSource
+        ? {}
+        : { cropX: placed.cropX, cropY: placed.cropY, cropWidth: placed.cropWidth, cropHeight: placed.cropHeight }),
+      importKind: "image",
+    });
+    if (id) result.added += 1;
+  }
+  return result;
 }

@@ -1,6 +1,11 @@
 import { SignJWT, createRemoteJWKSet, jwtVerify } from "jose";
 
 import prisma from "@/lib/prisma";
+import {
+  SERVICE_UNAVAILABLE_CODE,
+  SERVICE_UNAVAILABLE_MESSAGE,
+  isInfrastructureError,
+} from "@/lib/api/infrastructureErrors";
 import { createOpaqueToken, hashOpaqueToken } from "@/lib/auth/tokens";
 import { normalizeEmail, sanitizeDisplayName } from "@/lib/auth/utils";
 import {
@@ -241,6 +246,19 @@ export async function resolveMobileBearerUser(request) {
         code: ACCOUNT_DISABLED_CODE,
         error: error.message,
         reason: "account_disabled",
+      };
+    }
+
+    // A database outage says nothing about the token. Answering 401 here made the app throw a
+    // valid session away during a short Postgres outage (production audit H-24); 503 means
+    // "retry later" and the session survives.
+    if (isInfrastructureError(error)) {
+      return {
+        ok: false,
+        status: 503,
+        code: SERVICE_UNAVAILABLE_CODE,
+        error: SERVICE_UNAVAILABLE_MESSAGE,
+        reason: "service_unavailable",
       };
     }
 

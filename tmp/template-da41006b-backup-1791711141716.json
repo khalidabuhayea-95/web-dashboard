@@ -1,0 +1,382 @@
+{
+  "id": "da41006b-b865-43d1-b557-a0a9f21d182a",
+  "ownerId": "900b5b3c-ab9c-449b-82be-b0e6326185d3",
+  "name": "Minimalist Modern Before After Beauty Instagram Post - منشور Instagram",
+  "slug": "minimalist-modern-before-after-beauty-instagram-post-instagr",
+  "status": "draft",
+  "version": 1,
+  "canvasSize": {
+    "width": 1080,
+    "height": 1080
+  },
+  "pageCount": 1,
+  "pageThumbnails": null,
+  "category": "health-fitness",
+  "subCategory": "fitness-challenge",
+  "categories": [
+    {
+      "category": "health-fitness",
+      "subCategory": "fitness-challenge"
+    }
+  ],
+  "tags": [
+    "minimalist",
+    "modern",
+    "before",
+    "after",
+    "beauty",
+    "instagram",
+    "post",
+    "منشور"
+  ],
+  "thumbnailDataUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/11/75beac0e-eb81-4f69-9c53-cd7ce021fda6.webp",
+  "previewVideoUrl": null,
+  "previewPosterUrl": null,
+  "previewStatus": null,
+  "previewDurationMs": null,
+  "previewVersion": null,
+  "previewError": null,
+  "previewUpdatedAt": null,
+  "data": {
+    "meta": {
+      "import": {
+        "page": {
+          "id": "canva-page-1",
+          "name": "Canva Page 1",
+          "width": 1080,
+          "height": 1080,
+          "sourceWidth": 1080,
+          "sourceHeight": 1080
+        },
+        "source": "canva-extension",
+        "warnings": [
+          "Could not isolate merged Canva layer \"LB3qNBqbnq3LMXzz\".",
+          "Font cuts: Now -> 400 (design used 400)",
+          "Removed redundant base shape layer (layer-1).",
+          "Applied page background color #ffffff."
+        ],
+        "layerTree": [
+          {
+            "id": "LB3qNBqbnq3LMXzz",
+            "kind": "image",
+            "name": "Close-up Photo of Woman's Beautiful Face",
+            "bounds": {
+              "x": 0.0004037383178001619,
+              "y": 0.0004037383178001619,
+              "width": 1080,
+              "height": 1080
+            },
+            "zIndex": 1,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBL5wQZYRxKhGTBb",
+            "kind": "shape",
+            "name": "Shape 3",
+            "bounds": {
+              "x": 0.0004037383178001619,
+              "y": 534.5000041121496,
+              "width": 1080,
+              "height": 11
+            },
+            "zIndex": 2,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": -90
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBhV9sPdnCTVvTlm",
+            "kind": "text",
+            "name": "Text 4",
+            "bounds": {
+              "x": 106.0001599613026,
+              "y": 107.9992647198452,
+              "width": 434,
+              "height": 89
+            },
+            "zIndex": 3,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBwR2gsnqW9dqtbZ",
+            "kind": "text",
+            "name": "Text 5",
+            "bounds": {
+              "x": 538.0002421020736,
+              "y": 881.9325869489633,
+              "width": 434,
+              "height": 89
+            },
+            "zIndex": 4,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          }
+        ],
+        "usedFonts": [
+          "Now"
+        ],
+        "layerStats": {
+          "skipped": 0,
+          "detected": 5,
+          "editable": 4,
+          "rasterized": 1
+        },
+        "provenance": {
+          "via": "extension",
+          "layers": true,
+          "parity": "v2",
+          "source": "canva",
+          "canvaKeywordCount": 0
+        },
+        "assetManifest": {
+          "assets": [
+            {
+              "id": "asset-1",
+              "kind": "image",
+              "path": "thumbnailDataUrl",
+              "bytes": 37950,
+              "field": "thumbnailDataUrl",
+              "status": "uploaded",
+              "mimeType": "image/webp",
+              "original": "data:image/jpeg;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/11/75beac0e-eb81-4f69-9c53-cd7ce021fda6.webp",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-2",
+              "kind": "image",
+              "path": "fabricData.objects[1].src",
+              "bytes": 1739974,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/11/54120df6-c73d-479d-ab61-414344b908f7.png",
+              "sourceType": "data-uri"
+            }
+          ],
+          "summary": {
+            "total": 2,
+            "failed": 0,
+            "uploaded": 2,
+            "preserved": 0
+          },
+          "version": 1,
+          "uploadedAt": "2026-10-11T09:24:54.868Z"
+        },
+        "importVersion": 2
+      }
+    },
+    "objects": [
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/11/54120df6-c73d-479d-ab61-414344b908f7.png",
+        "top": 0.0004037383178001619,
+        "left": 0.0004037383178001619,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 944,
+        "height": 944,
+        "scaleX": 1.14406779661017,
+        "scaleY": 1.14406779661017,
+        "tagsEn": [
+          "close",
+          "up",
+          "photo",
+          "of",
+          "woman",
+          "beautiful",
+          "face"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Close-up Photo of Woman's Beautiful Face",
+        "version": "7.0.0",
+        "extBuild": "1.25.32-canva-fidelity",
+        "fallback": true,
+        "labelsEn": [
+          "Close-up Photo of Woman's Beautiful Face",
+          "close",
+          "up",
+          "photo",
+          "of",
+          "woman",
+          "beautiful",
+          "face"
+        ],
+        "layerName": "Close-up Photo of Woman's Beautiful Face",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 944,
+        "importNodeId": "LB3qNBqbnq3LMXzz",
+        "sourceHeight": 944,
+        "rasterPalette": [
+          "#af785c",
+          "#55311d",
+          "#221111",
+          "#d9ac9a",
+          "#171706",
+          "#6b6b64"
+        ],
+        "sourceAssetId": "",
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/11/54120df6-c73d-479d-ab61-414344b908f7.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "top": 1080.00000411215,
+        "fill": "rgb(250, 244, 239)",
+        "left": 534.5004037383179,
+        "type": "rect",
+        "angle": -90,
+        "flipX": false,
+        "flipY": false,
+        "width": 1080,
+        "height": 11,
+        "scaleX": 1,
+        "scaleY": 1,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.32-canva-fidelity",
+        "fallback": false,
+        "labelsEn": [],
+        "layerName": "Shape 3",
+        "layerType": "shape",
+        "importKind": "shape",
+        "layerHidden": false,
+        "layerLocked": false,
+        "strokeWidth": 0,
+        "importNodeId": "LBL5wQZYRxKhGTBb",
+        "sourceAssetId": "",
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "shape-svg"
+      },
+      {
+        "top": 119.1992647198452,
+        "fill": "rgb(250, 244, 239)",
+        "left": 106.0001599613026,
+        "text": "BEFORE",
+        "type": "textbox",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 438.34,
+        "height": 89,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.32-canva-fidelity",
+        "fallback": false,
+        "fontSize": 74.6667,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 4",
+        "layerType": "text",
+        "textAlign": "left",
+        "underline": false,
+        "fontFamily": "Now",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 0.8973210279816839,
+        "charSpacing": 50.00006696425582,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBhV9sPdnCTVvTlm",
+        "sourceAssetId": "",
+        "fallbackReason": "",
+        "importParentId": null
+      },
+      {
+        "top": 893.1325869489633,
+        "fill": "rgb(250, 244, 239)",
+        "left": 533.6602421020737,
+        "text": "AFTER",
+        "type": "textbox",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 438.34,
+        "height": 89,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.32-canva-fidelity",
+        "fallback": false,
+        "fontSize": 74.6667,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 5",
+        "layerType": "text",
+        "textAlign": "right",
+        "underline": false,
+        "fontFamily": "Now",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 0.8973210279816839,
+        "charSpacing": 50.00006696425582,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBwR2gsnqW9dqtbZ",
+        "sourceAssetId": "",
+        "fallbackReason": "",
+        "importParentId": null
+      }
+    ],
+    "version": "7.0.0",
+    "backgroundColor": "#ffffff"
+  },
+  "isPremium": false,
+  "isFeatured": false,
+  "featuredAt": null,
+  "publishedAt": null,
+  "createdAt": "2026-10-11T09:24:57.294Z",
+  "updatedAt": "2026-10-11T09:24:57.294Z"
+}

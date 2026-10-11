@@ -6,6 +6,7 @@ import { fitImportedAnimationsToCategories } from "@/lib/editor/animationSlotFit
 import { extractFabricData } from "@/lib/templates/editorData";
 import { uploadTemplatePageThumbnails } from "@/lib/templates/pageThumbnails.server";
 import { buildSnapshot, normalizeSlug } from "@/lib/templates/serverCore";
+import { normalizeTemplateArabicTextInPlace } from "@/lib/text/arabicPresentationForms";
 import {
   attachImportMetadataToFabricData,
   readImportMetadataFromEditorData,
@@ -195,7 +196,12 @@ export function resolveImportedTemplateData({
   const metadataFromEditor = readImportMetadataFromEditorData(editorData);
   const data = attachImportMetadataToFabricData(baseData, importMetadata || metadataFromEditor);
   const refittedAnimations = fitImportedAnimationsToCategories(data);
-  return { data, hasFabricData, refittedAnimations };
+  // Canva hands curved text over as pre-shaped glyphs in DISPLAY order (Arabic Presentation
+  // Forms in visual order); every renderer here shapes and reorders by itself, so that text drew
+  // disjoint and reversed in the editor, the app and the export (production audit H-04). Stored
+  // logical from now on — every importer (Canva extension, Canva URL, PSD) passes through here.
+  const arabicTextFixes = normalizeTemplateArabicTextInPlace(data).length;
+  return { data, hasFabricData, refittedAnimations, arabicTextFixes };
 }
 
 /**
@@ -242,7 +248,7 @@ export async function createImportedTemplate({
   const sanitizedThumbnailSource = rawThumbnailSource.startsWith("data:image/")
     ? await resizeThumbnailDataUrlHalf(rawThumbnailSource)
     : rawThumbnailSource;
-  const { data, hasFabricData, refittedAnimations } = resolveImportedTemplateData({
+  const { data, hasFabricData, refittedAnimations, arabicTextFixes } = resolveImportedTemplateData({
     fabricData,
     editorData,
     importMetadata,
@@ -270,6 +276,9 @@ export async function createImportedTemplate({
   const uniqueSlug = await ensureUniqueSlug(slug || uniqueName);
   if (refittedAnimations > 0 && importMetadata && typeof importMetadata === "object") {
     importMetadata.refittedAnimations = refittedAnimations;
+  }
+  if (arabicTextFixes > 0 && importMetadata && typeof importMetadata === "object") {
+    importMetadata.normalizedArabicTextLayers = arabicTextFixes;
   }
   const disallowedCanvaReferences = findExternalCanvaReferences(
     {

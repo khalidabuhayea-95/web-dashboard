@@ -98,6 +98,92 @@ export function isOneTimeAllowanceTier(tier: string): boolean {
   return tier !== "plus" && tier !== "pro";
 }
 
+// Number(null) === 0 passes Number.isFinite, so test for an explicit value.
+function resolveRunCost(settings: unknown, feature: string, costOverride: number | null | undefined): number {
+  const hasOverride =
+    costOverride !== null && costOverride !== undefined && Number.isFinite(Number(costOverride));
+  return hasOverride ? Math.max(0, Math.floor(Number(costOverride))) : resolveCreditCost(settings, feature);
+}
+
+function buildBalance({
+  feature,
+  cost,
+  allowance,
+  used,
+  oneTime,
+  now,
+}: {
+  feature: string;
+  cost: number;
+  allowance: number;
+  used: number;
+  oneTime: boolean;
+  now: Date;
+}): MediaCreditBalance {
+  const resetAt = resolvePeriodResetAt(now);
+  const retryAfterSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
+  const remaining = Math.max(0, allowance - used);
+  return {
+    feature,
+    cost,
+    allowance,
+    used,
+    remaining,
+    // A zero-cost feature is always free to run; otherwise the run must fit in
+    // what is left, so a user is never charged into a negative balance.
+    allowed: cost === 0 || remaining >= cost,
+    periodKey: resolvePeriodKey(now),
+    // Null / no retry advice on a one-time grant: waiting for the month to
+    // turn will not give a free account more credits.
+    resetAtIso: oneTime ? null : resetAt.toISOString(),
+    retryAfterSeconds: oneTime ? 0 : retryAfterSeconds,
+  };
+}
+
+/**
+ * The wallet for a feature, read from the database. THROWS when it cannot be read — use
+ * checkMediaCredits for the fail-open variant.
+ */
+async function computeMediaCreditBalance({
+  mobileUserId,
+  feature,
+  costOverride = null,
+}: {
+  mobileUserId: string;
+  feature: string;
+  costOverride?: number | null;
+}): Promise<MediaCreditBalance> {
+  const now = new Date();
+  const normalizedFeature = normalizeMediaCreditFeature(feature);
+  if (!normalizedFeature) throw new Error(`Unknown media credit feature: ${String(feature)}`);
+
+  const [settings, user] = await Promise.all([
+    getMobileAppSettings(),
+    prisma.mobileUser.findUnique({
+      where: { id: mobileUserId },
+      select: { creditAllowance: true, subscriptionTier: true, subscriptionExpiresAt: true },
+    }),
+  ]);
+  // The usage window depends on the tier, so it cannot join the parallel
+  // fetch above — a free account is summed over all time, a paid one over
+  // the current month.
+  const tier = resolveUserTier(user);
+  const oneTime = isOneTimeAllowanceTier(tier);
+  const used = await sumCreditsUsed(mobileUserId, resolvePeriodKey(now), { lifetime: oneTime });
+
+  return buildBalance({
+    feature: normalizedFeature,
+    cost: resolveRunCost(settings, normalizedFeature, costOverride),
+    allowance: resolveMonthlyAllowance(settings, {
+      userAllowance: user?.creditAllowance ?? null,
+      tier,
+    }),
+    used,
+    oneTime,
+    now,
+  });
+}
+
 /**
  * Reads a user's wallet for a given feature: what the run costs, what they have
  * left, and whether it fits.
@@ -106,6 +192,9 @@ export function isOneTimeAllowanceTier(tier: string): boolean {
  * failure is logged as an error. A database blip should not take the AI features
  * offline, and the per-user rate limiter still caps the burst. To fail closed
  * instead, return `allowed: false` from the catch block below.
+ *
+ * ★Read-only, so it can never stop two concurrent runs from both passing: the paid routes
+ * charge through reserveMediaCredits (atomic) instead. This stays for read paths and scripts.
  */
 export async function checkMediaCredits({
   mobileUserId,
@@ -122,22 +211,17 @@ export async function checkMediaCredits({
   costOverride?: number | null;
 }): Promise<MediaCreditBalance> {
   const now = new Date();
-  const periodKey = resolvePeriodKey(now);
-  const resetAt = resolvePeriodResetAt(now);
-  const retryAfterSeconds = Math.max(0, Math.ceil((resetAt.getTime() - now.getTime()) / 1000));
   const normalizedFeature = normalizeMediaCreditFeature(feature);
-
-  const openState = (extra: Partial<MediaCreditBalance> = {}): MediaCreditBalance => ({
-    feature: normalizedFeature || String(feature || ""),
-    cost: 0,
-    allowance: 0,
-    used: 0,
-    remaining: 0,
+  const openState = (): MediaCreditBalance => ({
+    ...buildBalance({
+      feature: normalizedFeature || String(feature || ""),
+      cost: 0,
+      allowance: 0,
+      used: 0,
+      oneTime: false,
+      now,
+    }),
     allowed: true,
-    periodKey,
-    resetAtIso: resetAt.toISOString(),
-    retryAfterSeconds,
-    ...extra,
   });
 
   if (!normalizedFeature) {
@@ -146,47 +230,7 @@ export async function checkMediaCredits({
   }
 
   try {
-    const [settings, user] = await Promise.all([
-      getMobileAppSettings(),
-      prisma.mobileUser.findUnique({
-        where: { id: mobileUserId },
-        select: { creditAllowance: true, subscriptionTier: true, subscriptionExpiresAt: true },
-      }),
-    ]);
-    // The usage window depends on the tier, so it cannot join the parallel
-    // fetch above — a free account is summed over all time, a paid one over
-    // the current month.
-    const tier = resolveUserTier(user);
-    const oneTime = isOneTimeAllowanceTier(tier);
-    const used = await sumCreditsUsed(mobileUserId, periodKey, { lifetime: oneTime });
-
-    // Number(null) === 0 passes Number.isFinite, so test for an explicit value.
-    const hasOverride =
-      costOverride !== null && costOverride !== undefined && Number.isFinite(Number(costOverride));
-    const cost = hasOverride
-      ? Math.max(0, Math.floor(Number(costOverride)))
-      : resolveCreditCost(settings, normalizedFeature);
-    const allowance = resolveMonthlyAllowance(settings, {
-      userAllowance: user?.creditAllowance ?? null,
-      tier,
-    });
-    const remaining = Math.max(0, allowance - used);
-
-    return {
-      feature: normalizedFeature,
-      cost,
-      allowance,
-      used,
-      remaining,
-      // A zero-cost feature is always free to run; otherwise the run must fit in
-      // what is left, so a user is never charged into a negative balance.
-      allowed: cost === 0 || remaining >= cost,
-      periodKey,
-      // Null / no retry advice on a one-time grant: waiting for the month to
-      // turn will not give a free account more credits.
-      resetAtIso: oneTime ? null : resetAt.toISOString(),
-      retryAfterSeconds: oneTime ? 0 : retryAfterSeconds,
-    };
+    return await computeMediaCreditBalance({ mobileUserId, feature: normalizedFeature, costOverride });
   } catch (error) {
     logger.error("Credit lookup failed; allowing the request", error, {
       mobileUserId,
@@ -196,12 +240,25 @@ export async function checkMediaCredits({
   }
 }
 
+/** The X-Credits-* set every successful paid response carries (no Retry-After: that is a 429's). */
+export function creditBalanceHeaderValues(balance: MediaCreditBalance): Record<string, string> {
+  return {
+    "X-Credits-Feature": balance.feature,
+    "X-Credits-Cost": String(balance.cost),
+    "X-Credits-Allowance": String(balance.allowance),
+    "X-Credits-Remaining": String(balance.remaining),
+    ...(balance.resetAtIso ? { "X-Credits-Reset": balance.resetAtIso } : {}),
+  };
+}
+
 /**
  * Wallet headers for a SUCCESSFUL run, so the app never has to ask "what's left?" after an AI
  * call — the answer rides the same response. Deliberately without `Retry-After`, which only
  * means something on the 429 refusal that [createCreditHeaders] builds.
  *
- * Read the balance AFTER charging, so `X-Credits-Remaining` is the post-run figure.
+ * Read the balance AFTER charging, so `X-Credits-Remaining` is the post-run figure. When the
+ * wallet cannot be read the headers are OMITTED: the old fail-open zero balance went out as
+ * `X-Credits-Remaining: 0` and the app showed an empty wallet after a successful run.
  */
 export async function creditBalanceHeaders({
   mobileUserId,
@@ -211,14 +268,7 @@ export async function creditBalanceHeaders({
   feature: string;
 }): Promise<Record<string, string>> {
   try {
-    const balance = await checkMediaCredits({ mobileUserId, feature });
-    return {
-      "X-Credits-Feature": balance.feature,
-      "X-Credits-Cost": String(balance.cost),
-      "X-Credits-Allowance": String(balance.allowance),
-      "X-Credits-Remaining": String(balance.remaining),
-      ...(balance.resetAtIso ? { "X-Credits-Reset": balance.resetAtIso } : {}),
-    };
+    return creditBalanceHeaderValues(await computeMediaCreditBalance({ mobileUserId, feature }));
   } catch (error) {
     // A run that succeeded must never fail because we could not price the wallet afterwards.
     logger.error("Post-run credit balance lookup failed", error, { mobileUserId, feature });
@@ -283,7 +333,11 @@ export async function enforceMediaCredits({
 }: EnforceOptions): Promise<NextResponse | null> {
   const balance = await checkMediaCredits({ mobileUserId, feature, costOverride });
   if (balance.allowed) return null;
+  return insufficientCreditsResponse(balance, message);
+}
 
+/** The 429 `insufficient_credits` refusal — one shape for the guard and the reservation. */
+export function insufficientCreditsResponse(balance: MediaCreditBalance, message?: string): NextResponse {
   return NextResponse.json(
     {
       error:
@@ -361,6 +415,217 @@ export async function recordMediaUsage({
       feature: normalizedFeature,
       model,
     });
+  }
+}
+
+// ---------------------------------------------------------------------------------------------
+// Reservations (production audit H-13 / ROB-05)
+// ---------------------------------------------------------------------------------------------
+// The paid routes used to read the balance, run the provider, and record usage AFTER the fact:
+// two overlapping runs both passed the read-only check and overdrew the wallet, and a run whose
+// client had already left (Back, cancel, iOS suspension, timeout) was still charged.
+//
+// Now the usage row IS the hold. It is inserted — with the run's credits — inside a transaction
+// that first locks the user's row, BEFORE the provider is called. A concurrent run queues on that
+// lock and its SUM then already includes this hold, so the wallet cannot be overdrawn. The row is
+// finalized (provider/model/cost) when the run succeeds and deleted — a full refund — when it
+// fails, times out, or the client leaves before the response is delivered
+// (src/lib/media/credits/paidRun.server.ts orchestrates that). No schema change: an unfinished
+// hold is simply a row whose provider is still MEDIA_CREDIT_RESERVATION_PROVIDER.
+
+/** `provider` of a usage row that is still a hold (run not finished). */
+export const MEDIA_CREDIT_RESERVATION_PROVIDER = "reserved";
+
+// A hold this old belongs to a process that died mid-run (the longest paid route allows 300 s);
+// the user's next reservation releases it rather than keeping their credits forever.
+const ORPHANED_RESERVATION_AGE_MS = 15 * 60_000;
+
+export type MediaCreditReservation = {
+  /** MediaUsage row id holding the credits. */
+  id: string;
+  mobileUserId: string;
+  feature: string;
+  credits: number;
+  periodKey: string;
+};
+
+export type ReserveMediaCreditsResult =
+  | {
+      ok: true;
+      reservation: MediaCreditReservation;
+      /** The wallet AFTER the hold — what X-Credits-Remaining reports. */
+      balance: MediaCreditBalance;
+      /** The feature's configured per-run cost (what X-Credits-Cost has always reported). */
+      featureCost: number;
+    }
+  | { ok: false; balance: MediaCreditBalance };
+
+/**
+ * Atomically checks the wallet and takes this run's credits. Returns `ok: false` with the
+ * balance when the run does not fit (the caller answers 429). THROWS when the database cannot be
+ * used — a run that cannot be billed must not run, so the caller answers 503 instead of the old
+ * fail-open behaviour.
+ */
+export async function reserveMediaCredits({
+  mobileUserId,
+  feature,
+  costOverride = null,
+}: {
+  mobileUserId: string;
+  feature: string;
+  costOverride?: number | null;
+}): Promise<ReserveMediaCreditsResult> {
+  const normalizedFeature = normalizeMediaCreditFeature(feature);
+  if (!normalizedFeature) throw new Error(`Unknown media credit feature: ${String(feature)}`);
+
+  const now = new Date();
+  const periodKey = resolvePeriodKey(now);
+  const settings = await getMobileAppSettings();
+  const cost = resolveRunCost(settings, normalizedFeature, costOverride);
+  const featureCost = resolveCreditCost(settings, normalizedFeature);
+
+  return prisma.$transaction(async (tx: any) => {
+    // One writer per wallet: a second run for the same user waits here until this transaction
+    // commits, and READ COMMITTED then shows it this hold in the SUM below.
+    // Row: { creditAllowance: number | null, subscriptionTier, subscriptionExpiresAt }.
+    const locked: any[] = await tx.$queryRaw`
+      SELECT "creditAllowance", "subscriptionTier", "subscriptionExpiresAt"
+      FROM "MobileUser"
+      WHERE "id" = ${mobileUserId}::uuid
+      FOR UPDATE
+    `;
+    const user = locked[0];
+    if (!user) throw new Error("Mobile user not found for a credit reservation.");
+
+    const orphaned = await tx.mediaUsage.deleteMany({
+      where: {
+        mobileUserId,
+        provider: MEDIA_CREDIT_RESERVATION_PROVIDER,
+        createdAt: { lt: new Date(now.getTime() - ORPHANED_RESERVATION_AGE_MS) },
+      },
+    });
+    if (orphaned.count > 0) {
+      logger.warn("Released orphaned credit reservations", { mobileUserId, count: orphaned.count });
+    }
+
+    const tier = resolveUserTier(user, now);
+    const oneTime = isOneTimeAllowanceTier(tier);
+    const aggregate = await tx.mediaUsage.aggregate({
+      where: oneTime ? { mobileUserId } : { mobileUserId, periodKey },
+      _sum: { credits: true },
+    });
+    const used = Number(aggregate._sum.credits || 0);
+    const allowance = resolveMonthlyAllowance(settings, {
+      userAllowance: user.creditAllowance ?? null,
+      tier,
+    });
+    const balance = buildBalance({ feature: normalizedFeature, cost, allowance, used, oneTime, now });
+    if (!balance.allowed) return { ok: false as const, balance };
+
+    const row = await tx.mediaUsage.create({
+      data: {
+        mobileUserId,
+        feature: normalizedFeature,
+        provider: MEDIA_CREDIT_RESERVATION_PROVIDER,
+        model: null,
+        credits: cost,
+        costMicros: 0,
+        periodKey,
+      },
+      select: { id: true },
+    });
+
+    return {
+      ok: true as const,
+      reservation: { id: row.id, mobileUserId, feature: normalizedFeature, credits: cost, periodKey },
+      balance: buildBalance({
+        feature: normalizedFeature,
+        cost: featureCost,
+        allowance,
+        used: used + cost,
+        oneTime,
+        now,
+      }),
+      featureCost,
+    };
+  });
+}
+
+/**
+ * Turns a hold into the run's permanent usage row (provider, model, provider cost). The credits
+ * were already taken by the reservation. Never throws: the run has succeeded and is being
+ * delivered; a bookkeeping failure only leaves the row marked as a hold.
+ */
+export async function finalizeMediaCreditReservation(
+  reservation: MediaCreditReservation,
+  {
+    provider = null,
+    model = null,
+    costMicros = null,
+  }: { provider?: string | null; model?: string | null; costMicros?: number | null } = {}
+): Promise<boolean> {
+  try {
+    const hasExplicitCost =
+      costMicros !== null && costMicros !== undefined && Number.isFinite(Number(costMicros));
+    const micros = hasExplicitCost
+      ? Math.max(0, Math.floor(Number(costMicros)))
+      : resolveModelPriceMicros(await getMobileAppSettings(), model || "");
+    const { count } = await prisma.mediaUsage.updateMany({
+      where: { id: reservation.id },
+      data: {
+        // Never leave the hold marker on a finished run, even when the route reports no provider.
+        provider: provider ? String(provider) : "unknown",
+        model: model ? String(model) : null,
+        costMicros: micros,
+      },
+    });
+    if (count === 0) {
+      logger.error("Finalized a credit reservation that no longer exists", null, {
+        reservationId: reservation.id,
+        mobileUserId: reservation.mobileUserId,
+        feature: reservation.feature,
+      });
+    }
+    return count > 0;
+  } catch (error) {
+    logger.error("Failed to finalize a credit reservation", error, {
+      reservationId: reservation.id,
+      mobileUserId: reservation.mobileUserId,
+      feature: reservation.feature,
+    });
+    return false;
+  }
+}
+
+/**
+ * Releases a hold — the full refund for a run the user did not get (provider failure, timeout,
+ * client gone before delivery). Idempotent and never throws; a hold that cannot be released now
+ * is released by the orphan sweep in the user's next reservation.
+ */
+export async function refundMediaCreditReservation(
+  reservation: MediaCreditReservation,
+  reason: string
+): Promise<boolean> {
+  try {
+    const { count } = await prisma.mediaUsage.deleteMany({ where: { id: reservation.id } });
+    logger.info("Credit reservation refunded", {
+      reservationId: reservation.id,
+      mobileUserId: reservation.mobileUserId,
+      feature: reservation.feature,
+      credits: reservation.credits,
+      reason,
+      released: count > 0,
+    });
+    return count > 0;
+  } catch (error) {
+    logger.error("Failed to refund a credit reservation", error, {
+      reservationId: reservation.id,
+      mobileUserId: reservation.mobileUserId,
+      feature: reservation.feature,
+      credits: reservation.credits,
+      reason,
+    });
+    return false;
   }
 }
 

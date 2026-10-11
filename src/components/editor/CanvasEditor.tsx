@@ -30,6 +30,7 @@ import {
   useEditorStore,
   type EditorElement,
   type EditorPage,
+  type PageBackground,
   type ShapeType,
   type ToolMode,
 } from "@/store/editorStore";
@@ -70,16 +71,21 @@ import {
   resolveVideoSourceTimeAtFrame,
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
+import { curvedTextArcPath, resolveCurvedTextArc, resolveTextCurveConfig } from "@/lib/editor/textCurve";
 import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
 import CanvaUnitText from "@/components/editor/CanvaUnitText";
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import { drawTextBackground, resolveTextBackgroundBox } from "@/lib/editor/textBackground";
+import { resolveLinearGradientEndpoints, textFillKonvaProps } from "@/lib/editor/textFill";
 import {
   clearTextBoxMeasurementCache,
+  layoutTextLines,
+  measureTextBox,
   resolveSnugTextBox,
   textBoxAnchorDeltaX,
   type TextBoxInput,
 } from "@/lib/editor/textBox";
+import { planTextLayerMerge, type TextMergeSource } from "@/lib/editor/mergeTextLayers";
 import {
   revealFraction,
   glyphVisual,
@@ -2558,11 +2564,11 @@ function CanvasPageSceneImpl({
           fillPatternRepeat={
             isTransparentBackground(page.background) && includePageOutline ? "repeat" : undefined
           }
-          fillLinearGradientStartPoint={page.background.type === "gradient" ? { x: 0, y: 0 } : undefined}
+          fillLinearGradientStartPoint={
+            page.background.type === "gradient" ? pageGradientEndpoints(page).start : undefined
+          }
           fillLinearGradientEndPoint={
-            page.background.type === "gradient"
-              ? { x: page.width, y: page.height }
-              : undefined
+            page.background.type === "gradient" ? pageGradientEndpoints(page).end : undefined
           }
           fillLinearGradientColorStops={
             page.background.type === "gradient"
@@ -2806,6 +2812,10 @@ function CanvasPageSceneImpl({
                     }
                   : {};
               const hasTextCurve = isCurvedText(element);
+              // Gradient glyph fill (lib/editor/textFill.ts), painted over the text box exactly as
+              // the app paints it. The flat colour stays as `fill` for every path that ignores it
+              // (the per-letter animation units, the inline editor).
+              const textFillProps = textFillKonvaProps(element.textFill, element.width, element.height);
               // The background box, in the node's own coordinates. Drawn INSIDE the text's node
               // (a scene-function underlay, or the first child of its group) so it moves, rotates,
               // scales and animates with the glyphs — including mid-drag and mid-transform, which
@@ -2845,14 +2855,17 @@ function CanvasPageSceneImpl({
                     {textBackgroundRect}
                     <TextPath
                       {...textStrokeProps}
-                      data={resolveTextCurvePath(element)}
+                      data={resolveTextCurvePath(element, resolveCssFontFamily(element.fontFamily), konvaFontStyle)}
                       text={element.text}
                       fill={element.color || element.fill}
+                      {...textFillProps}
                       fontSize={element.fontSize}
                       fontFamily={resolveCssFontFamily(element.fontFamily)}
                       fontStyle={konvaFontStyle}
                       fontVariant="normal"
-                      align={element.align}
+                      // The arc is exactly the text's advance (see resolveTextCurvePath), so the
+                      // text is laid from its start, as the app does — alignment has no room to act.
+                      align="left"
                       letterSpacing={element.letterSpacing}
                       textDecoration={element.textDecoration}
                       textBaseline="middle"
@@ -2937,6 +2950,14 @@ function CanvasPageSceneImpl({
                             y={gv.translateYEm * lineHeightPx}
                             text={b.text}
                             fill={element.color || element.fill}
+                            // One ramp across the whole box, not one per word.
+                            {...textFillKonvaProps(
+                              element.textFill,
+                              element.width,
+                              element.height,
+                              b.x,
+                              gv.translateYEm * lineHeightPx
+                            )}
                             fontSize={element.fontSize}
                             fontFamily={resolveCssFontFamily(element.fontFamily)}
                             fontStyle={konvaFontStyle}
@@ -2975,6 +2996,7 @@ function CanvasPageSceneImpl({
                   height: element.height,
                   text: element.text,
                   fill: element.color || element.fill,
+                  ...textFillProps,
                   fontSize: element.fontSize,
                   fontFamily: resolveCssFontFamily(element.fontFamily),
                   fontStyle: konvaFontStyle,
@@ -3038,6 +3060,7 @@ function CanvasPageSceneImpl({
                   height={element.height}
                   text={element.text}
                   fill={element.color || element.fill}
+                  {...textFillProps}
                   fontSize={element.fontSize}
                   fontFamily={resolveCssFontFamily(element.fontFamily)}
                   fontStyle={konvaFontStyle}
@@ -3246,19 +3269,50 @@ function resolveTextDirection(text: string) {
   return /[\u0590-\u08FF]/.test(String(text || "")) ? "rtl" : "ltr";
 }
 
-function resolveTextCurvePath(element: EditorElement) {
+/**
+ * Where a gradient page background runs. With an `angle` (a Canva import, or anything authored
+ * against the app's convention) it is the app's own ramp — centre to the farthest edges — so
+ * the web and the app paint the same thing; without one it stays the editor's original
+ * corner-to-corner ramp, so older gradient pages look exactly as they did.
+ */
+function pageGradientEndpoints(page: { width: number; height: number; background: PageBackground }) {
+  const angle = Number(page.background.angle);
+  if (!Number.isFinite(angle)) {
+    return { start: { x: 0, y: 0 }, end: { x: page.width, y: page.height } };
+  }
+  const endpoints = resolveLinearGradientEndpoints(page.width, page.height, angle);
+  return { start: { x: endpoints.startX, y: endpoints.startY }, end: { x: endpoints.endX, y: endpoints.endY } };
+}
+
+// One off-screen TextPath measures the text exactly as the drawn one will (Konva's own per-glyph
+// widths and font shorthand), so the arc is sized to the advance the glyphs really take.
+let curveMeasureNode: Konva.TextPath | null = null;
+
+/**
+ * The circle the app lays this curved text on (lib/editor/textCurve.ts): the text's advance fills
+ * `arcDegrees` exactly, the arc is centred on the box's axis and its sag in the box. The path
+ * starts at the arc's start and the TextPath is laid out from offset 0, so each glyph's centre
+ * lands where the app puts it; it runs a little past the end so the last glyph is drawn.
+ */
+function resolveTextCurvePath(element: EditorElement, fontFamily: string, fontStyle: string) {
   const width = Math.max(2, Number(element.width) || 2);
   const height = Math.max(2, Number(element.height) || 2);
   const fontSize = Math.max(1, Number(element.fontSize) || 1);
-  // ±100 is the slider's reach; an imported Canva arc may carry up to ±200 (the extension
-  // measured a tighter bend than the slider offers), and the path honours it.
-  const amount = clamp(Number(element.textCurveAmount || 0), -200, 200);
-  const middleY = height / 2;
-  const maxCurveOffset = clamp(width * 0.42, Math.max(12, fontSize), Math.max(16, fontSize * 6));
-  const curveOffset = (amount / 100) * maxCurveOffset;
-  const controlY = middleY - curveOffset;
-
-  return `M 0 ${middleY} Q ${width / 2} ${controlY} ${width} ${middleY}`;
+  const letterSpacing = Number(element.letterSpacing) || 0;
+  const text = String(element.text || "").replace(/\n/g, " ");
+  // The app's curve follows the box's own (unscaled) width; the group scales the whole drawing.
+  const config = resolveTextCurveConfig({ ...element, scaleX: 1 });
+  if (typeof window !== "undefined" && !curveMeasureNode) {
+    curveMeasureNode = new Konva.TextPath({ data: "M 0 0 L 1 0", text: "" });
+  }
+  let glyphWidths = text.length * fontSize * 0.55;
+  if (curveMeasureNode) {
+    curveMeasureNode.setAttrs({ text, fontSize, fontFamily, fontStyle, fontVariant: "normal", letterSpacing: 0 });
+    glyphWidths = curveMeasureNode.getTextWidth();
+  }
+  const advance = glyphWidths + Array.from(text).length * letterSpacing;
+  const arc = resolveCurvedTextArc(advance, config.arcDegrees, width, height);
+  return curvedTextArcPath(arc, fontSize + Math.abs(letterSpacing) * 2);
 }
 
 /**
@@ -3325,6 +3379,52 @@ function isCurvedText(element: EditorElement) {
   return isCurvedTextElement(element);
 }
 
+/** The layout input a text layer renders with — the same one the snug-fit measures. */
+function textLayoutInput(element: EditorElement, text = String(element.text || "")): TextBoxInput {
+  return {
+    text,
+    fontSize: Number(element.fontSize) || 0,
+    fontFamily: resolveCssFontFamily(element.fontFamily),
+    fontStyle: toKonvaFontStyle(element.fontStyle, element.fontWeight),
+    letterSpacing: Number(element.letterSpacing) || 0,
+    lineHeight: Number(element.lineHeight) || 1,
+    align: element.align,
+    direction: resolveTextDirection(text),
+  };
+}
+
+/**
+ * Text layers merged into ONE text layer, from their lines exactly as the canvas wraps them
+ * (lib/editor/mergeTextLayers.ts). Null when a single straight text box can't hold them.
+ */
+function planTextMerge(textElements: EditorElement[]) {
+  if (textElements.some(isCurvedText)) return null;
+  const byId = new Map(textElements.map((element) => [element.id, element]));
+  const sources: TextMergeSource[] = [];
+  textElements.forEach((element) => {
+    const width = Number(element.width) || 0;
+    const lines = layoutTextLines(textLayoutInput(element), width > 1 ? width : null);
+    if (!lines) return; // no text to carry over
+    sources.push({
+      id: element.id,
+      x: Number(element.x) || 0,
+      y: Number(element.y) || 0,
+      width,
+      rotation: Number(element.rotation) || 0,
+      scaleX: element.scaleX ?? 1,
+      scaleY: element.scaleY ?? 1,
+      fontSize: Number(element.fontSize) || 0,
+      lineHeight: Number(element.lineHeight) || 1,
+      align: element.align,
+      lines,
+    });
+  });
+  return planTextLayerMerge(sources, (text, primaryId) => {
+    const primary = byId.get(primaryId);
+    return primary ? (measureTextBox(textLayoutInput(primary, text), null)?.lineWidth ?? null) : null;
+  });
+}
+
 /** An imported ARGB colour (0xAARRGGBB, BLOCK's `barColor` param) as a CSS colour. */
 function argbToCssColor(argb: number): string {
   const value = Math.trunc(argb) >>> 0;
@@ -3364,9 +3464,12 @@ const MAX_SCALE = 4;
 // How far past the page edge panning may go, so the border is never flush with
 // the viewport edge when zoomed in.
 const PAN_MARGIN = 80;
-// Page thumbnails ship to mobile as page-strip tiles — small on purpose so a many-page save
-// stays a light payload. Matches the width PageBar downscales its own captures to.
-const PAGE_THUMBNAIL_MAX_WIDTH_PX = 168;
+// Page thumbnails ship to mobile, where a multi-page template's feed card slides through them
+// full-card — so they must be as sharp as the cover thumbnail, not page-strip tiles (a 168px
+// capture was upscaled ~3x on a phone). The server downsizes to the same 480px webp as the cover;
+// this only has to leave it enough pixels to do that from.
+const PAGE_THUMBNAIL_MAX_DIMENSION_PX = 960;
+const PAGE_THUMBNAIL_JPEG_QUALITY = 0.92;
 // Per-glyph motion is authored in em, which a photo does not have. This is the stand-in: a rise of
 // roughly an eighth of the layer's height reads like the text version without being comical on a
 // full-bleed background.
@@ -3440,6 +3543,8 @@ export default function CanvasEditor() {
   const duplicateSelected = useEditorStore((state) => state.duplicateSelected);
   const moveLayer = useEditorStore((state) => state.moveLayer);
   const replaceSelectedWithImageLayer = useEditorStore((state) => state.replaceSelectedWithImageLayer);
+  const replaceSelectedWithTextLayer = useEditorStore((state) => state.replaceSelectedWithTextLayer);
+  const convertFrameElementToMedia = useEditorStore((state) => state.convertFrameElementToMedia);
 
   // One-time auto-fit for single-line text. Imported text boxes (and some authored
   // ones) carry a lot of empty padding: the box is far wider than the glyph and
@@ -4486,7 +4591,7 @@ export default function CanvasEditor() {
 
         const pixelRatio = Math.min(
           1,
-          Math.max(0.05, PAGE_THUMBNAIL_MAX_WIDTH_PX / Math.max(spec.width, 1))
+          Math.max(0.05, PAGE_THUMBNAIL_MAX_DIMENSION_PX / Math.max(spec.width, spec.height, 1))
         );
 
         // Rasterize to a canvas first so the result can be PROVEN non-empty. A page that never
@@ -4504,7 +4609,7 @@ export default function CanvasEditor() {
         if (!context) return "";
         const { data } = context.getImageData(0, 0, canvas.width, canvas.height);
         let painted = false;
-        // Sample every ~29th pixel: enough to detect a rendered page, cheap on a 168px tile.
+        // Sample every ~29th pixel: enough to detect a rendered page, and it stops at the first hit.
         for (let offset = 3; offset < data.length; offset += 4 * 29) {
           if (data[offset] !== 0) {
             painted = true;
@@ -4513,7 +4618,7 @@ export default function CanvasEditor() {
         }
         if (!painted) return "";
 
-        return String(canvas.toDataURL("image/jpeg", 0.72) || "").trim();
+        return String(canvas.toDataURL("image/jpeg", PAGE_THUMBNAIL_JPEG_QUALITY) || "").trim();
       } catch {
         return "";
       } finally {
@@ -5063,6 +5168,16 @@ export default function CanvasEditor() {
       return { merged: false, message: "Video layers are not supported in merge yet." };
     }
 
+    // Text only → ONE editable text layer instead of a picture of the words. Falls through to the
+    // raster merge when one text box can't hold them (a curve, layers turned by different angles).
+    if (selectedElements.every((element) => element.type === "text")) {
+      const textPlan = planTextMerge(selectedElements.filter((element) => element.visible));
+      if (textPlan) {
+        const nextId = replaceSelectedWithTextLayer(textPlan);
+        return nextId ? { merged: true } : { merged: false, message: "Failed to replace layers after merge." };
+      }
+    }
+
     const selectedEntries = elements
       .filter((element) => selectedSet.has(element.id))
       .map((element) => ({
@@ -5180,7 +5295,94 @@ export default function CanvasEditor() {
     } finally {
       tempStage.destroy();
     }
-  }, [activePage, elements, replaceSelectedWithImageLayer, selectedIds]);
+  }, [activePage, elements, replaceSelectedWithImageLayer, replaceSelectedWithTextLayer, selectedIds]);
+
+  // A frame back to a layer that keeps the frame's look: the frame node (clip path, content and
+  // stroke) is drawn into its own unrotated box at the media's resolution, uploaded, and the store
+  // swaps the frame for an image layer of the same box. Video content cannot be baked, so it
+  // drops the mask instead (the store action's own path).
+  const convertFrameToLayer = useCallback(
+    async (id: string) => {
+      const element = elements.find((item) => item.id === id);
+      if (!element || element.type !== "frame") return { converted: false, message: "Select a frame first." };
+      const content = element.frameContent;
+      if (!content || !String(content.src || "").trim()) {
+        return { converted: false, message: "This frame is empty." };
+      }
+      if (content.kind === "video") {
+        return convertFrameElementToMedia(id)
+          ? { converted: true }
+          : { converted: false, message: "The frame's video lies outside the frame, so there is nothing to turn into a layer." };
+      }
+      const node = nodeRefs.current[id];
+      if (!node) return { converted: false, message: "Canvas is still loading. Try again in a moment." };
+
+      const boxWidth = Math.max(1, (Number(element.width) || 1) * Math.abs(Number(element.scaleX) || 1));
+      const boxHeight = Math.max(1, (Number(element.height) || 1) * Math.abs(Number(element.scaleY) || 1));
+      // Enough pixels to keep the media sharp (its own resolution over the frame), within reason.
+      const layout = resolveFrameContentLayout(
+        Number(element.width) || 1,
+        Number(element.height) || 1,
+        content.sourceWidth,
+        content.sourceHeight,
+        element.frameContentTransform
+      );
+      const mediaScale = layout.width > 0 ? (Number(content.sourceWidth) || layout.width) / layout.width : 1;
+      const pixelRatio = clamp(mediaScale / Math.max(0.01, Math.abs(Number(element.scaleX) || 1)), 1, 4);
+
+      const tempContainer = document.createElement("div");
+      const tempStage = new Konva.Stage({
+        container: tempContainer,
+        width: Math.ceil(boxWidth),
+        height: Math.ceil(boxHeight),
+      });
+      const tempLayer = new Konva.Layer();
+      tempStage.add(tempLayer);
+      try {
+        const clone = node.clone({ listening: false, draggable: false, id: "" });
+        clone.position({ x: 0, y: 0 });
+        clone.rotation(0);
+        clone.opacity(1);
+        // The layer keeps its own shadow; baking it would draw it twice. (A Group carries shadow
+        // attrs but has no shadow setters — only Shapes do — so set them as attrs.)
+        clone.setAttrs({ shadowBlur: 0, shadowOffsetX: 0, shadowOffsetY: 0, shadowOpacity: 0, shadowColor: "rgba(0,0,0,0)" });
+        // A frame with no border of its own still DRAWS a 2px outline on the canvas so an empty
+        // or hovered frame can be seen (FrameNode's `strokeWidth || 2`). That is editor chrome,
+        // not design: baking it put a dark border (and the drop-feedback glow) around a converted
+        // photo. Only a real border (strokeWidth > 0) is kept in the picture.
+        const hasRealBorder = Number(element.strokeWidth) > 0 && String(element.stroke || "").trim() !== "";
+        (clone as Konva.Group).find("Shape").forEach((shape) => {
+          if (!hasRealBorder) shape.setAttrs({ strokeWidth: 0, strokeEnabled: false, shadowEnabled: false });
+        });
+        (clone as Konva.Group).find("Group").forEach((group) => {
+          // The drop-feedback halo lives in a transparent child group; keep it transparent.
+          if (Number(group.opacity()) === 0) group.visible(false);
+        });
+        tempLayer.add(clone);
+        tempLayer.draw();
+        const dataUrl = tempStage.toDataURL({ pixelRatio, mimeType: "image/png" });
+        if (!dataUrl) return { converted: false, message: "Failed to render the frame." };
+        const imageFile = dataUrlToFile(dataUrl, `frame-layer-${Date.now()}.png`, "image/png");
+        const uploaded = await uploadEditorMediaFile(imageFile, "image");
+        const converted = convertFrameElementToMedia(id, {
+          baked: {
+            src: uploaded.url,
+            width: Math.max(1, Math.round(Math.ceil(boxWidth) * pixelRatio)),
+            height: Math.max(1, Math.round(Math.ceil(boxHeight) * pixelRatio)),
+          },
+        });
+        return converted ? { converted: true } : { converted: false, message: "Failed to replace the frame." };
+      } catch (error) {
+        return {
+          converted: false,
+          message: error instanceof Error ? error.message : "Failed to convert the frame.",
+        };
+      } finally {
+        tempStage.destroy();
+      }
+    },
+    [convertFrameElementToMedia, elements]
+  );
 
   useEffect(() => {
     const node = containerRef.current;
@@ -5349,6 +5551,7 @@ export default function CanvasEditor() {
       captureTimelineStripDataUrls,
       recordTimelinePreviewVideo,
       mergeSelectedLayers,
+      convertFrameToLayer,
     });
 
     return () => setStageApi(null);
@@ -5361,6 +5564,7 @@ export default function CanvasEditor() {
     exportPng,
     fitToScreen,
     mergeSelectedLayers,
+    convertFrameToLayer,
     setStageApi,
     zoomBy,
   ]);

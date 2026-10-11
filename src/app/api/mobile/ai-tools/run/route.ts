@@ -10,13 +10,16 @@ import {
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import prisma from "@/lib/prisma";
 import { checkRateLimit, createRateLimitResponse } from "@/lib/security/rateLimit.server";
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
+import { runPaidMediaOperation } from "@/lib/media/credits/paidRun.server";
 import { resolveAiTool, runAiTool } from "@/lib/mobile/aiTools.server";
 
 export const runtime = "nodejs";
 // The model itself can take minutes on a cold start; match the media routes.
 export const maxDuration = 300;
+// Refund and give up a little before the platform would kill the request.
+const RUN_TIMEOUT_MS = (maxDuration - 10) * 1000;
 
 const logger = createLogger("api.mobile.ai-tools.run");
 const RUN_LIMIT = { limit: 6, windowMs: 5 * 60_000 };
@@ -48,7 +51,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await resolveMobileBearerUser(request);
     if (!auth.ok) {
-      return jsonResponse(requestId, { error: auth.error }, auth.status);
+      return jsonResponse(requestId, { error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
     }
     const mobileUser = auth.mobileUser;
 
@@ -121,21 +124,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const insufficientCredits = await enforceMediaCredits({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.AI_TOOLS,
-      costOverride: tool.creditCost,
-    });
-    if (insufficientCredits) {
-      requestLogger.info("AI tool run rejected: insufficient credits", {
-        mobileUserId: mobileUser.id,
-        toolId,
-      });
-      return attachRequestIdHeader(insufficientCredits, requestId);
-    }
-
     // Normalise like the batch renderer and the admin generate route, so a
-    // phone upload produces the same result the card advertises.
+    // phone upload produces the same result the card advertises. Done before any credit is
+    // taken: an unreadable photo costs nothing.
     let normalizedInput: Buffer | null = null;
     if (imageBuffer) {
       try {
@@ -149,53 +140,51 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    const result = await runAiTool(tool, normalizedInput, "image/jpeg");
-
-    // Charged only after the provider returned something: a failed prediction
-    // must not spend the user's credits.
-    await recordMediaUsage({
+    // The tool's own price is reserved atomically before the model runs and refunded if it
+    // fails, times out, or the client leaves (Back, cancel, iOS suspension) before the image is
+    // delivered; an Idempotency-Key retry replays instead of charging again (production audit
+    // H-13 / ROB-05). The wallet AFTER this run rides the response (2026-09-08 direction).
+    const response = await runPaidMediaOperation({
+      request,
+      logger: requestLogger,
       mobileUserId: mobileUser.id,
       feature: MEDIA_CREDIT_FEATURES.AI_TOOLS,
-      provider: tool.kind === "magic" && !result.predictionId ? "local" : "replicate",
-      model: result.model,
-      credits: tool.creditCost,
+      costOverride: tool.creditCost,
+      idempotencyScope: "ai-tools:run",
+      fingerprint: toolId,
+      timeoutMs: RUN_TIMEOUT_MS,
+      execute: () => runAiTool(tool, normalizedInput, "image/jpeg"),
+      respond: (result, { chargedCredits }) => {
+        requestLogger.info("AI tool run completed", {
+          mobileUserId: mobileUser.id,
+          toolId,
+          kind: tool.kind,
+          model: result.model,
+          credits: chargedCredits,
+          outputBytes: result.buffer.length,
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          usage: {
+            provider: tool.kind === "magic" && !result.predictionId ? "local" : "replicate",
+            model: result.model,
+          },
+          headers: {
+            "Content-Type": result.mimeType || "image/png",
+            "Content-Disposition": `inline; filename="${tool.slug}.png"`,
+            "X-Ai-Tool-Id": toolId,
+            "X-Ai-Tool-Kind": tool.kind,
+            "X-Credits-Charged": String(chargedCredits),
+          },
+          body: new Uint8Array(result.buffer),
+        };
+      },
     });
-
-    // The wallet AFTER this run, so the app updates its shared balance from this very
-    // response instead of asking again (2026-09-08 direction).
-    const creditHeaders = await creditBalanceHeaders({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.AI_TOOLS,
-    });
-
-    requestLogger.info("AI tool run completed", {
-      mobileUserId: mobileUser.id,
-      toolId,
-      kind: tool.kind,
-      model: result.model,
-      credits: tool.creditCost,
-      outputBytes: result.buffer.length,
-      durationMs: Date.now() - startedAt,
-    });
-
-    return attachRequestIdHeader(
-      new NextResponse(new Uint8Array(result.buffer), {
-        status: 200,
-        headers: {
-          ...creditHeaders,
-
-          "Content-Type": result.mimeType || "image/png",
-          "Content-Disposition": `inline; filename="${tool.slug}.png"`,
-          "Cache-Control": "no-store",
-          "X-Ai-Tool-Id": toolId,
-          "X-Ai-Tool-Kind": tool.kind,
-          "X-Credits-Charged": String(tool.creditCost),
-        },
-      }),
-      requestId
-    );
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
     requestLogger.error("AI tool run failed", error, { durationMs: Date.now() - startedAt });
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return jsonResponse(requestId, { error: "Failed to run the AI tool." }, 500);
   }
 }

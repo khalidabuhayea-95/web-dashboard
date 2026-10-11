@@ -32,7 +32,7 @@ function noStore(payload: unknown, status = 200) {
 export async function POST(request: NextRequest) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
   const mobileUser = auth.mobileUser;
 

@@ -54,6 +54,7 @@ import {
   SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
+import { normalizeTextFill } from "@/lib/editor/textFill";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import {
   BUILTIN_SHAPE_ASSETS,
@@ -110,6 +111,7 @@ import {
   useEditorStore,
   type EditorDesign,
   type EditorElement,
+  type PageBackground,
   type SidebarTab,
 } from "@/store/editorStore";
 
@@ -1040,6 +1042,8 @@ interface CustomFontRecord {
   source?: string;
   removable?: boolean;
   displayName?: string;
+  /** Sample text rendered in the family (Fonts admin tab), dark ink on transparent. */
+  previewImageUrl?: string | null;
   createdAt?: string;
   updatedAt?: string;
 }
@@ -1218,30 +1222,30 @@ function toEditorBlendMode(mode: unknown): GlobalCompositeOperation | "source-ov
   return "source-over";
 }
 
-function extractFabricData(payload: unknown): { objects: Array<Record<string, unknown>>; backgroundColor?: unknown } | null {
+function extractFabricData(payload: unknown): { objects: Array<Record<string, unknown>>; backgroundColor?: unknown; background?: unknown } | null {
   if (!payload || typeof payload !== "object") return null;
   const data = payload as Record<string, unknown>;
 
   if (Array.isArray(data.objects)) {
-    return data as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown };
+    return data as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown; background?: unknown };
   }
 
   if (data.fabric && typeof data.fabric === "object") {
     const fabric = data.fabric as Record<string, unknown>;
     if (Array.isArray(fabric.objects)) {
-      return fabric as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown };
+      return fabric as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown; background?: unknown };
     }
   }
 
   if (data.data && typeof data.data === "object") {
     const nested = data.data as Record<string, unknown>;
     if (Array.isArray(nested.objects)) {
-      return nested as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown };
+      return nested as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown; background?: unknown };
     }
     if (nested.fabric && typeof nested.fabric === "object") {
       const nestedFabric = nested.fabric as Record<string, unknown>;
       if (Array.isArray(nestedFabric.objects)) {
-        return nestedFabric as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown };
+        return nestedFabric as { objects: Array<Record<string, unknown>>; backgroundColor?: unknown; background?: unknown };
       }
     }
   }
@@ -1454,6 +1458,34 @@ function dedupeSyntheticTextBackgroundLayers(
   return elements.filter((element) => !removeIds.has(element.id));
 }
 
+/**
+ * The page background a flat (fabric) template carries. A Canva import with a gradient page
+ * colour sends `background: {type:"gradient", gradientFrom, gradientTo, angle}` next to the flat
+ * `backgroundColor` (the mobile mapper reads the same object); anything else is the flat colour.
+ */
+function readImportedPageBackground(source: unknown, fallbackColor: string): PageBackground {
+  const flat: PageBackground = {
+    type: "color",
+    color: fallbackColor,
+    gradientFrom: fallbackColor,
+    gradientTo: fallbackColor,
+  };
+  if (!source || typeof source !== "object") return flat;
+  const record = source as Record<string, unknown>;
+  if (record.type !== "gradient") return flat;
+  const gradientFrom = parseColor(record.gradientFrom, "");
+  const gradientTo = parseColor(record.gradientTo, "");
+  if (!gradientFrom || !gradientTo) return flat;
+  const angle = Number(record.angle);
+  return {
+    type: "gradient",
+    color: gradientFrom,
+    gradientFrom,
+    gradientTo,
+    ...(Number.isFinite(angle) ? { angle } : {}),
+  };
+}
+
 function toEditorDesignFromTemplate(
   template: StoredTemplate,
   fallbackWidth: number,
@@ -1542,9 +1574,10 @@ function toEditorDesignFromTemplate(
   });
 
   const elements: EditorElement[] = [];
+  const pageIndexByElementId = new Map<string, number>();
 
   if (fabric) {
-    fabric.objects.forEach((object, index) => {
+    const buildElementsFromObject = (object: unknown, index: number) => {
       if (!object || typeof object !== "object") return;
       const item = object as Record<string, unknown>;
       const type = String(item.type || "").toLowerCase();
@@ -1747,8 +1780,10 @@ function toEditorDesignFromTemplate(
       // `type: "video"` (or an image typed `layerType: "video"`) with the editor's own
       // seconds-based trim fields; the mobile exporter reads the same object.
       const importedLayerType = String(item.layerType || item.importKind || "").toLowerCase();
+      const hasImportedFrameShape = Boolean(item.frameShape && typeof item.frameShape === "object");
       if (
         (type === "video" || (type === "image" && importedLayerType === "video")) &&
+        !hasImportedFrameShape &&
         typeof item.src === "string" &&
         item.src
       ) {
@@ -1775,8 +1810,11 @@ function toEditorDesignFromTemplate(
       // detectClipPathFrameMask): load it as a real FRAME so the outline survives and the photo
       // stays swappable. The captured photo is already cropped to the frame box, so it fills the
       // frame at cover / scale 1 exactly as Canva framed it.
+      // A video-filled Canva element (the extension's attachCapturedElementVideos) arrives as a
+      // video object with the same frame shape: the frame's content is the clip, its poster first.
+      const importedFrameIsVideo = type === "video" || (type === "image" && importedLayerType === "video");
       const importedFrameShape =
-        type === "image" && item.frameShape && typeof item.frameShape === "object"
+        (type === "image" || type === "video") && item.frameShape && typeof item.frameShape === "object"
           ? (item.frameShape as { presetId?: unknown; kind?: unknown; points?: unknown })
           : null;
       const importedFramePoints =
@@ -1799,12 +1837,29 @@ function toEditorDesignFromTemplate(
               kind: "polygon",
               points: importedFramePoints,
             },
-            frameContent: {
-              kind: "image",
-              src: item.src,
-              sourceWidth: Math.max(1, toNumber(item.sourceWidth, common.width || 1)),
-              sourceHeight: Math.max(1, toNumber(item.sourceHeight, common.height || 1)),
-            },
+            frameContent: importedFrameIsVideo
+              ? (() => {
+                  const videoDuration = Math.max(0, toNumber(item.videoDuration, toNumber(item.videoDurationSec, 0)));
+                  const videoStart = Math.max(0, toNumber(item.videoStart, toNumber(item.videoTrimStartMs, 0) / 1000));
+                  const rawVideoEnd = toNumber(item.videoEnd, toNumber(item.videoTrimEndMs, 0) / 1000);
+                  const posterSrc = String(item.posterSrc || item.thumbnailUri || item.poster || "").trim();
+                  return {
+                    kind: "video" as const,
+                    src: item.src,
+                    sourceWidth: Math.max(1, toNumber(item.sourceWidth, common.width || 1)),
+                    sourceHeight: Math.max(1, toNumber(item.sourceHeight, common.height || 1)),
+                    videoStart,
+                    videoEnd: rawVideoEnd > videoStart ? rawVideoEnd : videoDuration,
+                    videoDuration,
+                    ...(posterSrc ? { posterSrc } : {}),
+                  };
+                })()
+              : {
+                  kind: "image",
+                  src: item.src,
+                  sourceWidth: Math.max(1, toNumber(item.sourceWidth, common.width || 1)),
+                  sourceHeight: Math.max(1, toNumber(item.sourceHeight, common.height || 1)),
+                },
             frameContentTransform: { fit: "cover", scale: 1, offsetX: 0, offsetY: 0 },
           })
         );
@@ -1901,6 +1956,8 @@ function toEditorDesignFromTemplate(
               textBackgroundPaddingY: clamp01(item.textBackgroundPaddingY, 0),
             }
           : {};
+        // Canva's gradient text colour (the extension's readTextGradientFill), over the box.
+        const importedTextFill = normalizeTextFill(item.textFill);
         elements.push(
           createElementFromAsset(pageId, {
             ...common,
@@ -1923,9 +1980,14 @@ function toEditorDesignFromTemplate(
             color: parseColor(item.fill, "#111827"),
             fill: parseColor(item.fill, "#111827"),
             ...textBackgroundFields,
+            ...(importedTextFill ? { textFill: importedTextFill } : {}),
             // Imported curved text (Canva's per-letter arc, measured by the extension).
             textCurveEnabled: Boolean(item.textCurveEnabled) && Math.abs(toNumber(item.textCurveAmount, 0)) > 0.5,
             textCurveAmount: Math.max(-200, Math.min(200, toNumber(item.textCurveAmount, 0))),
+            // The arc Canva actually drew; the canvas and the app both lay the text on it.
+            ...(Math.abs(toNumber(item.textCurveArcDegrees, 0)) >= 1
+              ? { textCurveArcDegrees: Math.max(-300, Math.min(300, toNumber(item.textCurveArcDegrees, 0))) }
+              : {}),
           })
         );
         return;
@@ -1985,6 +2047,20 @@ function toEditorDesignFromTemplate(
             cornerRadius: Math.max(toNumber(item.rx, 0), toNumber(item.ry, 0)),
           })
         );
+      }
+    };
+    // Each element remembers the page of the object it was built from. Splitting pages by
+    // importNodeId instead let one id decide for every object that shares it — and ids DO repeat
+    // across pages: every page's background is the synthetic "layer-1", so page 1's marble
+    // background moved onto page 2 (with page 1's title and line, whose stray copies an import
+    // had put on page 2), leaving page 1 a bare colour.
+    fabric.objects.forEach((object, index) => {
+      const firstNewElement = elements.length;
+      buildElementsFromObject(object, index);
+      const rawPageIndex = Number((object as Record<string, unknown> | null)?.importPageIndex);
+      if (!Number.isInteger(rawPageIndex) || rawPageIndex < 0) return;
+      for (let built = firstNewElement; built < elements.length; built += 1) {
+        pageIndexByElementId.set(elements[built].id, rawPageIndex);
       }
     });
   }
@@ -2066,7 +2142,8 @@ function toEditorDesignFromTemplate(
     pageWidth: number,
     pageHeight: number,
     pageElements: EditorElement[],
-    sourceDurationMs = 0
+    sourceDurationMs = 0,
+    sourceBackground: unknown = null
   ): EditorDesign["pages"][number] => {
     const pageMaxEndMs = pageElements.reduce(
       (max, element) => Math.max(max, Number(element.timelineEndMs) || 0),
@@ -2086,34 +2163,16 @@ function toEditorDesignFromTemplate(
       width: pageWidth,
       height: pageHeight,
       durationMs: Math.min(600000, durationMs),
-      background: {
-        type: "color",
-        color: backgroundColor,
-        gradientFrom: backgroundColor,
-        gradientTo: backgroundColor,
-      },
+      background: readImportedPageBackground(sourceBackground, backgroundColor),
       elements: pageElements.map((element) => ({ ...element, pageId: id })),
     };
   };
 
   let editorPages: EditorDesign["pages"];
   if (importPagesMeta) {
-    const pageIndexByNodeId = new Map<string, number>();
-    if (fabric) {
-      fabric.objects.forEach((object) => {
-        if (!object || typeof object !== "object") return;
-        const item = object as Record<string, unknown>;
-        const nodeId = String(item.importNodeId || item.id || "").trim();
-        const rawIndex = Number(item.importPageIndex);
-        if (nodeId && Number.isInteger(rawIndex) && rawIndex >= 0) {
-          pageIndexByNodeId.set(nodeId, rawIndex);
-        }
-      });
-    }
     const buckets: EditorElement[][] = importPagesMeta.map(() => []);
     sortedElements.forEach((element) => {
-      const nodeId = String(element.importNodeId || "").trim();
-      const bucketIndex = pageIndexByNodeId.get(nodeId) ?? 0;
+      const bucketIndex = pageIndexByElementId.get(element.id) ?? 0;
       const bounded = bucketIndex >= 0 && bucketIndex < buckets.length ? bucketIndex : 0;
       buckets[bounded].push(element);
     });
@@ -2124,7 +2183,9 @@ function toEditorDesignFromTemplate(
         Math.max(16, Math.round(toNumber(pageMeta?.width, width))),
         Math.max(16, Math.round(toNumber(pageMeta?.height, height))),
         buckets[index],
-        Math.max(0, toNumber(pageMeta?.durationMs, 0))
+        Math.max(0, toNumber(pageMeta?.durationMs, 0)),
+        // The cover's page fill lives on the flat fabric data (editorData.js reads it there too).
+        (pageMeta as { background?: unknown } | null)?.background ?? (index === 0 ? fabric?.background : null)
       )
     );
   } else {
@@ -2135,7 +2196,8 @@ function toEditorDesignFromTemplate(
         width,
         height,
         sortedElements,
-        Math.max(0, toNumber(importPageMeta?.durationMs, 0))
+        Math.max(0, toNumber(importPageMeta?.durationMs, 0)),
+        fabric?.background
       ),
     ];
   }
@@ -2587,8 +2649,13 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const [customFontFamilyInput, setCustomFontFamilyInput] = useState("");
   const [fontLanguageTab, setFontLanguageTab] = useState<"arabic" | "english">("arabic");
   const [visibleFontCount, setVisibleFontCount] = useState(FONT_PAGE_SIZE);
-  const fontListSentinelRef = useRef<HTMLDivElement | null>(null);
+  // Held in state (a callback ref), not a ref object: the sentinel only exists while the Text tab
+  // is open, and an observer effect keyed on the list alone never saw it appear — the editor opens
+  // on another tab, so the list stopped at its first page.
+  const [fontListSentinel, setFontListSentinel] = useState<HTMLDivElement | null>(null);
   const loadedFontPreviewIdsRef = useRef<Set<string>>(new Set());
+  // Preview images that failed to load; those cards fall back to the name drawn in its own face.
+  const [brokenFontPreviewIds, setBrokenFontPreviewIds] = useState<ReadonlySet<string>>(() => new Set());
   const [uploadingCustomFont, setUploadingCustomFont] = useState(false);
   const [taxonomySettings, setTaxonomySettings] = useState<TaxonomyCategorySetting[]>([]);
   const [taxonomyLoading, setTaxonomyLoading] = useState(false);
@@ -4299,8 +4366,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   // scroll). Re-running on visibleFontCount re-checks intersection, so it keeps
   // filling until the sentinel is pushed out of the viewport.
   useEffect(() => {
-    const sentinel = fontListSentinelRef.current;
-    if (!sentinel || typeof IntersectionObserver === "undefined") return;
+    if (!fontListSentinel || typeof IntersectionObserver === "undefined") return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((entry) => entry.isIntersecting)) {
@@ -4309,19 +4375,21 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       },
       { rootMargin: "240px" }
     );
-    observer.observe(sentinel);
+    observer.observe(fontListSentinel);
     return () => observer.disconnect();
-  }, [visibleFontCount, activeFontList]);
+  }, [fontListSentinel, visibleFontCount, activeFontList]);
 
-  // Load faces for the fonts currently visible in the panel (crisp previews),
-  // once each — bulk preloading only declares faces lazily.
+  // Load faces for the visible fonts that have no preview image — their card draws the name in the
+  // font itself — once each; bulk preloading only declares faces lazily. A card with an image needs
+  // no font file until the font is applied.
   useEffect(() => {
     activeFontList.slice(0, visibleFontCount).forEach((font) => {
       if (!font?.id || loadedFontPreviewIdsRef.current.has(font.id)) return;
+      if (String(font.previewImageUrl || "").trim() && !brokenFontPreviewIds.has(font.id)) return;
       loadedFontPreviewIdsRef.current.add(font.id);
       void ensureCustomFontFaceInDocument(font);
     });
-  }, [activeFontList, visibleFontCount]);
+  }, [activeFontList, visibleFontCount, brokenFontPreviewIds]);
 
   const renderFontCard = (font: CustomFontRecord) => {
     const fontDisplay = deriveReadableFontLabel(font);
@@ -4334,37 +4402,58 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     // this panel picks a font for the selected text layer and only SHOWS which
     // ones are Pro.
     const showMeta = fontSource !== "custom" || isSelected || isPremium;
+    // The family's sample rendered to an image (Fonts admin tab), so a card costs one small image
+    // instead of a whole font file; the name then reads below it in the UI font.
+    const previewImageUrl = brokenFontPreviewIds.has(font.id) ? "" : String(font.previewImageUrl || "").trim();
 
     return (
-      <div
+      <button
         key={font.id}
-        className={`w-full rounded-md border bg-white p-2 ${isSelected ? "border-[#22828c]" : "border-[#d3d8e1]"}`}
-      >
-        <button
-          type="button"
-          className="block w-full overflow-hidden text-ellipsis whitespace-nowrap text-left text-sm font-medium text-[#0f172a]"
-          style={{ fontFamily: resolveCssFontFamily(font.family) }}
-          onMouseDown={(event) => {
-            event.preventDefault();
-          }}
-          onClick={() => {
-            const targetTextIds = [...selectedTextLayerIds];
+        type="button"
+        className={`block w-full rounded-md border bg-white p-2 text-left transition-colors ${
+          isSelected ? "border-[#22828c]" : "border-[#d3d8e1] hover:border-[#b6c0cc]"
+        }`}
+        onMouseDown={(event) => {
+          event.preventDefault();
+        }}
+        onClick={() => {
+          const targetTextIds = [...selectedTextLayerIds];
+          applyFontToSelectedTextLayers(font.family, targetTextIds, {
+            recordHistory: true,
+          });
+          void ensureCustomFontFaceInDocument(font).then(() => {
             applyFontToSelectedTextLayers(font.family, targetTextIds, {
-              recordHistory: true,
+              recordHistory: false,
             });
-            void ensureCustomFontFaceInDocument(font).then(() => {
-              applyFontToSelectedTextLayers(font.family, targetTextIds, {
-                recordHistory: false,
-              });
-            });
-          }}
-          title={font.family}
-        >
-          {fontDisplay}
-        </button>
-        {showMeta ? (
-          <div className="mt-2 flex min-w-0 items-center justify-end gap-2 text-[11px] text-[#64748b]">
-            <div className="flex shrink-0 items-center gap-2">
+          });
+        }}
+        title={font.family}
+      >
+        {previewImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element -- R2-hosted preview; next/image needs domain config
+          <img
+            src={previewImageUrl}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            draggable={false}
+            className="block h-10 max-w-full object-contain object-left"
+            onError={() =>
+              setBrokenFontPreviewIds((previous) => new Set(previous).add(font.id))
+            }
+          />
+        ) : (
+          <span
+            className="block overflow-hidden text-ellipsis whitespace-nowrap text-sm font-medium text-[#0f172a]"
+            style={{ fontFamily: resolveCssFontFamily(font.family) }}
+          >
+            {fontDisplay}
+          </span>
+        )}
+        {previewImageUrl || showMeta ? (
+          <span className="mt-1.5 flex min-w-0 items-center justify-between gap-2 text-[11px] text-[#64748b]">
+            <span className="min-w-0 truncate">{previewImageUrl ? fontDisplay : null}</span>
+            <span className="flex shrink-0 items-center gap-2">
               {fontSource !== "custom" ? (
                 <span className="rounded-full bg-[#eef2f7] px-2 py-0.5 text-[10px] font-semibold uppercase text-[#4b5563]">
                   {fontSource}
@@ -4376,10 +4465,10 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                 </span>
               ) : null}
               {isPremium ? <PremiumMark label="Pro font" /> : null}
-            </div>
-          </div>
+            </span>
+          </span>
         ) : null}
-      </div>
+      </button>
     );
   };
 
@@ -4644,7 +4733,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
                     <div className="space-y-2">
                       {activeFontList.slice(0, visibleFontCount).map(renderFontCard)}
                       {visibleFontCount < activeFontList.length ? (
-                        <div ref={fontListSentinelRef} className="h-4 w-full" aria-hidden="true" />
+                        <div ref={setFontListSentinel} className="h-4 w-full" aria-hidden="true" />
                       ) : null}
                     </div>
                   </div>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { buildSubscriptionCatalog } from "@/lib/billing/publicCatalog.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
@@ -38,8 +39,13 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     requestLogger.error("Building the subscription catalog failed", { error });
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return attachRequestIdHeader(
-      NextResponse.json({ error: "Failed to load the subscription catalog" }, { status: 500 }),
+      NextResponse.json(
+        { error: "Failed to load the subscription catalog" },
+        { status: 500, headers: { "Cache-Control": "no-store" } }
+      ),
       requestId
     );
   }

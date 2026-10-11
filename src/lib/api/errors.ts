@@ -1,4 +1,9 @@
 import { NextResponse } from "next/server";
+import {
+  isInfrastructureError,
+  isPrismaError,
+  serviceUnavailableResponse,
+} from "@/lib/api/infrastructureErrors";
 import { logger } from "@/lib/logging/logger";
 
 /**
@@ -12,12 +17,21 @@ export interface ApiError {
 
 /**
  * Handle API errors consistently with proper logging
+ *
+ * An outage (database unreachable, pool exhausted, …) answers 503 + `no-store` with a generic body
+ * whatever `statusCode` the caller passed — the auth routes pass 401, and a 401 during an outage
+ * tells the app to discard a perfectly good session (production audit H-24).
  */
 export function handleApiError(
   error: unknown,
   defaultMessage: string = "An unexpected error occurred",
   statusCode: number = 500
 ) {
+  if (isInfrastructureError(error)) {
+    logger.error(`${defaultMessage} (service unavailable)`, error);
+    return serviceUnavailableResponse();
+  }
+
   logger.error(defaultMessage, error);
   const errorStatusCode = Number(
     (error as { statusCode?: unknown; status?: unknown } | null)?.statusCode ??
@@ -28,11 +42,16 @@ export function handleApiError(
       ? errorStatusCode
       : statusCode;
 
-  // Don't expose sensitive error details in production
+  // Don't expose sensitive error details in production. Prisma's text (SQL, schema, connection
+  // details) is never exposed, not even in development, where QA devices talk to this server.
   const message =
-    process.env.NODE_ENV === "production" ? defaultMessage : String(error);
+    process.env.NODE_ENV === "production" || isPrismaError(error) ? defaultMessage : String(error);
 
-  return NextResponse.json({ error: message }, { status: responseStatusCode });
+  // An error is never a cacheable answer.
+  return NextResponse.json(
+    { error: message },
+    { status: responseStatusCode, headers: { "Cache-Control": "no-store" } }
+  );
 }
 
 /**

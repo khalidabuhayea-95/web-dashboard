@@ -1,0 +1,63 @@
+{
+ "id": "096df890-a6ee-4ca2-b21a-40e6f538cd19",
+ "family": "YAEWbec9CX4_0",
+ "normalizedFamily": "yaewbec9cx40",
+ "displayName": "Araboto",
+ "source": "custom",
+ "sourceId": null,
+ "status": "ready",
+ "isPremium": false,
+ "categories": [
+  "EXCLUSIVE",
+  "ENGLISH",
+  "ARABIC"
+ ],
+ "previewText": null,
+ "previewWeight": null,
+ "cssFontFamily": "'YAEWbec9CX4_0'",
+ "previewImageUrl": null,
+ "previewImageDarkUrl": null,
+ "previewImageUpdatedAt": null,
+ "sortOrder": 0,
+ "removable": true,
+ "createdAt": "2026-08-11T13:17:37.443Z",
+ "updatedAt": "2026-08-11T13:17:37.443Z",
+ "files": [
+  {
+   "id": "0322882c-4726-417a-a991-0b20cd1fe0b9",
+   "fontId": "096df890-a6ee-4ca2-b21a-40e6f538cd19",
+   "kind": "mobile",
+   "fontWeight": null,
+   "fontStyle": null,
+   "format": "ttf",
+   "mimeType": "font/ttf",
+   "fileName": "font.ttf",
+   "storageBucket": "nayroz-media-dev",
+   "storagePath": "fonts/096df890-a6ee-4ca2-b21a-40e6f538cd19/mobile/86ebb2869b85a279-font.ttf",
+   "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/096df890-a6ee-4ca2-b21a-40e6f538cd19/mobile/86ebb2869b85a279-font.ttf",
+   "sizeBytes": 434608,
+   "checksum": "86ebb2869b85a279fed121857d10125eb90c91aa5a84d6284e314c7856a30f49",
+   "status": "ready",
+   "createdAt": "2026-08-11T13:17:37.473Z",
+   "updatedAt": "2026-08-11T13:17:37.473Z"
+  },
+  {
+   "id": "efa14c4b-792e-40b3-a00e-9ad2475936ee",
+   "fontId": "096df890-a6ee-4ca2-b21a-40e6f538cd19",
+   "kind": "mobile@700",
+   "fontWeight": 700,
+   "fontStyle": "normal",
+   "format": "ttf",
+   "mimeType": "font/ttf",
+   "fileName": "font.ttf",
+   "storageBucket": "nayroz-media-dev",
+   "storagePath": "fonts/096df890-a6ee-4ca2-b21a-40e6f538cd19/mobile@700/69916f47fdaa93a5-font.ttf",
+   "publicUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/fonts/096df890-a6ee-4ca2-b21a-40e6f538cd19/mobile%40700/69916f47fdaa93a5-font.ttf",
+   "sizeBytes": 440468,
+   "checksum": "69916f47fdaa93a575a1c5a4ea3fa0a7d0cf45caa221ec11e828bd1c0b36e62a",
+   "status": "ready",
+   "createdAt": "2026-08-11T13:17:37.485Z",
+   "updatedAt": "2026-08-11T13:17:37.485Z"
+  }
+ ]
+}

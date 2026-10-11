@@ -9,6 +9,7 @@
  */
 import type { Occasion, OccasionItem } from "@prisma/client";
 
+import { isInfrastructureError } from "@/lib/api/infrastructureErrors";
 import prisma from "@/lib/prisma";
 import { resolveTemplateCategoryPairs } from "@/lib/templates/templateSettings";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
@@ -17,6 +18,7 @@ import { OCCASIONS_TIME_ZONE, resolveActiveBoost, todayInTimeZone } from "./date
 import { isUuid } from "./validate";
 
 export const OCCASION_BOOST_CACHE_TTL_MS = 60_000;
+const OCCASION_BOOST_OUTAGE_TTL_MS = 5_000;
 const MAX_IDS_PER_KIND = 1000;
 
 type OccasionWithItems = Occasion & { items: OccasionItem[] };
@@ -258,9 +260,12 @@ export async function getActiveOccasionBoost(): Promise<OccasionBoostSnapshot> {
     const value = await buildOccasionBoostSnapshot();
     cached = { value, expiresAt: now + OCCASION_BOOST_CACHE_TTL_MS };
     return value;
-  } catch {
+  } catch (error) {
     const value = createEmptyOccasionBoostSnapshot();
-    cached = { value, expiresAt: now + OCCASION_BOOST_CACHE_TTL_MS };
+    // An outage is held only briefly so the season's boost comes back with the database instead
+    // of staying off for a full minute; a schema that predates occasions keeps the long hold.
+    const holdMs = isInfrastructureError(error) ? OCCASION_BOOST_OUTAGE_TTL_MS : OCCASION_BOOST_CACHE_TTL_MS;
+    cached = { value, expiresAt: now + holdMs };
     return value;
   }
 }

@@ -1832,6 +1832,53 @@ function canvaEntryToSlots(entry) {
 
 // ── Page model → scheduler input ─────────────────────────────────────────────────────────────
 // `pageModel` is one page of the fiber walk's output ({ [LBid]: entry, __pageAnimation,
+// ── canva-text-stroke-fabric:start
+// A text outline the scraper read off Canva's stroke copy ({ color, widthRatio = stroke px / font
+// px }) as the text layer's fabric `stroke` + `strokeWidth`. The layer's width is a 0–100 value
+// that the web canvas and both mobile renderers turn into px as fontSize × width/100 × 0.22
+// (lib/editor/textStroke.ts), so Canva's ratio maps through that factor and clamps at 100.
+function canvaTextStrokeToFabric(textStroke) {
+  if (!textStroke || typeof textStroke !== "object") return {};
+  const color = String(textStroke.color || "").trim();
+  const ratio = Number(textStroke.widthRatio);
+  if (!color || !(ratio > 0)) return {};
+  const width = Math.min(100, Math.round((ratio / 0.22) * 100 * 10) / 10);
+  if (!(width > 0)) return {};
+  return { stroke: color, strokeWidth: width };
+}
+// ── canva-text-stroke-fabric:end
+
+// ── canva-page-gradient-background:start
+// The scraper's page gradient (a text-fill shaped `{gradientKind, angle, stops}` on the page box,
+// app convention: angle 0 = left→right, 90 = top→bottom) as the editor's page background. The
+// editor paints two colours; the first and last stops are what Canva shows at the page's edges,
+// and the full stop list rides along for a renderer that can use it. Null when there is nothing
+// usable, so the page keeps its flat colour.
+function canvaPageGradientToBackground(gradient) {
+  if (!gradient || typeof gradient !== "object") return null;
+  const stops = Array.isArray(gradient.stops)
+    ? gradient.stops
+        .map((stop) => ({
+          color: String(stop?.color || "").trim().toLowerCase(),
+          position: Number(stop?.position),
+          ...(Number.isFinite(Number(stop?.opacity)) && Number(stop.opacity) < 1 ? { opacity: Number(stop.opacity) } : {}),
+        }))
+        .filter((stop) => /^#[0-9a-f]{6}$/.test(stop.color) && Number.isFinite(stop.position))
+        .sort((a, b) => a.position - b.position)
+    : [];
+  if (stops.length < 2) return null;
+  const angle = Number(gradient.angle);
+  return {
+    type: "gradient",
+    gradientFrom: stops[0].color,
+    gradientTo: stops[stops.length - 1].color,
+    angle: Number.isFinite(angle) ? Math.round((((angle % 360) + 360) % 360) * 1000) / 1000 : 0,
+    ...(String(gradient.gradientKind || "linear") === "radial" ? { gradientKind: "radial" } : {}),
+    stops,
+  };
+}
+// ── canva-page-gradient-background:end
+
 // __pageDurationMs, __pageWidth, __pageHeight, __pageFill }); options.pageDurationMs overrides
 // the page length (a captured background video states it) and options.hasNextPage says whether a
 // page follows (Canva's default page outro and the last-page rule depend on it).
@@ -2526,6 +2573,36 @@ function resolveRotatedTopLeftAnchor(left, top, width, height, angle) {
 // on the same glyphs instead of three different system fallbacks. Mixed Latin + Arabic text keeps
 // its font — its Latin letters really are drawn in it.
 const CANVA_ARABIC_FALLBACK_FAMILY = "Noto Sans Arabic";
+// And the Latin face of the same fallback, for a text whose letters the Canva font does not have
+// (the scraper's textFallsBackToCanvaLatin): without it the editor drew "www.nayroz.com" in serif.
+const CANVA_LATIN_FALLBACK_FAMILY = "Noto Sans";
+
+// Canva's gradient text colour, re-expressed on the text box by the scraper (readTextGradientFill):
+// the editor's and the app's TextFill — { type: "gradient", gradientKind, angle, stops }. Anything
+// malformed is dropped and the text keeps its flat colour.
+function sanitizeImportedTextFill(raw) {
+  if (!raw || typeof raw !== "object" || raw.type !== "gradient" || !Array.isArray(raw.stops)) return null;
+  const stops = raw.stops
+    .map((stop) => {
+      const color = String(stop?.color || "").trim().toLowerCase();
+      const position = Number(stop?.position);
+      const opacity = Number(stop?.opacity);
+      return {
+        color,
+        position: Math.max(0, Math.min(1, position)),
+        ...(Number.isFinite(opacity) && opacity < 1 ? { opacity: Math.max(0, opacity) } : {}),
+      };
+    })
+    .filter((stop) => /^#[0-9a-f]{6}$/.test(stop.color) && Number.isFinite(stop.position))
+    .sort((a, b) => a.position - b.position);
+  if (stops.length < 2) return null;
+  return {
+    type: "gradient",
+    gradientKind: raw.gradientKind === "radial" ? "radial" : "linear",
+    angle: Number.isFinite(Number(raw.angle)) ? Number(raw.angle) : 0,
+    stops,
+  };
+}
 
 async function layerToFabricObject(layer, index) {
   let left = numberOr(layer?.x, 0);
@@ -2615,9 +2692,11 @@ async function layerToFabricObject(layer, index) {
         const chord = Math.max(2, Math.round(lastX - firstX + 2 * pad));
         const sagitta = Math.abs(endsY - apexY) * 1.03;
         amount = Math.min(200, Math.round(((2 * sagitta) / maxCurveOffsetFor(chord)) * 100));
-        left = firstX - pad;
-        top = endsY - height / 2;
-        width = chord;
+        // The box stays Canva's own: the editor and the app now both lay the text on a circle
+        // centred on the box's axis with its sag centred in the box — exactly where Canva's
+        // letters sit inside its element box (DAHQBvX7oJU: the box moved 17 px off the arc's axis
+        // when it was refitted for the old Bézier). The amount above only matters if the user
+        // later edits the curve, which drops the measured arc.
       } else {
         // Older scrapers only sent the sweep: put a circular arc of that sweep across the box.
         const sweepRad = (Math.min(300, Number(curve.sweepDeg)) * Math.PI) / 180;
@@ -2643,6 +2722,23 @@ async function layerToFabricObject(layer, index) {
       top += Math.cos(radians) * textShiftY;
     }
     const resolvedAnchor = resolveRotatedTopLeftAnchor(left, top, width, height, angle);
+    // Canva's line breaks as a range of box widths, in em of the font size (the scraper's
+    // measureTextWrapRange). The server multiplies by the final font size and picks the box width
+    // inside the range, so the editor and the app break exactly where Canva did.
+    const wrapRange = !curve && layer?.textWrapRange ? layer.textWrapRange : null;
+    const wrapMinEm = Number(wrapRange?.minEm);
+    const wrapMaxEm = Number(wrapRange?.maxEm);
+    const importWrapEm =
+      wrapRange && wrapMinEm > 0 && wrapMaxEm > wrapMinEm ? [wrapMinEm, wrapMaxEm] : null;
+    // A gradient-coloured text keeps its flat colour as the fallback every renderer that cannot
+    // texture glyphs draws — Canva leaves the glyphs themselves transparent, so a transparent colour
+    // falls back to the ramp's first stop rather than to invisible text.
+    const textFill = sanitizeImportedTextFill(layer?.textFill);
+    const flatColor = String(layer?.color || "#111827");
+    const textColor =
+      textFill && /^(transparent|rgba\([^)]*,\s*0(\.0+)?\s*\))$/i.test(flatColor.trim())
+        ? textFill.stops[0].color
+        : flatColor;
     return annotateImportMetadata({
       type: "textbox",
       version: "7.0.0",
@@ -2656,11 +2752,14 @@ async function layerToFabricObject(layer, index) {
       opacity,
       text,
       textAlign: curve ? "center" : String(layer?.textAlign || "left"),
-      fill: String(layer?.color || "#111827"),
+      fill: textColor,
+      ...(textFill ? { textFill } : {}),
       fontFamily:
         layer?.fontLacksArabic && !/[A-Za-z]/.test(text)
           ? CANVA_ARABIC_FALLBACK_FAMILY
-          : normalizeFontFamilyName(layer?.fontFamily) || "Arial",
+          : layer?.fontLacksLatin
+            ? CANVA_LATIN_FALLBACK_FAMILY
+            : normalizeFontFamilyName(layer?.fontFamily) || "Arial",
       fontSize,
       fontWeight: numberOr(layer?.fontWeight, 400),
       fontStyle: String(layer?.fontStyle || "normal"),
@@ -2669,7 +2768,9 @@ async function layerToFabricObject(layer, index) {
       underline,
       linethrough,
       ...textBackgroundFields,
+      ...canvaTextStrokeToFabric(layer?.textStroke),
       ...textCurveFields,
+      ...(importWrapEm ? { importWrapEm } : {}),
       flipX,
       flipY,
       layerType: "text",
@@ -2933,6 +3034,10 @@ async function layerToFabricObject(layer, index) {
   const frameMaskPoints = Array.isArray(layer?.frameMask?.points) ? layer.frameMask.points : null;
   if (!border && frameMaskPoints && frameMaskPoints.length >= 6) {
     imageObject.frameShape = { presetId: "canva-clip-path", kind: "polygon", points: frameMaskPoints };
+  }
+  // A video-filled element: the poster stands in until attachCapturedElementVideos swaps the clip in.
+  if (String(layer?.elementVideoId || "").trim()) {
+    imageObject.elementVideoId = String(layer.elementVideoId).trim();
   }
 
   if (/^https?:\/\//i.test(imageSrc)) {
@@ -4119,6 +4224,21 @@ function extractCanvaFiberModel() {
       if (fillHasMedia(el.fill) || (Array.isArray(el.paths) && el.paths.some((p) => p && fillHasMedia(p.fill)))) {
         facts.hasMediaFill = true;
       }
+      // A VIDEO fill's Canva video id (VA…): the scraper keeps such an element's clip outline and the
+      // background captures the clip by this id (attachCapturedElementVideos).
+      const readVideoId = (fill) => {
+        if (!isPlainObject(fill) || !isPlainObject(fill.video)) return "";
+        const raw = fill.video.video;
+        const value = raw && typeof raw.get === "function" ? raw.get() : raw;
+        return typeof value === "string" ? value : "";
+      };
+      const videoId =
+        readVideoId(el.fill) ||
+        (Array.isArray(el.paths) ? el.paths.map((p) => (p ? readVideoId(p.fill) : "")).find(Boolean) || "" : "");
+      if (videoId) facts.videoId = videoId;
+      // The element's Canva type ("grid", "shape", "text"…): a grid's cells are imported one by one.
+      const elementType = el.type && typeof el.type.get === "function" ? el.type.get() : el.type;
+      if (typeof elementType === "string" && elementType) facts.elementType = elementType;
       return facts;
     };
     // Every element under a page's element array, in Canva's paint order (a group before its own
@@ -4342,12 +4462,33 @@ function extractCanvaFiberModel() {
         return null;
       }
     };
+    // The media's draw rect inside its element frame ({ left, top, width, height, rotation }). Canva
+    // re-minifies this key with releases (`sb` → `xb` → `wb`, seen 2026-10-05) and a stale name read no
+    // crop at all — a 90°-turned photo then had its slice measured on screen and came in squeezed. Find
+    // it by SHAPE: the image record's plain object carrying numeric left/top/width/height.
+    const findMediaDrawRect = (record) => {
+      if (!record || typeof record !== "object") return null;
+      const isRect = (value) =>
+        Boolean(value) &&
+        typeof value === "object" &&
+        !Array.isArray(value) &&
+        ["left", "top", "width", "height"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key]));
+      for (const key of ["wb", "xb", "sb"]) if (isRect(record[key])) return record[key];
+      for (const key of Object.keys(record)) {
+        try {
+          if (isRect(record[key])) return record[key];
+        } catch (_error) {
+          // A throwing getter is not the rect.
+        }
+      }
+      return null;
+    };
     const extractImage = (el) => {
       try {
         const img = el.fill && el.fill.image;
         const media = img && img.media;
         if (!media || typeof media.id !== "string") return null;
-        const sb = img.sb && typeof img.sb === "object" ? img.sb : null;
+        const sb = findMediaDrawRect(img);
         return {
           mediaId: media.id,
           version: Number(media.version) || undefined,
@@ -4505,6 +4646,22 @@ function extractCanvaFiberModel() {
       if (t > 1) t /= 100;
       return { hex, alpha: Math.max(0, Math.min(1, 1 - t)) };
     };
+    // ── canva-gradient-line:start
+    // Canva's linear gradient `rotation` (degrees) turns the colour line from top→bottom (0) toward
+    // left→right (90 — what Canva's own DOM draws for it: x1=0 → x2=width at mid-height on
+    // DAHR9xcvsOU's fade bands). The line runs through the box centre along (sin r, cos r), in
+    // objectBoundingBox units. Kept identical in canva-fiber-main.js, background.js and
+    // canva-scraper.js (extension/canva-importer/test/gradient-line.test.mjs checks all three).
+    const canvaGradientLine = (rotation) => {
+      const raw = rotation && typeof rotation.get === "function" ? rotation.get() : rotation;
+      const degrees = Number(raw);
+      const radians = ((Number.isFinite(degrees) ? degrees : 0) * Math.PI) / 180;
+      const round = (value) => Math.round(value * 10000) / 10000 + 0;
+      const dx = Math.sin(radians) / 2;
+      const dy = Math.cos(radians) / 2;
+      return { x1: round(0.5 - dx), y1: round(0.5 - dy), x2: round(0.5 + dx), y2: round(0.5 + dy) };
+    };
+    // ── canva-gradient-line:end
     const svgPaintFromFill = (fill, gradientId) => {
       if (!fill || typeof fill !== "object") return null;
       const gradient = fill.gradient && typeof fill.gradient === "object" ? fill.gradient : null;
@@ -4519,13 +4676,14 @@ function extractCanvaFiberModel() {
           .filter(Boolean);
         if (stops.length === 0) return null;
         const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+        const line = canvaGradientLine(gradient.rotation);
         const cx = Number(gradient.center && gradient.center.left);
         const cy = Number(gradient.center && gradient.center.top);
         const defs = isRadial
           ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
               Number.isFinite(cy) ? cy : 0.5
             }" r="0.75">${stops.join("")}</radialGradient>`
-          : `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+          : `<linearGradient id="${gradientId}" x1="${line.x1}" y1="${line.y1}" x2="${line.x2}" y2="${line.y2}">${stops.join("")}</linearGradient>`;
         return { paint: `url(#${gradientId})`, alpha: 1, defs };
       }
       const solid = svgColor(fill.color, fill.transparency);
@@ -5795,8 +5953,15 @@ async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress
       if (entry.contentRange?.total) bucket.total = Math.max(bucket.total, entry.contentRange.total);
       byUrl.set(entry.url, bucket);
     });
+    // The clip asked for first (a page with several videos plays them all), then the biggest.
+    const matchesVideoId = (url) => Boolean(videoId) && String(url).includes(videoId);
     const candidateUrls = Array.from(byUrl.values())
-      .sort((a, b) => (b.total || 0) - (a.total || 0) || b.entries.length - a.entries.length)
+      .sort(
+        (a, b) =>
+          Number(matchesVideoId(b.url)) - Number(matchesVideoId(a.url)) ||
+          (b.total || 0) - (a.total || 0) ||
+          b.entries.length - a.entries.length
+      )
       .map((bucket) => bucket.url);
     probe.resources
       .filter((resource) => !byUrl.has(resource.url))
@@ -5974,6 +6139,72 @@ async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress
       await releaseDebugger(tabId);
     }
   }
+}
+
+// Element videos: a Canva element whose fill is a VIDEO (an arch-framed clip on DAHR94gu0m0) is
+// scraped as its poster — what the page shows while paused — with its clip outline as a frame
+// shape and `elementVideoId` from the model. Capture the clip the way the page background is
+// captured and turn the poster into a video object that keeps the frame shape: the editor loads
+// it as a frame with video content, the mobile mapper as a frame with the poster preview.
+async function attachCapturedElementVideos(fabricObjects, context) {
+  const objects = Array.isArray(fabricObjects) ? fabricObjects : [];
+  const indexes = objects
+    .map((object, index) =>
+      String(object?.elementVideoId || "").trim() && String(object?.type || "") === "image" ? index : -1
+    )
+    .filter((index) => index >= 0);
+  if (indexes.length === 0) return { objects, captured: 0 };
+  const warnings = Array.isArray(context?.importWarnings) ? context.importWarnings : [];
+  const cache = context?.cache instanceof Map ? context.cache : new Map();
+  const next = objects.slice();
+  let captured = 0;
+  for (const index of indexes) {
+    const object = next[index];
+    const videoId = String(object.elementVideoId || "").trim();
+    if (!cache.has(videoId)) {
+      cache.set(
+        videoId,
+        captureCanvaBackgroundVideo(context.tabId, { videoId, reportProgress: context?.reportProgress })
+      );
+    }
+    const capture = await cache.get(videoId);
+    const { elementVideoId: _elementVideoId, ...rest } = object;
+    if (!capture?.ok) {
+      logger.warn("Element video capture failed; keeping poster", { videoId, reason: capture?.reason });
+      warnings.push(
+        `Video element "${String(object.layerName || videoId)}" imported as its poster frame (capture: ${String(capture?.reason || "unknown")}).`
+      );
+      next[index] = rest;
+      continue;
+    }
+    const blobRef = registerBinaryAsset(
+      capture.blob,
+      `canva-element-video-${videoId}.${capture.mimeType === "video/webm" ? "webm" : "mp4"}`
+    );
+    const durationSec = Math.round(Math.max(0, Number(capture.durationSec) || 0) * 1000) / 1000;
+    const posterSrc = String(object.src || "");
+    // The scraped picture is the poster unless the layer fell to its outline (an SVG).
+    const posterUsable = posterSrc && !/^data:image\/svg/i.test(posterSrc);
+    next[index] = {
+      ...rest,
+      type: "video",
+      layerType: "video",
+      importKind: "video",
+      src: blobRef,
+      ...(posterUsable ? { thumbnailUri: posterSrc } : {}),
+      videoStart: 0,
+      videoEnd: durationSec,
+      videoDuration: durationSec,
+      sourceWidth: capture.width > 0 ? capture.width : numberOr(object.sourceWidth, numberOr(object.width, 1)),
+      sourceHeight: capture.height > 0 ? capture.height : numberOr(object.sourceHeight, numberOr(object.height, 1)),
+      fallback: false,
+      fallbackReason: "",
+      imageProvenance: "element-video",
+      videoCapture: { videoId, method: capture.method },
+    };
+    captured += 1;
+  }
+  return { objects: next, captured };
 }
 
 // Swaps the page's poster-frame layer (scraper: imageProvenance "background-video-poster") for a
@@ -7477,6 +7708,18 @@ async function importActiveCanvaTab(message, options = {}) {
         backgroundVideoDurationMs = Math.round(Number(videoSwap.durationMs));
       }
     }
+    // Video-filled elements (framed clips): capture each clip by its id and swap it in.
+    if (fabricObjects.some((object) => String(object?.elementVideoId || "").trim())) {
+      const elementVideos = await timePhase("captureElementVideos", () =>
+        attachCapturedElementVideos(fabricObjects, {
+          tabId: tab.id,
+          cache: backgroundVideoCaptureCache,
+          importWarnings,
+          reportProgress: (text) => reportProgress(`${pagePrefix}${text}`),
+        })
+      );
+      fabricObjects = elementVideos.objects;
+    }
     // Canva's animation scheduler (docs/canva-animation-parity.md §8.5) over the whole page model,
     // now that the page's objects exist and its length is final (a captured background video is
     // the only source of a video page's length). It writes each animated object's slots, legacy
@@ -7566,6 +7809,8 @@ async function importActiveCanvaTab(message, options = {}) {
       importedCustomFonts,
       hasExtractedLayers: pageHasExtractedLayers,
       backgroundVideoDurationMs,
+      // The page's gradient fill, when Canva paints one (see pageBackgroundGradient in the scraper).
+      pageBackgroundGradient: captureMeta?.pageBackgroundGradient || null,
     };
   };
 
@@ -7693,9 +7938,20 @@ async function importActiveCanvaTab(message, options = {}) {
     const value = fromPage > 0 ? fromPage : Number(designFiberModel?.__pageDurationMs);
     return Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
   };
+  const pageBackgroundFor = (pageIndex) =>
+    canvaPageGradientToBackground(capturedArtifacts[pageIndex]?.pageBackgroundGradient);
+  const coverBackground = pageBackgroundFor(0);
   const fabricData = {
     version: "7.0.0",
-    ...(/^#[0-9a-f]{3}([0-9a-f]{3})?$/.test(modelPageColor) ? { backgroundColor: modelPageColor } : {}),
+    ...(/^#[0-9a-f]{3}([0-9a-f]{3})?$/.test(modelPageColor)
+      ? { backgroundColor: modelPageColor }
+      : coverBackground
+        ? { backgroundColor: coverBackground.gradientFrom }
+        : {}),
+    // A gradient page colour rides as the page `background` object the editor, the mobile mapper
+    // (editorData.js reads the cover's from here) and the app all understand; `backgroundColor`
+    // above stays the flat fallback for readers that only know a colour.
+    ...(coverBackground ? { background: coverBackground } : {}),
     objects:
       fabricObjects.length > 0
         ? fabricObjects
@@ -7772,6 +8028,7 @@ async function importActiveCanvaTab(message, options = {}) {
                   ...(String(artifacts.imageDataUrl || "").startsWith("data:image/")
                     ? { thumbnailDataUrl: artifacts.imageDataUrl }
                     : {}),
+                  ...(pageBackgroundFor(mergedPageIndex) ? { background: pageBackgroundFor(mergedPageIndex) } : {}),
                 })),
               }
             : {}),

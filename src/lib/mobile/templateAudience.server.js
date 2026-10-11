@@ -12,12 +12,16 @@ import { resolveOptionalMobileBearer } from "@/lib/mobile/userAuth.server";
 
 const PUBLISHED_ONLY = Object.freeze({ status: "published" });
 const PUBLISHED_AND_DRAFT = Object.freeze({ status: { in: ["published", "draft"] } });
+// The same two audiences as plain lists, for the raw-SQL paths (search, taxonomy counts).
+const PUBLISHED_ONLY_STATUSES = Object.freeze(["published"]);
+const PUBLISHED_AND_DRAFT_STATUSES = Object.freeze(["published", "draft"]);
 
 /**
  * @typedef {{
  *   isTester: boolean,
  *   viewerId: string | null,
  *   statusWhere: object,
+ *   statuses: readonly string[],
  *   cacheControl: (publicValue: string) => string,
  *   headers: (publicValue: string) => Record<string, string>,
  * }} TemplateAudience
@@ -35,6 +39,7 @@ export async function resolveTemplateAudience(request) {
     isTester: tester,
     viewerId: viewer?.id || null,
     statusWhere: tester ? PUBLISHED_AND_DRAFT : PUBLISHED_ONLY,
+    statuses: tester ? PUBLISHED_AND_DRAFT_STATUSES : PUBLISHED_ONLY_STATUSES,
     cacheControl: (publicValue) => (tester ? MOBILE_PRIVATE_NO_STORE : publicValue),
     headers: (publicValue) => ({
       "Cache-Control": tester ? MOBILE_PRIVATE_NO_STORE : publicValue,

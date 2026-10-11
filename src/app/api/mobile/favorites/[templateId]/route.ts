@@ -62,7 +62,7 @@ function enforceWriteRateLimit(userId: string) {
 export async function GET(request: NextRequest, context: RouteContext) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
 
   const templateId = await resolveTemplateId(context);
@@ -90,7 +90,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 export async function PUT(request: NextRequest, context: RouteContext) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
   const mobileUser = auth.mobileUser;
 
@@ -132,7 +132,7 @@ export async function PUT(request: NextRequest, context: RouteContext) {
 export async function DELETE(request: NextRequest, context: RouteContext) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
   const mobileUser = auth.mobileUser;
 

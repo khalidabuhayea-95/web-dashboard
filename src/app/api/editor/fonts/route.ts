@@ -69,6 +69,12 @@ function toEditorSyncedFont(font: any) {
     // Whitelisted explicitly (unlike toEditorCustomFont, which spreads the row) —
     // without this the editor's Pro switch reads false for every synced font.
     isPremium: Boolean(font?.isPremium),
+    // The family's per-weight files. A Canva import merges its bold cut INTO the matching Google
+    // family, and without this list the editor declared only the 400 face and drew faux-bold.
+    variants: Array.isArray(font?.variants) ? font.variants : [],
+    // The sample image the Fonts tab renders for the family — the editor's font cards show it
+    // instead of downloading every font file just to draw its name.
+    previewImageUrl: String(font?.previewImageUrl || "").trim() || null,
     createdAt: font?.createdAt,
     updatedAt: font?.updatedAt,
   };

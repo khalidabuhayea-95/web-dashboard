@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { getSubscriptionStatus } from "@/lib/billing/subscriptionState.server";
 import { createLogger } from "@/lib/logging/logger";
 import {
@@ -27,7 +28,7 @@ export async function GET(request: NextRequest) {
     if (!auth.ok) {
       return attachRequestIdHeader(
         NextResponse.json(
-          { error: auth.error },
+          { error: auth.error, ...(auth.code ? { code: auth.code } : {}) },
           { status: auth.status, headers: { "Cache-Control": "no-store" } }
         ),
         requestId
@@ -42,6 +43,8 @@ export async function GET(request: NextRequest) {
     );
   } catch (error) {
     requestLogger.error("Failed to read subscription status", error);
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) return attachRequestIdHeader(unavailable, requestId);
     return attachRequestIdHeader(
       NextResponse.json(
         { error: "Failed to read the subscription status." },

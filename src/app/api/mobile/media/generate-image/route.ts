@@ -1,5 +1,8 @@
+import { createHash } from "node:crypto";
+
 import { NextRequest, NextResponse } from "next/server";
 
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { createLogger } from "@/lib/logging/logger";
 import {
   attachRequestIdHeader,
@@ -9,8 +12,8 @@ import {
 import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { getMobileAppSettings } from "@/lib/settings/mobileAppSettings.server.js";
 import { resolveMobileImageGenerationModel } from "@/lib/settings/mobileAppSettings.js";
-import { MEDIA_CREDIT_FEATURES, resolveCreditCost } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
+import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
+import { runPaidMediaOperation } from "@/lib/media/credits/paidRun.server";
 import {
   ImageGenerationError,
   generateImage,
@@ -28,6 +31,8 @@ import {
 export const runtime = "nodejs";
 // The model answers in 4–6s; this is headroom for a slow queue, not a target.
 export const maxDuration = 180;
+// Refund and give up a little before the platform would kill the request.
+const RUN_TIMEOUT_MS = (maxDuration - 10) * 1000;
 
 const logger = createLogger("api.mobile.media.generate-image");
 // Generation is cheap and people iterate on wording, so the window is wider
@@ -54,7 +59,7 @@ export async function POST(request: NextRequest) {
   try {
     const auth = await resolveMobileBearerUser(request);
     if (!auth.ok) {
-      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+      return jsonResponse(requestId, { error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status, {
         "Cache-Control": "no-store",
       });
     }
@@ -101,67 +106,54 @@ export async function POST(request: NextRequest) {
       normalizeImageGenerationModelId((body as { model?: unknown }).model) ||
       resolveMobileImageGenerationModel(settings);
 
-    const insufficientCredits = await enforceMediaCredits({
+    // Credits are reserved atomically before the model runs and refunded if it fails, times out,
+    // or the client leaves before the image is delivered; an Idempotency-Key retry replays
+    // instead of charging again (production audit H-13). The wallet AFTER this run rides the
+    // response as X-Credits-* (2026-09-08 direction).
+    const response = await runPaidMediaOperation({
+      request,
+      logger: requestLogger,
       mobileUserId: mobileUser.id,
       feature: MEDIA_CREDIT_FEATURES.IMAGE_GENERATION,
+      idempotencyScope: "media:generate-image",
+      // The prompt is part of what was asked for; only its digest is kept.
+      fingerprint: `${modelId}:${aspectRatio}:${createHash("sha256").update(prompt).digest("hex").slice(0, 16)}`,
+      timeoutMs: RUN_TIMEOUT_MS,
+      execute: () => generateImage({ prompt, aspectRatio, modelId }),
+      respond: (result, { chargedCredits }) => {
+        requestLogger.info("Image generation completed", {
+          mobileUserId: mobileUser.id,
+          model: result.model,
+          aspectRatio: result.aspectRatio,
+          translated: result.translated,
+          promptChars: prompt.length,
+          outputBytes: result.buffer.length,
+          durationMs: Date.now() - startedAt,
+        });
+        return {
+          usage: { provider: result.provider, model: result.model },
+          headers: {
+            "Content-Type": result.mimeType,
+            "Content-Disposition": 'inline; filename="generated.png"',
+            "X-Generation-Model": result.model,
+            "X-Generation-Aspect-Ratio": result.aspectRatio,
+            // The app shows "N credits used" from this header, same as the AI Tools run route:
+            // exactly what the reservation took (the configured cost).
+            "X-Credits-Charged": String(chargedCredits),
+          },
+          body: new Uint8Array(result.buffer),
+        };
+      },
     });
-    if (insufficientCredits) {
-      requestLogger.info("Image generation rejected: insufficient credits", {
-        mobileUserId: mobileUser.id,
-      });
-      return attachRequestIdHeader(insufficientCredits, requestId);
-    }
-
-    const result = await generateImage({ prompt, aspectRatio, modelId });
-
-    // The app shows "N credits used" from this header, same as the AI Tools run
-    // route. Read the configured cost rather than hard-coding the default.
-    const chargedCredits = resolveCreditCost(
-      settings,
-      MEDIA_CREDIT_FEATURES.IMAGE_GENERATION
-    );
-
-    await recordMediaUsage({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.IMAGE_GENERATION,
-      provider: result.provider,
-      model: result.model,
-    });
-
-    // The wallet AFTER this run, so the app updates its shared balance from this very
-    // response instead of asking again (2026-09-08 direction).
-    const creditHeaders = await creditBalanceHeaders({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.IMAGE_GENERATION,
-    });
-
-    requestLogger.info("Image generation completed", {
-      mobileUserId: mobileUser.id,
-      model: result.model,
-      aspectRatio: result.aspectRatio,
-      translated: result.translated,
-      promptChars: prompt.length,
-      outputBytes: result.buffer.length,
-      durationMs: Date.now() - startedAt,
-    });
-
-    return attachRequestIdHeader(
-      new NextResponse(new Uint8Array(result.buffer), {
-        status: 200,
-        headers: {
-          ...creditHeaders,
-
-          "Content-Type": result.mimeType,
-          "Content-Disposition": 'inline; filename="generated.png"',
-          "Cache-Control": "no-store",
-          "X-Generation-Model": result.model,
-          "X-Generation-Aspect-Ratio": result.aspectRatio,
-          "X-Credits-Charged": String(chargedCredits),
-        },
-      }),
-      requestId
-    );
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) {
+      requestLogger.error("Image generation failed: service unavailable", error, {
+        durationMs: Date.now() - startedAt,
+      });
+      return attachRequestIdHeader(unavailable, requestId);
+    }
     if (error instanceof ImageGenerationError) {
       requestLogger.warn("Image generation rejected", { code: error.code, error: error.message });
       return jsonResponse(requestId, { error: error.message, code: error.code }, error.status, {

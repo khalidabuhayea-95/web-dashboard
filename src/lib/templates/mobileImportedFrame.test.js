@@ -59,3 +59,27 @@ test("the same photo without a frameShape stays a plain IMAGE", () => {
   assert.equal(layer.type, "IMAGE");
   assert.equal(resolveFrameContent(importedPhoto()), null);
 });
+
+test("a video-filled element (video object + frameShape) is a FRAME whose content is the clip, poster first", () => {
+  const video = importedPhoto({
+    type: "video",
+    layerType: "video",
+    importKind: "video",
+    src: "https://cdn.example.com/kaaba.mp4",
+    thumbnailUri: "https://cdn.example.com/kaaba-poster.png",
+    videoStart: 0,
+    videoEnd: 5,
+    videoDuration: 5,
+    frameShape: { presetId: "canva-clip-path", kind: "polygon", points: ARCH },
+  });
+  const content = resolveFrameContent(video);
+  assert.equal(content.kind, "video");
+  assert.equal(content.src, "https://cdn.example.com/kaaba.mp4");
+  assert.equal(content.posterSrc, "https://cdn.example.com/kaaba-poster.png");
+  assert.equal(content.videoDuration, 5);
+  const [layer] = layersOf([video]);
+  assert.equal(layer.type, "FRAME");
+  assert.equal(layer.shape.kind, "polygon");
+  // With a poster the app gets the frame's preview picture, like every other frame.
+  assert.equal(layer.content.type, "IMAGE");
+});

@@ -441,6 +441,21 @@
         if (fillHasMedia(el.fill) || (Array.isArray(el.paths) && el.paths.some((p) => p && fillHasMedia(p.fill)))) {
           facts.hasMediaFill = true;
         }
+        // A VIDEO fill's Canva video id (VA…): the scraper keeps such an element's clip outline and the
+        // background captures the clip by this id (attachCapturedElementVideos).
+        const readVideoId = (fill) => {
+          if (!isPlainObject(fill) || !isPlainObject(fill.video)) return "";
+          const raw = fill.video.video;
+          const value = raw && typeof raw.get === "function" ? raw.get() : raw;
+          return typeof value === "string" ? value : "";
+        };
+        const videoId =
+          readVideoId(el.fill) ||
+          (Array.isArray(el.paths) ? el.paths.map((p) => (p ? readVideoId(p.fill) : "")).find(Boolean) || "" : "");
+        if (videoId) facts.videoId = videoId;
+        // The element's Canva type ("grid", "shape", "text"…): a grid's cells are imported one by one.
+        const elementType = el.type && typeof el.type.get === "function" ? el.type.get() : el.type;
+        if (typeof elementType === "string" && elementType) facts.elementType = elementType;
         return facts;
       };
       // Every element under a page's element array, in Canva's paint order (a group before its own
@@ -664,20 +679,35 @@
           return null;
         }
       };
+      // ── canva-media-draw-rect:start
+      // The media's draw rect inside its element frame ({ left, top, width, height, rotation }). Canva
+      // re-minifies this key with releases (`sb` → `xb` → `wb`, seen 2026-10-05) and a stale name read no
+      // crop at all — a 90°-turned photo then had its slice measured on screen and came in squeezed. Find
+      // it by SHAPE: the image record's plain object carrying numeric left/top/width/height.
+      const findMediaDrawRect = (record) => {
+        if (!record || typeof record !== "object") return null;
+        const isRect = (value) =>
+          Boolean(value) &&
+          typeof value === "object" &&
+          !Array.isArray(value) &&
+          ["left", "top", "width", "height"].every((key) => typeof value[key] === "number" && Number.isFinite(value[key]));
+        for (const key of ["wb", "xb", "sb"]) if (isRect(record[key])) return record[key];
+        for (const key of Object.keys(record)) {
+          try {
+            if (isRect(record[key])) return record[key];
+          } catch (_error) {
+            // A throwing getter is not the rect.
+          }
+        }
+        return null;
+      };
+      // ── canva-media-draw-rect:end
       const extractImage = (el) => {
         try {
           const img = el.fill && el.fill.image;
           const media = img && img.media;
           if (!media || typeof media.id !== "string") return null;
-          // The media's draw rect inside the element frame. Canva renamed the minified prop from
-          // `sb` to `xb` (observed 2026-09: { left, top, width, height, rotation }, equal to the frame
-          // when the media simply fills it). Read the new name first, keep the old as a fallback.
-          const sb =
-            img.xb && typeof img.xb === "object"
-              ? img.xb
-              : img.sb && typeof img.sb === "object"
-                ? img.sb
-                : null;
+          const sb = findMediaDrawRect(img);
           return {
             mediaId: media.id,
             version: Number(media.version) || undefined,
@@ -869,6 +899,22 @@
         const alpha = Math.max(0, Math.min(1, 1 - t));
         return { hex, alpha };
       };
+      // ── canva-gradient-line:start
+      // Canva's linear gradient `rotation` (degrees) turns the colour line from top→bottom (0) toward
+      // left→right (90 — what Canva's own DOM draws for it: x1=0 → x2=width at mid-height on
+      // DAHR9xcvsOU's fade bands). The line runs through the box centre along (sin r, cos r), in
+      // objectBoundingBox units. Kept identical in canva-fiber-main.js, background.js and
+      // canva-scraper.js (extension/canva-importer/test/gradient-line.test.mjs checks all three).
+      const canvaGradientLine = (rotation) => {
+        const raw = rotation && typeof rotation.get === "function" ? rotation.get() : rotation;
+        const degrees = Number(raw);
+        const radians = ((Number.isFinite(degrees) ? degrees : 0) * Math.PI) / 180;
+        const round = (value) => Math.round(value * 10000) / 10000 + 0;
+        const dx = Math.sin(radians) / 2;
+        const dy = Math.cos(radians) / 2;
+        return { x1: round(0.5 - dx), y1: round(0.5 - dy), x2: round(0.5 + dx), y2: round(0.5 + dy) };
+      };
+      // ── canva-gradient-line:end
       const svgPaintFromFill = (fill, gradientId) => {
         // → { paint, alpha, defs } where paint is a colour or url(#id).
         if (!fill || typeof fill !== "object") return null;
@@ -884,15 +930,15 @@
             .filter(Boolean);
           if (stops.length === 0) return null;
           const isRadial = String(gradient.type || "").toLowerCase() === "radial";
+          const line = canvaGradientLine(gradient.rotation);
           const cx = Number(gradient.center && gradient.center.left);
           const cy = Number(gradient.center && gradient.center.top);
           const defs = isRadial
             ? `<radialGradient id="${gradientId}" cx="${Number.isFinite(cx) ? cx : 0.5}" cy="${
                 Number.isFinite(cy) ? cy : 0.5
               }" r="0.75">${stops.join("")}</radialGradient>`
-            : // Canva's linear angle isn't exposed under a stable key; top→bottom matches the
-              // common case and never leaves the shape unpainted.
-              `<linearGradient id="${gradientId}" x1="0" y1="0" x2="0" y2="1">${stops.join("")}</linearGradient>`;
+            : // The line follows Canva's `rotation` (canvaGradientLine); none = top→bottom.
+              `<linearGradient id="${gradientId}" x1="${line.x1}" y1="${line.y1}" x2="${line.x2}" y2="${line.y2}">${stops.join("")}</linearGradient>`;
           return { paint: `url(#${gradientId})`, alpha: 1, defs };
         }
         const solid = svgColor(fill.color, fill.transparency);
@@ -1375,7 +1421,7 @@
             const get = unwrapObservable;
             const color = String(get(fill.color) || "").trim();
             const img = fill.image && fill.image.media && typeof fill.image.media.id === "string" ? fill.image : null;
-            const box = img ? img.xb || img.sb : null;
+            const box = img ? findMediaDrawRect(img) : null;
             // Current model: a page background VIDEO is the fill's `video` slot — {video:"VA…",
             // xb placement rect (page px, may exceed the page), transparency, autoplay, volume}.
             // Older designs carried a per-scene clip ARRAY on the page object instead (see
@@ -1384,7 +1430,7 @@
               fill.video && typeof fill.video === "object" && typeof get(fill.video.video) === "string"
                 ? fill.video
                 : null;
-            const vbox = vid ? vid.xb || vid.sb || vid.rb : null;
+            const vbox = vid ? findMediaDrawRect(vid) : null;
             return {
               color: /^#[0-9a-f]{3}([0-9a-f]{3})?$/i.test(color) ? color.toLowerCase() : "",
               transparency: Number(get(fill.transparency)) || 0,
@@ -1581,13 +1627,60 @@
               })(root, 0);
               return found;
             };
+            // Each page's elements come from the design's PLAIN snapshot (…CCf.pages[i], real arrays
+            // all the way down — paths, fills, text cells), matched to the live page by id. The live
+            // page objects hold observable collections instead, which every extractor here
+            // (extractShape / extractVectorShape / extractBorder / extractText) can't read. The old
+            // structural search from each LIVE page walked keys in order, and a current page lists
+            // `audio` before `elements`: audio.tracks.ctx… climbs to that snapshot and lands on
+            // pages[0].elements — so EVERY page got page 1's model. Page 2 of DAHPQGZn2Tw imported
+            // page 1's title and line (model supplement), lost its own line, and its shapes fell back
+            // to zoom-scaled DOM captures; page 1's clips and animation stood in for later pages'.
+            const isPlainPage = (value) =>
+              value && typeof value === "object" && !Array.isArray(value) && Array.isArray(value.elements);
+            let plainPages = null;
+            (function findPlainPages(obj, depth, seenSet) {
+              if (plainPages || !obj || typeof obj !== "object" || depth > 16 || seenSet.has(obj)) return;
+              seenSet.add(obj);
+              if (Array.isArray(obj)) {
+                if (
+                  obj.length &&
+                  obj.every(isPlainPage) &&
+                  obj.some((page) => page.elements.some((it) => it && typeof it.id === "string" && /^LB/.test(it.id)))
+                ) {
+                  plainPages = obj;
+                  return;
+                }
+                for (const it of obj) findPlainPages(it, depth + 1, seenSet);
+                return;
+              }
+              for (const key in obj) {
+                try {
+                  findPlainPages(obj[key], depth + 1, seenSet);
+                } catch (_e) {
+                  /* observable getters can throw */
+                }
+                if (plainPages) return;
+              }
+            })(doc, 0, new Set());
+            const plainPageFor = (pageRoot, pageIndex) => {
+              if (!plainPages) return null;
+              const id = pageRoot && typeof pageRoot.id === "string" ? pageRoot.id : "";
+              const byId = id ? plainPages.find((page) => page.id === id) : null;
+              if (byId) return byId;
+              // Same page count and no ids to match on: the snapshot is in page order too.
+              return plainPages.length === pagesArray.length ? plainPages[pageIndex] || null : null;
+            };
             const pages = [];
             for (let pageIndex = 0; pageIndex < pagesArray.length; pageIndex += 1) {
               const pageRoot = pagesArray[pageIndex];
-              const pageElements = buildElementMap(findElementsArrayIn(pageRoot));
-              const pageFillForPage = readPageFill(pageRoot) || readPageFill(findPageObjIn(pageRoot));
+              const plainPage = plainPageFor(pageRoot, pageIndex);
+              const pageElements = buildElementMap(plainPage ? plainPage.elements : findElementsArrayIn(pageRoot));
+              // Clips live on the snapshot's page object; the fill only on the live page.
+              const pageObjForPage = plainPage || findPageObjIn(pageRoot);
+              const pageFillForPage = readPageFill(pageRoot) || readPageFill(pageObjForPage);
               const pageClips =
-                findClipsOnPageObj(findPageObjIn(pageRoot)) || clipsFromFill(pageFillForPage, pageRoot);
+                findClipsOnPageObj(pageObjForPage) || clipsFromFill(pageFillForPage, pageRoot);
               pages.push({
                 index: pageIndex,
                 elements: pageElements,
@@ -1596,9 +1689,9 @@
                     ? { clips: pageClips, posters }
                     : null,
                 fill: pageFillForPage,
-                animation: readPageAnimation(pageRoot) || readPageAnimation(findPageObjIn(pageRoot)),
+                animation: readPageAnimation(pageRoot) || readPageAnimation(pageObjForPage),
                 durationMs: readPageDurationMs(pageRoot, pageFillForPage, pageElements),
-                ...(readPageSize(pageRoot) || readPageSize(findPageObjIn(pageRoot)) || {}),
+                ...(readPageSize(pageRoot) || readPageSize(pageObjForPage) || {}),
               });
             }
             if (pages.some((p) => Object.keys(p.elements).length > 0)) {

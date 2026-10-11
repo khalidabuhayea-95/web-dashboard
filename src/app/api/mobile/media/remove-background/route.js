@@ -10,8 +10,9 @@ import { resolveMobileBearerUser } from "@/lib/mobile/userAuth.server";
 import { removeBackground } from "@/lib/media/backgroundRemoval/index.server";
 import { isBackgroundRemovalError } from "@/lib/media/backgroundRemoval/errors";
 import { removeRasterBackgroundWithRembg } from "@/lib/media/backgroundRemoval/providers/rembg.server";
+import { serviceUnavailableResponseFor } from "@/lib/api/infrastructureErrors";
 import { MEDIA_CREDIT_FEATURES } from "@/lib/media/credits/config.js";
-import { enforceMediaCredits, recordMediaUsage, creditBalanceHeaders} from "@/lib/media/credits/index.server";
+import { runPaidMediaOperation } from "@/lib/media/credits/paidRun.server";
 import {
   checkRateLimit,
   createRateLimitResponse,
@@ -19,6 +20,8 @@ import {
 
 export const runtime = "nodejs";
 export const maxDuration = 180;
+// Refund and give up a little before the platform would kill the request.
+const RUN_TIMEOUT_MS = (maxDuration - 10) * 1000;
 
 const logger = createLogger("api.mobile.media.remove-background");
 const REMOVE_BACKGROUND_LIMIT = {
@@ -105,7 +108,7 @@ export async function POST(request) {
       requestLogger.warn("Background removal rejected: unauthenticated", {
         reason: auth.reason,
       });
-      return jsonResponse(requestId, { error: auth.error }, auth.status, {
+      return jsonResponse(requestId, { error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status, {
         "Cache-Control": "no-store",
       });
     }
@@ -154,83 +157,79 @@ export async function POST(request) {
       });
     }
 
-    const insufficientCredits = await enforceMediaCredits({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
-    });
-    if (insufficientCredits) {
-      requestLogger.info("Background removal rejected: insufficient credits", {
-        mobileUserId: mobileUser.id,
-      });
-      return attachRequestIdHeader(insufficientCredits, requestId);
-    }
-
     const inputBytes = Buffer.from(await file.arrayBuffer());
     const safeFileName = sanitizeFileName(file.name) || "image";
-    const result = await removeBackgroundForMobile({
-      bytes: inputBytes,
-      mimeType: file.type,
-      fileName: safeFileName,
-    });
 
-    await recordMediaUsage({
+    // Credits are reserved atomically before the remover runs and refunded if it fails, times
+    // out, or the client leaves before the image is delivered; an Idempotency-Key retry replays
+    // instead of charging again (production audit H-13). The wallet AFTER this run rides the
+    // response as X-Credits-* (2026-09-08 direction).
+    const response = await runPaidMediaOperation({
+      request,
+      logger: requestLogger,
       mobileUserId: mobileUser.id,
       feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
-      provider: String(result.provider || result.strategy || "local"),
-      model: "local/background-remover",
+      idempotencyScope: "media:remove-background",
+      fingerprint: "remove-background",
+      timeoutMs: RUN_TIMEOUT_MS,
+      execute: () =>
+        removeBackgroundForMobile({
+          bytes: inputBytes,
+          mimeType: file.type,
+          fileName: safeFileName,
+        }),
+      respond: (result) => {
+        const durationMs = Date.now() - startedAt;
+        if (result.fallbackUsed) {
+          requestLogger.warn("Primary rembg background removal failed; used legacy fallback", {
+            inputMimeType: String(file.type || "").trim().toLowerCase() || null,
+            inputBytes: inputBytes.length,
+            fallbackProvider: result.fallbackProvider || null,
+            fallbackStrategy: result.fallbackStrategy || null,
+            primaryProvider: result.primaryProvider || null,
+            primaryStrategy: result.primaryStrategy || null,
+            fallbackReasonCode: result.fallbackReasonCode || null,
+            fallbackReason: result.fallbackReason || null,
+            durationMs,
+          });
+        }
+        requestLogger.info("Background removal completed", {
+          mobileUserId: mobileUser.id,
+          inputMimeType: String(file.type || "").trim().toLowerCase() || null,
+          inputBytes: inputBytes.length,
+          outputBytes: result.bytes.length,
+          width: result.width || null,
+          height: result.height || null,
+          strategy: result.strategy,
+          provider: result.provider,
+          fallbackUsed: Boolean(result.fallbackUsed),
+          durationMs,
+        });
+        return {
+          usage: {
+            provider: String(result.provider || result.strategy || "local"),
+            model: "local/background-remover",
+          },
+          headers: {
+            "Content-Type": "image/png",
+            "Content-Disposition": `inline; filename=\"${result.fileName || "image-no-bg.png"}\"`,
+            "X-Output-Width": String(result.width || ""),
+            "X-Output-Height": String(result.height || ""),
+            "X-Background-Removal-Strategy": String(result.provider || result.strategy || ""),
+          },
+          body: new Uint8Array(result.bytes),
+        };
+      },
     });
-
-    // The wallet AFTER this run, so the app updates its shared balance from this very
-    // response instead of asking again (2026-09-08 direction).
-    const creditHeaders = await creditBalanceHeaders({
-      mobileUserId: mobileUser.id,
-      feature: MEDIA_CREDIT_FEATURES.BACKGROUND_REMOVAL,
-    });
-
-    const durationMs = Date.now() - startedAt;
-    if (result.fallbackUsed) {
-      requestLogger.warn("Primary rembg background removal failed; used legacy fallback", {
-        inputMimeType: String(file.type || "").trim().toLowerCase() || null,
-        inputBytes: inputBytes.length,
-        fallbackProvider: result.fallbackProvider || null,
-        fallbackStrategy: result.fallbackStrategy || null,
-        primaryProvider: result.primaryProvider || null,
-        primaryStrategy: result.primaryStrategy || null,
-        fallbackReasonCode: result.fallbackReasonCode || null,
-        fallbackReason: result.fallbackReason || null,
-        durationMs,
-      });
-    }
-    requestLogger.info("Background removal completed", {
-      mobileUserId: mobileUser.id,
-      inputMimeType: String(file.type || "").trim().toLowerCase() || null,
-      inputBytes: inputBytes.length,
-      outputBytes: result.bytes.length,
-      width: result.width || null,
-      height: result.height || null,
-      strategy: result.strategy,
-      provider: result.provider,
-      fallbackUsed: Boolean(result.fallbackUsed),
-      durationMs,
-    });
-
-    return attachRequestIdHeader(
-      new NextResponse(result.bytes, {
-        status: 200,
-        headers: {
-          ...creditHeaders,
-
-          "Content-Type": "image/png",
-          "Content-Disposition": `inline; filename=\"${result.fileName || "image-no-bg.png"}\"`,
-          "Cache-Control": "no-store",
-          "X-Output-Width": String(result.width || ""),
-          "X-Output-Height": String(result.height || ""),
-          "X-Background-Removal-Strategy": String(result.provider || result.strategy || ""),
-        },
-      }),
-      requestId
-    );
+    return attachRequestIdHeader(response, requestId);
   } catch (error) {
+    const unavailable = serviceUnavailableResponseFor(error);
+    if (unavailable) {
+      requestLogger.error("Background removal failed: service unavailable", error, {
+        durationMs: Date.now() - startedAt,
+      });
+      return attachRequestIdHeader(unavailable, requestId);
+    }
     const statusCode =
       isBackgroundRemovalError(error) && Number.isFinite(Number(error.statusCode))
         ? Number(error.statusCode)

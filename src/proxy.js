@@ -3,6 +3,10 @@ import {
   ensureRequestIdHeaders,
 } from "@/lib/logging/request";
 import { logger } from "@/lib/logging/logger";
+import {
+  checkMobileRequestSignature,
+  invalidRequestSignatureResponse,
+} from "@/lib/mobile/requestSigning.server";
 import { NextResponse } from "next/server";
 
 /**
@@ -18,6 +22,20 @@ export async function proxy(request) {
     path: request.nextUrl.pathname,
     ip: request.ip || "unknown",
   });
+
+  // Mobile request signatures (production audit L-26): verified and counted on every mobile API
+  // call, REPORT-ONLY unless MOBILE_REQUEST_SIGNING_MODE=enforce — see requestSigning.server.js.
+  // Isolated so a fault here can never turn mobile traffic into the 500 below.
+  if (request.nextUrl.pathname.startsWith("/api/mobile/")) {
+    try {
+      const signing = checkMobileRequestSignature(request);
+      if (signing.reject) {
+        return attachRequestIdHeader(invalidRequestSignatureResponse(), requestId);
+      }
+    } catch (error) {
+      logger.error("Mobile request signature check failed; request let through", error, { requestId });
+    }
+  }
 
   try {
     const response = NextResponse.next({

@@ -1,4 +1,5 @@
 import prisma from "@/lib/prisma";
+import { isInfrastructureError } from "@/lib/api/infrastructureErrors";
 
 const MOBILE_AUTH_SETTINGS_KEY = "mobile_auth_settings_v1";
 
@@ -78,7 +79,11 @@ export async function getMobileAuthSettings() {
       return normalizeStoredSettings();
     }
     return normalizeStoredSettings(record.value);
-  } catch {
+  } catch (error) {
+    // An outage must surface as one: the defaults have EMPTY token secrets, so returning them
+    // turned every authenticated request into "session invalid" 401s — and /auth/refresh into a
+    // forced sign-out — while Postgres was down (production audit H-24).
+    if (isInfrastructureError(error)) throw error;
     return normalizeStoredSettings();
   }
 }

@@ -15,6 +15,8 @@ import {
   normalizeSpecEasing,
 } from "@/lib/editor/animationSpec";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
+import { textFillToMobilePayload } from "@/lib/editor/textFill";
+import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
 import {
   getShapeRasterFrame,
   isRasterizableShapeLayer,
@@ -733,31 +735,13 @@ function readTextAlignment(item) {
  * native field; `charSpacing` only rides raw Canva-extension imports.
  */
 /**
- * The app's curved text is a true circular arc ({ arcDegrees, radius }); the web editor bends
- * along a quadratic Bézier whose bulge is `textCurveAmount`% of clamp(width*0.42, fontSize,
- * fontSize*6). An imported layer also carries the arc Canva actually drew
- * (`textCurveArcDegrees`), which wins when present; otherwise the Bézier's sagitta over the box's
- * chord is turned back into the circle through the same three points. Positive bows up.
+ * The app's curved text: `{ enabled, arcDegrees, radius }` (src/lib/editor/textCurve.ts, which the
+ * web canvas draws from too, so both show the same circle). A measured Canva arc
+ * (`textCurveArcDegrees`) wins; otherwise the editor amount is turned into the arc through the same
+ * three points. Positive bows up.
  */
 function readCurveConfig(item) {
-  const amount = clamp(numberOr(item?.textCurveAmount, 0), -200, 200);
-  const enabled = Boolean(item?.textCurveEnabled) && Math.abs(amount) > 0.5;
-  if (!enabled) return { enabled: false, arcDegrees: 0, radius: 200 };
-  const width = Math.max(2, numberOr(item?.width, 2) * Math.abs(numberOr(item?.scaleX, 1)));
-  const fontSize = Math.max(1, numberOr(item?.fontSize, 42));
-  const measuredArc = numberOr(item?.textCurveArcDegrees, 0);
-  let arcDegrees;
-  let radius;
-  if (Math.abs(measuredArc) >= 1) {
-    arcDegrees = clamp(measuredArc, -300, 300);
-    radius = width / (2 * Math.sin(Math.min(Math.PI / 2, (Math.abs(arcDegrees) * Math.PI) / 360)));
-  } else {
-    const maxCurveOffset = Math.max(Math.max(12, fontSize), Math.min(width * 0.42, Math.max(16, fontSize * 6)));
-    const sagitta = Math.max(0.5, ((Math.abs(amount) / 100) * maxCurveOffset) / 2);
-    radius = (width * width) / (8 * sagitta) + sagitta / 2;
-    arcDegrees = Math.sign(amount) * ((2 * Math.asin(Math.min(1, width / (2 * radius))) * 180) / Math.PI);
-  }
-  return { enabled: true, arcDegrees: Math.round(arcDegrees * 10) / 10, radius: Math.round(radius) };
+  return resolveTextCurveConfig(item);
 }
 
 function readLetterSpacingPx(item, fontSizePx) {
@@ -1033,6 +1017,9 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
   const fontName = resolveEditorTextFontName(item);
   const font = buildTextLayerFontPayload(fontName, options?.fontLookup);
   const wrapWidth = textWrapWidthFromFabric(item);
+  // Gradient glyph fill — the app's TextLayer.fill (TextFill.Gradient). `colorHex` stays the flat
+  // fallback, which is all an older app build draws.
+  const fill = textFillToMobilePayload(item.textFill);
 
   return {
     ...base,
@@ -1049,6 +1036,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     strikethrough: textFormat.strikethrough,
     textCase: textFormat.textCase,
     colorHex: normalizeHex(item.color || item.fill, "#FFFFFF"),
+    ...(fill ? { fill } : {}),
     shadow: {
       // Enabled means ACTUALLY VISIBLE, not merely "has a colour": every element defaults to
       // shadowColor "#000000", so keying off the colour marked every text layer as shadowed.
@@ -1451,12 +1439,27 @@ export function resolveFrameContent(item) {
   if (explicit?.src) return explicit;
   const src = String(item?.src || "").trim();
   if (!src || !asObject(item?.frameShape)) return explicit || null;
-  return {
-    kind: "image",
-    src,
-    sourceWidth: numberOr(item?.sourceWidth, numberOr(item?.width, 1)),
-    sourceHeight: numberOr(item?.sourceHeight, numberOr(item?.height, 1)),
-  };
+  const sourceWidth = numberOr(item?.sourceWidth, numberOr(item?.width, 1));
+  const sourceHeight = numberOr(item?.sourceHeight, numberOr(item?.height, 1));
+  // A video-filled Canva element: a video object carrying its clip outline (see the extension's
+  // attachCapturedElementVideos). Its poster is the frame's preview.
+  const isVideo =
+    String(item?.type || "").toLowerCase() === "video" ||
+    String(item?.layerType || "").toLowerCase() === "video";
+  if (isVideo) {
+    const posterSrc = String(item?.thumbnailUri || item?.posterSrc || "").trim();
+    return {
+      kind: "video",
+      src,
+      sourceWidth,
+      sourceHeight,
+      ...(posterSrc ? { posterSrc } : {}),
+      videoDuration: numberOr(item?.videoDuration, 0),
+      videoStart: numberOr(item?.videoStart, 0),
+      videoEnd: numberOr(item?.videoEnd, 0),
+    };
+  }
+  return { kind: "image", src, sourceWidth, sourceHeight };
 }
 
 function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
@@ -2188,6 +2191,8 @@ function slimMobileLayer(layer) {
         size: layer.size,
         ...(typeof layer.wrapWidth === "number" ? { wrapWidth: layer.wrapWidth } : {}),
         colorHex: layer.colorHex,
+        // Gradient glyph fill (see mapTextLayer); absent for a flat-colour text.
+        ...(layer.fill ? { fill: layer.fill } : {}),
         shadow: layer.shadow,
         stroke: layer.stroke,
         letterSpacing: layer.letterSpacing,

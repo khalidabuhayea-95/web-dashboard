@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { handleApiError } from "@/lib/api/errors";
 import { isTemplateAllowedByTaxonomy, prepareMobileTaxonomy } from "@/lib/mobile/taxonomy";
 import prisma from "@/lib/prisma";
 import { extractEditorPagesData, extractFabricData } from "@/lib/templates/editorData";
@@ -292,7 +293,17 @@ function resolveBackgroundSource(templateData, field, pageIndex = 0) {
   return "";
 }
 
-export async function GET(request, { params }) {
+export async function GET(request, context) {
+  try {
+    return await resolveTemplateAsset(request, context);
+  } catch (error) {
+    // Outage → 503 + no-store (production audit H-24); anything else a generic 500 rather than
+    // the framework's error page.
+    return handleApiError(error, "Failed to resolve the template asset.");
+  }
+}
+
+async function resolveTemplateAsset(request, { params }) {
   const resolvedParams = await params;
   const templateRef = String(resolvedParams?.id || resolvedParams?.slug || "").trim();
   if (!templateRef) {

@@ -39,7 +39,7 @@ function requestOrigin(request: NextRequest): string {
 export async function GET(request: NextRequest) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
 
   try {
@@ -68,7 +68,7 @@ export async function GET(request: NextRequest) {
 export async function POST(request: NextRequest) {
   const auth = await resolveMobileBearerUser(request);
   if (!auth.ok) {
-    return noStore({ error: auth.error }, auth.status);
+    return noStore({ error: auth.error, ...(auth.code ? { code: auth.code } : {}) }, auth.status);
   }
   const mobileUser = auth.mobileUser;
 

@@ -22,12 +22,17 @@ import {
   createMobilePublicMediaUrlResolver,
   createTemplateAssetResolver,
 } from "@/lib/mobile/templateAssets";
+import {
+  findTemplateSearchMatches,
+  rankTemplateSearchRows,
+  type TemplateSearchMatch,
+} from "@/lib/mobile/templateSearch.server";
 import { getActiveOccasionBoost } from "@/lib/occasions/boost.server";
-import { applyOccasionCategoryOrder, stablePartition } from "@/lib/occasions/hoist";
+import { applyOccasionCategoryOrder } from "@/lib/occasions/hoist";
 import { resolvePinnedWindow } from "@/lib/occasions/pinnedPagination";
 import { buildTemplateBoostWhere, makeTemplateBoostPredicate } from "@/lib/occasions/templateBoost";
 import { mergeTemplateWhere, templateCategoryWhere } from "@/lib/templates/categoryQuery";
-import { FEATURED_FIRST_ORDER_BY, sortFeaturedFirst } from "@/lib/templates/featured";
+import { FEATURED_FIRST_ORDER_BY } from "@/lib/templates/featured";
 import prisma from "@/lib/prisma";
 import { toMobileTemplate } from "@/lib/templates/mobileProject";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
@@ -103,24 +108,20 @@ function resolveTemplateTags(searchParams: URLSearchParams): string[] {
   );
 }
 
-function normalizeSearchText(value: string): string {
-  return value.trim().toLowerCase();
-}
-
 function resolveQueryOnlySearchValue(searchParams: URLSearchParams): string {
   return String(searchParams.get("query") || "").trim();
 }
 
-function templateMatchesCombinedQuery(template: any, query: string): boolean {
-  const normalizedQuery = normalizeSearchText(query);
-  if (!normalizedQuery) return true;
-
-  const name = normalizeSearchText(String(template?.name || ""));
-  if (name.includes(normalizedQuery)) return true;
-
-  const tags = Array.isArray(template?.tags) ? template.tags : [];
-  return tags.some((tag: unknown) => normalizeSearchText(String(tag || "")).includes(normalizedQuery));
-}
+// What the relevance ranking and the boost predicate read; the full row is fetched for one page only.
+const SEARCH_RANK_SELECT = {
+  id: true,
+  isFeatured: true,
+  featuredAt: true,
+  updatedAt: true,
+  category: true,
+  subCategory: true,
+  categories: true,
+} as const;
 
 export async function buildMobileTemplatesListResponse(
   request: NextRequest,
@@ -200,10 +201,12 @@ export async function buildMobileTemplatesListResponse(
       publishedScopeWhere,
       templateCategoryWhere({ category: categoryValue, subCategory: subCategoryValue })
     );
-    const where = mergeTemplateWhere(baseWhere, {
-      ...(tags.length > 0 ? { tags: { array_contains: tags } } : {}),
-      ...(query ? { name: { contains: query, mode: "insensitive" } } : {}),
-    });
+    // The text query is NOT a `where` clause any more: it is matched Arabic-aware over title, tags
+    // and placement labels by findTemplateSearchMatches below (production audit H-18).
+    const where = mergeTemplateWhere(
+      baseWhere,
+      tags.length > 0 ? { tags: { array_contains: tags } } : {}
+    );
     const templateSelect = {
       id: true,
       name: true,
@@ -232,25 +235,44 @@ export async function buildMobileTemplatesListResponse(
 
     let rows: any[] = [];
     let total = 0;
+    // Set when the page is a search result: groups are then emitted in relevance order.
+    let searchMatches: Map<string, TemplateSearchMatch> | null = null;
 
     const boostWhere = buildTemplateBoostWhere(boost, taxonomy);
 
-    if (searchMode === "queryOnly" && query) {
-      let matchingRows = (
-        await prisma.template.findMany({
-          where: baseWhere,
-          orderBy: { updatedAt: "desc" },
-          select: templateSelect,
-        })
-      ).filter((template: any) => templateMatchesCombinedQuery(template, query));
-
-      const isBoosted = makeTemplateBoostPredicate(boost);
-      if (isBoosted) matchingRows = stablePartition(matchingRows, isBoosted);
-      // Featured outrank the boost: pulled ahead of everything, the rest keeps its order.
-      matchingRows = sortFeaturedFirst(matchingRows);
-
-      total = matchingRows.length;
-      rows = matchingRows.slice(skip, skip + pageSize);
+    if (query) {
+      // Search (both /search and a /templates request carrying `query`): match ids in SQL, apply
+      // the route's own filters (audience, published scope, category, tags) through Prisma, rank
+      // in memory — relevance first, then featured → boosted → recency inside each tier — and
+      // fetch full rows for the one page served. A query with no usable token matches nothing.
+      const search = await findTemplateSearchMatches({
+        query,
+        statuses: audience.statuses,
+        taxonomy,
+      });
+      if (search.truncated) {
+        requestLogger.warn("Template search hit the match cap", { cap: search.matches.size });
+      }
+      const matchedIds = Array.from(search.matches.keys());
+      const candidates: any[] = matchedIds.length
+        ? await prisma.template.findMany({
+            where: mergeTemplateWhere(where, { id: { in: matchedIds } }),
+            orderBy: { updatedAt: "desc" },
+            select: SEARCH_RANK_SELECT,
+          })
+        : [];
+      const ranked = rankTemplateSearchRows(candidates, search.matches, makeTemplateBoostPredicate(boost));
+      total = ranked.length;
+      const pageIds = ranked.slice(skip, skip + pageSize).map((row: any) => row.id);
+      const pageRows: any[] = pageIds.length
+        ? await prisma.template.findMany({
+            where: mergeTemplateWhere(audience.statusWhere, { id: { in: pageIds } }),
+            select: templateSelect,
+          })
+        : [];
+      const pageRowsById = new Map(pageRows.map((row: any) => [row.id, row]));
+      rows = pageIds.map((id: string) => pageRowsById.get(id)).filter(Boolean);
+      searchMatches = search.matches;
     } else if (!boostWhere) {
       [rows, total] = await prisma.$transaction([
         prisma.template.findMany({
@@ -393,6 +415,9 @@ export async function buildMobileTemplatesListResponse(
 
     const templatesBySubCategory = Array.from(groupedBySubCategoryMap.values())
       .sort((left: any, right: any) => {
+        // A search page keeps its ranking visible: groups follow their best-ranked template
+        // (the app flattens the groups in order), instead of the taxonomy order a browse uses.
+        if (searchMatches) return left._firstIndex - right._firstIndex;
         const leftCategoryOrder =
           (categoryOrder.get(left.categoryValue) ?? Number.MAX_SAFE_INTEGER) as number;
         const rightCategoryOrder =

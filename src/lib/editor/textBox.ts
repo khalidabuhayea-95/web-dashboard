@@ -81,6 +81,54 @@ function measurementKey(input: TextBoxInput, wrapWidth: number | null) {
  * Lays the text out in a throwaway Konva.Text and reports the box it needs. `wrapWidth` is the
  * column the text wraps at; pass null for an unconstrained (single-line-per-paragraph) layout.
  */
+/** An off-stage Konva.Text laid out exactly like the on-canvas node; null without a DOM. */
+function createMeasureNode(input: TextBoxInput, wrapWidth: number | null): Konva.Text | null {
+  const text = String(input.text ?? "");
+  const fontSize = Number(input.fontSize) || 0;
+  if (!text || fontSize <= 0) return null;
+  if (typeof document === "undefined") return null;
+  return new Konva.Text({
+    text,
+    fontSize,
+    fontFamily: input.fontFamily,
+    fontStyle: input.fontStyle,
+    fontVariant: "normal",
+    letterSpacing: Number(input.letterSpacing) || 0,
+    lineHeight: Number(input.lineHeight) || 1,
+    align: input.align,
+    direction: input.direction,
+    wrap: "word",
+    // No `height` on purpose: Konva DROPS wrapped lines that overflow a fixed height, and the
+    // whole point here is the height the full text needs.
+    ...(wrapWidth !== null && wrapWidth > 0 ? { width: wrapWidth } : {}),
+  });
+}
+
+/**
+ * The lines a text layer renders, top to bottom, as the canvas wraps them (soft wraps resolved),
+ * each with its width — merging text layers keeps these so the merged paragraph breaks where the
+ * originals did. Null when it can't be laid out (no DOM, empty text).
+ */
+export function layoutTextLines(
+  input: TextBoxInput,
+  wrapWidth: number | null = null
+): Array<{ text: string; width: number }> | null {
+  let node: Konva.Text | null = null;
+  try {
+    node = createMeasureNode(input, wrapWidth);
+    const lines = (node as unknown as { textArr?: Array<{ text?: unknown; width?: unknown }> } | null)?.textArr;
+    if (!Array.isArray(lines) || lines.length === 0) return null;
+    return lines.map((line) => ({
+      text: String(line?.text ?? ""),
+      width: Math.max(0, Number(line?.width) || 0),
+    }));
+  } catch {
+    return null;
+  } finally {
+    node?.destroy();
+  }
+}
+
 export function measureTextBox(input: TextBoxInput, wrapWidth: number | null = null): TextBoxMetrics | null {
   const text = String(input.text ?? "");
   const fontSize = Number(input.fontSize) || 0;
@@ -93,21 +141,8 @@ export function measureTextBox(input: TextBoxInput, wrapWidth: number | null = n
 
   let node: Konva.Text | null = null;
   try {
-    node = new Konva.Text({
-      text,
-      fontSize,
-      fontFamily: input.fontFamily,
-      fontStyle: input.fontStyle,
-      fontVariant: "normal",
-      letterSpacing: Number(input.letterSpacing) || 0,
-      lineHeight: Number(input.lineHeight) || 1,
-      align: input.align,
-      direction: input.direction,
-      wrap: "word",
-      // No `height` on purpose: Konva DROPS wrapped lines that overflow a fixed height, and the
-      // whole point here is the height the full text needs.
-      ...(wrapWidth !== null && wrapWidth > 0 ? { width: wrapWidth } : {}),
-    });
+    node = createMeasureNode(input, wrapWidth);
+    if (!node) return null;
     const lines = (node as unknown as { textArr?: unknown[] }).textArr;
     const metrics: TextBoxMetrics = {
       lineWidth: node.getTextWidth(),

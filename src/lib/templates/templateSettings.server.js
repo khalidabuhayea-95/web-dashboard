@@ -68,17 +68,17 @@ export async function getTemplateTaxonomySettings(options = {}) {
       diagnostics.readMs = roundTiming(performance.now() - startedAt);
     }
     return sanitized;
-  } catch (_error) {
-    cachedTemplateTaxonomySettings = {
-      value: TEMPLATE_CATEGORY_SETTINGS,
-      expiresAt: now + TEMPLATE_TAXONOMY_CACHE_TTL_MS,
-    };
+  } catch (error) {
+    // ★Never fall back to TEMPLATE_CATEGORY_SETTINGS here. That legacy list has different
+    // category ids from the saved taxonomy; serving it during a short DB outage (production
+    // audit H-24) let the app cache a taxonomy whose every category then 400'd. Nothing is cached
+    // on failure either — the next request retries the database. Callers map an outage to 503.
     if (diagnostics) {
       diagnostics.cacheHit = false;
-      diagnostics.source = "fallback";
+      diagnostics.source = "error";
       diagnostics.readMs = roundTiming(performance.now() - startedAt);
     }
-    return TEMPLATE_CATEGORY_SETTINGS;
+    throw error;
   }
 }
 
