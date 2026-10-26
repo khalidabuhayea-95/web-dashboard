@@ -48,7 +48,10 @@ import {
   computeTrimTransparentPaddingPatch,
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
+import { curvePatchFromPercent, curvePercentFromArc, curvedTextRingSpread } from "@/lib/editor/curvedText";
+import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
 import { textFillCssBackground } from "@/lib/editor/textFill";
+import { useTextStyleTarget } from "@/components/editor/useTextStyleTarget";
 import {
   extractImagePaletteFromSource,
   extractSvgPaletteColors,
@@ -100,6 +103,9 @@ const VIDEO_TRIM_HANDLE_WIDTH_PX = 32;
  * curve, text background, image colours, crop & fit) open in popovers instead of stacking extra
  * rows above the canvas. The video trimmer docks over the bottom of the canvas while open.
  */
+/** One-tap colours for a selected range's highlight band (custom colour next to them). */
+const TEXT_HIGHLIGHT_SWATCHES = ["#fde047", "#f9a8d4", "#86efac", "#93c5fd", "#c4b5fd", "#9d4edd", "#ffffff", "#111827"];
+
 export default function ContextToolbar() {
   const [isVideoTrimOpen, setIsVideoTrimOpen] = useState(false);
   const [isTrimmingImagePadding, setIsTrimmingImagePadding] = useState(false);
@@ -122,6 +128,9 @@ export default function ContextToolbar() {
   const flipSelected = useEditorStore((state) => state.flipSelected);
   const updateElement = useEditorStore((state) => state.updateElement);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
+  // Text style controls write to the characters selected in the on-canvas editor when there are
+  // some (a multi-style range), else to the whole selected text layers.
+  const { range: textRange, rangeStyle: textRangeStyle, applyTextStyle } = useTextStyleTarget();
 
   const hasSelection = selectedIds.length > 0;
   const activePage = useMemo(
@@ -186,11 +195,16 @@ export default function ContextToolbar() {
     () => String(activeVideoElement?.src || ""),
     [activeVideoElement?.src]
   );
-  const activeFontWeight = String(activeTextElement?.fontWeight || "400");
+  // The selected range's own style when part of this text is selected (absent keys = the layer's).
+  const selectedRangeStyle =
+    textRange && activeTextElement && textRange.elementId === activeTextElement.id ? textRangeStyle : null;
+  const activeFontWeight = String(selectedRangeStyle?.fontWeight ?? activeTextElement?.fontWeight ?? "400");
   const activeFontWeightNumber = Number.parseInt(activeFontWeight.replace(/[^\d]/g, ""), 10);
   const isBold = Number.isFinite(activeFontWeightNumber) ? activeFontWeightNumber >= 600 : /bold/i.test(activeFontWeight);
-  const isItalic = activeTextElement?.fontStyle === "italic";
-  const textDecorationValue = String(activeTextElement?.textDecoration || "") as TextDecorationValue;
+  const isItalic = (selectedRangeStyle?.fontStyle ?? activeTextElement?.fontStyle) === "italic";
+  const textDecorationValue = String(
+    selectedRangeStyle?.textDecoration ?? activeTextElement?.textDecoration ?? ""
+  ) as TextDecorationValue;
   const hasDecoration = (token: "underline" | "line-through") =>
     textDecorationValue
       .split(/\s+/)
@@ -730,7 +744,11 @@ export default function ContextToolbar() {
     };
   }, [isVideoTrimOpen, resolvedVideoDuration, videoTrimFrameCacheKey]);
 
-  const textCurveEnabled = Boolean(activeTextElement?.textCurveEnabled);
+  // The app's curve sheet: Curve = % of a full circle (lib/editor/curvedText.ts), Size = ringSpread.
+  const textCurveArc = activeTextElement ? resolveTextCurveConfig({ ...activeTextElement, scaleX: 1 }).arcDegrees : 0;
+  const textCurveEnabled = Math.abs(textCurveArc) > 0.5;
+  const textCurvePercent = textCurveEnabled ? curvePercentFromArc(textCurveArc) : 0;
+  const textCurveSizePercent = Math.round(curvedTextRingSpread(activeTextElement) * 100);
   const textBackgroundEnabled = Boolean(activeTextElement?.textBackgroundEnabled);
   const textBackgroundColor =
     normalizeHexColor(String(activeTextElement?.textBackgroundColor || "")) || "#000000";
@@ -742,7 +760,6 @@ export default function ContextToolbar() {
   const textBackgroundRoundnessPct = textBackgroundPercent(activeTextElement?.textBackgroundAngleSize, 0);
   const textBackgroundPaddingXPct = textBackgroundPercent(activeTextElement?.textBackgroundPaddingX, 0);
   const textBackgroundPaddingYPct = textBackgroundPercent(activeTextElement?.textBackgroundPaddingY, 0);
-  const textCurveAmount = Math.max(-200, Math.min(200, Number(activeTextElement?.textCurveAmount || 0)));
   const videoTrimPlayheadPercent = resolvedVideoDuration > 0 ? clampNumber(videoTrimPlayhead / resolvedVideoDuration, 0, 1) : 0;
   const videoTrimWindowLabel = `${formatTrimTime(videoTrimDraft.start)}s - ${formatTrimTime(videoTrimDraft.end)}s`;
   const videoTrimThumbs = useMemo(
@@ -899,18 +916,24 @@ export default function ContextToolbar() {
   const textAlign = activeTextElement?.align === "center" || activeTextElement?.align === "right" ? activeTextElement.align : "left";
   const AlignIcon = textAlign === "center" ? AlignCenter : textAlign === "right" ? AlignRight : AlignLeft;
   const nextTextAlign = textAlign === "left" ? "center" : textAlign === "center" ? "right" : "left";
-  const textColor = activeTextElement ? activeTextElement.color || activeTextElement.fill || "#111827" : "#111827";
+  const textColor =
+    selectedRangeStyle?.color ??
+    (activeTextElement ? activeTextElement.color || activeTextElement.fill || "#111827" : "#111827");
   // A gradient-coloured text shows its ramp on the swatch; picking a colour replaces it.
-  const textFillSwatch = activeTextElement ? textFillCssBackground(activeTextElement.textFill) : "";
-  const fontSize = activeTextElement ? Math.round(activeTextElement.fontSize) : 0;
+  const textFillSwatch =
+    activeTextElement && !selectedRangeStyle?.color ? textFillCssBackground(activeTextElement.textFill) : "";
+  const currentFontSize = selectedRangeStyle?.fontSize ?? activeTextElement?.fontSize ?? 0;
+  const fontSize = Math.round(currentFontSize);
   const setFontSize = (value: number) => {
     if (!activeTextElement) return;
-    updateSelectedElements({
-      fontSize: Math.max(8, Math.min(400, Number(value) || activeTextElement.fontSize)),
+    applyTextStyle({
+      fontSize: Math.max(8, Math.min(400, Number(value) || currentFontSize)),
     });
   };
   const lineHeight = Number(activeTextElement?.lineHeight || 1);
-  const letterSpacing = Number(activeTextElement?.letterSpacing || 0);
+  const letterSpacing = Number(selectedRangeStyle?.letterSpacing ?? activeTextElement?.letterSpacing ?? 0);
+  const rangeHighlightColor = normalizeHexColor(String(selectedRangeStyle?.highlightColor || "")) || "";
+  const rangeHighlightOpacity = Number(selectedRangeStyle?.highlightOpacity ?? 1);
   const mappedPalette = activeRasterPalette.map((original) => activeRasterColorMap[original] || original);
   const numberFieldClass =
     "h-7 w-16 rounded-lg bg-[#f1f2f4] px-2 text-right text-[12px] tabular-nums text-t-primary outline-none focus:ring-2 focus:ring-brand-teal/30 disabled:opacity-45";
@@ -941,7 +964,8 @@ export default function ContextToolbar() {
 
   return (
     <>
-      <div className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-3">
+      {/* data-editor-chrome: focus moving here keeps the on-canvas text editor open (inlineRichTextEditor). */}
+      <div data-editor-chrome className="pointer-events-none absolute inset-x-0 top-3 z-30 flex justify-center px-3">
         <div
           role="toolbar"
           aria-label="Selection tools"
@@ -966,7 +990,7 @@ export default function ContextToolbar() {
                   className="absolute inset-0 cursor-pointer opacity-0"
                   value={textColor}
                   onChange={(event) =>
-                    updateSelectedElements({ color: event.target.value, fill: event.target.value, textFill: undefined })
+                    applyTextStyle({ color: event.target.value, fill: event.target.value, textFill: undefined })
                   }
                 />
               </label>
@@ -1007,26 +1031,103 @@ export default function ContextToolbar() {
                 icon={Bold}
                 label="Bold"
                 active={isBold}
-                onClick={() => updateSelectedElements({ fontWeight: isBold ? "400" : "700" })}
+                onClick={() => applyTextStyle({ fontWeight: isBold ? "400" : "700" })}
               />
               <ToolButton
                 icon={Italic}
                 label="Italic"
                 active={isItalic}
-                onClick={() => updateSelectedElements({ fontStyle: isItalic ? "normal" : "italic" })}
+                onClick={() => applyTextStyle({ fontStyle: isItalic ? "normal" : "italic" })}
               />
               <ToolButton
                 icon={Underline}
                 label="Underline"
                 active={isUnderline}
-                onClick={() => updateSelectedElements({ textDecoration: toggleTextDecoration("underline") })}
+                onClick={() => applyTextStyle({ textDecoration: toggleTextDecoration("underline") })}
               />
               <ToolButton
                 icon={Strikethrough}
                 label="Strikethrough"
                 active={isStrikethrough}
-                onClick={() => updateSelectedElements({ textDecoration: toggleTextDecoration("line-through") })}
+                onClick={() => applyTextStyle({ textDecoration: toggleTextDecoration("line-through") })}
               />
+              {selectedRangeStyle ? (
+                // Part of the text is selected on the canvas: a band behind just that part.
+                <ToolPopover
+                  label="Highlight"
+                  width={260}
+                  trigger={({ open, triggerProps }) => (
+                    <ToolButton
+                      icon={Highlighter}
+                      label="Highlight selection"
+                      active={open || Boolean(rangeHighlightColor)}
+                      chevron
+                      {...triggerProps}
+                    />
+                  )}
+                >
+                  <PopoverHeader title="Highlight selection" />
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap gap-1.5" role="group" aria-label="Highlight colors">
+                      {TEXT_HIGHLIGHT_SWATCHES.map((swatch) => (
+                        <button
+                          key={swatch}
+                          type="button"
+                          aria-label={`Highlight ${swatch}`}
+                          aria-pressed={rangeHighlightColor === swatch}
+                          className={cx(
+                            "h-7 w-7 rounded-full ring-1 ring-black/10 transition-transform hover:scale-110",
+                            rangeHighlightColor === swatch ? "outline outline-2 outline-offset-2 outline-brand-teal" : ""
+                          )}
+                          style={{ backgroundColor: swatch }}
+                          onClick={() => applyTextStyle({ highlightColor: swatch })}
+                        />
+                      ))}
+                    </div>
+                    <div className="flex items-center justify-between gap-3">
+                      <span className="text-[12px] text-t-secondary">Custom</span>
+                      <div className="flex items-center gap-2">
+                        <label className="relative inline-flex h-7 w-7 cursor-pointer items-center justify-center rounded-full ring-1 ring-black/10">
+                          <span
+                            className="h-5 w-5 rounded-full"
+                            style={{ backgroundColor: rangeHighlightColor || "#fde047" }}
+                          />
+                          <input
+                            type="color"
+                            aria-label="Highlight color"
+                            className="absolute inset-0 cursor-pointer opacity-0"
+                            value={rangeHighlightColor || "#fde047"}
+                            onChange={(event) => applyTextStyle({ highlightColor: event.target.value })}
+                          />
+                        </label>
+                        {rangeHighlightColor ? (
+                          <button
+                            type="button"
+                            className="rounded-full px-2 py-1 text-[12px] text-t-secondary hover:bg-[#eef0f2]"
+                            onClick={() => applyTextStyle({ highlightColor: undefined, highlightOpacity: undefined })}
+                          >
+                            Remove
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <SliderField
+                      label="Opacity"
+                      min={0.05}
+                      max={1}
+                      step={0.05}
+                      value={rangeHighlightColor ? rangeHighlightOpacity : 1}
+                      onChange={(value) =>
+                        applyTextStyle({
+                          highlightColor: rangeHighlightColor || "#fde047",
+                          highlightOpacity: Math.max(0.05, Math.min(1, value)),
+                        })
+                      }
+                      display={<span className="text-[12px] tabular-nums text-t-secondary">{Math.round((rangeHighlightColor ? rangeHighlightOpacity : 1) * 100)}%</span>}
+                    />
+                  </div>
+                </ToolPopover>
+              ) : null}
 
               <ToolDivider />
               <ToolButton
@@ -1073,7 +1174,7 @@ export default function ContextToolbar() {
                     max={100}
                     step={0.5}
                     value={letterSpacing}
-                    onChange={(value) => updateSelectedElements({ letterSpacing: Math.max(-10, Math.min(200, value)) })}
+                    onChange={(value) => applyTextStyle({ letterSpacing: Math.max(-10, Math.min(200, value)) })}
                     display={
                       <input
                         type="number"
@@ -1084,7 +1185,7 @@ export default function ContextToolbar() {
                         className={numberFieldClass}
                         value={letterSpacing}
                         onChange={(event) =>
-                          updateSelectedElements({
+                          applyTextStyle({
                             letterSpacing: Math.max(-10, Math.min(200, Number(event.target.value) || 0)),
                           })
                         }
@@ -1110,58 +1211,46 @@ export default function ContextToolbar() {
                 )}
               >
                 <PopoverHeader title="Curve">
-                  <MiniSwitch
-                    label="Curve text"
-                    checked={textCurveEnabled}
-                    onChange={() =>
-                      updateSelectedElements({
-                        textCurveEnabled: !textCurveEnabled,
-                        textCurveAmount: !textCurveEnabled && textCurveAmount === 0 ? 40 : textCurveAmount,
-                        textCurveArcDegrees: undefined,
-                      })
-                    }
-                  />
-                </PopoverHeader>
-                <SliderField
-                  label="Bend"
-                  min={-100}
-                  max={100}
-                  value={textCurveAmount}
-                  disabled={!textCurveEnabled}
-                  onChange={(value) =>
-                    // Editing the curve hands it to the slider: a measured Canva arc no longer applies.
-                    updateSelectedElements({ textCurveEnabled: true, textCurveAmount: value || 0, textCurveArcDegrees: undefined })
-                  }
-                  display={
-                    <input
-                      type="number"
-                      min={-200}
-                      max={200}
-                      step={1}
-                      aria-label="Text curve value"
-                      className={numberFieldClass}
-                      value={Math.round(textCurveAmount)}
-                      disabled={!textCurveEnabled}
-                      onChange={(event) =>
-                        updateSelectedElements({
-                          textCurveEnabled: true,
-                          textCurveAmount: Math.max(-200, Math.min(200, Number(event.target.value) || 0)),
-                          textCurveArcDegrees: undefined,
-                        })
-                      }
-                    />
-                  }
-                />
-                <div className="mt-3 flex items-center justify-between gap-2">
-                  <span className="text-[11px] leading-4 text-t-tertiary">Negative bends down, positive bends up.</span>
                   <button
                     type="button"
                     className="shrink-0 rounded-full px-2.5 py-1 text-[12px] font-medium text-t-secondary hover:bg-[#f1f2f4] hover:text-t-primary"
-                    onClick={() => updateSelectedElements({ textCurveEnabled: false, textCurveAmount: 0, textCurveArcDegrees: undefined })}
+                    onClick={() =>
+                      updateSelectedElements({
+                        textCurveEnabled: false,
+                        textCurveAmount: 0,
+                        textCurveArcDegrees: undefined,
+                        textCurveRingSpread: undefined,
+                      })
+                    }
                   >
                     Reset
                   </button>
+                </PopoverHeader>
+                <SliderField
+                  label="Curve"
+                  min={-100}
+                  max={100}
+                  value={textCurvePercent}
+                  display={`${textCurvePercent}%`}
+                  onChange={(value) => updateSelectedElements(curvePatchFromPercent(value))}
+                />
+                <div className="mt-3">
+                  <SliderField
+                    label="Size"
+                    min={0}
+                    max={100}
+                    value={textCurveSizePercent}
+                    display={`${textCurveSizePercent}%`}
+                    disabled={!textCurveEnabled}
+                    onChange={(value) =>
+                      updateSelectedElements({ textCurveRingSpread: value > 0 ? Math.min(1, value / 100) : undefined })
+                    }
+                  />
                 </div>
+                <p className="mt-3 text-[11px] leading-4 text-t-tertiary">
+                  100% bends the text into a full circle; negative values curve it downwards. Size grows the
+                  ring by stretching the words (kashida in Arabic, wider gaps in English).
+                </p>
               </ToolPopover>
 
               <ToolPopover

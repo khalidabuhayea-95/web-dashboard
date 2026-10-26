@@ -80,6 +80,38 @@ test("a video-filled element (video object + frameShape) is a FRAME whose conten
   const [layer] = layersOf([video]);
   assert.equal(layer.type, "FRAME");
   assert.equal(layer.shape.kind, "polygon");
-  // With a poster the app gets the frame's preview picture, like every other frame.
-  assert.equal(layer.content.type, "IMAGE");
+  // The clip itself plays in the frame (a poster-only preview exported as an empty frame).
+  assert.equal(layer.content.type, "VIDEO");
+  assert.equal(layer.content.previewOnly, false);
+  assert.match(layer.content.videoUri, /kaaba\.mp4$/);
+  assert.match(layer.content.thumbnailUri, /kaaba-poster\.png$/);
+});
+
+test("a framed video is cover-fitted in the app's own scale (source x scale), not stretched or zoomed", () => {
+  // DAHNlFf3ad4's chandelier: a 1920x1080 clip in a 520x733 arch.
+  const video = importedPhoto({
+    type: "video",
+    layerType: "video",
+    src: "https://cdn.example.com/chandelier.mp4",
+    width: 520,
+    height: 733,
+    scaleX: 1,
+    scaleY: 1,
+    sourceWidth: 1920,
+    sourceHeight: 1080,
+    videoDuration: 8.456,
+    videoEnd: 8.456,
+    frameShape: { presetId: "canva-clip-path", kind: "polygon", points: ARCH },
+  });
+  const [layer] = layersOf([video]);
+  assert.equal(layer.content.type, "VIDEO");
+  assert.equal("thumbnailUri" in layer.content, false, "the .mp4 is no thumbnail");
+  assert.equal(layer.contentTransform.fit, "manual");
+  assert.ok(Math.abs(layer.contentTransform.scale - 733 / 1080) < 1e-4, String(layer.contentTransform.scale));
+  // A web frame that contains its clip keeps the whole clip inside.
+  const [contained] = layersOf([{ ...video, frameContentTransform: { fit: "contain", scale: 1 } }]);
+  assert.ok(Math.abs(contained.contentTransform.scale - 520 / 1920) < 1e-4);
+  // A manual transform is passed through untouched.
+  const [manual] = layersOf([{ ...video, frameContentTransform: { fit: "manual", scale: 0.5, offsetX: 10 } }]);
+  assert.deepEqual(manual.contentTransform, { fit: "manual", scale: 0.5, offsetX: 10, offsetY: 0 });
 });

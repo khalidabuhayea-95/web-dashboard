@@ -1,0 +1,10 @@
+import { PrismaClient } from "@prisma/client";
+const c = new PrismaClient();
+const rows = await c.$queryRawUnsafe(`SELECT name, "createdAt", data FROM "Template" WHERE id = $1::uuid`, process.argv[2]);
+const r = rows[0]; const d = r.data;
+console.log(r.name, r.createdAt, JSON.stringify(d.meta?.import?.source || {}).slice(0, 300));
+console.log("page", JSON.stringify(d.meta?.import?.page || {}).slice(0, 300));
+console.log("warnings", JSON.stringify(d.meta?.import?.warnings || []));
+const objs = d.objects || [];
+for (const [i, o] of objs.entries()) console.log(i, o.type, o.extBuild || "", o.importNodeId, "p=", o.importParentId || "-", (o.layerName || o.text || "").slice(0, 28).replace(/\n/g, " "), `${o.timelineStartMs}-${o.timelineEndMs}`, o.fallback ? "FALLBACK " + o.fallbackReason : "", `x=${Math.round(o.left)} y=${Math.round(o.top)} w=${Math.round(o.width * (o.scaleX || 1))} h=${Math.round(o.height * (o.scaleY || 1))}`);
+await c.$disconnect();

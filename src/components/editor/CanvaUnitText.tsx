@@ -33,6 +33,13 @@ import {
 } from "@/lib/editor/animationCanvaUnits";
 import type { GlyphMotionSpec } from "@/lib/editor/animationVisual";
 import { drawTextBackground, type TextBackgroundBox } from "@/lib/editor/textBackground";
+import {
+  TEXT_HIGHLIGHT_HEIGHT_EM,
+  TEXT_HIGHLIGHT_PADDING_X_EM,
+  TEXT_HIGHLIGHT_RADIUS_EM,
+} from "@/lib/editor/richText";
+import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
+import { textSpanRuns, type TextSpan, type TextSpanStyle } from "@/lib/editor/textSpans";
 
 export interface CanvaUnitTextStyle {
   text: string;
@@ -52,9 +59,23 @@ export interface CanvaUnitTextStyle {
   strokeWidth?: number;
   /** The layer's background box, painted under the units so it stays put while they animate. */
   background?: TextBackgroundBox | null;
+  /**
+   * Multi-style ranges that only PAINT differently (colour, outline) — lib/editor/textSpans.ts.
+   * A text whose ranges change the layout never plays per unit (elementPlaysCanvaUnits).
+   */
+  spans?: TextSpan[];
 }
 
 type Interval = [number, number];
+
+/** One paint style of a multi-style text: its fill/outline and the glyph boxes it covers on a line. */
+interface PaintGroup {
+  fill: string;
+  stroke: string;
+  strokeWidth: number;
+  /** Relative to the line's left edge. */
+  intervals: Interval[];
+}
 
 interface UnitLine {
   text: string;
@@ -67,7 +88,11 @@ interface UnitLine {
   /** Clip path: the x intervals of each unit's graphemes on this line, relative to [x]. */
   units: Map<number, Interval[]>;
   /** Konva's per-letter path instead: every letter with its own x and unit. */
-  letters: Array<{ text: string; x: number; width: number; unit: number }> | null;
+  letters: Array<{ text: string; x: number; width: number; unit: number; paint?: Omit<PaintGroup, "intervals"> }> | null;
+  /** Ranges painted in another style on this line (multi-style text); empty for one style. */
+  paints: PaintGroup[];
+  /** Highlighted ranges on this line: colour, opacity and glyph boxes. */
+  highlights: Array<{ color: string; opacity: number; intervals: Interval[] }>;
 }
 
 interface UnitTextLayout {
@@ -152,6 +177,19 @@ function measureGlyphIntervals(
   }
 }
 
+// ── Multi-style paint ─────────────────────────────────────────────────────────────────────────────
+
+/** The fill/outline a span paints with, or null when it paints like the layer. */
+function spanPaint(span: TextSpanStyle, style: CanvaUnitTextStyle): Omit<PaintGroup, "intervals"> | null {
+  if (span.color === undefined && span.stroke === undefined && span.strokeWidth === undefined) return null;
+  return {
+    fill: span.color ?? style.fill,
+    stroke: span.stroke ?? style.stroke ?? "",
+    strokeWidth:
+      span.strokeWidth !== undefined ? resolveTextStrokeWidthPx(span.strokeWidth, style.fontSize) : (style.strokeWidth ?? 0),
+  };
+}
+
 // ── Layout ───────────────────────────────────────────────────────────────────────────────────────
 
 const LAYOUT_CACHE = new Map<string, UnitTextLayout>();
@@ -199,6 +237,12 @@ function layoutCanvaUnitText(style: CanvaUnitTextStyle, unit: number): UnitTextL
   const units = canvaTextUnits(style.text, unit, graphemeLines);
   const perLetter =
     style.direction !== "rtl" && (style.letterSpacing !== 0 || style.align === "justify");
+  // Multi-style ranges with their own paint, in source offsets.
+  const spanRuns = style.spans?.length ? textSpanRuns(style.text, style.spans) : [];
+  const paintRuns = spanRuns
+    .map((run) => ({ start: run.start, end: run.end, paint: spanPaint(run.style, style) }))
+    .filter((run): run is { start: number; end: number; paint: Omit<PaintGroup, "intervals"> } => run.paint !== null);
+  const highlightRuns = spanRuns.filter((run) => run.style.highlightColor);
 
   const laidOut: UnitLine[] = lines.map((line, index) => {
     let x = 0;
@@ -228,11 +272,12 @@ function layoutCanvaUnitText(style: CanvaUnitTextStyle, unit: number): UnitTextL
         }
         const width = canvasMeasure(font, 0, letter);
         const owner = own.find((entry) => offset >= entry.start && offset < entry.end);
-        if (owner) letters.push({ text: letter, x: cursorX, width, unit: owner.unit });
+        const painted = paintRuns.find((run) => range.start + offset >= run.start && range.start + offset < run.end);
+        if (owner) letters.push({ text: letter, x: cursorX, width, unit: owner.unit, ...(painted ? { paint: painted.paint } : {}) });
         cursorX += width + style.letterSpacing;
         offset += letter.length;
       }
-      return { text: line.text, x, top, baseline, units: new Map(), letters };
+      return { text: line.text, x, top, baseline, units: new Map(), letters, paints: [], highlights: [] };
     }
 
     const intervals = measureGlyphIntervals(
@@ -248,7 +293,38 @@ function layoutCanvaUnitText(style: CanvaUnitTextStyle, unit: number): UnitTextL
       list.push(...intervals[i]);
       byUnit.set(entry.unit, list);
     });
-    return { text: line.text, x, top, baseline, units: byUnit, letters: null };
+    // Each painted range's glyph boxes on this line, measured like the units'.
+    const linePaintRuns = paintRuns.filter((run) => run.end > range.start && run.start < range.end);
+    const paintIntervals = linePaintRuns.length
+      ? measureGlyphIntervals(
+          line.text,
+          font,
+          style.letterSpacing,
+          style.direction,
+          linePaintRuns.map(
+            (run) => [Math.max(run.start, range.start) - range.start, Math.min(run.end, range.end) - range.start] as Interval
+          )
+        )
+      : [];
+    const paints: PaintGroup[] = linePaintRuns.map((run, i) => ({ ...run.paint, intervals: paintIntervals[i] ?? [] }));
+    const lineHighlightRuns = highlightRuns.filter((run) => run.end > range.start && run.start < range.end);
+    const highlightIntervals = lineHighlightRuns.length
+      ? measureGlyphIntervals(
+          line.text,
+          font,
+          style.letterSpacing,
+          style.direction,
+          lineHighlightRuns.map(
+            (run) => [Math.max(run.start, range.start) - range.start, Math.min(run.end, range.end) - range.start] as Interval
+          )
+        )
+      : [];
+    const highlights = lineHighlightRuns.map((run, i) => ({
+      color: String(run.style.highlightColor),
+      opacity: run.style.highlightOpacity ?? 1,
+      intervals: highlightIntervals[i] ?? [],
+    }));
+    return { text: line.text, x, top, baseline, units: byUnit, letters: null, paints, highlights };
   });
 
   const layout: UnitTextLayout = {
@@ -291,7 +367,9 @@ function paintText(
   y: number,
   style: CanvaUnitTextStyle,
   layout: UnitTextLayout,
-  wholeLine: boolean
+  wholeLine: boolean,
+  line: UnitLine | null = null,
+  letterPaint: Omit<PaintGroup, "intervals"> | null = null
 ) {
   ctx.font = layout.font;
   ctx.textBaseline = layout.textBaseline;
@@ -301,14 +379,57 @@ function paintText(
   if (wholeLine && style.letterSpacing !== 0 && "letterSpacing" in spaced) {
     spaced.letterSpacing = `${style.letterSpacing}px`;
   }
-  if (style.stroke && (style.strokeWidth ?? 0) > 0) {
-    ctx.lineWidth = style.strokeWidth ?? 0;
-    ctx.strokeStyle = style.stroke;
+  const basePaint = letterPaint ?? { fill: style.fill, stroke: style.stroke ?? "", strokeWidth: style.strokeWidth ?? 0 };
+  const paints = wholeLine && line ? line.paints : [];
+  if (paints.length === 0) {
+    if (basePaint.stroke && basePaint.strokeWidth > 0) {
+      ctx.lineWidth = basePaint.strokeWidth;
+      ctx.strokeStyle = basePaint.stroke;
+      ctx.miterLimit = 2;
+      ctx.strokeText(text, x, y);
+    }
+    ctx.fillStyle = basePaint.fill;
+    ctx.fillText(text, x, y);
+    return;
+  }
+  // A multi-style line: the whole line once per paint style, each clipped to its glyph boxes
+  // (Arabic stays joined), every outline before any fill.
+  const pad = layout.lineHeightPx;
+  const top = (line?.top ?? 0) - pad;
+  const height = layout.lineHeightPx + pad * 2;
+  const excluded = paints.flatMap((paint) => paint.intervals);
+  const entries: Array<{ paint: Omit<PaintGroup, "intervals">; intervals: Interval[] | null }> = [
+    { paint: basePaint, intervals: null },
+    ...paints.map((paint) => ({ paint, intervals: paint.intervals })),
+  ];
+  const clip = (intervals: Interval[] | null, grow: number) => {
+    ctx.beginPath();
+    if (intervals) {
+      for (const [a, b] of intervals) ctx.rect(x + a - grow, top, b - a + grow * 2, height);
+      ctx.clip();
+      return;
+    }
+    ctx.rect(-style.width - pad, top, style.width * 3 + pad * 2, height);
+    for (const [a, b] of excluded) ctx.rect(x + a, top, b - a, height);
+    ctx.clip("evenodd");
+  };
+  for (const entry of entries) {
+    if (!entry.paint.stroke || !(entry.paint.strokeWidth > 0)) continue;
+    ctx.save();
+    clip(entry.intervals, entry.paint.strokeWidth / 2 + 1);
+    ctx.lineWidth = entry.paint.strokeWidth;
+    ctx.strokeStyle = entry.paint.stroke;
     ctx.miterLimit = 2;
     ctx.strokeText(text, x, y);
+    ctx.restore();
   }
-  ctx.fillStyle = style.fill;
-  ctx.fillText(text, x, y);
+  for (const entry of entries) {
+    ctx.save();
+    clip(entry.intervals, 0);
+    ctx.fillStyle = entry.paint.fill;
+    ctx.fillText(text, x, y);
+    ctx.restore();
+  }
 }
 
 /** Scales [ctx] by [scale] about ([cx], [cy]). */
@@ -365,7 +486,7 @@ function drawBlurredUnit(
     surface.rect(line.x + a, line.top - pad, b - a, layout.lineHeightPx + pad * 2);
   }
   surface.clip();
-  paintText(surface, line.text, line.x, line.baseline, style, layout, true);
+  paintText(surface, line.text, line.x, line.baseline, style, layout, true, line);
   surface.restore();
 
   const deviceScale = Math.sqrt(Math.abs(m.a * m.d - m.b * m.c));
@@ -409,7 +530,7 @@ function drawWholeLine(
       for (const [a, b] of excluded) ctx.rect(line.x + a, line.top - pad, b - a, layout.lineHeightPx + pad * 2);
       ctx.clip("evenodd");
     }
-    paintText(ctx, line.text, line.x, line.baseline, style, layout, true);
+    paintText(ctx, line.text, line.x, line.baseline, style, layout, true, line);
     ctx.restore();
   }
   for (const [intervals, visual] of moving) {
@@ -425,7 +546,7 @@ function drawWholeLine(
       ctx.beginPath();
       for (const [a, b] of intervals) ctx.rect(line.x + a, line.top - pad, b - a, layout.lineHeightPx + pad * 2);
       ctx.clip();
-      paintText(ctx, line.text, line.x, line.baseline, style, layout, true);
+      paintText(ctx, line.text, line.x, line.baseline, style, layout, true, line);
     }
     ctx.restore();
   }
@@ -451,7 +572,7 @@ function drawLetters(
       const m = ctx.getTransform();
       ctx.filter = `blur(${radius * Math.sqrt(Math.abs(m.a * m.d - m.b * m.c))}px)`;
     }
-    paintText(ctx, letter.text, letter.x, line.baseline, style, layout, false);
+    paintText(ctx, letter.text, letter.x, line.baseline, style, layout, false, null, letter.paint ?? null);
     ctx.restore();
   }
 }
@@ -464,6 +585,25 @@ function drawCanvaUnitText(
 ) {
   const ctx = context._context;
   if (style.background) drawTextBackground(ctx, style.background);
+  // Highlight bands of a multi-style text (lib/editor/richText.ts's band, centred on the line box).
+  // They stay put while the units play.
+  for (const line of layout.lines) {
+    for (const highlight of line.highlights) {
+      if (highlight.intervals.length === 0 || !(highlight.opacity > 0)) continue;
+      const em = style.fontSize;
+      const left = line.x + Math.min(...highlight.intervals.map((interval) => interval[0])) - em * TEXT_HIGHLIGHT_PADDING_X_EM;
+      const right = line.x + Math.max(...highlight.intervals.map((interval) => interval[1])) + em * TEXT_HIGHLIGHT_PADDING_X_EM;
+      const height = em * TEXT_HIGHLIGHT_HEIGHT_EM;
+      const top = line.top + layout.lineHeightPx / 2 - height / 2;
+      ctx.save();
+      ctx.globalAlpha *= highlight.opacity;
+      ctx.fillStyle = highlight.color;
+      ctx.beginPath();
+      ctx.roundRect(left, top, right - left, height, em * TEXT_HIGHLIGHT_RADIUS_EM);
+      ctx.fill();
+      ctx.restore();
+    }
+  }
   const schedule = cachedCanvaUnitSchedule({
     type: motion.type,
     fill: Boolean(motion.fill),

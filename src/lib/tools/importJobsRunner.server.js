@@ -14,6 +14,7 @@ import {
   runFreepikImportForOwner,
 } from "@/lib/tools/freepikImport.server";
 import { logger } from "@/lib/logging/logger";
+import { scheduleElementTranslationSweep } from "@/lib/search/elementTranslations.server";
 
 const activeJobs = new Set();
 
@@ -118,6 +119,8 @@ async function runImportJobInternal(jobId) {
           await updateImportJobProgress(jobId, message);
         },
       });
+      // Arabic title/tags for any icon whose import translation fell back to English.
+      scheduleElementTranslationSweep();
     } else if (claimed.type === "freepik-backgrounds") {
       await updateImportJobProgress(jobId, "Importing Freepik backgrounds...");
       result = await runFreepikBackgroundImportForOwner({

@@ -58,7 +58,13 @@ function collectTextLayerFontNames(objects) {
           const layerType = String(layer?.layerType || layer?.type || "").trim().toLowerCase();
           return layerType === "text" || layerType.includes("text");
         })
-        .map((layer) => resolveEditorTextFontName(layer))
+        .flatMap((layer) => [
+          resolveEditorTextFontName(layer),
+          // A font used only by a styled range of a multi-style text (its textSpans).
+          ...(Array.isArray(layer?.textSpans) ? layer.textSpans : [])
+            .filter((span) => span?.fontFamily)
+            .map((span) => resolveEditorTextFontName({ fontFamily: span.fontFamily })),
+        ])
         .filter(Boolean)
     )
   );

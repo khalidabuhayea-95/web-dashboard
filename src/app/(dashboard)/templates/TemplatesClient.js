@@ -426,6 +426,13 @@ export default function TemplatesClient() {
     return payload;
   }, []);
 
+  const removeTemplatesFromList = useCallback((templateIds) => {
+    const removed = new Set(templateIds);
+    setTemplates((current) => current.filter((entry) => !removed.has(entry.id)));
+    setTotalTemplates((current) => Math.max(0, current - removed.size));
+    setSelectedTemplateIds((current) => current.filter((id) => !removed.has(id)));
+  }, []);
+
   const handleDeleteTemplate = useCallback(async (template) => {
     const templateId = String(template?.id || "").trim();
     if (!templateId) return;
@@ -434,18 +441,22 @@ export default function TemplatesClient() {
     const confirmed = window.confirm(`Delete "${templateName}"? This action cannot be undone.`);
     if (!confirmed) return;
 
+    // The row leaves the list as soon as the delete is confirmed — the server also cleans the
+    // template's R2 objects, which can take a while — and comes back if the delete fails.
+    removeTemplatesFromList([templateId]);
     setDeletingTemplateId(templateId);
     setStatus("Deleting template...");
     try {
       await deleteTemplateById(templateId);
-      await loadTemplates();
       setStatus("Template deleted.");
     } catch (error) {
       setStatus(error.message || "Failed to delete template.");
     } finally {
       setDeletingTemplateId("");
+      // Refill the page (the next template moves up) or restore a row whose delete failed.
+      void loadTemplates();
     }
-  }, [deleteTemplateById, loadTemplates]);
+  }, [deleteTemplateById, loadTemplates, removeTemplatesFromList]);
 
   const toggleTemplateSelection = useCallback((templateId, checked) => {
     setSelectedTemplateIds((current) => {
@@ -484,6 +495,7 @@ export default function TemplatesClient() {
     );
     if (!confirmed) return;
 
+    removeTemplatesFromList(targetIds);
     setBulkDeleting(true);
     setStatus(`Deleting ${targetIds.length} template${targetIds.length > 1 ? "s" : ""}...`);
     try {
@@ -499,10 +511,6 @@ export default function TemplatesClient() {
         }
       });
 
-      if (deletedIds.length > 0) {
-        await loadTemplates();
-      }
-
       if (failedCount > 0) {
         setStatus(
           `${deletedIds.length} template${deletedIds.length === 1 ? "" : "s"} deleted, ${failedCount} failed.`
@@ -514,8 +522,10 @@ export default function TemplatesClient() {
       setStatus(error.message || "Failed to delete selected templates.");
     } finally {
       setBulkDeleting(false);
+      // Refill the page and bring back any template whose delete failed.
+      void loadTemplates();
     }
-  }, [deleteTemplateById, loadTemplates, selectedTemplateIdsSet, visibleTemplateIds]);
+  }, [deleteTemplateById, loadTemplates, removeTemplatesFromList, selectedTemplateIdsSet, visibleTemplateIds]);
 
   const patchFeatured = useCallback(async (ids, isFeatured) => {
     const response = await fetch("/api/templates", {

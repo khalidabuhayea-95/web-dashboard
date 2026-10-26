@@ -1,11 +1,13 @@
 /**
- * Template search against a real Postgres (production audit H-18): the SQL fold, token-AND over
- * title / tags / placement labels, audience statuses, and the relevance order.
+ * Template search against a real Postgres (production audit H-18; smart search 2026-10-19): the
+ * SQL fold, concepts over title / tags / keywords / placement labels, synonyms across languages,
+ * typo tolerance, partial matches, audience statuses, and the relevance order.
  *
- * Needs a DISPOSABLE database with the Prisma schema pushed — never the shared dev database:
+ * Needs a DISPOSABLE database with the MIGRATIONS applied (not `db push`: the search columns are
+ * GENERATED, which push cannot create) — never the shared dev database:
  *   docker run --rm -d --name nayroz-backend-fix-tests -p 127.0.0.1:55433:5432 \
  *     -e POSTGRES_USER=test -e POSTGRES_PASSWORD=test -e POSTGRES_DB=nayroz_fix_test postgres:17
- *   DATABASE_URL=postgresql://test:test@127.0.0.1:55433/nayroz_fix_test npx prisma db push --skip-generate
+ *   DATABASE_URL=postgresql://test:test@127.0.0.1:55433/nayroz_fix_test npx prisma migrate deploy
  *   NAYROZ_TEST_DATABASE_URL=postgresql://test:test@127.0.0.1:55433/nayroz_fix_test \
  *     node --import tsx --test src/lib/mobile/templateSearch.server.test.ts
  * Skipped when NAYROZ_TEST_DATABASE_URL is not set.
@@ -54,7 +56,16 @@ const TAXONOMY = {
   ],
 };
 
-type Seed = { key: string; name: string; tags?: string[]; status?: string; category: string; subCategory: string; extra?: Array<{ category: string; subCategory: string }> };
+type Seed = {
+  key: string;
+  name: string;
+  tags?: string[];
+  keywords?: string[];
+  status?: string;
+  category: string;
+  subCategory: string;
+  extra?: Array<{ category: string; subCategory: string }>;
+};
 
 const SEEDS: Seed[] = [
   { key: "exact", name: "بطاقة رمضان كريم ذهبية", category: "quotes-content", subCategory: "motivational-quotes" },
@@ -66,6 +77,9 @@ const SEEDS: Seed[] = [
   { key: "dua", name: "صلاة الفجر", category: "islamic-religious", subCategory: "dua-azkar" },
   { key: "secondary", name: "بطاقة مولد", category: "quotes-content", subCategory: "motivational-quotes", extra: [{ category: "islamic-religious", subCategory: "dua-azkar" }] },
   { key: "draft", name: "مسودة رمضان", status: "draft", category: "quotes-content", subCategory: "motivational-quotes" },
+  { key: "gazelle", name: "غزال ذهبي", keywords: ["golden", "gazelle"], category: "quotes-content", subCategory: "motivational-quotes" },
+  { key: "anniversary", name: "Golden Wedding Anniversary", category: "quotes-content", subCategory: "motivational-quotes" },
+  { key: "cake", name: "تورتة الحفلة", category: "quotes-content", subCategory: "motivational-quotes" },
 ];
 
 let prisma: any;
@@ -104,6 +118,7 @@ test.before(async () => {
         subCategory: seed.subCategory,
         categories: [{ category: seed.category, subCategory: seed.subCategory }, ...(seed.extra || [])],
         tags: seed.tags || [],
+        searchKeywords: seed.keywords || [],
         data: {},
         // Distinct recency so the in-tier order is deterministic: later seeds are newer.
         updatedAt: new Date(Date.UTC(2026, 0, 1, 0, minute)),
@@ -134,50 +149,54 @@ test("the SQL fold equals the JS fold for the same strings", { skip }, async () 
   ];
   for (const sample of samples) {
     const [row] = await prisma.$queryRaw(
-      Prisma.sql`SELECT ${normalizedSearchSql(Prisma.sql`${sample}::text`)} AS folded`
+      Prisma.sql`SELECT ${normalizedSearchSql(Prisma.sql`${sample}::text`)} AS folded, nayroz_search_fold(${sample}::text) AS stored`
     );
     assert.equal(row.folded, normalizeSearchText(sample), sample);
+    // The stored columns' fold = the same fold, with every non-letter/digit run as one space.
+    const words = normalizeSearchText(sample).split(/[^\p{L}\p{N}]+/u).filter(Boolean).join(" ");
+    assert.equal(row.stored, ` ${words} `, `stored: ${sample}`);
   }
 });
 
 test("token-AND over title, tags and placement labels; drafts follow the audience", { skip }, async () => {
   const published = ["published"];
-  const kareem = await findTemplateSearchMatches({ query: "رمضان كريم", statuses: published, taxonomy: TAXONOMY });
-  assert.deepEqual(idsFor(kareem), new Set(["exact", "split", "tagOnly"]));
+  const kareem = await findTemplateSearchMatches({ query: "رمضان كريم", statuses: published, taxonomy: TAXONOMY, translate: false });
+  assert.deepEqual(idsFor(kareem), new Set(["exact", "split", "tagOnly"]), "rows with only one of the two words drop out");
 
-  const harakat = await findTemplateSearchMatches({ query: "رَمَضَان", statuses: published, taxonomy: TAXONOMY });
-  const plain = await findTemplateSearchMatches({ query: "رمضان", statuses: published, taxonomy: TAXONOMY });
+  const harakat = await findTemplateSearchMatches({ query: "رَمَضَان", statuses: published, taxonomy: TAXONOMY, translate: false });
+  const plain = await findTemplateSearchMatches({ query: "رمضان", statuses: published, taxonomy: TAXONOMY, translate: false });
   assert.deepEqual(idsFor(harakat), idsFor(plain));
   assert.ok(idsFor(plain).has("harakat"), "a title written with harakat matches a bare query");
   assert.ok(idsFor(plain).has("labelOnly"), "the Ramadan rail's label covers a title that never says it");
   assert.ok(!idsFor(plain).has("draft"));
 
-  const english = await findTemplateSearchMatches({ query: "Ramadan", statuses: published, taxonomy: TAXONOMY });
-  assert.deepEqual(idsFor(english), new Set(["labelOnly"]));
+  const english = await findTemplateSearchMatches({ query: "Ramadan", statuses: published, taxonomy: TAXONOMY, translate: false });
+  assert.deepEqual(idsFor(english), idsFor(plain), "an English query reaches the Arabic titles through the synonyms");
 
-  const taMarbuta = await findTemplateSearchMatches({ query: "تهنئه", statuses: published, taxonomy: TAXONOMY });
+  const taMarbuta = await findTemplateSearchMatches({ query: "تهنئه", statuses: published, taxonomy: TAXONOMY, translate: false });
   assert.ok(idsFor(taMarbuta).has("fitr") && idsFor(taMarbuta).has("harakat"));
 
-  const fitr = await findTemplateSearchMatches({ query: "عيد فطر", statuses: published, taxonomy: TAXONOMY });
-  const fitrWithArticle = await findTemplateSearchMatches({ query: "عيد الفطر", statuses: published, taxonomy: TAXONOMY });
+  const fitr = await findTemplateSearchMatches({ query: "عيد فطر", statuses: published, taxonomy: TAXONOMY, translate: false });
+  const fitrWithArticle = await findTemplateSearchMatches({ query: "عيد الفطر", statuses: published, taxonomy: TAXONOMY, translate: false });
   assert.deepEqual(idsFor(fitr), new Set(["fitr"]));
   assert.deepEqual(idsFor(fitrWithArticle), idsFor(fitr));
 
-  const dua = await findTemplateSearchMatches({ query: "أدعية", statuses: published, taxonomy: TAXONOMY });
+  const dua = await findTemplateSearchMatches({ query: "أدعية", statuses: published, taxonomy: TAXONOMY, translate: false });
   assert.deepEqual(idsFor(dua), new Set(["dua", "secondary"]), "a secondary placement in `categories` counts");
 
-  const withDrafts = await findTemplateSearchMatches({ query: "رمضان", statuses: ["published", "draft"], taxonomy: TAXONOMY });
+  const withDrafts = await findTemplateSearchMatches({ query: "رمضان", statuses: ["published", "draft"], taxonomy: TAXONOMY, translate: false });
   assert.ok(idsFor(withDrafts).has("draft"), "a tester audience sees drafts");
 
-  const nothing = await findTemplateSearchMatches({ query: "؟؟", statuses: published, taxonomy: TAXONOMY });
+  const nothing = await findTemplateSearchMatches({ query: "؟؟", statuses: published, taxonomy: TAXONOMY, translate: false });
   assert.equal(nothing.matches.size, 0);
 });
 
 test("relevance: exact title phrase, then all tokens in the title, then tags/labels", { skip }, async () => {
-  const result = await findTemplateSearchMatches({ query: "رمضان كريم", statuses: ["published"], taxonomy: TAXONOMY });
-  assert.deepEqual(result.matches.get(ids.get("exact")!), { rawHit: true, titleHits: 2 });
-  assert.deepEqual(result.matches.get(ids.get("split")!), { rawHit: false, titleHits: 2 });
-  assert.deepEqual(result.matches.get(ids.get("tagOnly")!), { rawHit: false, titleHits: 0 });
+  const result = await findTemplateSearchMatches({ query: "رمضان كريم", statuses: ["published"], taxonomy: TAXONOMY, translate: false });
+  // Both words as whole title words (8 + 8); the tag-only row matches both as whole tag words (4 + 4).
+  assert.deepEqual(result.matches.get(ids.get("exact")!), { rawHit: true, matched: 2, quality: 16 });
+  assert.deepEqual(result.matches.get(ids.get("split")!), { rawHit: false, matched: 2, quality: 16 });
+  assert.deepEqual(result.matches.get(ids.get("tagOnly")!), { rawHit: false, matched: 2, quality: 8 });
 
   // Incoming rows newest-first, as the list route fetches them; a featured tag-only row must still
   // rank below the title hits, and featured leads only inside its own tier.
@@ -190,4 +209,24 @@ test("relevance: exact title phrase, then all tokens in the title, then tags/lab
     rankTemplateSearchRows(rows, result.matches).map((row) => row.id),
     [ids.get("exact"), ids.get("split"), ids.get("tagOnly")]
   );
+});
+
+test("smart search: machine keywords, synonyms, typos and partial matches", { skip }, async () => {
+  const published = ["published"];
+  const find = (query: string) => findTemplateSearchMatches({ query, statuses: published, taxonomy: TAXONOMY, translate: false });
+
+  // An Arabic-only title answers an English word through its stored keywords.
+  assert.deepEqual(idsFor(await find("gazelle")), new Set(["gazelle"]));
+  // And an English title answers Arabic through the synonym groups.
+  assert.ok(idsFor(await find("زفاف")).has("anniversary"));
+  // Dialect spelling: «كيكة» is in the cake group with «تورتة».
+  assert.deepEqual(idsFor(await find("كيكة")), new Set(["cake"]));
+  // A typo inside a word of 4+ letters.
+  assert.ok(idsFor(await find("aniversary")).has("anniversary"));
+  // Nothing has both words: the rows matching the one known word come back instead of nothing.
+  const partial = await find("غزال زرافة");
+  assert.deepEqual(idsFor(partial), new Set(["gazelle"]));
+  assert.equal(partial.matches.get(ids.get("gazelle")!)?.matched, 1);
+  // Clitics: «بالذهبي» finds «ذهبي».
+  assert.ok(idsFor(await find("بالذهبي")).has("gazelle"));
 });

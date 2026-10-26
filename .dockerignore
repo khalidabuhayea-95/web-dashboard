@@ -23,6 +23,6 @@ out
 *.log
 
 # Repo docs / nested tooling not needed at build time
-extension/**/.claude
+extensions/**/.claude
 AUDIT_REPORT.md
 IMPORT_WORKER_SPEC.md

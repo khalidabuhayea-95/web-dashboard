@@ -83,6 +83,75 @@ export function revealedCharOffset(
   return boundaries[Math.min(shown - 1, boundaries.length - 1)];
 }
 
+// ── CapCut's letter pacings (the slot's `typePacing` param) ─────────────────
+// Read from CapCut's own text-animation scripts (2026-10-22). Units are ALL the text's characters
+// in order, line breaks included (a break takes its own beat — matched frame by frame against
+// CapCut on "Aziza\n&\nAmmar"); p is the slot's 0..1 progress.
+//   1 "Type 2" (PrinterTwo.lua): unit u fades in on sinIn from sinIn(u/n)·¾ of the effect, over
+//     quinticOut(u/n)·¼ of it.
+//   2 "Random Typewriter" (PrinterOne.lua): even slots of 1/n; the letter in its slot steps 0.33 →
+//     0.66 → 1 (CapCut also scrambles that letter's glyph — not drawn).
+//   3 "Typewriter" (TextAnim.lua): CapCut's typing rhythm (a 14-value weight table, the second one
+//     when a letter gets ≥ 150 ms), typed over the first 1/1.2 of the effect; a letter pops in
+//     whole at 90 % of its slot.
+// The app computes the same in LayerAnimationVisualRuntime.kt (typewriterCharAlphas).
+export const TYPE_PACING_TYPE2 = 1;
+export const TYPE_PACING_RANDOM = 2;
+export const TYPE_PACING_RHYTHM = 3;
+const CAPCUT_TYPING_RHYTHM = [0.86, 1.35, 0.62, 5.2, 0.25, 0.96, 0.35, 4.55, 0.03, 0.82, 0.2, 1.26, 0.36, 0.1];
+const CAPCUT_TYPING_RHYTHM_SLOW = [0.86, 1.35, 0.62, 2.2, 0.25, 0.96, 0.35, 2.55, 0.03, 0.82, 0.2, 1.26, 0.36, 0.1];
+
+const sinIn = (x: number) => 1 - Math.cos((clamp(x, 0, 1) * Math.PI) / 2);
+const quinticOut = (x: number) => 1 - Math.pow(1 - clamp(x, 0, 1), 5);
+
+/** Each unit's opacity at [progress] for pacing [pacing] (n units). */
+export function typewriterUnitAlphas(pacing: number, progress: number, durationMs: number, n: number): number[] {
+  const alphas = new Array<number>(Math.max(0, n)).fill(0);
+  if (n <= 0) return alphas;
+  const p = clamp(progress, 0, 1);
+  if (p >= 1) return alphas.fill(1);
+  if (pacing === TYPE_PACING_TYPE2) {
+    for (let u = 1; u <= n; u += 1) {
+      const start = sinIn(u / n) * 0.75;
+      const length = quinticOut(u / n) * 0.25;
+      alphas[u - 1] = length > 0 ? sinIn((p - start) / length) : p >= start ? 1 : 0;
+    }
+  } else if (pacing === TYPE_PACING_RANDOM) {
+    if (p <= 0) return alphas;
+    const slot = 1 / n;
+    const current = Math.ceil(p / slot);
+    const step = Math.floor((p % slot) / (slot / 3));
+    for (let u = 1; u <= n; u += 1) {
+      alphas[u - 1] = u < current ? 1 : u === current ? Math.min(1, (step + 1) * 0.33) : 0;
+    }
+  } else if (pacing === TYPE_PACING_RHYTHM) {
+    const table = Math.max(1, durationMs) / 1000 / n >= 0.15 ? CAPCUT_TYPING_RHYTHM_SLOW : CAPCUT_TYPING_RHYTHM;
+    const weights = Array.from({ length: n }, (_, k) => table[k % table.length]);
+    const total = weights.reduce((sum, weight) => sum + weight, 0);
+    const q = 1.2 * p;
+    let start = 0;
+    for (let u = 0; u < n; u += 1) {
+      const share = weights[u] / total;
+      alphas[u] = q >= start + 0.9 * share ? 1 : 0;
+      start += share;
+    }
+  } else {
+    return alphas.fill(1);
+  }
+  return alphas;
+}
+
+/** Per-character opacity of [text] (every character is a unit), or null without a pacing. */
+export function typewriterCharAlphas(
+  pacing: number | undefined,
+  progress: number,
+  durationMs: number,
+  text: string
+): number[] | null {
+  if (!pacing) return null;
+  return typewriterUnitAlphas(pacing, progress, durationMs, text.length);
+}
+
 /** The revealed share of the text's WIDTH (char-index approximation). */
 export function revealFraction(
   progress: number,

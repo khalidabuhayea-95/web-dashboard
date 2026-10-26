@@ -5,7 +5,7 @@
     "spec": "docs/canva-animation-parity.md §8 (web dashboard)",
     "rounding": "every number under `out` is rounded to 4 dp (whole numbers as ints, -0 as 0); every INPUT (p, w, h, spec, slots, localMs, text, lines, intensity, seed) is exact — Float inputs are written as their shortest decimal, the value the Kotlin used.",
     "visual": "resolveLayerAnimationVisualState(LayerTimelinePlaybackState(isVisible=true, localMs=0, progress=p, animation=spec, isExiting=exiting), w, h, layerIndex). `p` is the progress the resolver RECEIVES — exit rows pass 1 - u (their k says u=…). spec is used exactly as given, params included.",
-    "timeline": "resolveTimelinePlaybackStateFor(hidden=false, timelineStartMs=0, timelineEndMs=layerDurationMs, animations=slots, playheadMs=localMs, totalDurationMs=layerDurationMs), then resolveLayerAnimationVisualState(state, w, h, layerIndex) — the composed visual (§8.2).",
+    "timeline": "resolveTimelinePlaybackStateFor(hidden=false, timelineStartMs=0, timelineEndMs=layerDurationMs, animations=slots, playheadMs=localMs, totalDurationMs=layerDurationMs), then resolveLayerAnimationVisualState(state, w, h, layerIndex) — the composed visual (§8.2). Rows keyed BREATHE|photo-flow|x, BREATHE|two-segment|x+y and BREATHE|x-only (the x1…/x2… sideways drift) added 2026-10-14 by a throwaway TmpPhotoFlowGoldenTest through the same runtime.",
     "units": "canvaTextUnits(text, unit, lines): lines = line index per REAL grapheme (null = one line); out.graphemes are the real graphemes only (no pseudo newline items); unitOfGrapheme is aligned with them; unitCount counts the pseudo items too. Graphemes: base + following Mn/Mc/Me (Unicode 17.0 table), ZWJ joins the next code point, variation selectors attach. Whitespace = Unicode White_Space, CJK = Canva's $ri ranges, both tested on ANY code point of the grapheme. An empty paragraph's pseudo item takes the previous item's line.",
     "unitVisual": "canvaUnitVisual(type, unit, fill, intensity, seed, durationMs, exiting, p, unitIndex, unitCount) + canvaUnitElementScale(...same, no unitIndex). `p` is the RAW slot progress (p entering, u exiting). Vd = clamp(intensity - .5, 0, 1); NEON always fits (fill ignored); seed null = P 1.",
     "outFields": "s sx sy rot tx ty a blur mask{kind progress featherFraction|startAngleDegrees edge anchored} text{progress mode durationMs} glyph{type progress durationMs canva?{unit fill isExiting intensity seed restAlpha restScale restBlurPx}} bar{leftFraction topFraction widthFraction heightFraction colorArgb?}",
@@ -58871,6 +58871,1175 @@
           "edge": "LEFT",
           "anchored": true
         },
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=0",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 0,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 9,
+        "ty": 0,
+        "a": 0,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=100",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 100,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 9,
+        "ty": 0,
+        "a": 0,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=160",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 160,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 8.9999,
+        "ty": 0,
+        "a": 0,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=240",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 240,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 6.7373,
+        "ty": 0,
+        "a": 0.4363,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=320",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 320,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 0.0053,
+        "ty": 0,
+        "a": 0.7484,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=400",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 400,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -6.732,
+        "ty": 0,
+        "a": 0.9363,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=481",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 481,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -9,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=1000",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 1000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -9,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|photo-flow|x|t=14999",
+      "slots": {
+        "entrance": {
+          "type": "FADE",
+          "infinite": false,
+          "durationMs": 321,
+          "delayMs": 160,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 1,
+          "params": null
+        },
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 1.06,
+            "r1To": 1.06,
+            "r1Start": 159.5,
+            "r1Dur": 321.0944,
+            "r1Ease": 4,
+            "x1From": 9,
+            "x1To": -9
+          }
+        }
+      },
+      "layerDurationMs": 15000,
+      "localMs": 14999,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -9,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=0",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 0,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 0.95,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -12,
+        "ty": 4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=1000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 1000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 0.9775,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -7.5,
+        "ty": 2,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=2000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 2000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.005,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": -3,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=4000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 4000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 6,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=5000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 5000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.06,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 6,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=7000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 7000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.0525,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 5.25,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=8000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 8000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1.03,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 3,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=10000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 10000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 0,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|two-segment|x+y|t=11999",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1From": 0.95,
+            "r1To": 1.06,
+            "r1Start": 0,
+            "r1Dur": 4000,
+            "r1Ease": 1,
+            "r2To": 1,
+            "r2Start": 6000,
+            "r2Dur": 4000,
+            "r2Ease": 4,
+            "x1From": -12,
+            "x1To": 6,
+            "x2To": 0,
+            "y1From": 4,
+            "y1To": -4
+          }
+        }
+      },
+      "layerDurationMs": 12000,
+      "localMs": 11999,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 0,
+        "ty": -4,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|x-only|t=0",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1To": 1,
+            "r1Start": 500,
+            "r1Dur": 1500,
+            "r1Ease": 4,
+            "x1To": 20
+          }
+        }
+      },
+      "layerDurationMs": 4000,
+      "localMs": 0,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 0,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|x-only|t=500",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1To": 1,
+            "r1Start": 500,
+            "r1Dur": 1500,
+            "r1Ease": 4,
+            "x1To": 20
+          }
+        }
+      },
+      "layerDurationMs": 4000,
+      "localMs": 500,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 0,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|x-only|t=1250",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1To": 1,
+            "r1Start": 500,
+            "r1Dur": 1500,
+            "r1Ease": 4,
+            "x1To": 20
+          }
+        }
+      },
+      "layerDurationMs": 4000,
+      "localMs": 1250,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 10,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|x-only|t=2000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1To": 1,
+            "r1Start": 500,
+            "r1Dur": 1500,
+            "r1Ease": 4,
+            "x1To": 20
+          }
+        }
+      },
+      "layerDurationMs": 4000,
+      "localMs": 2000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 20,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
+        "text": null,
+        "glyph": null,
+        "bar": null
+      }
+    },
+    {
+      "k": "BREATHE|x-only|t=3000",
+      "slots": {
+        "entrance": null,
+        "exit": null,
+        "loop": {
+          "type": "BREATHE",
+          "infinite": true,
+          "durationMs": 30000,
+          "delayMs": 0,
+          "direction": "DEFAULT",
+          "easing": "LINEAR",
+          "intensity": 0.1,
+          "params": {
+            "concurrent": 1,
+            "r1To": 1,
+            "r1Start": 500,
+            "r1Dur": 1500,
+            "r1Ease": 4,
+            "x1To": 20
+          }
+        }
+      },
+      "layerDurationMs": 4000,
+      "localMs": 3000,
+      "w": 200,
+      "h": 100,
+      "layerIndex": 0,
+      "out": {
+        "s": 1,
+        "sx": 1,
+        "sy": 1,
+        "rot": 0,
+        "tx": 20,
+        "ty": 0,
+        "a": 1,
+        "blur": 0,
+        "mask": null,
         "text": null,
         "glyph": null,
         "bar": null

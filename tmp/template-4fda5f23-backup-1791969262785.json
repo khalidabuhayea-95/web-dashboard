@@ -1,0 +1,3438 @@
+{
+  "id": "4fda5f23-9c5e-4260-a569-d6d1b1383445",
+  "ownerId": "900b5b3c-ab9c-449b-82be-b0e6326185d3",
+  "name": "فيديو للهاتف الجوال ابيض و وردي دعوة زواج عروسه هادئ - فيديو للهاتف الجوال",
+  "slug": "canva-import-1791968721990",
+  "status": "draft",
+  "version": 1,
+  "canvasSize": {
+    "width": 1080,
+    "height": 1920
+  },
+  "pageCount": 1,
+  "pageThumbnails": null,
+  "category": "invitations",
+  "subCategory": "engagement-invitation",
+  "categories": [
+    {
+      "category": "invitations",
+      "subCategory": "engagement-invitation"
+    }
+  ],
+  "tags": [
+    "فيديو",
+    "للهاتف",
+    "الجوال",
+    "ابيض",
+    "وردي",
+    "دعوة",
+    "زواج",
+    "عروسه",
+    "هادئ"
+  ],
+  "thumbnailDataUrl": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/72ed6a48-d5f6-42cd-932e-e4650774d72f.webp",
+  "previewVideoUrl": null,
+  "previewPosterUrl": null,
+  "previewStatus": null,
+  "previewDurationMs": null,
+  "previewVersion": null,
+  "previewError": null,
+  "previewUpdatedAt": null,
+  "data": {
+    "meta": {
+      "import": {
+        "page": {
+          "id": "canva-page-1",
+          "name": "Canva Page 1",
+          "width": 1080,
+          "height": 1920,
+          "durationMs": 11000,
+          "sourceWidth": 1080,
+          "sourceHeight": 1920
+        },
+        "source": "canva-extension",
+        "warnings": [
+          "Could not isolate merged Canva layer \"LBcSgSBkHZPp0BPP\".",
+          "Could not isolate merged Canva layer \"LB36cJjm6hMG3dp9\".",
+          "Could not isolate merged Canva layer \"LBjYlf0tDm2y8CPS\".",
+          "Could not isolate merged Canva layer \"LB5SPb1H1LQ3RFxS\".",
+          "Font cuts: YADK4JLT5uI_0 -> 400,700 (design used 400/700)",
+          "Could not isolate merged Canva layer \"LBwVLr44C1zVvd22\".",
+          "Could not isolate merged Canva layer \"LBhdMRqMQZcrVnHP\".",
+          "Timeline: 15 element(s) captured at another moment of the video.",
+          "Could not isolate merged Canva layer \"LBcGb5FWJ8g2f77h\".",
+          "Could not isolate merged Canva layer \"LBnsBRHYj8GHdsfg\".",
+          "Font cuts: YADK4JLT5uI_0 -> 400 (design used 400)",
+          "Timeline: 3 element(s) captured at another moment of the video.",
+          "Applied page background color #ffffff."
+        ],
+        "layerTree": [
+          {
+            "id": "layer-1",
+            "kind": "image",
+            "name": "White background",
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 1080,
+              "height": 1920
+            },
+            "zIndex": 0,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LB9WTZhcZ8KGg2rB",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 713.0253552867904,
+              "y": 1513.544144300731,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 1,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBCq8fZcqkMWw7xv",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -189.7000462427292,
+              "y": -197.0577242191867,
+              "width": 575,
+              "height": 594
+            },
+            "zIndex": 2,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBCtpBFS4mrc7T3Z",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -67.98481119792578,
+              "y": 1122.844729385338,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 3,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB8yrWWv8v8dzBXN",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 836.8605672852838,
+              "y": 854.8649951228056,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 4,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBcP0ZnMdFHtQWqh",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 103.1626710618995,
+              "y": 1702.583253709847,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 5,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBW6j8m0c70YNmSs",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 470.9444106903931,
+              "y": 279.4452026871288,
+              "width": 166,
+              "height": 171
+            },
+            "zIndex": 6,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBcSgSBkHZPp0BPP",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 282.4702925138646,
+              "y": 712.4915250662882,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 7,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBGvsjkQGybH8kGx",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -278.3321518775109,
+              "y": 438.599326478679,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 8,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB8MKsVnzhldCNDn",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 445.9775591623362,
+              "y": -272.9203156474127,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 9,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB36cJjm6hMG3dp9",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 436.4586414528602,
+              "y": 1271.533914848515,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 10,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBx05WzfpF30hL9g",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 971.9983521515502,
+              "y": 58.25232369131004,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 11,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB0jjvXXMRT2772h",
+            "kind": "image",
+            "name": "Hijaiyah arabic letter",
+            "bounds": {
+              "x": 443.3378414562446,
+              "y": 478.6554731111627,
+              "width": 193,
+              "height": 355
+            },
+            "zIndex": 12,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LB5SPb1H1LQ3RFxS",
+            "kind": "image",
+            "name": "Location Pin Icon",
+            "bounds": {
+              "x": 800.6465668328908,
+              "y": 1422.227425409849,
+              "width": 63,
+              "height": 91
+            },
+            "zIndex": 13,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBjYlf0tDm2y8CPS",
+            "kind": "image",
+            "name": "calendar icon, calendar date icon symbol",
+            "bounds": {
+              "x": 197.8645960988908,
+              "y": 1424.950310760203,
+              "width": 85,
+              "height": 89
+            },
+            "zIndex": 14,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LB7fvDvVXQjJZKCL",
+            "kind": "text",
+            "name": "Text 16",
+            "bounds": {
+              "x": 203.2389280616594,
+              "y": 985.2978025296288,
+              "width": 641,
+              "height": 162
+            },
+            "zIndex": 15,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBXq1WTmkDQY3htj",
+            "kind": "text",
+            "name": "Text 17",
+            "bounds": {
+              "x": 219.3774123001965,
+              "y": 1243.699502992952,
+              "width": 641,
+              "height": 75
+            },
+            "zIndex": 16,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB6yBJ6YNCkwCQLm",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 713.0253552867904,
+              "y": 1513.544144300731,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 1,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBZQck65XhRSwhm3",
+            "kind": "text",
+            "name": "Text 3",
+            "bounds": {
+              "x": 263.2127176871398,
+              "y": 534.0112823015502,
+              "width": 554,
+              "height": 75
+            },
+            "zIndex": 2,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LB1RkLSZZH2Zn6PN",
+            "kind": "text",
+            "name": "Text 4",
+            "bounds": {
+              "x": 224.4429325190911,
+              "y": 584.1151126265213,
+              "width": 483,
+              "height": 162
+            },
+            "zIndex": 3,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 1.635777120070484
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBM6t3rwXrrr51jL",
+            "kind": "text",
+            "name": "Text 5",
+            "bounds": {
+              "x": 614.8986763100437,
+              "y": 571.3973585903384,
+              "width": 312,
+              "height": 162
+            },
+            "zIndex": 4,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": -8.294602591816984
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBPj15dmB534tVgr",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -67.98481119792578,
+              "y": 1122.844729385338,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 5,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBNMFVxSn3GRd0pB",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 836.8605672852838,
+              "y": 854.8649951228056,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 6,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBddjt4B4bnMc7r8",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -138.2213429812664,
+              "y": -135.0833515219978,
+              "width": 575,
+              "height": 594
+            },
+            "zIndex": 7,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBw3z0nmgTfWPBSg",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 103.1626710618995,
+              "y": 1702.583253709847,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 8,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBwVLr44C1zVvd22",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 282.4702925138646,
+              "y": 712.4915250662882,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 9,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBrWYhBtvFdQzQ3q",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": -278.3321518775109,
+              "y": 438.599326478679,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 10,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBFKTB6Tx5P3t3H2",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 447.0665329614628,
+              "y": -191.7060678564056,
+              "width": 421,
+              "height": 435
+            },
+            "zIndex": 11,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBhdMRqMQZcrVnHP",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 436.4586414528602,
+              "y": 1271.533914848515,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 12,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBwNj6RVJ8wXWHnD",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 971.9983521515502,
+              "y": 58.25232369131004,
+              "width": 297,
+              "height": 307
+            },
+            "zIndex": 13,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 0.2,
+              "rotation": 0
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBD6P6mZkkzWSSV3",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 750.1420326217467,
+              "y": 425.0941509508789,
+              "width": 173,
+              "height": 184
+            },
+            "zIndex": 14,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBKxsZHNTjWLKMKt",
+            "kind": "text",
+            "name": "Text 16",
+            "bounds": {
+              "x": 163.9116316808778,
+              "y": 586.7024487952775,
+              "width": 122,
+              "height": 120
+            },
+            "zIndex": 15,
+            "fallback": false,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 11.40155777210117
+            },
+            "fallbackReason": ""
+          },
+          {
+            "id": "LBcGb5FWJ8g2f77h",
+            "kind": "image",
+            "name": "Door",
+            "bounds": {
+              "x": 540,
+              "y": 0,
+              "width": 540,
+              "height": 1920
+            },
+            "zIndex": 1,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBnsBRHYj8GHdsfg",
+            "kind": "image",
+            "name": "Door",
+            "bounds": {
+              "x": 0,
+              "y": 0,
+              "width": 540,
+              "height": 1920
+            },
+            "zIndex": 2,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          },
+          {
+            "id": "LBXC11fqSYrhJFrJ",
+            "kind": "image",
+            "name": "Watercolor Rose Illustration",
+            "bounds": {
+              "x": 270.4381451848035,
+              "y": 659.7004929310152,
+              "width": 566,
+              "height": 601
+            },
+            "zIndex": 3,
+            "fallback": true,
+            "parentId": null,
+            "transform": {
+              "scaleX": 1,
+              "scaleY": 1,
+              "opacity": 1,
+              "rotation": 0
+            },
+            "fallbackReason": "masked-or-clipped"
+          }
+        ],
+        "usedFonts": [
+          "YADK4JLT5uI_0"
+        ],
+        "layerStats": {
+          "skipped": 0,
+          "detected": 35,
+          "editable": 22,
+          "rasterized": 13
+        },
+        "provenance": {
+          "via": "extension",
+          "layers": true,
+          "parity": "v2",
+          "source": "canva",
+          "canvaKeywordCount": 0
+        },
+        "assetManifest": {
+          "assets": [
+            {
+              "id": "asset-1",
+              "kind": "image",
+              "path": "thumbnailDataUrl",
+              "bytes": 4748,
+              "field": "thumbnailDataUrl",
+              "status": "uploaded",
+              "mimeType": "image/webp",
+              "original": "data:image/jpeg;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/72ed6a48-d5f6-42cd-932e-e4650774d72f.webp",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-2",
+              "kind": "image",
+              "path": "fabricData.objects[0].src",
+              "bytes": 9374,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/jpeg",
+              "original": "data:image/jpeg;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0265912a-e944-4417-81b9-8d34ef0b5b27.jpg",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-3",
+              "kind": "image",
+              "path": "fabricData.objects[1].src",
+              "bytes": 84142,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-4",
+              "kind": "image",
+              "path": "fabricData.objects[2].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-5",
+              "kind": "image",
+              "path": "fabricData.objects[3].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-6",
+              "kind": "image",
+              "path": "fabricData.objects[4].src",
+              "bytes": 84142,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-7",
+              "kind": "image",
+              "path": "fabricData.objects[6].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-8",
+              "kind": "image",
+              "path": "fabricData.objects[7].src",
+              "bytes": 1005185,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/619e49f8-97f0-44b8-8f7d-e9db38dcd6d9.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-9",
+              "kind": "image",
+              "path": "fabricData.objects[9].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-10",
+              "kind": "image",
+              "path": "fabricData.objects[11].src",
+              "bytes": 36268,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-11",
+              "kind": "image",
+              "path": "fabricData.objects[12].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-12",
+              "kind": "image",
+              "path": "fabricData.objects[13].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-13",
+              "kind": "image",
+              "path": "fabricData.objects[14].src",
+              "bytes": 36268,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-14",
+              "kind": "image",
+              "path": "fabricData.objects[15].src",
+              "bytes": 41852,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0bbaaf14-756d-431e-912f-a5b6fecf345a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-15",
+              "kind": "image",
+              "path": "fabricData.objects[16].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-16",
+              "kind": "image",
+              "path": "fabricData.objects[17].src",
+              "bytes": 987010,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-17",
+              "kind": "image",
+              "path": "fabricData.objects[18].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-18",
+              "kind": "image",
+              "path": "fabricData.objects[19].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-19",
+              "kind": "image",
+              "path": "fabricData.objects[20].src",
+              "bytes": 987010,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-20",
+              "kind": "image",
+              "path": "fabricData.objects[21].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-21",
+              "kind": "image",
+              "path": "fabricData.objects[22].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-22",
+              "kind": "image",
+              "path": "fabricData.objects[23].src",
+              "bytes": 44343,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-23",
+              "kind": "image",
+              "path": "fabricData.objects[24].src",
+              "bytes": 983802,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-24",
+              "kind": "image",
+              "path": "fabricData.objects[25].src",
+              "bytes": 36268,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-25",
+              "kind": "image",
+              "path": "fabricData.objects[26].src",
+              "bytes": 44343,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-26",
+              "kind": "image",
+              "path": "fabricData.objects[27].src",
+              "bytes": 52638,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/41f8fa59-7ea4-4823-9221-18151915d522.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-27",
+              "kind": "image",
+              "path": "fabricData.objects[28].src",
+              "bytes": 36268,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-28",
+              "kind": "image",
+              "path": "fabricData.objects[29].src",
+              "bytes": 35741,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/958d2996-4166-4c5f-9569-4ecf13999ed8.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-29",
+              "kind": "image",
+              "path": "fabricData.objects[30].src",
+              "bytes": 43628,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/b442cdc7-3362-44d5-a77e-315ed219ee6e.png",
+              "sourceType": "data-uri"
+            },
+            {
+              "id": "asset-30",
+              "kind": "image",
+              "path": "fabricData.objects[31].src",
+              "bytes": 44750,
+              "field": "src",
+              "status": "uploaded",
+              "mimeType": "image/png",
+              "original": "data:image/png;...",
+              "rewritten": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/e75e3a5a-1264-4419-b45c-91488d8460fc.png",
+              "sourceType": "data-uri"
+            }
+          ],
+          "summary": {
+            "total": 30,
+            "failed": 0,
+            "uploaded": 30,
+            "preserved": 0
+          },
+          "version": 1,
+          "uploadedAt": "2026-10-14T09:05:20.216Z"
+        },
+        "importVersion": 2
+      }
+    },
+    "objects": [
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0265912a-e944-4417-81b9-8d34ef0b5b27.jpg",
+        "top": 0,
+        "left": 0,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 600,
+        "height": 1067,
+        "scaleX": 1.8,
+        "scaleY": 1.799437675726336,
+        "tagsEn": [
+          "white",
+          "background"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "White background",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "White background",
+          "white",
+          "background"
+        ],
+        "layerName": "White background",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 600,
+        "importNodeId": "layer-1",
+        "sourceHeight": 1067,
+        "rasterPalette": [
+          "#ffffff"
+        ],
+        "sourceAssetId": "",
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0265912a-e944-4417-81b9-8d34ef0b5b27.jpg",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+        "top": 0,
+        "left": 540,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 225,
+        "height": 800,
+        "scaleX": 2.4,
+        "scaleY": 2.4,
+        "tagsEn": [
+          "door"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Door",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Door",
+          "door"
+        ],
+        "layerName": "Door",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 225,
+        "importNodeId": "LBcGb5FWJ8g2f77h",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#eee7dc",
+          "#efefef",
+          "#d3b797"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 2542,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "mediaMotionPath": [
+          {
+            "t": 12,
+            "x": 0,
+            "y": 8
+          },
+          {
+            "t": 35,
+            "x": 0,
+            "y": 50
+          },
+          {
+            "t": 43,
+            "x": 0,
+            "y": 256
+          },
+          {
+            "t": 51,
+            "x": 0,
+            "y": 289
+          },
+          {
+            "t": 61,
+            "x": 0,
+            "y": 340
+          },
+          {
+            "t": 68,
+            "x": 0,
+            "y": 398
+          },
+          {
+            "t": 78,
+            "x": 0,
+            "y": 457
+          },
+          {
+            "t": 85,
+            "x": 0,
+            "y": 489
+          },
+          {
+            "t": 96,
+            "x": 0,
+            "y": 527
+          },
+          {
+            "t": 103,
+            "x": 0,
+            "y": 564
+          },
+          {
+            "t": 110,
+            "x": 0,
+            "y": 589
+          },
+          {
+            "t": 120,
+            "x": 0,
+            "y": 627
+          },
+          {
+            "t": 127,
+            "x": 0,
+            "y": 641
+          },
+          {
+            "t": 138,
+            "x": 0,
+            "y": 698
+          },
+          {
+            "t": 150,
+            "x": 0,
+            "y": 756
+          },
+          {
+            "t": 168,
+            "x": 0,
+            "y": 795
+          },
+          {
+            "t": 180,
+            "x": 0,
+            "y": 822
+          },
+          {
+            "t": 199,
+            "x": 1,
+            "y": 875
+          },
+          {
+            "t": 211,
+            "x": 1,
+            "y": 936
+          },
+          {
+            "t": 223,
+            "x": 1,
+            "y": 967
+          },
+          {
+            "t": 241,
+            "x": 2,
+            "y": 1016
+          },
+          {
+            "t": 253,
+            "x": 2,
+            "y": 1059
+          },
+          {
+            "t": 271,
+            "x": 2,
+            "y": 1120
+          },
+          {
+            "t": 283,
+            "x": 3,
+            "y": 1144
+          },
+          {
+            "t": 301,
+            "x": 3,
+            "y": 1174
+          },
+          {
+            "t": 313,
+            "x": 4,
+            "y": 1198
+          },
+          {
+            "t": 332,
+            "x": 4,
+            "y": 1249
+          },
+          {
+            "t": 344,
+            "x": 4,
+            "y": 1276
+          },
+          {
+            "t": 362,
+            "x": 5,
+            "y": 1330
+          },
+          {
+            "t": 374,
+            "x": 5,
+            "y": 1368
+          },
+          {
+            "t": 386,
+            "x": 5,
+            "y": 1394
+          },
+          {
+            "t": 404,
+            "x": 6,
+            "y": 1444
+          },
+          {
+            "t": 416,
+            "x": 6,
+            "y": 1493
+          },
+          {
+            "t": 434,
+            "x": 6,
+            "y": 1571
+          },
+          {
+            "t": 447,
+            "x": 6,
+            "y": 1605
+          },
+          {
+            "t": 465,
+            "x": 6,
+            "y": 1672
+          },
+          {
+            "t": 468,
+            "x": 6,
+            "y": 1738
+          },
+          {
+            "t": 478,
+            "x": 6,
+            "y": 1824
+          },
+          {
+            "t": 484,
+            "x": 6,
+            "y": 1858
+          },
+          {
+            "t": 490,
+            "x": 6,
+            "y": 1876
+          },
+          {
+            "t": 500,
+            "x": 6,
+            "y": 1926
+          },
+          {
+            "t": 506,
+            "x": 6,
+            "y": 1976
+          },
+          {
+            "t": 516,
+            "x": 6,
+            "y": 2026
+          },
+          {
+            "t": 522,
+            "x": 6,
+            "y": 2093
+          },
+          {
+            "t": 529,
+            "x": 6,
+            "y": 2178
+          },
+          {
+            "t": 535,
+            "x": 6,
+            "y": 2246
+          },
+          {
+            "t": 538,
+            "x": 6,
+            "y": 2346
+          },
+          {
+            "t": 542,
+            "x": 6,
+            "y": 2432
+          }
+        ],
+        "timelineStartMs": 0,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+        "canvaAnimationPreset": 28,
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1513.544144300731,
+        "left": 713.0253552867904,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LB6yBJ6YNCkwCQLm",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1513.544144300731,
+        "left": 713.0253552867904,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LB9WTZhcZ8KGg2rB",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+        "top": 0,
+        "left": 0,
+        "type": "image",
+        "angle": 0,
+        "flipX": true,
+        "flipY": false,
+        "width": 225,
+        "height": 800,
+        "scaleX": 2.4,
+        "scaleY": 2.4,
+        "tagsEn": [
+          "door"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Door",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Door",
+          "door"
+        ],
+        "layerName": "Door",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 225,
+        "importNodeId": "LBnsBRHYj8GHdsfg",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#eee7dc",
+          "#efefef",
+          "#d3b797"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 2542,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "mediaMotionPath": [
+          {
+            "t": 21,
+            "x": -24,
+            "y": -2
+          },
+          {
+            "t": 45,
+            "x": -47,
+            "y": -4
+          },
+          {
+            "t": 62,
+            "x": -71,
+            "y": -4
+          },
+          {
+            "t": 78,
+            "x": -95,
+            "y": -3
+          },
+          {
+            "t": 94,
+            "x": -119,
+            "y": -3
+          },
+          {
+            "t": 117,
+            "x": -167,
+            "y": -3
+          },
+          {
+            "t": 134,
+            "x": -216,
+            "y": -2
+          },
+          {
+            "t": 146,
+            "x": -265,
+            "y": -2
+          },
+          {
+            "t": 165,
+            "x": -314,
+            "y": -2
+          },
+          {
+            "t": 182,
+            "x": -362,
+            "y": -3
+          },
+          {
+            "t": 201,
+            "x": -409,
+            "y": -6
+          },
+          {
+            "t": 219,
+            "x": -455,
+            "y": -10
+          },
+          {
+            "t": 236,
+            "x": -505,
+            "y": -10
+          },
+          {
+            "t": 255,
+            "x": -555,
+            "y": -10
+          },
+          {
+            "t": 265,
+            "x": -582,
+            "y": -11
+          },
+          {
+            "t": 275,
+            "x": -609,
+            "y": -13
+          },
+          {
+            "t": 287,
+            "x": -637,
+            "y": -15
+          },
+          {
+            "t": 326,
+            "x": -664,
+            "y": -16
+          }
+        ],
+        "timelineStartMs": 0,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/81657bc1-26f2-4c18-bea6-69d2ec3f0630.png",
+        "canvaAnimationPreset": 28,
+        "rasterPaletteVersion": 2
+      },
+      {
+        "top": 527.7612823015502,
+        "fill": "rgb(132, 77, 75)",
+        "left": 260.4427176871398,
+        "text": "في بيــتنــا أجمــل",
+        "type": "textbox",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 559.54,
+        "height": 75,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 62.473065037,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 3",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          },
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 700,
+        "importKind": "text",
+        "lineHeight": 1.396747573507404,
+        "charSpacing": 0,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBZQck65XhRSwhm3",
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "timelineStartMs": 3229,
+        "mediaAnimationMode": "IN_OUT",
+        "mediaAnimationType": "BLUR",
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500,
+        "mediaAnimationOutDurationMs": 500
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": -197.0577242191867,
+        "left": -189.7000462427292,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.7428940568475452,
+        "scaleY": 0.7421777221526908,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBCq8fZcqkMWw7xv",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/619e49f8-97f0-44b8-8f7d-e9db38dcd6d9.png",
+        "top": 659.7004929310152,
+        "left": 270.4381451848035,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 754,
+        "height": 799,
+        "scaleX": 0.7506631299734748,
+        "scaleY": 0.7509386733416771,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 754,
+        "importNodeId": "LBXC11fqSYrhJFrJ",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b6",
+          "#ddddcc",
+          "#c2726e"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 2542,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 1042,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/619e49f8-97f0-44b8-8f7d-e9db38dcd6d9.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "top": 577.1853680568502,
+        "fill": "rgb(132, 77, 75)",
+        "left": 224.4395428018609,
+        "text": "ــــــــــــــــــــــ",
+        "type": "textbox",
+        "angle": 1.635777120070484,
+        "flipX": false,
+        "flipY": false,
+        "width": 487.83,
+        "height": 162,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 118.971552784,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 4",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          },
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 1.39953299006107,
+        "charSpacing": -20,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LB1RkLSZZH2Zn6PN",
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "textCurveAmount": -29,
+        "timelineStartMs": 3229,
+        "textCurveEnabled": true,
+        "mediaAnimationMode": "IN_OUT",
+        "mediaAnimationType": "BLUR",
+        "textCurveArcDegrees": -20.2,
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500,
+        "mediaAnimationOutDurationMs": 500
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1122.844729385338,
+        "left": -67.98481119792578,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBCtpBFS4mrc7T3Z",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "top": 585.0100827841582,
+        "fill": "rgb(132, 77, 75)",
+        "left": 601.8488210618897,
+        "text": "عروسـ",
+        "type": "textbox",
+        "angle": -8.294602591816984,
+        "flipX": false,
+        "flipY": false,
+        "width": 315.12,
+        "height": 162,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 100.65233165,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 5",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          },
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 1.396747573507404,
+        "charSpacing": 0,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBM6t3rwXrrr51jL",
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "timelineStartMs": 3229,
+        "mediaAnimationMode": "IN_OUT",
+        "mediaAnimationType": "BLUR",
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500,
+        "mediaAnimationOutDurationMs": 500
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "top": 854.8649951228056,
+        "left": 836.8605672852838,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LB8yrWWv8v8dzBXN",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#bf726c",
+          "#d7b5c6"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1122.844729385338,
+        "left": -67.98481119792578,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBPj15dmB534tVgr",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1702.583253709847,
+        "left": 103.1626710618995,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBcP0ZnMdFHtQWqh",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "top": 854.8649951228056,
+        "left": 836.8605672852838,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LBNMFVxSn3GRd0pB",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#bf726c",
+          "#d7b5c6"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0bbaaf14-756d-431e-912f-a5b6fecf345a.png",
+        "top": 279.4452026871288,
+        "left": 470.9444106903931,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 149,
+        "scaleX": 1.144827586206897,
+        "scaleY": 1.147651006711409,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LBW6j8m0c70YNmSs",
+        "sourceHeight": 149,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#be706b",
+          "#ddbbcc"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/0bbaaf14-756d-431e-912f-a5b6fecf345a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": -135.0833515219978,
+        "left": -138.2213429812664,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.7428940568475452,
+        "scaleY": 0.7421777221526908,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBddjt4B4bnMc7r8",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+        "top": 712.4915250662882,
+        "left": 282.4702925138646,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 800,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.54375,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBcSgSBkHZPp0BPP",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#d9b9b6",
+          "#ddddcc",
+          "#c1726e",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 1702.583253709847,
+        "left": 103.1626710618995,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBw3z0nmgTfWPBSg",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 438.599326478679,
+        "left": -278.3321518775109,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBGvsjkQGybH8kGx",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+        "top": 712.4915250662882,
+        "left": 282.4702925138646,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 800,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.54375,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBwVLr44C1zVvd22",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#d9b9b6",
+          "#ddddcc",
+          "#c1726e",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/9e7b7618-ef5e-43e1-8410-b14d0ee32e38.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": -272.9203156474127,
+        "left": 445.9775591623362,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LB8MKsVnzhldCNDn",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": 438.599326478679,
+        "left": -278.3321518775109,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBrWYhBtvFdQzQ3q",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+        "top": 1271.533914848515,
+        "left": 436.4586414528602,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LB36cJjm6hMG3dp9",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dedbcc",
+          "#bf726c",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "top": -191.7060678564056,
+        "left": 447.0665329614628,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 774,
+        "height": 799,
+        "scaleX": 0.5439276485788114,
+        "scaleY": 0.5431789737171464,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 774,
+        "importNodeId": "LBFKTB6Tx5P3t3H2",
+        "sourceHeight": 799,
+        "rasterPalette": [
+          "#d9b9b5",
+          "#ddddcc",
+          "#bd706a",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/87c6ca47-b047-42f9-9f05-f85f5fc4aa6a.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "top": 58.25232369131004,
+        "left": 971.9983521515502,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LBx05WzfpF30hL9g",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#bf726c",
+          "#d7b5c6"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 6125,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+        "top": 1271.533914848515,
+        "left": 436.4586414528602,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LBhdMRqMQZcrVnHP",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dedbcc",
+          "#bf726c",
+          "#ccaabb"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/00f48e15-624a-43de-b590-0b42ed3fcf92.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/41f8fa59-7ea4-4823-9221-18151915d522.png",
+        "top": 478.6554731111627,
+        "left": 443.3378414562446,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 435,
+        "height": 800,
+        "scaleX": 0.4436781609195402,
+        "scaleY": 0.44375,
+        "tagsEn": [
+          "hijaiyah",
+          "arabic",
+          "letter"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Hijaiyah arabic letter",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Hijaiyah arabic letter",
+          "hijaiyah",
+          "arabic",
+          "letter"
+        ],
+        "layerName": "Hijaiyah arabic letter",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 435,
+        "importNodeId": "LB0jjvXXMRT2772h",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#bbaaaa",
+          "#885244"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6000,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/41f8fa59-7ea4-4823-9221-18151915d522.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "top": 58.25232369131004,
+        "left": 971.9983521515502,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 145,
+        "height": 150,
+        "scaleX": 2.048275862068965,
+        "scaleY": 2.046666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 0.2,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 145,
+        "importNodeId": "LBwNj6RVJ8wXWHnD",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#bf726c",
+          "#d7b5c6"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "imageProvenance": "fetch",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/f6f49d5b-8796-40ae-86b2-45d424ed19f8.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/958d2996-4166-4c5f-9569-4ecf13999ed8.png",
+        "top": 1422.227425409849,
+        "left": 800.6465668328908,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 549,
+        "height": 783,
+        "scaleX": 0.1147540983606557,
+        "scaleY": 0.1149425287356322,
+        "tagsEn": [
+          "location",
+          "pin",
+          "icon"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Location Pin Icon",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Location Pin Icon",
+          "location",
+          "pin",
+          "icon"
+        ],
+        "layerName": "Location Pin Icon",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 549,
+        "importNodeId": "LB5SPb1H1LQ3RFxS",
+        "sourceHeight": 783,
+        "rasterPalette": [
+          "#bbaaaa"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6000,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/958d2996-4166-4c5f-9569-4ecf13999ed8.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/b442cdc7-3362-44d5-a77e-315ed219ee6e.png",
+        "top": 425.0941509508789,
+        "left": 750.1420326217467,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 141,
+        "height": 150,
+        "scaleX": 1.226950354609929,
+        "scaleY": 1.226666666666667,
+        "tagsEn": [
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "Watercolor Rose Illustration",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "Watercolor Rose Illustration",
+          "watercolor",
+          "rose",
+          "illustration"
+        ],
+        "layerName": "Watercolor Rose Illustration",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 141,
+        "importNodeId": "LBD6P6mZkkzWSSV3",
+        "sourceHeight": 150,
+        "rasterPalette": [
+          "#d9b8b5",
+          "#dddbcb",
+          "#bf716b",
+          "#cfa7b8"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 3229,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/b442cdc7-3362-44d5-a77e-315ed219ee6e.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "src": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/e75e3a5a-1264-4419-b45c-91488d8460fc.png",
+        "top": 1424.950310760203,
+        "left": 197.8645960988908,
+        "type": "image",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 764,
+        "height": 800,
+        "scaleX": 0.1112565445026178,
+        "scaleY": 0.11125,
+        "tagsEn": [
+          "calendar",
+          "icon",
+          "date",
+          "symbol"
+        ],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "calendar icon, calendar date icon symbol",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": true,
+        "labelsEn": [
+          "calendar icon, calendar date icon symbol",
+          "calendar",
+          "icon",
+          "date",
+          "symbol"
+        ],
+        "layerName": "calendar icon, calendar date icon symbol",
+        "layerType": "image",
+        "importKind": "image",
+        "layerHidden": false,
+        "layerLocked": false,
+        "sourceWidth": 764,
+        "importNodeId": "LBjYlf0tDm2y8CPS",
+        "sourceHeight": 800,
+        "rasterPalette": [
+          "#777777"
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "masked-or-clipped",
+        "importParentId": null,
+        "imageProvenance": "fetch-fit",
+        "timelineStartMs": 6000,
+        "rasterOriginalSrc": "https://pub-fc5e264db77e4f0eaf59934da77e5900.r2.dev/users/900b5b3c-ab9c-449b-82be-b0e6326185d3/imports/canva-extension/image/2026/10/14/e75e3a5a-1264-4419-b45c-91488d8460fc.png",
+        "rasterPaletteVersion": 2
+      },
+      {
+        "top": 565.8274352598626,
+        "fill": "rgb(132, 77, 75)",
+        "left": 177.9730315137826,
+        "text": "ــه",
+        "type": "textbox",
+        "angle": 11.40155777210117,
+        "flipX": false,
+        "flipY": false,
+        "width": 124,
+        "height": 120,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 99.95084934600001,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 16",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          },
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 1.398613857858072,
+        "charSpacing": 0,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBKxsZHNTjWLKMKt",
+        "sourceAssetId": "",
+        "timelineEndMs": 6000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "timelineStartMs": 3229,
+        "mediaAnimationMode": "IN_OUT",
+        "mediaAnimationType": "BLUR",
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500,
+        "mediaAnimationOutDurationMs": 500
+      },
+      {
+        "top": 979.0478025296288,
+        "fill": "rgb(132, 77, 75)",
+        "left": 202.2389280616594,
+        "text": "اللهم بــارك لهما وأجمع بينهما على خيـــــــــــــــــر",
+        "type": "textbox",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 643,
+        "height": 162,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 62.473065037,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 16",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": null,
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 700,
+        "importKind": "text",
+        "lineHeight": 1.396747573507404,
+        "charSpacing": 0,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LB7fvDvVXQjJZKCL",
+        "importWrapEm": [
+          9.24277,
+          11.38623
+        ],
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "timelineStartMs": 6125,
+        "mediaAnimationMode": "IN",
+        "mediaAnimationType": "BLUR",
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500
+      },
+      {
+        "top": 1237.449502992952,
+        "fill": "rgb(132, 77, 75)",
+        "left": 216.1724123001965,
+        "text": "فــرح  |  احمد",
+        "type": "textbox",
+        "angle": 0,
+        "flipX": false,
+        "flipY": false,
+        "width": 647.41,
+        "height": 75,
+        "tagsEn": [],
+        "opacity": 1,
+        "originX": "left",
+        "originY": "top",
+        "titleEn": "",
+        "version": "7.0.0",
+        "extBuild": "1.25.44-canva-timeline-scenes",
+        "fallback": false,
+        "fontSize": 62.473,
+        "labelsEn": [],
+        "fontStyle": "normal",
+        "layerName": "Text 17",
+        "layerType": "text",
+        "textAlign": "center",
+        "underline": false,
+        "animations": {
+          "exit": null,
+          "loop": null,
+          "entrance": {
+            "type": "BLUR",
+            "delayMs": 0,
+            "infinite": false,
+            "direction": "DEFAULT",
+            "intensity": 1,
+            "durationMs": 500
+          }
+        },
+        "fontFamily": "YADK4JLT5uI_0",
+        "fontWeight": 400,
+        "importKind": "text",
+        "lineHeight": 1.392601603892882,
+        "charSpacing": 0,
+        "layerHidden": false,
+        "layerLocked": false,
+        "linethrough": false,
+        "importNodeId": "LBXq1WTmkDQY3htj",
+        "sourceAssetId": "",
+        "timelineEndMs": 11000,
+        "fallbackReason": "",
+        "importParentId": null,
+        "timelineStartMs": 6125,
+        "mediaAnimationMode": "IN",
+        "mediaAnimationType": "BLUR",
+        "canvaAnimationPreset": 29,
+        "mediaAnimationDurationMs": 500
+      }
+    ],
+    "version": "7.0.0",
+    "backgroundColor": "#ffffff"
+  },
+  "isPremium": false,
+  "isFeatured": false,
+  "featuredAt": null,
+  "publishedAt": null,
+  "createdAt": "2026-10-14T09:05:22.024Z",
+  "updatedAt": "2026-10-14T09:05:22.024Z"
+}

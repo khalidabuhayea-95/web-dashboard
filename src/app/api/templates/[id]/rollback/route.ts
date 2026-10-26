@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import prisma from "@/lib/prisma";
+import { scheduleTemplateSearchKeywords } from "@/lib/search/templateKeywords.server";
+import { TEMPLATE_WRITE_TRANSACTION_OPTIONS } from "@/lib/templates/templateTransaction";
 import {
   buildSnapshot,
   canAccessTemplate,
@@ -101,7 +103,9 @@ export async function POST(
       });
 
       return item;
-    });
+    }, TEMPLATE_WRITE_TRANSACTION_OPTIONS);
+
+    if (rolledBack.name !== template.name) scheduleTemplateSearchKeywords(rolledBack.id);
 
     return NextResponse.json({ template: rolledBack });
   } catch (error) {

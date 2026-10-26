@@ -37,7 +37,7 @@ Core application path: `/Users/khalidabuhayea/AndroidStudioProjects/web-dashboar
 | Admin API | User management + stats | `src/app/api/admin/users/route.js`, `src/app/api/admin/stats/route.js` |
 | Taxonomy settings | Template category/subcategory settings | `src/app/api/settings/template-taxonomy/route.js`, `src/lib/templates/templateSettings*.js` |
 | Auth + session bridge | NextAuth dashboard sessions + mobile bearer auth helpers | `src/lib/auth/auth.js`, `src/lib/mobile/userAuth.server.js`, `src/proxy.js` |
-| Canva extension package | Chrome extension to extract Canva page/layers and send to API | `extension/canva-importer/*` |
+| Canva extension package | Chrome extension to extract Canva page/layers and send to API | `extensions/canva-importer/*` |
 | Utility scripts | CLI Canva import + mobile signature helper | `scripts/import-canva-template.mjs`, `scripts/sign-mobile-request.mjs` |
 
 ## 3) Databases and Storage

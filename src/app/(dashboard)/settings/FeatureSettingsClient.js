@@ -739,7 +739,7 @@ function CanvaExtensionTokenCard() {
         <div className="rounded-xl border border-border bg-muted/25 p-4 text-sm">
           <div className="font-semibold">Extension folder</div>
           <div className="mt-1 text-muted-foreground">
-            <code>/Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/extension/canva-importer</code>
+            <code>/Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/extensions/canva-importer</code>
           </div>
           <div className="mt-3 text-muted-foreground">
             Load this folder as an unpacked extension in Chrome, then paste the token below into the extension popup.

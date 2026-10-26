@@ -2,13 +2,13 @@ import { randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
 import { buildAssetBoostOrderBy } from "@/lib/editor/assetBoostOrder";
+import { logger } from "@/lib/logging/logger";
+import { SEARCH_SESSION_SQL, dedupingParam, scoredSearchCtes } from "@/lib/search/searchSql";
+import { planSearchQuery } from "@/lib/search/searchTranslate.server";
 
 const DEFAULT_PAGE_SIZE = 40;
 const MAX_PAGE_SIZE = 120;
 const DEFAULT_SOURCE = "freepik";
-const SEARCH_TOKEN_LIMIT = 6;
-const ARABIC_VARIANT_SOURCE = "أإآٱؤئىة";
-const ARABIC_VARIANT_TARGET = "ااااوياه";
 let ensureSchemaPromise = null;
 
 const IMPORTED_ELEMENTS_SCHEMA_STATEMENTS = [
@@ -163,80 +163,6 @@ function sanitizeArray(value) {
         .slice(0, 120)
     )
   );
-}
-
-function normalizeSearchTerm(value) {
-  return sanitizeText(value)
-    .toLowerCase()
-    .replace(/[أإآٱ]/g, "ا")
-    .replace(/[ؤ]/g, "و")
-    .replace(/[ئ]/g, "ي")
-    .replace(/[ى]/g, "ي")
-    .replace(/[ة]/g, "ه")
-    .replace(/[^\p{L}\p{N}\s]+/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function buildFuzzyLikePattern(value) {
-  const normalized = normalizeSearchTerm(value).replace(/\s+/g, "");
-  if (!normalized) return "%%";
-  if (normalized.length < 4) return `%${normalized}%`;
-  return `%${normalized.split("").join("%")}%`;
-}
-
-function sqlNormalizeExpression(expression) {
-  return `LOWER(TRANSLATE(COALESCE(${expression}, ''), '${ARABIC_VARIANT_SOURCE}', '${ARABIC_VARIANT_TARGET}'))`;
-}
-
-function buildSearchFieldsSql(rawLikeToken, normalizedLikeToken, fuzzyLikeToken) {
-  const titleEnNormalized = sqlNormalizeExpression("title_en");
-  const titleArNormalized = sqlNormalizeExpression("title_ar");
-  const tagEnNormalized = sqlNormalizeExpression("tag_en");
-  const tagArNormalized = sqlNormalizeExpression("tag_ar");
-  const labelEnNormalized = sqlNormalizeExpression("label_en");
-  const labelArNormalized = sqlNormalizeExpression("label_ar");
-
-  return `
-    LOWER(COALESCE(title_en, '')) LIKE ${rawLikeToken}
-    OR LOWER(COALESCE(title_ar, '')) LIKE ${rawLikeToken}
-    OR ${titleEnNormalized} LIKE ${normalizedLikeToken}
-    OR ${titleArNormalized} LIKE ${normalizedLikeToken}
-    OR ${titleEnNormalized} LIKE ${fuzzyLikeToken}
-    OR ${titleArNormalized} LIKE ${fuzzyLikeToken}
-    OR EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(tags_en) AS tag_en
-      WHERE
-        LOWER(tag_en) LIKE ${rawLikeToken}
-        OR ${tagEnNormalized} LIKE ${normalizedLikeToken}
-        OR ${tagEnNormalized} LIKE ${fuzzyLikeToken}
-    )
-    OR EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(tags_ar) AS tag_ar
-      WHERE
-        LOWER(tag_ar) LIKE ${rawLikeToken}
-        OR ${tagArNormalized} LIKE ${normalizedLikeToken}
-        OR ${tagArNormalized} LIKE ${fuzzyLikeToken}
-    )
-    OR EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(labels_en) AS label_en
-      WHERE
-        LOWER(label_en) LIKE ${rawLikeToken}
-        OR ${labelEnNormalized} LIKE ${normalizedLikeToken}
-        OR ${labelEnNormalized} LIKE ${fuzzyLikeToken}
-    )
-    OR EXISTS (
-      SELECT 1
-      FROM jsonb_array_elements_text(labels_ar) AS label_ar
-      WHERE
-        LOWER(label_ar) LIKE ${rawLikeToken}
-        OR ${labelArNormalized} LIKE ${normalizedLikeToken}
-        OR ${labelArNormalized} LIKE ${fuzzyLikeToken}
-    )
-  `;
 }
 
 function parseDateValue(value) {
@@ -512,39 +438,82 @@ export async function upsertImportedElementAsset(input) {
   return normalizeRow(Array.isArray(rows) ? rows[0] : null);
 }
 
-function buildSearchCondition(queryValue, nextParam) {
-  const rawQuery = sanitizeText(queryValue).toLowerCase();
-  const normalizedQuery = normalizeSearchTerm(queryValue);
-  const effectiveQuery = normalizedQuery || rawQuery;
-  if (!effectiveQuery) return "";
+/**
+ * A search page of the element catalogue (smart search, 2026-10-19): the query is planned by
+ * src/lib/search (synonyms in both languages, Arabic clitics and stems, English plurals, a cached
+ * machine translation, typo tolerance) and scored over the stored, folded, trigram-indexed columns
+ * search_title (title_en + title_ar) and search_tags (tags, labels and category slug, both
+ * languages) — see migration 20261019120000. Rows matching as many query concepts as the best row
+ * are kept, best matches first; inside a tier the seasonal boost and recency order holds.
+ */
+async function searchImportedElementAssets({ query, translate, filterSql, params, nextParam, page, pageSize, locale, boost }) {
+  const plan = await planSearchQuery(query, { translate });
+  const empty = {
+    items: [],
+    page: 1,
+    pageSize,
+    total: 0,
+    totalPages: 1,
+    hasNextPage: false,
+    hasPrevPage: false,
+  };
+  if (!plan.concepts.length) return empty;
 
-  const rawLikeToken = nextParam(`%${rawQuery || effectiveQuery}%`);
-  const normalizedLikeToken = nextParam(`%${effectiveQuery}%`);
-  const fuzzyLikeToken = nextParam(buildFuzzyLikePattern(effectiveQuery));
-  const primarySearchSql = buildSearchFieldsSql(
-    rawLikeToken,
-    normalizedLikeToken,
-    fuzzyLikeToken
+  const keptCte = scoredSearchCtes({
+    plan,
+    columns: { title: "search_title", tags: "search_tags" },
+    param: nextParam,
+    from: "editor_element_assets",
+    where: filterSql,
+    select: [["id", "id"]],
+  });
+
+  // The search settings are transaction-local (see SEARCH_SESSION_SQL), so each statement runs in
+  // a transaction that sets them first.
+  const inSearchTransaction = async (sql, values) => {
+    const [, rows] = await prisma.$transaction([
+      prisma.$queryRawUnsafe(SEARCH_SESSION_SQL),
+      prisma.$queryRawUnsafe(sql, ...values),
+    ]);
+    return rows;
+  };
+  const totalRows = await inSearchTransaction(`${keptCte} SELECT COUNT(*)::int AS total FROM kept`, [...params]);
+  const total = Number(totalRows?.[0]?.total || 0);
+  if (total === 0) {
+    // The synonym list grows from these (src/lib/search/searchSynonyms.js).
+    logger.info("Search returned nothing", { scope: "elements", query: String(query || "").slice(0, 120) });
+    return empty;
+  }
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const safePage = Math.min(page, totalPages);
+  const offset = (safePage - 1) * pageSize;
+
+  // Bound AFTER the count ran, so the count statement never receives parameters it has no
+  // placeholders for (see buildAssetBoostOrderBy).
+  const boostOrder = buildAssetBoostOrderBy(boost, nextParam).replace(/^ORDER BY\s+/i, "");
+  const limitParam = nextParam(pageSize);
+  const offsetParam = nextParam(offset);
+  const rows = await inSearchTransaction(
+    `${keptCte}
+     SELECT * FROM (
+       SELECT e.*, k.matched AS search_matched, k.quality AS search_quality
+       FROM kept k JOIN editor_element_assets e USING (id)
+     ) r
+     ORDER BY search_matched DESC, search_quality DESC, ${boostOrder}
+     LIMIT ${limitParam}
+     OFFSET ${offsetParam}`,
+    params
   );
-
-  const tokenClauses = normalizedQuery
-    .split(" ")
-    .map((value) => value.trim())
-    .filter(Boolean)
-    .slice(0, SEARCH_TOKEN_LIMIT)
-    .map((token) => {
-      const tokenRaw = nextParam(`%${token}%`);
-      const tokenNormalized = nextParam(`%${token}%`);
-      const tokenFuzzy = nextParam(buildFuzzyLikePattern(token));
-      return `(${buildSearchFieldsSql(tokenRaw, tokenNormalized, tokenFuzzy)})`;
-    });
-
-  return `
-    AND (
-      ${primarySearchSql}
-      ${tokenClauses.length > 0 ? `OR (${tokenClauses.join(" AND ")})` : ""}
-    )
-  `;
+  const items = Array.isArray(rows) ? rows.map((row) => normalizeRow(row, locale)).filter(Boolean) : [];
+  return {
+    items,
+    page: safePage,
+    pageSize,
+    total,
+    totalPages,
+    hasNextPage: safePage < totalPages,
+    hasPrevPage: safePage > 1,
+  };
 }
 
 export async function listImportedElementAssets(options = {}) {
@@ -559,18 +528,31 @@ export async function listImportedElementAssets(options = {}) {
   const locale = String(options.locale || options.lang || "en").toLowerCase() === "ar" ? "ar" : "en";
 
   const params = [];
-  const nextParam = (value) => {
+  const nextParam = dedupingParam((value) => {
     params.push(value);
     return `$${params.length}`;
-  };
+  });
 
   const sourceSql = source ? `source = ${nextParam(source)}` : "1=1";
   const categorySql = categoryValue ? `AND category_value = ${nextParam(categoryValue)}` : "";
   const kindSql = kind ? `AND kind = ${nextParam(kind)}` : "";
-  const searchSql = buildSearchCondition(options.query, nextParam);
   // Lets the Pro-assets dashboard review exactly what has been flagged, instead of
   // hunting for crowns page by page.
   const premiumSql = options.premiumOnly ? "AND is_premium = TRUE" : "";
+
+  if (sanitizeText(options.query)) {
+    return searchImportedElementAssets({
+      query: options.query,
+      translate: options.translate !== false,
+      filterSql: `${sourceSql} ${categorySql} ${kindSql} ${premiumSql}`,
+      params,
+      nextParam,
+      page,
+      pageSize,
+      locale,
+      boost: options.boost,
+    });
+  }
 
   const countSql = `
     SELECT COUNT(*)::int AS total
@@ -579,7 +561,6 @@ export async function listImportedElementAssets(options = {}) {
     ${categorySql}
     ${kindSql}
     ${premiumSql}
-    ${searchSql}
   `;
 
   const totalRows = await prisma.$queryRawUnsafe(countSql, ...params);
@@ -600,7 +581,6 @@ export async function listImportedElementAssets(options = {}) {
     ${categorySql}
     ${kindSql}
     ${premiumSql}
-    ${searchSql}
     ${orderBySql}
     LIMIT ${limitParam}
     OFFSET ${offsetParam}

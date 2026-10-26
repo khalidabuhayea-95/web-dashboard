@@ -121,15 +121,17 @@ test("the tabs offer Canva's family where Canva offers it (spec §7)", () => {
   assert.ok(!entrance.includes("TECTONIC"));
 });
 
-test("the Canva family carries Canva's labels and timings (spec §1)", () => {
-  assert.equal(getAnimationLabel("RISE", "ar"), "ارتقاء");
-  assert.equal(getAnimationLabel("PAN", "ar"), "تأرجح");
-  assert.equal(getAnimationLabel("WIPE", "ar"), "المسح");
+test("the Canva family carries the app's labels and Canva's timings (spec §1)", () => {
+  // The tile names are the app's (animationSpec.json is its export), not Canva's own wording.
+  assert.equal(getAnimationLabel("RISE", "ar"), "صعود");
+  assert.equal(getAnimationLabel("PAN", "ar"), "تحريك جانبي");
+  assert.equal(getAnimationLabel("WIPE", "ar"), "مسح");
   assert.equal(getAnimationLabel("BLUR", "en"), "Blur");
-  assert.equal(getAnimationLabel("STOMP", "ar"), "سقوط هوائي");
+  assert.equal(getAnimationLabel("STOMP", "ar"), "ارتطام");
   assert.equal(getAnimationLabel("ROTATE", "en"), "Rotate");
-  assert.equal(getAnimationLabel("TUMBLE", "ar"), "دوران");
-  assert.equal(getAnimationLabel("PULSE", "ar"), "تقليص العنصر وتمديده");
+  assert.equal(getAnimationLabel("TUMBLE", "ar"), "تدحرج");
+  assert.equal(getAnimationLabel("PULSE", "ar"), "نبض");
+  assert.equal(getAnimationLabel("WIGGLE", "ar"), "تمايل");
   for (const type of ["RISE", "PAN", "FADE", "POP", "WIPE", "BLUR", "SUCCESSION", "BASELINE", "TUMBLE", "NEON", "SCRAPBOOK", "STOMP"]) {
     const d = getAnimationDefaults(type);
     assert.equal(d.durationMs, 500, `${type} intro is Canva's 500 ms`);

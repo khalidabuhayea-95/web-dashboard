@@ -1,6 +1,8 @@
 import Konva from "konva";
 // Side effect: the snug-fit measures RTL letter-spacing the way the canvas draws it.
 import "@/lib/editor/konvaTextPatches";
+import { measureRichTextBox, type RichTextInput } from "@/lib/editor/richText";
+import { textSpansAffectLayout, type TextSpan } from "@/lib/editor/textSpans";
 
 /**
  * Everything that changes how a text layer is laid out. Deliberately mirrors the props the
@@ -17,6 +19,12 @@ export interface TextBoxInput {
   lineHeight: number;
   align: "left" | "center" | "right" | "justify";
   direction: "ltr" | "rtl";
+  /**
+   * Multi-style ranges (lib/editor/textSpans.ts), span families already resolved to CSS lists.
+   * Only ranges that change font, weight, size or spacing change the box — those are laid out by
+   * lib/editor/richText.ts, exactly as the canvas draws them; anything else measures like plain text.
+   */
+  spans?: TextSpan[];
 }
 
 export interface TextBoxMetrics {
@@ -37,6 +45,12 @@ export interface SnugTextBox {
    * narrower than its text is NOT hugging, and keeps the width it was given.
    */
   hugging: boolean;
+  /**
+   * True when a line was wider than the box (a letter wider than its box, which the browser — and
+   * the editor, konvaTextPatches.ts — draws overflowing from the START edge). Such a box must grow
+   * from that edge, not by `align`, or the glyph slides: see textBoxStartAnchorDeltaX.
+   */
+  overflowed?: boolean;
 }
 
 /**
@@ -74,7 +88,32 @@ function measurementKey(input: TextBoxInput, wrapWidth: number | null) {
     input.align,
     input.direction,
     wrapWidth === null ? "auto" : Math.round(wrapWidth * 100),
+    input.spans && input.spans.length > 0 ? JSON.stringify(input.spans) : "",
   ].join("\u0000");
+}
+
+/** The rich layout's input for a box measurement (Konva's "italic 700" split back into its parts). */
+function richInputFromBox(input: TextBoxInput): RichTextInput {
+  const style = String(input.fontStyle || "");
+  const weight = style.match(/\d+/)?.[0] ?? (/bold/i.test(style) ? "700" : "400");
+  return {
+    text: String(input.text ?? ""),
+    width: 0,
+    height: null,
+    fontSize: Number(input.fontSize) || 0,
+    fontFamily: input.fontFamily,
+    fontWeight: weight,
+    fontStyle: /italic/i.test(style) ? "italic" : "normal",
+    lineHeight: Number(input.lineHeight) || 1,
+    align: input.align,
+    direction: input.direction,
+    letterSpacing: Number(input.letterSpacing) || 0,
+    color: "#000000",
+    textDecoration: "",
+    stroke: "",
+    strokeWidth: 0,
+    spans: input.spans ?? [],
+  };
 }
 
 /**
@@ -138,6 +177,14 @@ export function measureTextBox(input: TextBoxInput, wrapWidth: number | null = n
   const key = measurementKey(input, wrapWidth);
   const cached = measurementCache.get(key);
   if (cached) return cached;
+
+  if (input.spans && textSpansAffectLayout(input.spans)) {
+    const metrics = measureRichTextBox(richInputFromBox(input), wrapWidth);
+    if (!metrics) return null;
+    if (measurementCache.size >= MEASUREMENT_CACHE_LIMIT) measurementCache.clear();
+    measurementCache.set(key, metrics);
+    return metrics;
+  }
 
   let node: Konva.Text | null = null;
   try {
@@ -210,11 +257,21 @@ export function resolveSnugTextBox(input: TextBoxInput, boxWidth: number | null)
       ? measured
       : measureTextBox(input, nextWidth) || measured;
 
+  const overflowed = requestedWidth !== null && measured.lineWidth > requestedWidth + 0.5;
   return {
     width: Math.max(2, nextWidth),
     height: Math.max(1, Math.ceil(finalMetrics.height)),
     hugging,
+    ...(overflowed ? { overflowed: true } : {}),
   };
+}
+
+/**
+ * The box shift for a box whose line overflowed it: the overflowing line was drawn from the box's
+ * START edge (right for RTL, left for LTR), so that edge stays put while the box grows to fit it.
+ */
+export function textBoxStartAnchorDeltaX(direction: TextBoxInput["direction"], previousWidth: number, nextWidth: number) {
+  return direction === "rtl" ? (Number(previousWidth) || 0) - (Number(nextWidth) || 0) : 0;
 }
 
 /**

@@ -220,24 +220,49 @@ function cleanName(value) {
     .slice(0, 120);
 }
 
+// ── font-width-family:start
+// A width is a different typeface, not a cut: a typographic family groups Agrandir's Wide and
+// Narrow under one nameID 16 ("Agrandir") and keeps the width in the typographic SUBFAMILY ("Wide",
+// "Narrow Medium", "Narrow Bold"). Keyed on nameID 16 alone, an Imsakiah's Agrandir Narrow merged
+// into the library's Agrandir WIDE (DAHOJVWKQmM): its 400 texts drew 24% too wide and wrapped
+// ("RAMADAN IMSAKIAH", "DHUHUR", "12:09"). The width word joins the family name, so each width is
+// its own family — a weight/style axis never does (those are the family's cuts).
+const WIDTH_WORD = /\b((?:ultra|extra|semi|ext)[ -]?)?(condensed|compressed|compact|narrow|extended|expanded|wide)\b/i;
+
+/** The family name a width variant is stored under: `family` + the subfamily's width word. */
+export function fontFamilyWithWidth(family, subfamily) {
+  const base = cleanName(family);
+  if (!base) return "";
+  const match = WIDTH_WORD.exec(String(subfamily || ""));
+  if (!match) return base;
+  const word = cleanName(match[0]).replace(/\s*-\s*/g, " ");
+  const widthWord = match[2].toLowerCase();
+  // "Roboto Condensed" + "Condensed Bold" already says it.
+  if (new RegExp(`\\b${widthWord}\\b`, "i").test(base)) return base;
+  return `${base} ${word.replace(/\b\w/g, (letter) => letter.toUpperCase())}`;
+}
+// ── font-width-family:end
+
 /**
- * The family (typographic family, nameID 16, else the legacy family, nameID 1), subfamily and
- * full name, plus what the file says its weight and slant are (OS/2 usWeightClass, fsSelection
- * bit 0). Null when the file can't be read at all.
+ * The family (typographic family, nameID 16, else the legacy family, nameID 1 — plus the
+ * typographic subfamily's width word, see fontFamilyWithWidth), subfamily and full name, plus
+ * what the file says its weight and slant are (OS/2 usWeightClass, fsSelection bit 0). Null when
+ * the file can't be read at all.
  */
 export function extractFontFaceInfo(input) {
   const tables = readFontTables(input, ["name", "OS/2"]);
   if (!tables) return null;
   const names = readNameRecords(tables.get("name"));
   const typographicFamily = cleanName(names.get(16)?.value);
+  const typographicSubfamily = cleanName(names.get(17)?.value);
   const legacyFamily = cleanName(names.get(1)?.value);
   const os2 = tables.get("OS/2");
   const weightClass = os2 && os2.length >= 6 ? os2.readUInt16BE(4) : 0;
   const fsSelection = os2 && os2.length >= 64 ? os2.readUInt16BE(62) : 0;
   return {
-    family: typographicFamily || legacyFamily,
+    family: typographicFamily ? fontFamilyWithWidth(typographicFamily, typographicSubfamily) : legacyFamily,
     legacyFamily,
-    subfamily: cleanName(names.get(17)?.value || names.get(2)?.value),
+    subfamily: cleanName(typographicSubfamily || names.get(2)?.value),
     fullName: cleanName(names.get(4)?.value),
     // 1..1000 per the spec; 0 when absent. Legacy per-weight families ("Hacen Tunisia Lt") often
     // claim 400 for every cut, so treat it as evidence, not truth.

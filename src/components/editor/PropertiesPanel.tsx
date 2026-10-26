@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { SlidersHorizontal, X } from "lucide-react";
 
 import Button from "@/components/ui/button";
+import { useTextStyleTarget } from "@/components/editor/useTextStyleTarget";
 import { Input, Label, Select } from "@/components/ui/form";
 import {
   extractImagePaletteFromSource,
@@ -117,6 +118,8 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   const availableFontFamilies = useEditorStore((state) => state.availableFontFamilies);
 
   const updateElement = useEditorStore((state) => state.updateElement);
+  // Characters selected in the on-canvas text editor take the text controls (a multi-style range).
+  const { range: textRange, rangeStyle: textRangeStyle, applyTextStyle } = useTextStyleTarget();
   const recordHistory = useEditorStore((state) => state.recordHistory);
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const convertMediaElementToFrame = useEditorStore((state) => state.convertMediaElementToFrame);
@@ -277,15 +280,25 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
   // Text outline. Separate from the media/shape "Corners & Border" section because a TEXT layer's
   // `strokeWidth` is a 0–100 PERCENTAGE of the font size, not a pixel width (see textStroke.ts).
   const activeTextStrokeElement = activeElement?.type === "text" ? activeElement : null;
-  const activeTextStroke = splitColorAlpha(activeTextStrokeElement?.stroke);
+  // The selected range's own style when part of this text is selected (absent keys = the layer's).
+  const activeTextRangeStyle =
+    textRange && activeTextStrokeElement && textRange.elementId === activeTextStrokeElement.id ? textRangeStyle : null;
+  /** A text style change: the selected range when there is one, else the whole layer. */
+  const patchTextStyle = (patch: Partial<EditorElement>, options?: { recordHistory?: boolean }) => {
+    if (!activeTextStrokeElement) return;
+    if (activeTextRangeStyle) applyTextStyle(patch, options);
+    else updateElement(activeTextStrokeElement.id, patch, options);
+  };
+  const activeTextStroke = splitColorAlpha(activeTextRangeStyle?.stroke ?? activeTextStrokeElement?.stroke);
   const activeTextStrokeWidth = Math.max(
     0,
-    Math.min(TEXT_STROKE_MAX_PERCENT, Math.round(Number(activeTextStrokeElement?.strokeWidth) || 0))
+    Math.min(
+      TEXT_STROKE_MAX_PERCENT,
+      Math.round(Number(activeTextRangeStyle?.strokeWidth ?? activeTextStrokeElement?.strokeWidth) || 0)
+    )
   );
-  const patchTextStroke = (patch: Partial<EditorElement>, options?: { recordHistory?: boolean }) => {
-    if (!activeTextStrokeElement) return;
-    updateElement(activeTextStrokeElement.id, patch, options);
-  };
+  const patchTextStroke = (patch: Partial<EditorElement>, options?: { recordHistory?: boolean }) =>
+    patchTextStyle(patch, options);
 
   // Blur is a media filter on mobile (MediaAction.BLUR). Videos are excluded: a blurred Konva node
   // renders from a cached bitmap, which would freeze playback on the web canvas.
@@ -424,6 +437,7 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
 
   return (
     <aside
+      data-editor-chrome
       className={`min-h-0 shrink-0 overflow-hidden bg-white transition-[width,padding,opacity] duration-300 ease-out ${
         collapsed ? "w-0 p-0 opacity-0" : "w-[320px] px-4 pb-4 pt-3 opacity-100"
       }`}
@@ -582,7 +596,10 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
               <div className="grid grid-cols-2 gap-2">
                 <div className="space-y-1">
                   <Label>Font Family</Label>
-                  <Select value={activeElement.fontFamily} onChange={(event) => updateElement(activeElement.id, { fontFamily: event.target.value })}>
+                  <Select
+                    value={activeTextRangeStyle?.fontFamily ?? activeElement.fontFamily}
+                    onChange={(event) => patchTextStyle({ fontFamily: event.target.value })}
+                  >
                     {fontFamilies.map((family) => (
                       <option key={family} value={family}>
                         {family}
@@ -594,10 +611,13 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 <div className="space-y-1">
                   <Label>Font Size</Label>
                   <Input
-                    value={activeElement.fontSize}
+                    value={activeTextRangeStyle?.fontSize ?? activeElement.fontSize}
                     onChange={(event) =>
-                      updateElement(activeElement.id, {
-                        fontSize: Math.max(8, numberOr(event.target.value, activeElement.fontSize)),
+                      patchTextStyle({
+                        fontSize: Math.max(
+                          8,
+                          numberOr(event.target.value, activeTextRangeStyle?.fontSize ?? activeElement.fontSize)
+                        ),
                       })
                     }
                   />
@@ -607,7 +627,10 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
               <div className="grid grid-cols-3 gap-2">
                 <div className="space-y-1">
                   <Label>Weight</Label>
-                  <Select value={String(activeElement.fontWeight)} onChange={(event) => updateElement(activeElement.id, { fontWeight: event.target.value })}>
+                  <Select
+                    value={String(activeTextRangeStyle?.fontWeight ?? activeElement.fontWeight)}
+                    onChange={(event) => patchTextStyle({ fontWeight: event.target.value })}
+                  >
                     <option value="400">Regular</option>
                     <option value="500">Medium</option>
                     <option value="600">Semibold</option>
@@ -618,8 +641,8 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 <div className="space-y-1">
                   <Label>Style</Label>
                   <Select
-                    value={activeElement.fontStyle}
-                    onChange={(event) => updateElement(activeElement.id, { fontStyle: event.target.value as "normal" | "italic" })}
+                    value={activeTextRangeStyle?.fontStyle ?? activeElement.fontStyle}
+                    onChange={(event) => patchTextStyle({ fontStyle: event.target.value as "normal" | "italic" })}
                   >
                     <option value="normal">Normal</option>
                     <option value="italic">Italic</option>
@@ -628,9 +651,9 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 <div className="space-y-1">
                   <Label>Decoration</Label>
                   <Select
-                    value={activeElement.textDecoration}
+                    value={activeTextRangeStyle?.textDecoration ?? activeElement.textDecoration}
                     onChange={(event) =>
-                      updateElement(activeElement.id, {
+                      patchTextStyle({
                         textDecoration: event.target.value as
                           | ""
                           | "underline"
@@ -660,10 +683,13 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                 <div className="space-y-1">
                   <Label>Letter Spacing</Label>
                   <Input
-                    value={activeElement.letterSpacing}
+                    value={activeTextRangeStyle?.letterSpacing ?? activeElement.letterSpacing}
                     onChange={(event) =>
-                      updateElement(activeElement.id, {
-                        letterSpacing: numberOr(event.target.value, activeElement.letterSpacing),
+                      patchTextStyle({
+                        letterSpacing: numberOr(
+                          event.target.value,
+                          activeTextRangeStyle?.letterSpacing ?? activeElement.letterSpacing
+                        ),
                       })
                     }
                   />
@@ -686,9 +712,9 @@ export default function PropertiesPanel({ collapsed }: PropertiesPanelProps) {
                   <Label>Text Color</Label>
                   <Input
                     type="color"
-                    value={activeElement.color || "#111827"}
+                    value={activeTextRangeStyle?.color ?? (activeElement.color || "#111827")}
                     onChange={(event) =>
-                      updateElement(activeElement.id, {
+                      patchTextStyle({
                         color: event.target.value,
                         fill: event.target.value,
                         // A picked colour replaces a gradient fill rather than hiding behind it.

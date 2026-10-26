@@ -245,7 +245,6 @@ async function buildBySubCategoryResponse(request) {
 
       return {
         id: mobileTemplate.id,
-        title: mobileTemplate.title,
         canvasWidth: mobileTemplate.canvasWidth,
         canvasHeight: mobileTemplate.canvasHeight,
         pageCount: mobileTemplate.pageCount,

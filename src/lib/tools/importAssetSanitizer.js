@@ -1,3 +1,4 @@
+import { convertPngToLosslessWebp } from "@/lib/media/losslessWebp.server";
 import {
   getPublicStorageBucketName,
   getStoragePublicHostnames,
@@ -5,7 +6,7 @@ import {
 } from "@/lib/storage/objectStorage.server";
 import { trimTransparentPaddingForImportedFrameObject } from "@/lib/tools/canvaFrameTrim.server";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
-import { isFragmentedMp4, remuxToProgressiveMp4 } from "@/lib/media/progressiveMp4.server";
+import { hasMoovAfterMdat, isFragmentedMp4, remuxToProgressiveMp4 } from "@/lib/media/progressiveMp4.server";
 
 export const IMPORT_ASSET_MANIFEST_VERSION = 1;
 
@@ -240,6 +241,27 @@ function looksLikeAssetField(fieldName, value) {
   if (normalizedFieldName.endsWith("uri")) return true;
   if (normalizedFieldName.endsWith("url")) return true;
   return false;
+}
+
+// Fields that only carry a PREVIEW of a layer whose real content lives elsewhere — a captured
+// video's poster frame. Losing one costs a thumbnail; failing on it cost the whole import: one
+// unreachable poster (HTTP 403) on DAHNlFf3ad4's third arch video flattened the design into a
+// single snapshot image, because the per-layer crop rescue only replaces `src`.
+const OPTIONAL_PREVIEW_ASSET_FIELDS = new Set(["thumbnailuri"]);
+
+function isOptionalPreviewAssetField(fieldName, node) {
+  return (
+    OPTIONAL_PREVIEW_ASSET_FIELDS.has(asString(fieldName).toLowerCase()) &&
+    asString(node?.type).toLowerCase() === "video"
+  );
+}
+
+// Where a failed source pointed, without its query (signed URLs carry credentials there).
+function describeSourceForWarning(value) {
+  const source = asString(value);
+  if (source.startsWith("data:")) return summarizeSource(source);
+  const parsed = parseUrlOrNull(source);
+  return parsed ? `${parsed.host}${parsed.pathname}` : summarizeSource(source);
 }
 
 function getSourceHostsFromEnv() {
@@ -648,6 +670,7 @@ export async function sanitizeImportPayloadAssets({
   traceRasterToSvg = false,
   rewriteExternalUrls = true,
   fetchTimeoutMs = DEFAULT_FETCH_TIMEOUT_MS,
+  convertPngToWebp = false,
 }) {
   const safeOwnerId = asString(ownerId);
   if (!safeOwnerId) {
@@ -766,13 +789,29 @@ export async function sanitizeImportPayloadAssets({
       }
     }
 
+    // Canva imports store their PNG images as lossless WebP (same pixels and alpha, roughly half
+    // the bytes). These are the files the element library shares with the template layers. The
+    // template thumbnail keeps its own format.
+    if (
+      convertPngToWebp &&
+      !normalizedFieldName.includes("thumbnail") &&
+      /^image\/png$/i.test(String(mimeType || "").trim())
+    ) {
+      const losslessWebp = await convertPngToLosslessWebp(bytes);
+      if (losslessWebp.converted) {
+        bytes = losslessWebp.bytes;
+        mimeType = losslessWebp.mimeType;
+      }
+    }
+
     const extension = extensionFromMimeType(mimeType) || extensionFromUrl(source);
     const kind = detectAssetKind({ mimeType, extension, fieldName });
 
     validateAssetBytes({ kind, bytes });
-    // A captured Canva clip is DASH fragments glued together; browsers stall on that served as a
-    // file, so store it as an ordinary progressive MP4 (see progressiveMp4.server).
-    if (kind === "video" && isFragmentedMp4(bytes)) {
+    // A captured Canva clip is DASH fragments glued together, and a CapCut download keeps its moov
+    // index after the media data; browsers stall on both served as a file, so store either as an
+    // ordinary faststart MP4 (see progressiveMp4.server).
+    if (kind === "video" && (isFragmentedMp4(bytes) || hasMoovAfterMdat(bytes))) {
       try {
         bytes = await remuxToProgressiveMp4(bytes);
         mimeType = "video/mp4";
@@ -855,6 +894,14 @@ export async function sanitizeImportPayloadAssets({
         } catch (error) {
           const message =
             error instanceof Error ? error.message : "unknown upload error";
+          if (isOptionalPreviewAssetField(key, node)) {
+            delete node[key];
+            changed = true;
+            warnings.push(
+              `${fieldPath}: video preview dropped (${message}; ${describeSourceForWarning(value)}).`
+            );
+            continue;
+          }
           throw new Error(`Failed to sanitize import asset at ${fieldPath}: ${message}`);
         }
         continue;

@@ -1,0 +1,42 @@
+
+> web-dashboard@0.1.0 convert:element-webp
+> node --env-file=.env --env-file=.env.local --import tsx scripts/convert-element-pngs-to-webp.ts --apply
+
+PNG elements to convert: 8010 { freepik: 6405, canva: 1604, editor: 1 }
+Backups and mapping: /Users/khalidabuhayea/nayroz_db_backups/element-webp-2026-10-19T07-34-05-509Z
+  250/8010 — 250 converted, 0 kept as PNG, 0 failed
+  500/8010 — 500 converted, 0 kept as PNG, 0 failed
+  750/8010 — 748 converted, 0 kept as PNG, 0 failed
+  1000/8010 — 1000 converted, 0 kept as PNG, 0 failed
+  1250/8010 — 1247 converted, 0 kept as PNG, 0 failed
+  1500/8010 — 1499 converted, 0 kept as PNG, 0 failed
+  1750/8010 — 1750 converted, 0 kept as PNG, 0 failed
+  2000/8010 — 2000 converted, 0 kept as PNG, 0 failed
+  2250/8010 — 2250 converted, 0 kept as PNG, 0 failed
+  2500/8010 — 2498 converted, 0 kept as PNG, 0 failed
+  2750/8010 — 2750 converted, 0 kept as PNG, 0 failed
+  3000/8010 — 2999 converted, 0 kept as PNG, 0 failed
+  3250/8010 — 3250 converted, 0 kept as PNG, 0 failed
+  3500/8010 — 3499 converted, 0 kept as PNG, 0 failed
+  3750/8010 — 3749 converted, 0 kept as PNG, 0 failed
+  4000/8010 — 3999 converted, 0 kept as PNG, 0 failed
+  4250/8010 — 4250 converted, 0 kept as PNG, 0 failed
+  4500/8010 — 4503 converted, 0 kept as PNG, 0 failed
+  4750/8010 — 4748 converted, 0 kept as PNG, 0 failed
+  5000/8010 — 4998 converted, 0 kept as PNG, 0 failed
+  5250/8010 — 5251 converted, 0 kept as PNG, 0 failed
+  5500/8010 — 5501 converted, 0 kept as PNG, 0 failed
+  5750/8010 — 5749 converted, 0 kept as PNG, 0 failed
+  6000/8010 — 5998 converted, 0 kept as PNG, 0 failed
+  6250/8010 — 6250 converted, 0 kept as PNG, 0 failed
+  6500/8010 — 6502 converted, 0 kept as PNG, 0 failed
+  6750/8010 — 6749 converted, 0 kept as PNG, 0 failed
+  7000/8010 — 6998 converted, 1 kept as PNG, 0 failed
+  7250/8010 — 7252 converted, 1 kept as PNG, 0 failed
+  7500/8010 — 7494 converted, 4 kept as PNG, 0 failed
+  7750/8010 — 7743 converted, 6 kept as PNG, 0 failed
+  8000/8010 — 7993 converted, 7 kept as PNG, 0 failed
+Converted 8003, kept as PNG 7 { 'not-smaller': 7 } failed 0. 788 MB → 428 MB (46% smaller)
+Templates rewritten: 544, revisions rewritten: 1786.
+Done in 1108 s. Old PNGs are still in R2; delete them later with:
+  npm run convert:element-webp -- --delete-old /Users/khalidabuhayea/nayroz_db_backups/element-webp-2026-10-19T07-34-05-509Z

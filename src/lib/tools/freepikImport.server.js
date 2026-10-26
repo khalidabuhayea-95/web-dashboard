@@ -1,3 +1,4 @@
+import { convertPngToLosslessWebp } from "@/lib/media/losslessWebp.server";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -1217,6 +1218,15 @@ export async function runFreepikImportForOwner({
           continue;
         }
         importedFingerprints.add(contentHash);
+      }
+
+      // A PNG icon is stored as lossless WebP: the same pixels and alpha, about half the bytes.
+      // The fingerprint above was taken on the original bytes, so duplicate checks against
+      // earlier PNG imports keep matching. GIFs and anything else are stored as they came.
+      const losslessWebp = await convertPngToLosslessWebp(uploadBytes);
+      if (losslessWebp.converted) {
+        uploadBytes = losslessWebp.bytes;
+        uploadMimeType = losslessWebp.mimeType;
       }
 
       const storedUrl = await uploadAssetToStorage({

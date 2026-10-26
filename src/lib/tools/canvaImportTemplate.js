@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from "node:crypto";
 
 import prisma from "@/lib/prisma";
+import { scheduleTemplateSearchKeywords } from "@/lib/search/templateKeywords.server";
+import { TEMPLATE_WRITE_TRANSACTION_OPTIONS } from "@/lib/templates/templateTransaction";
 import { resizeThumbnailDataUrlHalf } from "@/lib/media/thumbnailResize.server";
 import { fitImportedAnimationsToCategories } from "@/lib/editor/animationSlotFit";
 import { extractFabricData } from "@/lib/templates/editorData";
@@ -322,7 +324,7 @@ export async function createImportedTemplate({
   const placements =
     explicitPlacements.length > 0 ? explicitPlacements : await resolveImportPlacements(ownerId);
 
-  return prisma.$transaction(async (tx) => {
+  const createdTemplate = await prisma.$transaction(async (tx) => {
     const created = await tx.template.create({
       data: {
         id: templateId,
@@ -355,7 +357,10 @@ export async function createImportedTemplate({
     });
 
     return created;
-  });
+  }, TEMPLATE_WRITE_TRANSACTION_OPTIONS);
+  // English keywords for an Arabic name and vice versa, once the response is out.
+  scheduleTemplateSearchKeywords(createdTemplate.id);
+  return createdTemplate;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -382,7 +387,7 @@ const TEXT_OBJECT_TYPES = new Set(["textbox", "text", "i-text", "itext"]);
 // directly and the pixel radii with them.
 const PARAMETRIC_SHAPE_TYPES = new Set(["rect", "circle", "ellipse", "triangle", "line"]);
 // Animation params the importer emits in page pixels (docs/canva-animation-parity.md §8.1).
-const HORIZONTAL_PX_PARAM_KEYS = ["travelX", "poseX"];
+const HORIZONTAL_PX_PARAM_KEYS = ["travelX", "poseX", "x1From", "x1To", "x2To"];
 const VERTICAL_PX_PARAM_KEYS = ["travelY", "poseY", "y1From", "y1To", "y2To"];
 const UNIFORM_PX_OBJECT_KEYS = [
   "shadowBlur",
@@ -455,6 +460,16 @@ export function scaleFabricObjectToCanvas(object, scale) {
     if ("wrapWidth" in next) next.wrapWidth = scaleFiniteNumber(next.wrapWidth, sx);
     // letterSpacing (px) is the legacy mirror of charSpacing (em); only the px form scales.
     if ("letterSpacing" in next) next.letterSpacing = scaleFiniteNumber(next.letterSpacing, uniform);
+    // Multi-style ranges carry their own px sizes and spacing (lib/editor/textSpans.ts).
+    if (Array.isArray(next.textSpans)) {
+      next.textSpans = next.textSpans.map((span) => {
+        if (!span || typeof span !== "object") return span;
+        const scaled = { ...span };
+        if ("fontSize" in scaled) scaled.fontSize = scaleFiniteNumber(scaled.fontSize, uniform);
+        if ("letterSpacing" in scaled) scaled.letterSpacing = scaleFiniteNumber(scaled.letterSpacing, uniform);
+        return scaled;
+      });
+    }
   } else if (PARAMETRIC_SHAPE_TYPES.has(type)) {
     if ("width" in next) next.width = scaleFiniteNumber(next.width, sx);
     if ("height" in next) next.height = scaleFiniteNumber(next.height, sy);
@@ -479,6 +494,14 @@ export function scaleFabricObjectToCanvas(object, scale) {
     };
   }
   if ("animations" in next) next.animations = scaleAnimationSlots(next.animations, scale);
+  // A custom motion path's offsets are page pixels too (its `t` is time and passes through).
+  if (Array.isArray(next.mediaMotionPath)) {
+    next.mediaMotionPath = next.mediaMotionPath.map((point) =>
+      point && typeof point === "object"
+        ? { ...point, x: scaleFiniteNumber(point.x, sx), y: scaleFiniteNumber(point.y, sy) }
+        : point
+    );
+  }
   return next;
 }
 

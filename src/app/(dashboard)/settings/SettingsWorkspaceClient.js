@@ -500,7 +500,7 @@ function SettingsWorkspaceClient() {
                   Load the extension from
                   {" "}
                   <code className="rounded bg-white px-1.5 py-0.5 text-[color:var(--ds-text)]">
-                    extension/canva-importer
+                    extensions/canva-importer
                   </code>
                   {" "}
                   and paste the generated token into the extension popup.

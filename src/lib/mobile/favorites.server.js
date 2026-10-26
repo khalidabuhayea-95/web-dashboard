@@ -87,7 +87,7 @@ function serializeFavoriteTemplate(template, origin) {
   const canvasSize = template.canvasSize || {};
   return {
     id: String(template.id || ""),
-    title: String(template.name || "Untitled"),
+    // No `title`: template names stay in the dashboard (2026-10-19) — the app never shows them.
     status: String(template.status || "draft"),
     category: String(template.category || "general"),
     subCategory: String(template.subCategory || "general"),

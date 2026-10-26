@@ -16,11 +16,15 @@ import {
 } from "@/lib/editor/animationSpec";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import { textFillToMobilePayload } from "@/lib/editor/textFill";
+import { normalizeTextSpans } from "@/lib/editor/textSpans";
 import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
+import { applyChromeArabicLetterSpacing } from "@/lib/editor/arabicLetterSpacing";
 import {
+  canRenderShapeLayerAsSvg,
   getShapeRasterFrame,
   isRasterizableShapeLayer,
   renderShapeLayerToDataUrl,
+  shapeLayerSvgVersion,
 } from "@/lib/templates/shapeRaster";
 
 function numberOr(value, fallback = 0) {
@@ -527,6 +531,29 @@ function mapLayerTimelineWindow(item) {
   return { startMs, endMs };
 }
 
+const MOTION_PATH_MAX_POINTS = 256;
+
+/**
+ * Canva's custom motion path ("create an animation" — DAHNZVrSYZM's doors swing open along one),
+ * exactly as the web editor plays it (lib/editor/previewRuntime.ts resolveMotionPathOffset):
+ * `[{ t, x, y }]`, t in ms from the layer's timeline-window start, x/y the layer's offset from its
+ * resting place in project px (page axes — not turned or mirrored with the layer). Linear between
+ * points; the first offset holds before the path starts and the last after it ends. Null — and the
+ * field omitted — unless at least two finite points remain.
+ */
+function mapLayerMotionPath(item) {
+  const raw = Array.isArray(item?.mediaMotionPath) ? item.mediaMotionPath : null;
+  if (!raw || raw.length < 2) return null;
+  const round = (value) => Math.round(value * 100) / 100;
+  const points = raw
+    .map((point) => ({ t: Number(point?.t), x: Number(point?.x), y: Number(point?.y) }))
+    .filter((point) => Number.isFinite(point.t) && Number.isFinite(point.x) && Number.isFinite(point.y))
+    .map((point) => ({ t: Math.max(0, round(point.t)), x: round(point.x), y: round(point.y) }))
+    .sort((a, b) => a.t - b.t)
+    .slice(0, MOTION_PATH_MAX_POINTS);
+  return points.length >= 2 ? points : null;
+}
+
 /**
  * The LEGACY single-animation object, for app builds without three-slot support.
  *
@@ -741,7 +768,10 @@ function readTextAlignment(item) {
  * three points. Positive bows up.
  */
 function readCurveConfig(item) {
-  return resolveTextCurveConfig(item);
+  const config = resolveTextCurveConfig(item);
+  // The Size slider (the app's ringSpread, 0..1); omitted at 0 so a plain curve is unchanged.
+  const ringSpread = Math.max(0, Math.min(1, numberOr(item?.textCurveRingSpread, 0)));
+  return config.enabled && ringSpread > 0 ? { ...config, ringSpread: Math.round(ringSpread * 1000) / 1000 } : config;
 }
 
 function readLetterSpacingPx(item, fontSizePx) {
@@ -916,9 +946,11 @@ function baseLayer(item, index, canvasSize) {
   const timelineWindow = mapLayerTimelineWindow(item);
   const slots = resolveElementAnimations(item || {});
   const animations = mapLayerAnimations(slots);
+  const motionPath = mapLayerMotionPath(item);
 
   return {
     ...(animations ? { animations } : {}),
+    ...(motionPath ? { motionPath } : {}),
     id: String(item.id || item.layerId || `layer-${index + 1}`),
     transform: buildTransform({
       item,
@@ -1002,6 +1034,65 @@ function buildTextLayerFontPayload(fontName, fontLookup) {
   };
 }
 
+/** A colour as the app's hex: `#RRGGBB`, or `#AARRGGBB` when it is translucent. */
+function colorHexWithAlpha(value, fallbackHex = "#000000") {
+  const { hex, opacity } = rgbaToHexWithOpacity(value, fallbackHex);
+  if (opacity >= 0.999) return hex;
+  const alpha = Math.round(clamp(opacity, 0, 1) * 255)
+    .toString(16)
+    .padStart(2, "0")
+    .toUpperCase();
+  return `#${alpha}${hex.slice(1)}`;
+}
+
+/**
+ * A multi-style text's ranges for the app — the TEXT layer's `spans` (lib/editor/textSpans.ts):
+ * UTF-16 `[start, end)` into `text`, sorted and non-overlapping, each listing ONLY what differs
+ * from the layer, in the layer's own field names and units — `fontName` (+ its `font` record),
+ * `size` (project px), `fontWeight` (+ `bold` = weight ≥ 600), `italic`, `colorHex` (#RRGGBB, or
+ * #AARRGGBB when translucent), `letterSpacing` (px), `underline`/`strikethrough`, `stroke`
+ * {enabled, colorHex, opacity, width 0–100 of the span's own size}, `highlight` {colorHex, opacity}
+ * (a band behind the range: glyph boxes ± 0.1 em, 1.2 em tall on the line centre, 0.25 em
+ * corners). An app build that ignores `spans` draws the text in the layer's own style.
+ */
+function mapTextSpans(item, fontLookup) {
+  const text = String(item?.text || "");
+  return normalizeTextSpans(item?.textSpans, text).map((span) => {
+    const out = { start: span.start, end: span.end };
+    if (span.fontFamily) {
+      const fontName = resolveEditorTextFontName({ fontFamily: span.fontFamily });
+      out.fontName = fontName;
+      const font = buildTextLayerFontPayload(fontName, fontLookup);
+      if (font) out.font = font;
+    }
+    if (span.fontSize !== undefined) out.size = span.fontSize;
+    if (span.fontWeight !== undefined) {
+      out.fontWeight = Number(span.fontWeight);
+      out.bold = Number(span.fontWeight) >= 600;
+    }
+    if (span.fontStyle !== undefined) out.italic = span.fontStyle === "italic";
+    if (span.color !== undefined) out.colorHex = colorHexWithAlpha(span.color, "#FFFFFF");
+    if (span.letterSpacing !== undefined) out.letterSpacing = span.letterSpacing;
+    if (span.textDecoration !== undefined) {
+      out.underline = span.textDecoration.includes("underline");
+      out.strikethrough = span.textDecoration.includes("line-through");
+    }
+    if (span.stroke !== undefined || span.strokeWidth !== undefined) {
+      const strokeColor = rgbaToHexWithOpacity(span.stroke ?? item.stroke, "#000000");
+      const width = span.strokeWidth ?? numberOr(item.strokeWidth, 0);
+      out.stroke = { enabled: width > 0, colorHex: strokeColor.hex, opacity: strokeColor.opacity, width };
+    }
+    if (span.highlightColor) {
+      const highlight = rgbaToHexWithOpacity(span.highlightColor, "#000000");
+      out.highlight = {
+        colorHex: highlight.hex,
+        opacity: clamp(highlight.opacity * (span.highlightOpacity ?? 1), 0, 1),
+      };
+    }
+    return out;
+  });
+}
+
 function mapTextLayer(item, index, canvasSize, options = {}) {
   const base = baseLayer(item, index, canvasSize);
   const strokeColor = rgbaToHexWithOpacity(item.stroke, "#000000");
@@ -1020,6 +1111,20 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
   // Gradient glyph fill — the app's TextLayer.fill (TextFill.Gradient). `colorHex` stays the flat
   // fallback, which is all an older app build draws.
   const fill = textFillToMobilePayload(item.textFill);
+  // Multi-style ranges (see mapTextSpans); absent for a one-style text.
+  const curveConfig = readCurveConfig(item);
+  // Arabic takes letter spacing only where Chrome puts it (spaces, Latin, digits, free symbols),
+  // sent as ranges — the app spaces every glyph and pulled joined letters apart
+  // (lib/editor/arabicLetterSpacing.ts). Curved text keeps the old path: the app's curve ranges are
+  // paint-only.
+  const spacing = curveConfig.enabled
+    ? { letterSpacing: readLetterSpacingPx(item, numberOr(item.fontSize, 42)), spans: mapTextSpans(item, options?.fontLookup) }
+    : applyChromeArabicLetterSpacing(
+        String(item.text || ""),
+        readLetterSpacingPx(item, numberOr(item.fontSize, 42)),
+        mapTextSpans(item, options?.fontLookup)
+      );
+  const spans = spacing.spans;
 
   return {
     ...base,
@@ -1054,10 +1159,10 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
       opacity: strokeColor.opacity,
       width: numberOr(item.strokeWidth, 0),
     },
-    letterSpacing: readLetterSpacingPx(item, numberOr(item.fontSize, 42)),
+    letterSpacing: spacing.letterSpacing,
     lineHeight: numberOr(item.lineHeight, 1.2),
     alignment: mapTextAlignment(readTextAlignment(item)),
-    curveConfig: readCurveConfig(item),
+    curveConfig,
     backgroundVisible: bgEnabled && bgOpacity > 0,
     backgroundColorHex: bgColor,
     backgroundAngleSize: clamp(numberOr(item.textBackgroundAngleSize, 0), 0, 1),
@@ -1066,6 +1171,7 @@ function mapTextLayer(item, index, canvasSize, options = {}) {
     backgroundPaddingX: clamp(numberOr(item.textBackgroundPaddingX, 0), 0, 1),
     backgroundPaddingY: clamp(numberOr(item.textBackgroundPaddingY, 0), 0, 1),
     ...(font ? { font } : {}),
+    ...(spans.length > 0 ? { spans } : {}),
   };
 }
 
@@ -1376,6 +1482,26 @@ function normalizeFrameContentTransform(value) {
   };
 }
 
+// The app lays frame content out as source × scale around the frame's centre and never reads
+// `fit` (it normalises every frame to MANUAL), so a web "cover" / "contain" becomes the scale that
+// produces it: cover fills the frame (max ratio), contain fits inside it (min ratio), and the web's
+// own scale and offsets ride on top. A 1920×1080 clip in a 520×733 arch is 0.679, not 1 — at 1 the
+// app showed a 1.47× zoomed centre slice.
+function manualFrameContentTransform(value, content, frameWidth, frameHeight) {
+  const transform = normalizeFrameContentTransform(value);
+  if (transform.fit === "manual") return transform;
+  const sourceWidth = Math.max(numberOr(content?.sourceWidth, 1), 1);
+  const sourceHeight = Math.max(numberOr(content?.sourceHeight, 1), 1);
+  const ratioX = Math.max(numberOr(frameWidth, 1), 1) / sourceWidth;
+  const ratioY = Math.max(numberOr(frameHeight, 1), 1) / sourceHeight;
+  const fitScale = transform.fit === "contain" ? Math.min(ratioX, ratioY) : Math.max(ratioX, ratioY);
+  return {
+    ...transform,
+    fit: "manual",
+    scale: Math.round(fitScale * transform.scale * 1e6) / 1e6,
+  };
+}
+
 function mapFrameShapePayload(item) {
   const frameShape = asObject(item?.frameShape) || {};
   const presetId = String(
@@ -1480,7 +1606,10 @@ function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
     field: "frameContent.src",
   });
 
-  if (kind === "IMAGE" || content.posterSrc) {
+  // A frame's PHOTO is a slot the user fills: the app gets the frame's preview picture. A frame's
+  // VIDEO is the design itself (DAHNlFf3ad4's chandelier clip in the arch): it plays and exports, so
+  // the app gets the clip — the poster was a preview-only still that exported as an empty frame.
+  if (kind === "IMAGE") {
     return {
       type: "IMAGE",
       imageUri: resolveFramePreviewContentUri(item, index, options),
@@ -1494,22 +1623,27 @@ function mapFrameContentPayload(item, index, options, frameWidth, frameHeight) {
     const durationMs = readVideoDurationMs(content);
     const trimStartMs = readVideoTrimStartMs(content);
     const trimEndMs = readVideoTrimEndMs(content, durationMs, trimStartMs);
+    // The poster as captured (never the .mp4, which is no picture).
+    const thumbnailUri = content.posterSrc
+      ? resolveMediaUri(content.posterSrc, {
+          assetResolver: options?.assetResolver,
+          mediaUrlResolver: options?.mediaUrlResolver,
+          scope: "layer",
+          elementId: item.id || item.layerId || "",
+          index,
+          field: "frameContent.posterSrc",
+        })
+      : "";
     return {
       type: "VIDEO",
       videoUri: contentUri,
-      thumbnailUri: resolveMediaUri(content.posterSrc || content.src || "", {
-        assetResolver: options?.assetResolver,
-        mediaUrlResolver: options?.mediaUrlResolver,
-        scope: "layer",
-        elementId: item.id || item.layerId || "",
-        index,
-        field: content.posterSrc ? "frameContent.posterSrc" : "frameContent.src",
-      }),
+      ...(thumbnailUri ? { thumbnailUri } : {}),
       sourceWidth,
       sourceHeight,
       trimStartMs: Math.round(trimStartMs),
       trimEndMs: Math.round(trimEndMs),
       durationMs: Math.round(durationMs),
+      previewOnly: false,
     };
   }
 
@@ -1534,7 +1668,9 @@ function mapFrameLayer(item, index, canvasSize, options) {
         offsetX: 0,
         offsetY: 0,
       }
-    : normalizeFrameContentTransform(item.frameContentTransform);
+    : content?.type === "VIDEO"
+      ? manualFrameContentTransform(item.frameContentTransform, content, frameWidth, frameHeight)
+      : normalizeFrameContentTransform(item.frameContentTransform);
 
   return {
     ...base,
@@ -1572,8 +1708,23 @@ function mapShapeLayerAsImage(item, index, canvasSize, options) {
     height: frame.height,
   };
   const base = baseLayer(rasterItem, index, canvasSize);
-  const imageUri =
-    typeof options?.assetResolver === "function"
+  // Served as an SVG (same geometry) so the app redraws it at its on-screen size instead of
+  // upscaling a box-sized PNG — a 1 px ring on an A6 page came out pixelated. `v` changes with
+  // what the shape draws, so an edited shape isn't answered from the app's image cache.
+  const asVector = typeof options?.assetResolver === "function" && canRenderShapeLayerAsSvg(item);
+  const vectorUri = asVector
+    ? String(
+        options.assetResolver({
+          scope: "layer",
+          elementId: item.id || item.layerId || "",
+          index,
+          field: "shape-vector",
+        }) || ""
+      ).trim()
+    : "";
+  const imageUri = vectorUri
+    ? `${vectorUri}${vectorUri.includes("?") ? "&" : "?"}v=${shapeLayerSvgVersion(item)}`
+    : typeof options?.assetResolver === "function"
       ? String(
           options.assetResolver({
             scope: "layer",
@@ -1603,6 +1754,7 @@ function mapShapeLayerAsImage(item, index, canvasSize, options) {
       includeStroke: false,
       includeShapeMask: false,
     }),
+    ...(vectorUri ? { assetKind: "vector", colorEditMode: "none" } : {}),
   };
 }
 
@@ -2080,6 +2232,13 @@ function slimLayerFont(font) {
   };
 }
 
+function slimTextSpan(span) {
+  if (!span || typeof span !== "object") return span;
+  const { font, ...rest } = span;
+  const slimFont = slimLayerFont(font);
+  return slimFont ? { ...rest, font: slimFont } : rest;
+}
+
 function slimFrameShape(shape) {
   if (!shape || typeof shape !== "object") return undefined;
 
@@ -2142,6 +2301,8 @@ function slimMobileLayer(layer) {
     // template authored with an entrance rendered completely static, with no timeline at all.
     // Spread rather than assigned so a layer with no slots keeps the payload it had.
     ...(layer.animations ? { animations: layer.animations } : {}),
+    // The custom motion path (mapLayerMotionPath) — listed here for the same reason.
+    ...(layer.motionPath ? { motionPath: layer.motionPath } : {}),
   };
 
   switch (String(layer.type || "").toUpperCase()) {
@@ -2211,6 +2372,8 @@ function slimMobileLayer(layer) {
         backgroundPaddingX: layer.backgroundPaddingX,
         backgroundPaddingY: layer.backgroundPaddingY,
         ...(font ? { font } : {}),
+        // Multi-style ranges (see mapTextSpans); each span's font record slimmed like the layer's.
+        ...(Array.isArray(layer.spans) && layer.spans.length > 0 ? { spans: layer.spans.map(slimTextSpan) } : {}),
       };
     }
     case "FRAME": {
@@ -2253,7 +2416,8 @@ export function toMobileProject(template, options = {}) {
 
   return {
     id: String(template?.id || ""),
-    name: String(template?.name || "Untitled"),
+    // No `name`: template names are not sent to the app (2026-10-19). The app names every design
+    // itself («تصميم 1», «تصميم 2», …).
     createdAt: new Date(template?.createdAt || Date.now()).getTime(),
     updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
     canvasWidth: primarySize.width,
@@ -2311,7 +2475,7 @@ export function toMobileTemplate(template, options = {}) {
   const summaryPageCount = Math.max(1, Math.round(numberOr(template?.pageCount, 1)));
   return {
     id: String(template?.id || ""),
-    title: String(template?.name || "Untitled"),
+    // No `title`: template names stay in the dashboard (2026-10-19) — the app never shows them.
     version: numberOr(template?.version, 1),
     updatedAt: new Date(template?.updatedAt || Date.now()).getTime(),
     canvasWidth: canvasSize.width,
@@ -2438,7 +2602,12 @@ export function toMobileProjectSlim(template, options = {}) {
  * zero.
  */
 function resolveSinglePageDurationMs(primaryPage, rawData) {
-  const candidates = [primaryPage?.durationMs, rawData?.timeline?.totalDurationMs];
+  // …and, for a one-page import never saved from the editor, the source page's own length.
+  const candidates = [
+    primaryPage?.durationMs,
+    rawData?.timeline?.totalDurationMs,
+    rawData?.meta?.import?.page?.durationMs,
+  ];
   for (const candidate of candidates) {
     const parsed = Number(candidate);
     if (Number.isFinite(parsed) && parsed > 0) return Math.round(parsed);
@@ -2463,7 +2632,7 @@ export function toMobileTemplateDetailSlim(template, options = {}) {
 
   return {
     id: String(template?.id || ""),
-    title: String(template?.name || "Untitled"),
+    // No `title`: template names stay in the dashboard (2026-10-19) — the app never shows them.
     category: String(options?.categoryLabel || template?.category || ""),
     categoryValue: String(options?.categoryValue || template?.category || ""),
     subCategory: String(options?.subCategoryLabel || template?.subCategory || ""),

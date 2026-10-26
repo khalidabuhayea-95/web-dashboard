@@ -16,7 +16,7 @@ import fs from "node:fs";
 import path from "node:path";
 import zlib from "node:zlib";
 
-import { extractFontFaceInfo, extractFontFamilyName, readFontTables } from "@/lib/editor/fontName.server";
+import { extractFontFaceInfo, extractFontFamilyName, fontFamilyWithWidth, readFontTables } from "@/lib/editor/fontName.server";
 
 const FIXTURES = path.join(process.cwd(), "src/lib/editor/__fixtures__/fonts");
 const fixture = (name) => fs.readFileSync(path.join(FIXTURES, name));
@@ -149,4 +149,30 @@ test("anything unreadable yields no name and never throws", () => {
   collection.write("ttcf", 4, "latin1");
   assert.equal(readFontTables(collection), null);
   assert.equal(extractFontFaceInfo(Buffer.from("wOF2 but truncated")), null);
+});
+
+// ── width variants are their own families (DAHOJVWKQmM's Agrandir Narrow merged into Agrandir Wide)
+test("a typographic subfamily's width word joins the family name", () => {
+  // Canva's Agrandir cuts: nameID 16 "Agrandir" for Wide and Narrow alike, the width in nameID 17.
+  const wide = sfntWithNames([[3, 0x0409, 1, "Agrandir Wide"], [3, 0x0409, 2, "Regular"], [3, 0x0409, 16, "Agrandir"], [3, 0x0409, 17, "Wide"]]);
+  const narrowMedium = sfntWithNames([[3, 0x0409, 1, "Agrandir Narrow Medium"], [3, 0x0409, 2, "Regular"], [3, 0x0409, 16, "Agrandir"], [3, 0x0409, 17, "Narrow Medium"]]);
+  const narrowBold = sfntWithNames([[3, 0x0409, 1, "Agrandir Semi Narrow"], [3, 0x0409, 2, "Bold"], [3, 0x0409, 16, "Agrandir"], [3, 0x0409, 17, "Narrow Bold"]]);
+  assert.equal(extractFontFamilyName(wide), "Agrandir Wide");
+  assert.equal(extractFontFamilyName(narrowMedium), "Agrandir Narrow");
+  assert.equal(extractFontFamilyName(narrowBold), "Agrandir Narrow");
+  assert.equal(extractFontFaceInfo(narrowBold).subfamily, "Narrow Bold");
+});
+
+test("a weight or style alone, or a width the family already names, leaves the name as it is", () => {
+  const bold = sfntWithNames([[3, 0x0409, 1, "Cairo"], [3, 0x0409, 2, "Bold"], [3, 0x0409, 16, "Cairo"], [3, 0x0409, 17, "Bold"]]);
+  const semiBoldItalic = sfntWithNames([[3, 0x0409, 1, "Poppins SemiBold"], [3, 0x0409, 2, "Italic"], [3, 0x0409, 16, "Poppins"], [3, 0x0409, 17, "SemiBold Italic"]]);
+  const condensed = sfntWithNames([[3, 0x0409, 1, "Roboto Condensed"], [3, 0x0409, 2, "Bold"], [3, 0x0409, 16, "Roboto Condensed"], [3, 0x0409, 17, "Condensed Bold"]]);
+  const legacyOnly = sfntWithNames([[3, 0x0409, 1, "Hacen Tunisia Lt"], [3, 0x0409, 2, "Regular"]]);
+  assert.equal(extractFontFamilyName(bold), "Cairo");
+  assert.equal(extractFontFamilyName(semiBoldItalic), "Poppins");
+  assert.equal(extractFontFamilyName(condensed), "Roboto Condensed");
+  assert.equal(extractFontFamilyName(legacyOnly), "Hacen Tunisia Lt");
+  assert.equal(fontFamilyWithWidth("Barlow", "Semi Condensed Medium"), "Barlow Semi Condensed");
+  assert.equal(fontFamilyWithWidth("Univers", "Extra-Compressed"), "Univers Extra Compressed");
+  assert.equal(fontFamilyWithWidth("", "Wide"), "");
 });

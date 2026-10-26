@@ -37,6 +37,36 @@ export function isFragmentedMp4(bytes: Uint8Array): boolean {
   return false;
 }
 
+/**
+ * True when the `moov` index comes after `mdat` — CapCut's downloads are laid out this way. The
+ * browser then needs the file's tail before the first frame; in the editor that request stalled
+ * and the clip sat at readyState 0 (black page). Pure; no ffmpeg.
+ */
+export function hasMoovAfterMdat(bytes: Uint8Array): boolean {
+  const data = bytes instanceof Uint8Array ? bytes : new Uint8Array(0);
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  let offset = 0;
+  let boxes = 0;
+  let sawMdat = false;
+  while (offset + 8 <= data.byteLength && boxes < 64) {
+    let size = view.getUint32(offset);
+    const type = String.fromCharCode(data[offset + 4], data[offset + 5], data[offset + 6], data[offset + 7]);
+    if (size === 1) {
+      if (offset + 16 > data.byteLength) return false;
+      size = Number(view.getBigUint64(offset + 8));
+    } else if (size === 0) {
+      size = data.byteLength - offset;
+    }
+    if (boxes === 0 && type !== "ftyp") return false;
+    if (type === "moov") return sawMdat;
+    if (type === "mdat") sawMdat = true;
+    if (size < 8) return false;
+    offset += size;
+    boxes += 1;
+  }
+  return false;
+}
+
 export async function remuxToProgressiveMp4(bytes: Uint8Array): Promise<Uint8Array> {
   const dir = await mkdtemp(path.join(tmpdir(), "nayroz-remux-"));
   const input = path.join(dir, "in.mp4");

@@ -7,6 +7,7 @@ import { extractEditorPagesData, extractFabricData } from "@/lib/templates/edito
 import {
   isRasterizableShapeLayer,
   renderShapeLayerToPngBuffer,
+  renderShapeLayerToSvg,
 } from "@/lib/templates/shapeRaster";
 import { getTemplateTaxonomySettings } from "@/lib/templates/templateSettings.server";
 import {
@@ -369,6 +370,22 @@ async function resolveTemplateAsset(request, { params }) {
         { status: 422 }
       );
     }
+  }
+
+  if (scope === "layer" && field === "shape-vector") {
+    // The SVG twin of shape-raster (see shapeRaster.js): crisp at any size in the app.
+    const svg = isRasterizableShapeLayer(layerObject) ? renderShapeLayerToSvg(layerObject) : null;
+    if (!svg) {
+      return NextResponse.json({ error: "Asset not found." }, { status: 404 });
+    }
+    return new NextResponse(Buffer.from(svg, "utf8"), {
+      status: 200,
+      headers: {
+        "Content-Type": "image/svg+xml; charset=utf-8",
+        "Cache-Control": audience.cacheControl("public, max-age=300"),
+        Vary: "Authorization",
+      },
+    });
   }
 
   if (scope === "layer" && field === "shape-raster") {

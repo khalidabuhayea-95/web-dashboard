@@ -34,6 +34,13 @@ model Template {
   /// scalar pair via resolveTemplateCategoryPairs().
   categories        Json?
   tags              Json
+  /// Machine search keywords (the name translated into the other language); see
+  /// src/lib/search/templateKeywords.server.js. Human `tags` stay as the designer wrote them.
+  searchKeywords    Json                     @default("[]")
+  /// GENERATED ALWAYS AS nayroz_search_fold(name) STORED — read-only, see migration 20261019120000.
+  searchTitle       Unsupported("text")?
+  /// GENERATED ALWAYS AS nayroz_search_fold(tags || searchKeywords) STORED — read-only.
+  searchTags        Unsupported("text")?
   thumbnailDataUrl  String?
   previewVideoUrl   String?
   previewPosterUrl  String?
@@ -536,6 +543,9 @@ model editor_element_assets {
   free_svg           Boolean   @default(false)
   /// Pro-only element (see FontFamily.isPremium for the same concept).
   is_premium         Boolean   @default(false)
+  /// GENERATED search columns (migration 20261019120000) — read-only.
+  search_title       Unsupported("text")?
+  search_tags        Unsupported("text")?
   source_payload     Json      @default("{}")
   translation_status String    @default("fallback")
   created_source_at  DateTime? @db.Timestamptz(6)

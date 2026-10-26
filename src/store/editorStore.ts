@@ -35,6 +35,13 @@ import {
 } from "@/lib/editor/animationSlots";
 import type { TextFill } from "@/lib/editor/textFill";
 import {
+  hasTextSpans,
+  normalizeTextSpans,
+  reconcileTextSpansForPatch,
+  textSpanFontFamilies,
+  type TextSpan,
+} from "@/lib/editor/textSpans";
+import {
   DEFAULT_FRAME_CONTENT_TRANSFORM,
   createFrameShapeFromPreset,
   normalizeFrameContentTransform,
@@ -47,6 +54,7 @@ import {
   type FrameShape,
 } from "@/lib/editor/frames";
 import { trimTrailingBlankTextLines } from "@/lib/editor/textContent";
+import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
 
 export type ToolMode = "select" | "pan" | "draw" | "crop";
 export type SidebarTab =
@@ -188,8 +196,10 @@ export interface EditorElement {
   letterSpacing: number;
   textCurveEnabled?: boolean;
   textCurveAmount?: number;
-  /** The arc Canva drew, measured on import; wins over the amount until the curve is edited. */
+  /** The curve's arc in degrees (the app's arcDegrees: + dome, − valley, ±360 a full ring). */
   textCurveArcDegrees?: number;
+  /** The curve's Size slider (the app's ringSpread, 0..1): stretches each line up to 3× — kashida first. */
+  textCurveRingSpread?: number;
   /**
    * Background box behind the text — the mobile app's model field for field (see
    * lib/editor/textBackground.ts): angle 0..1 → radius angle×28 px, padding 0..1 → fontSize×ratio×0.5.
@@ -205,6 +215,12 @@ export interface EditorElement {
    * flat `color`, which also stays the fallback for every path that cannot texture glyphs.
    */
   textFill?: TextFill;
+  /**
+   * Multi-style text (lib/editor/textSpans.ts): style overrides for character ranges of `text` —
+   * font, weight, size, colour, spacing, decoration, outline, highlight. The layer's own fields are
+   * the base; absent/empty = one style. Ships to mobile as the TEXT layer's `spans`.
+   */
+  textSpans?: TextSpan[];
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
@@ -426,6 +442,12 @@ interface EditorStore {
   timelineIsPlaying: boolean;
   previewGenerationActive: boolean;
   selectedIds: string[];
+  /**
+   * The characters selected inside the text being edited on the canvas (UTF-16 offsets into its
+   * `text`), kept while the toolbar has focus. While it is set and non-empty, text style controls
+   * style that range (lib/editor/textSpans.ts) instead of the whole layer. Never saved.
+   */
+  textRangeSelection: { elementId: string; start: number; end: number } | null;
   publishCandidateIds: string[];
   /** Element category the next Publish Elements run files its assets under. */
   publishCategoryValue: string;
@@ -484,6 +506,7 @@ interface EditorStore {
   setPublishCategoryValue: (value: string) => void;
   bumpImportedElementsRefreshKey: () => void;
   clearSelection: () => void;
+  setTextRangeSelection: (selection: { elementId: string; start: number; end: number } | null) => void;
   registerFontFamilies: (fontFamilies: string[]) => void;
   setTemplateMeta: (meta: TemplateMetaPatch) => void;
   clearTemplateMeta: () => void;
@@ -606,6 +629,14 @@ function createDefaultDesignTimeline(
   };
 }
 
+function normalizedCurveArc(partial: Partial<EditorElement>): { textCurveArcDegrees?: number } {
+  const measured = Number(partial.textCurveArcDegrees);
+  if (Number.isFinite(measured) && Math.abs(measured) > 0.5) return { textCurveArcDegrees: Math.max(-360, Math.min(360, measured)) };
+  if (!partial.textCurveEnabled || !(Math.abs(Number(partial.textCurveAmount) || 0) > 0.5)) return {};
+  const config = resolveTextCurveConfig({ ...partial, scaleX: 1 });
+  return config.enabled && Math.abs(config.arcDegrees) > 0.5 ? { textCurveArcDegrees: config.arcDegrees } : {};
+}
+
 function createBaseElement(pageId: string, partial: Partial<EditorElement> = {}): EditorElement {
   const normalizedFontFamily = normalizeFontFamilyName(partial.fontFamily);
   return {
@@ -648,8 +679,12 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     letterSpacing: partial.letterSpacing ?? 0,
     textCurveEnabled: partial.textCurveEnabled ?? false,
     textCurveAmount: partial.textCurveAmount ?? 0,
-    ...(Number.isFinite(Number(partial.textCurveArcDegrees)) && Math.abs(Number(partial.textCurveArcDegrees)) >= 1
-      ? { textCurveArcDegrees: Number(partial.textCurveArcDegrees) }
+    // The arc is THE curve (the app's arcDegrees). An older layer holding only the editor amount is
+    // turned into its arc once, here — that conversion reads the box width, and a curved box is
+    // now derived from the arc, so leaving it live would feed back into itself.
+    ...normalizedCurveArc(partial),
+    ...(Number(partial.textCurveRingSpread) > 0
+      ? { textCurveRingSpread: Math.min(1, Number(partial.textCurveRingSpread)) }
       : {}),
     ...(partial.textBackgroundEnabled !== undefined || partial.textBackgroundColor !== undefined
       ? {
@@ -796,7 +831,11 @@ function normalizeElementForEditor(
 function trimTextElementForEditor(element: EditorElement): EditorElement {
   if (element.type !== "text") return element;
   const text = trimTrailingBlankTextLines(element.text);
-  return text === element.text ? element : { ...element, text };
+  if (text === element.text) return element;
+  // Trimming only drops trailing blank lines, so the spans just lose what sat past the new end.
+  return hasTextSpans(element)
+    ? { ...element, text, textSpans: normalizeTextSpans(element.textSpans, text) }
+    : { ...element, text };
 }
 
 function normalizePageForEditor(page: EditorPage): EditorPage {
@@ -955,6 +994,15 @@ function createFrameContentFromMediaElement(element: EditorElement): {
   };
 }
 
+/** The font list after a patch: its layer font and any font a styled range of the text names. */
+function mergePatchFontFamilies(current: string[], patch: Partial<EditorElement>) {
+  const added = [
+    ...(typeof patch.fontFamily === "string" ? [patch.fontFamily] : []),
+    ...textSpanFontFamilies(patch.textSpans),
+  ];
+  return added.length > 0 ? mergeFontFamilies(current, added) : current;
+}
+
 function collectFontFamiliesFromPages(pages: EditorPage[]) {
   if (!Array.isArray(pages)) return [];
   const values: string[] = [];
@@ -963,6 +1011,8 @@ function collectFontFamiliesFromPages(pages: EditorPage[]) {
     page.elements.forEach((element) => {
       if (element?.type !== "text") return;
       values.push(String(element.fontFamily || ""));
+      // Fonts used only by a styled range of the text still have to load.
+      values.push(...textSpanFontFamilies(element.textSpans));
     });
   });
   return mergeFontFamilies([], values);
@@ -1165,6 +1215,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   timelineIsPlaying: false,
   previewGenerationActive: false,
   selectedIds: [],
+  textRangeSelection: null,
   publishCandidateIds: [],
   publishCategoryValue: "",
   importedElementsRefreshKey: 0,
@@ -1273,6 +1324,21 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   bumpImportedElementsRefreshKey: () =>
     set((state) => ({ importedElementsRefreshKey: state.importedElementsRefreshKey + 1 })),
   clearSelection: () => set({ selectedIds: [] }),
+  setTextRangeSelection: (selection) =>
+    set((state) => {
+      const current = state.textRangeSelection;
+      if (
+        current === selection ||
+        (current &&
+          selection &&
+          current.elementId === selection.elementId &&
+          current.start === selection.start &&
+          current.end === selection.end)
+      ) {
+        return state;
+      }
+      return { textRangeSelection: selection };
+    }),
   registerFontFamilies: (fontFamilies) =>
     set((state) => ({
       availableFontFamilies: mergeFontFamilies(state.availableFontFamilies, fontFamilies),
@@ -1623,8 +1689,10 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           ? { mediaAnimationIntensity: normalizeAnimationIntensity(patch.mediaAnimationIntensity) }
           : {}),
       };
+      // A text layer with spans keeps them coherent: new text carries them along, a whole-layer
+      // style value takes over that key, a new layer size scales theirs (textSpans.ts).
       const nextElements = activePage.elements.map((element) =>
-        element.id !== id ? element : { ...element, ...normalizedPatch }
+        element.id !== id ? element : { ...element, ...reconcileTextSpansForPatch(element, normalizedPatch) }
       );
       const nextPage = reconcilePageWithElements(
         activePage,
@@ -1638,10 +1706,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           durationMs: nextPage.durationMs,
           elements: nextPage.elements,
         })),
-        availableFontFamilies:
-          typeof normalizedPatch.fontFamily === "string"
-            ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
-            : state.availableFontFamilies,
+        availableFontFamilies: mergePatchFontFamilies(state.availableFontFamilies, normalizedPatch),
       };
     });
 
@@ -1996,7 +2061,9 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           : {}),
       };
       const nextElements = activePage.elements.map((element) =>
-        !selectedSet.has(element.id) ? element : { ...element, ...normalizedPatch }
+        !selectedSet.has(element.id)
+          ? element
+          : { ...element, ...reconcileTextSpansForPatch(element, normalizedPatch) }
       );
       const nextPage = reconcilePageWithElements(
         activePage,
@@ -2010,10 +2077,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
           durationMs: nextPage.durationMs,
           elements: nextPage.elements,
         })),
-        availableFontFamilies:
-          typeof normalizedPatch.fontFamily === "string"
-            ? mergeFontFamilies(state.availableFontFamilies, [normalizedPatch.fontFamily])
-            : state.availableFontFamilies,
+        availableFontFamilies: mergePatchFontFamilies(state.availableFontFamilies, normalizedPatch),
       };
     });
 
@@ -2157,7 +2221,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
 
     const pastedFontFamilies = duplicated
       .filter((element) => element.type === "text")
-      .map((element) => element.fontFamily);
+      .flatMap((element) => [element.fontFamily, ...textSpanFontFamilies(element.textSpans)]);
 
     set((prev) => ({
       pages: mutateActivePage(prev, (activePage) => ({

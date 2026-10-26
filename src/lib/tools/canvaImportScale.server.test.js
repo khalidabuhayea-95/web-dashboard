@@ -180,3 +180,23 @@ test("layer-tree bounds follow the objects into the clamped canvas", () => {
   assert.equal(scaled.page.width, 1587, "the metadata page keeps reporting the source size; the route records both");
   assert.equal(editorData.layerTree[0].bounds.x, 317.69, "input is not mutated");
 });
+
+test("a custom motion path's offsets follow the clamp; its times do not", () => {
+  const scale = resolveImportCanvasScale(posterDimensions());
+  const door = scaleFabricObjectToCanvas(
+    {
+      type: "image",
+      left: 540,
+      top: 0,
+      mediaMotionPath: [
+        { t: 0, x: 0, y: 0 },
+        { t: 1178, x: 542, y: 6 },
+      ],
+    },
+    scale
+  );
+  assert.deepEqual(door.mediaMotionPath.map((point) => point.t), [0, 1178]);
+  close(door.mediaMotionPath[1].x, 542 * scale.sx);
+  close(door.mediaMotionPath[1].y, 6 * scale.sy);
+  assert.deepEqual(door.mediaMotionPath[0], { t: 0, x: 0, y: 0 });
+});

@@ -85,6 +85,11 @@ export interface TextRevealSpec {
   progress: number;
   mode: TextRevealMode;
   durationMs: number;
+  /**
+   * A per-letter pacing other than the app's 160 ms cadence (the slot's `typePacing` param, set by
+   * the CapCut import — see typewriterCharAlphas). Absent = the default typing.
+   */
+  pacing?: number;
 }
 
 /**
@@ -384,13 +389,14 @@ function withAuthoredBlur(
 function typewriterVisualState(
   progress: number,
   mode: TextRevealMode,
-  durationMs: number
+  durationMs: number,
+  pacing = 0
 ): AnimationVisualState {
   return {
     ...identityVisualState(),
     alphaMultiplier: clamp(0.12 + progress * 0.88, 0, 1),
     revealMask: { kind: "WIPE", progress, featherFraction: 0 },
-    textReveal: { progress, mode, durationMs },
+    textReveal: { progress, mode, durationMs, ...(pacing > 0 ? { pacing } : {}) },
   };
 }
 
@@ -1314,7 +1320,7 @@ export function resolveAnimationVisualState(
         state.glyphMotion = { type, progress: cycleProgress, durationMs: spec.durationMs };
         return state;
       case "TYPEWRITER_CHARS":
-        return typewriterVisualState(progress, "CHARS", spec.durationMs);
+        return typewriterVisualState(progress, "CHARS", spec.durationMs, Math.trunc(specParam(spec, "typePacing") ?? 0));
       case "TYPEWRITER_CURSOR":
         return typewriterVisualState(progress, "CURSOR", spec.durationMs);
       case "TYPEWRITER_WORDS":
@@ -1397,7 +1403,7 @@ function rampFromParams(spec: AnimationSpecInput, from: number, to: number, to2:
 
 /**
  * A concurrent loop's own visual at loop clock [loopMs] (§8.2): with ramp params, BREATHE ramps
- * the scale (plus its vertical drift from the `y` ramp), DRIFT the translation along its axis
+ * the scale (plus its vertical / sideways drift from the `y` / `x` ramps), DRIFT the translation along its axis
  * (x for LEFT/RIGHT/DEFAULT, y for UP/DOWN) and TECTONIC the x translation, all in layer-local
  * ms; without them the type's loop formula plays at `(loopMs mod durationMs) / durationMs`.
  */
@@ -1417,15 +1423,17 @@ export function resolveConcurrentLoopVisualState(
     );
     if (loop.type === "BREATHE") {
       state.scaleMultiplier = value;
-      const yTo = specParam(loop, "y1To");
-      const yFrom = specParam(loop, "y1From");
-      if (yTo !== undefined || yFrom !== undefined) {
-        const end = yTo ?? 0;
-        state.translationY = canvaRampValue(
-          rampFromParams(loop, yFrom ?? 0, end, specParam(loop, "y2To") ?? end),
-          loopMs
-        );
-      }
+      // The drifts ride the same timing: y1…/y2… vertical, x1…/x2… sideways (Canva's Photo Flow
+      // pans a photo either way inside its frame while it holds the zoom).
+      const drift = (fromKey: string, toKey: string, secondKey: string) => {
+        const end = specParam(loop, toKey);
+        const start = specParam(loop, fromKey);
+        if (end === undefined && start === undefined) return 0;
+        const to = end ?? 0;
+        return canvaRampValue(rampFromParams(loop, start ?? 0, to, specParam(loop, secondKey) ?? to), loopMs);
+      };
+      state.translationX = drift("x1From", "x1To", "x2To");
+      state.translationY = drift("y1From", "y1To", "y2To");
     } else if (loop.type === "DRIFT" && (loop.direction === "UP" || loop.direction === "DOWN")) {
       state.translationY = value;
     } else {

@@ -48,9 +48,13 @@ the model back:**
   `BJa: {Vd:0, direction:1}`, `N5a: {Vd:0}` (defaults are Vd 0 = speed/intensity mid-point);
 * "مسح الرسوم المتحركة" (clear) leaves `animation: {type:"none"}` and no repeating record — `type:"none"`
   means NO animation, never a preset.
-The raw records are kept as a fixture: `extension/canva-importer/test/fixtures/canva-live-records-2026-09-22.json`.
+The raw records are kept as a fixture: `extensions/canva-importer/test/fixtures/canva-live-records-2026-09-22.json`.
 
 ### Panel tiles (Arabic UI, in Canva's order)
+
+The Arabic column is CANVA's wording (what the importer recognises). Our editor and the app show the
+app's own tile names instead (`animationSpec.json` is the app's export — e.g. RISE «صعود», PAN «تحريك
+جانبي», WIGGLE «تمايل»), synced 2026-10-14.
 
 | id | Canva name | Arabic tile | our type | Canva offers as |
 |---|---|---|---|---|
@@ -75,7 +79,7 @@ The raw records are kept as a fixture: `extension/canva-importer/test/fixtures/c
 | "pulse" | pulse | تقليص العنصر وتمديده | PULSE | repeating (loop) |
 | "wiggle" | wiggle | اهتزاز سريع بالاتجاهين | WIGGLE | repeating (loop) |
 
-Other element ids (for the importer only): 14 Photo Flow → DRIFT, 15 Photo Zoom → BREATHE, 16 Photo Rise
+Other element ids (for the importer only): 14 Photo Flow → BREATHE ramp on a photo (§8.5 item 8; DRIFT on a non-photo), 15 Photo Zoom → BREATHE, 16 Photo Rise
 → RISE, 24 Typewriter, 25 Ascend, 18 Bounce, 19 Burst, 27 Roll, 21 Shift, 22 Skate, 23 Spread, 20 Merge,
 32 Clarify, 28 custom motion path, 30 mask reveal, 38 Shake Zoom, 39 Whip Slide, 40 Pulse(photo), 41 Chroma
 Wave, 42 Old TV, 43 S-Movement. Page-animation ids are a SEPARATE enum (see §7).
@@ -402,6 +406,7 @@ params; editing duration/direction of the current spec keeps them. Unknown keys 
 | `stackPhaseMs` | loop slot | clock offset for the stacked effects |
 | `r1From` `r1To` `r1Start` `r1Dur` `r1Ease` `r2To` `r2Start` `r2Dur` `r2Ease` | BREATHE, DRIFT, TECTONIC (concurrent) | time-based ramp, ms are layer-local, ease ids per §1 (1 linear, 4 easeInOutQuad) |
 | `y1From` `y1To` `y2To` | BREATHE | vertical drift (px) on the same ramp timing |
+| `x1From` `x1To` `x2To` | BREATHE | sideways drift (px) on the same ramp timing (Photo Flow's sideways pan) |
 | `fadeEase` | FADE | 1 = LINEAR in and out (Canva Tectonic fades, Drift on video pages) |
 | `unit` | FADE, BLUR, SUCCESSION, NEON | writing style: 1 character, 2 word, 3 line |
 | `fill` | same | 1 = stretch the unit schedule to fill the duration (explicit Canva duration) |
@@ -524,6 +529,13 @@ Everything below runs in the extension on Canva's own model values (design px, p
    headline (`Fyf`); every other element gets Canva's hidden "shake" (element id 10, `ntf`), which has no
    counterpart here. That shake, the photo presets 14–19 and the combo styles 21–27 keep the current
    approximation and are logged as such in the import warnings.
+   **Photo Flow (14, and page 17 on its photos) is ported** (`canva-photo-flow`, from `eQf`/`fQf`/`YQf`/
+   `XQf`, 2026-10-14): Canva moves the PHOTO INSIDE its frame (no element tween). Page photo timing over
+   min(page, 8 s) − 750·f (f = min(1, span/2050)): slot = span/N, step = .66·slot, slot += leftover/N;
+   untimed photos fade in at step·index for min(slot, 1300·f) (easeOutQuad), timed ones on their own
+   windows; the photo is zoomed 1 + lerp(.02, .1, intensity) and panned ±k/2 (easeInOutQuad over the slot)
+   along an axis from the frame (w/h < .5 up, > 1.8 right) or its page quarter (TL right, BL up, TR down,
+   BR left). Emitted as a BREATHE ramp (scale held, the pan on the `y1` lift or the `x1` slide). Photo Zoom / Photo Rise (15/16, pages 18/19) are still approximations.
 9. **Extraction**: all three fiber-walk copies read the page animation (not only canva-fiber-main.js),
    keep raw `startUs`/`durationUs` undefined vs 0, and read element geometry + text for the seeds and units.
 

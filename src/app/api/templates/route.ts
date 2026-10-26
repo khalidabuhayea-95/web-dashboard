@@ -4,6 +4,8 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { Prisma } from "@prisma/client";
 import prisma from "@/lib/prisma";
+import { scheduleTemplateSearchKeywords } from "@/lib/search/templateKeywords.server";
+import { TEMPLATE_WRITE_TRANSACTION_OPTIONS } from "@/lib/templates/templateTransaction";
 import { findDashboardUsersByIds } from "@/lib/auth/dashboardUsers.server";
 import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { resizeThumbnailBufferHalf } from "@/lib/media/thumbnailResize.server";
@@ -196,7 +198,9 @@ function extractEditorPages(data: any): Array<Record<string, any>> {
   if (Array.isArray(extracted?.objects)) {
     return [
       {
-        durationMs: data?.timeline?.totalDurationMs,
+        // A one-page import carries its source page's length under meta.import.page (the
+        // extension's video designs); the editor writes timeline.totalDurationMs once saved.
+        durationMs: data?.timeline?.totalDurationMs ?? data?.meta?.import?.page?.durationMs,
         elements: extracted.objects,
       },
     ];
@@ -955,7 +959,13 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
         });
 
         return item;
-      });
+      }, TEMPLATE_WRITE_TRANSACTION_OPTIONS);
+
+      // Search keywords follow the name (an Arabic name gets English ones and vice versa).
+      const existingKeywords = (existing as { searchKeywords?: unknown }).searchKeywords;
+      if (uniqueName !== existing.name || !Array.isArray(existingKeywords) || existingKeywords.length === 0) {
+        scheduleTemplateSearchKeywords(updated.id);
+      }
 
       return jsonForEditorClient({ template: withTemplatePreview(updated) });
     }
@@ -1040,7 +1050,9 @@ export async function POST(request: NextRequest): Promise<NextResponse> {
       });
 
       return item;
-    });
+    }, TEMPLATE_WRITE_TRANSACTION_OPTIONS);
+
+    scheduleTemplateSearchKeywords(created.id);
 
     return jsonForEditorClient({ template: withTemplatePreview(created) }, { status: 201 });
   } catch (error) {
@@ -1234,7 +1246,7 @@ export async function PATCH(request: NextRequest): Promise<NextResponse> {
       });
 
       return item;
-    });
+    }, TEMPLATE_WRITE_TRANSACTION_OPTIONS);
 
     return jsonForEditorClient({ template: withTemplatePreview(template) });
   } catch (error) {

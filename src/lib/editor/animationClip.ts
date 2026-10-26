@@ -89,3 +89,89 @@ export function drawRevealClip(ctx: Ctx2D, mask: ClipMask, w: number, h: number,
     }
   }
 }
+
+/** One laid-out line of a text node (Konva's `textArr` entry). */
+export interface TypewriterLine {
+  text: string;
+  width: number;
+  /** The line ends a paragraph (a `\n` follows it in the source text). */
+  lastInParagraph?: boolean;
+}
+
+/**
+ * The typewriter as the app draws it: the first [revealed] characters of the text shown, line by
+ * line, the rest hidden — not one wipe across the whole box, which uncovered every line at once and
+ * left the half-typed ones as ghosts under the fallback fade. Rectangles in the text's local
+ * space: earlier lines whole, the current line up to its last typed character (from the right for
+ * right-to-left text), later lines nothing. [measure] is a line prefix's drawn width.
+ */
+export function typewriterRevealRects(
+  lines: ReadonlyArray<TypewriterLine>,
+  revealed: number,
+  options: {
+    boxWidth: number;
+    lineHeightPx: number;
+    align: string;
+    rtl: boolean;
+    measure: (text: string) => number;
+  }
+): Array<{ x: number; y: number; width: number; height: number }> {
+  const { boxWidth, lineHeightPx, align, rtl, measure } = options;
+  const rects: Array<{ x: number; y: number; width: number; height: number }> = [];
+  // Each shown line owns its band; the first reaches up and the last down a full line (accents,
+  // swashes), the line being typed a fifth below (its descenders) without uncovering the next.
+  const bleed = lineHeightPx;
+  let consumed = 0;
+  lines.forEach((line, index) => {
+    const remaining = revealed - consumed;
+    consumed += line.text.length + 1;
+    if (remaining <= 0) return;
+    const whole = remaining >= line.text.length;
+    const top = index === 0 ? -bleed : index * lineHeightPx;
+    const below = index === lines.length - 1 ? bleed : whole ? 0 : 0.2 * lineHeightPx;
+    const height = (index + 1) * lineHeightPx + below - top;
+    if (whole) {
+      rects.push({ x: -bleed, y: top, width: boxWidth + 2 * bleed, height });
+      return;
+    }
+    const lineLeft = align === "center" ? (boxWidth - line.width) / 2 : align === "right" ? boxWidth - line.width : 0;
+    const shown = Math.max(0, Math.min(line.width, measure(line.text.slice(0, remaining))));
+    // The typed part reaches back past the line's start edge (a swash may lean out of it).
+    rects.push(rtl ? { x: lineLeft + line.width - shown, y: top, width: shown + bleed, height } : { x: lineLeft - bleed, y: top, width: shown + bleed, height });
+  });
+  return rects;
+}
+
+/**
+ * The box of character [charIndex] of the text laid out as [lines] (same counting as
+ * typewriterRevealRects), for a letter drawn on its own pass — a typewriter letter mid-fade. Null
+ * for a line break or past the end.
+ */
+export function typewriterCharRect(
+  lines: ReadonlyArray<TypewriterLine>,
+  charIndex: number,
+  options: {
+    boxWidth: number;
+    lineHeightPx: number;
+    align: string;
+    rtl: boolean;
+    measure: (text: string) => number;
+  }
+): { x: number; y: number; width: number; height: number } | null {
+  const { boxWidth, lineHeightPx, align, rtl, measure } = options;
+  let consumed = 0;
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    const local = charIndex - consumed;
+    consumed += line.text.length + 1;
+    if (local < 0) return null;
+    if (local >= line.text.length) continue;
+    const lineLeft = align === "center" ? (boxWidth - line.width) / 2 : align === "right" ? boxWidth - line.width : 0;
+    const before = measure(line.text.slice(0, local));
+    const through = measure(line.text.slice(0, local + 1));
+    const left = rtl ? lineLeft + line.width - through : lineLeft + before;
+    const bleed = 0.2 * lineHeightPx;
+    return { x: left, y: index * lineHeightPx - bleed, width: Math.max(0, through - before), height: lineHeightPx + 2 * bleed };
+  }
+  return null;
+}

@@ -44,15 +44,17 @@ const clamp = (value: number, min: number, max: number) => Math.max(min, Math.mi
  */
 export function resolveTextCurveConfig(item: TextCurveSource | null | undefined): TextCurveConfig {
   const amount = clamp(finiteOr(item?.textCurveAmount, 0), -200, 200);
-  const enabled = Boolean(item?.textCurveEnabled) && Math.abs(amount) > 0.5;
+  const measuredArc = finiteOr(item?.textCurveArcDegrees, 0);
+  // The app's test — enabled with more than half a degree; an arc alone (the curve slider writes
+  // it directly, 100% = a full ring) is enough, the legacy amount still counts for old layers.
+  const enabled = Boolean(item?.textCurveEnabled) && (Math.abs(measuredArc) > 0.5 || Math.abs(amount) > 0.5);
   if (!enabled) return { enabled: false, arcDegrees: 0, radius: 200 };
   const width = Math.max(2, finiteOr(item?.width, 2) * Math.abs(finiteOr(item?.scaleX, 1)));
   const fontSize = Math.max(1, finiteOr(item?.fontSize, 42));
-  const measuredArc = finiteOr(item?.textCurveArcDegrees, 0);
   let arcDegrees: number;
   let radius: number;
-  if (Math.abs(measuredArc) >= 1) {
-    arcDegrees = clamp(measuredArc, -300, 300);
+  if (Math.abs(measuredArc) > 0.5) {
+    arcDegrees = clamp(measuredArc, -360, 360);
     radius = width / (2 * Math.sin(Math.min(Math.PI / 2, (Math.abs(arcDegrees) * Math.PI) / 360)));
   } else {
     const maxCurveOffset = Math.max(Math.max(12, fontSize), Math.min(width * 0.42, Math.max(16, fontSize * 6)));

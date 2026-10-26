@@ -55,6 +55,8 @@ import {
 } from "@/lib/editor/imageCrop";
 import { normalizeHexColor } from "@/lib/editor/colorUtils";
 import { normalizeTextFill } from "@/lib/editor/textFill";
+import { normalizeTextSpans, type TextSpan } from "@/lib/editor/textSpans";
+import { useTextStyleTarget } from "@/components/editor/useTextStyleTarget";
 import { recolorSvgSource } from "@/lib/editor/imagePalette";
 import {
   BUILTIN_SHAPE_ASSETS,
@@ -1958,6 +1960,22 @@ function toEditorDesignFromTemplate(
           : {};
         // Canva's gradient text colour (the extension's readTextGradientFill), over the box.
         const importedTextFill = normalizeTextFill(item.textFill);
+        // Runs styled on their own (the extension's canva-text-spans): px sizes and spacing scale
+        // with the layer's own, families are normalised like the layer's.
+        const importedText = String(item.text || "");
+        const importedTextSpans = Array.isArray(item.textSpans)
+          ? normalizeTextSpans(
+              (item.textSpans as Array<Record<string, unknown>>).map((span) => ({
+                ...(span as unknown as TextSpan),
+                ...(span?.fontFamily ? { fontFamily: normalizeFontFamilyName(String(span.fontFamily)) } : {}),
+                ...(Number.isFinite(Number(span?.fontSize)) ? { fontSize: Number(span.fontSize) * scaleYAbs } : {}),
+                ...(Number.isFinite(Number(span?.letterSpacing))
+                  ? { letterSpacing: Number(span.letterSpacing) * scaleXAbs }
+                  : {}),
+              })),
+              importedText
+            )
+          : [];
         elements.push(
           createElementFromAsset(pageId, {
             ...common,
@@ -1981,12 +1999,18 @@ function toEditorDesignFromTemplate(
             fill: parseColor(item.fill, "#111827"),
             ...textBackgroundFields,
             ...(importedTextFill ? { textFill: importedTextFill } : {}),
+            ...(importedTextSpans.length > 0 ? { textSpans: importedTextSpans } : {}),
             // Imported curved text (Canva's per-letter arc, measured by the extension).
-            textCurveEnabled: Boolean(item.textCurveEnabled) && Math.abs(toNumber(item.textCurveAmount, 0)) > 0.5,
+            textCurveEnabled:
+              Boolean(item.textCurveEnabled) &&
+              (Math.abs(toNumber(item.textCurveAmount, 0)) > 0.5 || Math.abs(toNumber(item.textCurveArcDegrees, 0)) > 0.5),
             textCurveAmount: Math.max(-200, Math.min(200, toNumber(item.textCurveAmount, 0))),
+            ...(toNumber(item.textCurveRingSpread, 0) > 0
+              ? { textCurveRingSpread: Math.min(1, toNumber(item.textCurveRingSpread, 0)) }
+              : {}),
             // The arc Canva actually drew; the canvas and the app both lay the text on it.
-            ...(Math.abs(toNumber(item.textCurveArcDegrees, 0)) >= 1
-              ? { textCurveArcDegrees: Math.max(-300, Math.min(300, toNumber(item.textCurveArcDegrees, 0))) }
+            ...(Math.abs(toNumber(item.textCurveArcDegrees, 0)) > 0.5
+              ? { textCurveArcDegrees: Math.max(-360, Math.min(360, toNumber(item.textCurveArcDegrees, 0))) }
               : {}),
           })
         );
@@ -2606,6 +2630,8 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
   const deleteElement = useEditorStore((state) => state.deleteElement);
   const resizeActivePage = useEditorStore((state) => state.resizeActivePage);
   const updateElement = useEditorStore((state) => state.updateElement);
+  // A font picked while part of a text is selected on the canvas styles just that part.
+  const { range: textRange, applyTextStyle } = useTextStyleTarget();
   const updateSelectedElements = useEditorStore((state) => state.updateSelectedElements);
   const recordHistory = useEditorStore((state) => state.recordHistory);
 
@@ -3723,6 +3749,11 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
     const targetIds = Array.isArray(targetIdsOverride)
       ? targetIdsOverride.filter(Boolean)
       : selectedTextLayerIds;
+    if (textRange && targetIds.includes(textRange.elementId)) {
+      applyTextStyle({ fontFamily: normalizedFamily }, { recordHistory: shouldRecordHistory });
+      registerFontFamilies([normalizedFamily]);
+      return;
+    }
     if (targetIds.length === 0) {
       const hasAnyTextLayer = layers.some((element) => element.type === "text");
       if (!hasAnyTextLayer) {
@@ -4186,9 +4217,15 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
       tags: Array.isArray(template.tags) ? template.tags : [],
       isPremium: Boolean((template as { isPremium?: boolean }).isPremium),
     });
+    // The signature must be the one the query effect asks for, verbatim: a URL without
+    // `updatedAt` requests "id::", and recording the template's own updatedAt here never matched
+    // it, so every change of this callback's identity fetched and reloaded the template again
+    // (~1 s apart — the page never settled and a video layer never finished loading).
     loadedTemplateSignatureRef.current = buildTemplateLoadSignature(
       String(options?.requestedTemplateId || template.id || ""),
-      String(options?.requestedUpdatedAt || template.updatedAt || "")
+      options?.requestedTemplateId
+        ? String(options?.requestedUpdatedAt || "")
+        : String(options?.requestedUpdatedAt || template.updatedAt || "")
     );
   }, [
     activePage.height,
@@ -4474,6 +4511,7 @@ export default function SidePanel({ collapsed }: SidePanelProps) {
 
   return (
     <aside
+      data-editor-chrome
       className={`relative flex min-h-0 shrink-0 bg-white transition-[width] duration-300 ease-out ${
         collapsed ? "w-[76px]" : "w-[396px]"
       }`}

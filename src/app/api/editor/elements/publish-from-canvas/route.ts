@@ -1,3 +1,4 @@
+import { convertPngToLosslessWebp } from "@/lib/media/losslessWebp.server";
 import { createHash } from "node:crypto";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -14,6 +15,7 @@ import {
   uploadObject,
 } from "@/lib/storage/objectStorage.server";
 import { getEditorSession } from "@/lib/templates/server";
+import { scheduleElementTranslationSweep } from "@/lib/search/elementTranslations.server";
 import { translateBatchToArabic } from "@/lib/tools/arabicTranslate.server";
 
 export const runtime = "nodejs";
@@ -136,12 +138,23 @@ async function uploadDataUrlToStorage(dataUrl: string, ownerId: string, baseName
     throw new Error("Image is too large to publish.");
   }
 
-  const path = makeObjectPath(ownerId, baseName, parsed.mimeType);
+  // A PNG element is stored as lossless WebP: the same pixels and alpha, about half the bytes.
+  let body: Buffer = parsed.buffer;
+  let mimeType = parsed.mimeType;
+  if (mimeType === "image/png") {
+    const losslessWebp = await convertPngToLosslessWebp(body);
+    if (losslessWebp.converted) {
+      body = losslessWebp.bytes;
+      mimeType = losslessWebp.mimeType;
+    }
+  }
+
+  const path = makeObjectPath(ownerId, baseName, mimeType);
   const uploaded = await uploadObject({
     bucket: BUCKET_NAME,
     key: path,
-    body: parsed.buffer,
-    contentType: parsed.mimeType,
+    body,
+    contentType: mimeType,
     cacheControl: "public, max-age=31536000, immutable",
     upsert: false,
     skipExistenceCheck: true,
@@ -368,6 +381,8 @@ export async function POST(request: NextRequest) {
       skippedCount: skipped.length,
     });
 
+    // Arabic title/tags for anything whose translation fell back to English (here or earlier).
+    scheduleElementTranslationSweep();
     return NextResponse.json({ ok: true, published, skipped }, {
       headers: { "Cache-Control": "no-store" },
     });

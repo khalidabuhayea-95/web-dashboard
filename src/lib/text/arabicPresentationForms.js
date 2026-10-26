@@ -287,6 +287,11 @@ export function normalizeTemplateArabicTextInPlace(data) {
         const before = node.text;
         const isRtlBefore = node.isRtl;
         node.text = result.text;
+        // Multi-style ranges (textSpans) index the text: they survive a one-for-one fold, but a
+        // reordered or resized string would put them on the wrong letters — drop them instead.
+        if (Array.isArray(node.textSpans) && (result.reordered || result.text.length !== before.length)) {
+          delete node.textSpans;
+        }
         if (firstStrongIsRtl(result.text)) node.isRtl = true;
         changes.push({
           path: `${path}.text`,

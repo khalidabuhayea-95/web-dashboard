@@ -1,5 +1,6 @@
 "use client";
 
+import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
 import { resolveTimelineWindow } from "@/lib/editor/animationTimeline";
 import {
   resolveElementAnimations,
@@ -17,6 +18,7 @@ import {
   type GlyphMotionSpec,
 } from "@/lib/editor/animationVisual";
 import type { EditorElement } from "@/store/editorStore";
+import { textSpansAffectLayout } from "@/lib/editor/textSpans";
 
 export const PREVIEW_RENDER_FPS = 60;
 
@@ -203,8 +205,7 @@ export function resolveAnimationStateAtFrame(
 export function isCurvedTextElement(element: EditorElement): boolean {
   return (
     element.type === "text" &&
-    Boolean(element.textCurveEnabled) &&
-    Math.abs(Number(element.textCurveAmount) || 0) > 0.5
+    resolveTextCurveConfig(element).enabled
   );
 }
 
@@ -219,6 +220,9 @@ export function elementPlaysCanvaUnits(
 ): boolean {
   if (!motion || motion.unit === undefined) return false;
   if (element.type !== "text" || isCurvedTextElement(element)) return false;
+  // Ranges in another font, size or spacing are laid out by lib/editor/richText.ts, not on the
+  // single-style lines the units clip: such a text plays the whole-element fallback.
+  if (textSpansAffectLayout(element.textSpans)) return false;
   return canvaUnitsApplyToText(motion.type, String(element.text ?? ""));
 }
 

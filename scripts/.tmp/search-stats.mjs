@@ -1,0 +1,10 @@
+import { PrismaClient } from "@prisma/client";
+const c = new PrismaClient();
+const q = (s) => c.$queryRawUnsafe(s);
+console.log("ext", await q(`SELECT name, installed_version FROM pg_available_extensions WHERE name IN ('pg_trgm','vector','unaccent','fuzzystrmatch')`));
+console.log("elements", await q(`SELECT count(*)::int AS total, count(*) FILTER (WHERE jsonb_array_length(tags_ar)=0)::int AS no_tags_ar, count(*) FILTER (WHERE jsonb_array_length(tags_en)=0)::int AS no_tags_en, count(*) FILTER (WHERE coalesce(title_ar,'')='')::int AS no_title_ar, count(*) FILTER (WHERE jsonb_array_length(labels_ar)=0)::int AS no_labels_ar, round(avg(jsonb_array_length(tags_en)))::int AS avg_tags_en, round(avg(jsonb_array_length(tags_ar)))::int AS avg_tags_ar FROM editor_element_assets`));
+console.log("elements by source", await q(`SELECT source, kind, count(*)::int FROM editor_element_assets GROUP BY 1,2 ORDER BY 3 DESC`));
+console.log("sample elements", await q(`SELECT title_en, title_ar, tags_en::text, tags_ar::text, labels_ar::text FROM editor_element_assets ORDER BY random() LIMIT 6`));
+console.log("templates", await q(`SELECT count(*)::int AS total, count(*) FILTER (WHERE status='published')::int AS published, count(*) FILTER (WHERE jsonb_array_length(tags)=0)::int AS no_tags, round(avg(jsonb_array_length(tags)))::int AS avg_tags, count(*) FILTER (WHERE name ~ '[a-zA-Z]')::int AS latin_names, count(*) FILTER (WHERE name ~ '[؀-ۿ]')::int AS arabic_names FROM "Template"`));
+console.log("sample templates", await q(`SELECT name, tags::text, category, "subCategory" FROM "Template" WHERE status='published' ORDER BY random() LIMIT 8`));
+await c.$disconnect();

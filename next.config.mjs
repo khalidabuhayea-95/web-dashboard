@@ -18,9 +18,12 @@ const nextConfig = {
   // (Next 16's build no longer runs ESLint, so there is no `eslint` option to set here.)
   typescript: { ignoreBuildErrors: true },
   experimental: {
-    // Needed for large PSD/PDF uploads routed through Next proxy/middleware.
-    // Kept above the 200MB PSD cap (route.ts) to allow for multipart overhead.
-    proxyClientMaxBodySize: "210mb",
+    // Needed for large PSD/PDF uploads routed through Next proxy/middleware (200MB PSD cap in
+    // route.ts) and for Canva extension imports: a 163-element illustration collage arrives as
+    // ~250MB of PNG parts, and a body past this limit is cut here, so the multipart manifest then
+    // fails to parse as "Invalid request body". The extension compresses images above
+    // DASHBOARD_UPLOAD_BUDGET_BYTES (background.js) and refuses past its hard limit, both under this.
+    proxyClientMaxBodySize: "600mb",
   },
   headers: async () => {
     // Pragmatic baseline CSP: allows the inline/eval that Next's runtime needs and

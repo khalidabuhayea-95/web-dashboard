@@ -5,12 +5,14 @@ import { flushSync } from "react-dom";
 import Konva from "konva";
 // Side effect: RTL letter-spacing is measured the way Konva draws it (see the module).
 import "@/lib/editor/konvaTextPatches";
-import useImage from "use-image";
+// Side effect: shrunk images are drawn with high-quality filtering (see the module).
+import "@/lib/editor/konvaImageSmoothing";
 import { animatedFrameIndexAtMs, loadAnimatedImageFrames, type AnimatedImageFrames } from "@/lib/editor/animatedImage";
 import { Minus, Plus } from "lucide-react";
 import {
   Arrow,
   Circle,
+  Ellipse,
   Group,
   Image as KonvaImage,
   Layer,
@@ -20,7 +22,6 @@ import {
   Stage,
   Star,
   Text,
-  TextPath,
   Transformer,
 } from "react-konva";
 
@@ -71,23 +72,55 @@ import {
   resolveVideoSourceTimeAtFrame,
   type ElementRenderPose,
 } from "@/lib/editor/previewRuntime";
-import { curvedTextArcPath, resolveCurvedTextArc, resolveTextCurveConfig } from "@/lib/editor/textCurve";
-import { drawRevealClip, type ClipMask } from "@/lib/editor/animationClip";
+import { resolveTextCurveConfig } from "@/lib/editor/textCurve";
+import { curvedTextRingSpread } from "@/lib/editor/curvedText";
+import { curvedTextFrameFor, paintCurvedText, type CurvedTextPaintInput } from "@/lib/editor/curvedTextPaint";
+import {
+  buildSnapTargets,
+  SNAP_THRESHOLD_SCREEN_PX,
+  snapMovingRect,
+  snapResizedRect,
+  snapResizedRotatedBox,
+  unionRect,
+  type SnapGuide,
+  type SnapRect,
+  type SnapTargets,
+  type SpacingMark,
+} from "@/lib/editor/snapping";
+import { drawRevealClip, typewriterCharRect, typewriterRevealRects, type ClipMask } from "@/lib/editor/animationClip";
+import { preloadImage, useCachedImage } from "@/lib/editor/imageCache";
 import CanvaUnitText from "@/components/editor/CanvaUnitText";
+import { openInlineRichTextEditor, type InlineRichTextEditor } from "@/components/editor/inlineRichTextEditor";
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import { drawTextBackground, resolveTextBackgroundBox } from "@/lib/editor/textBackground";
 import { resolveLinearGradientEndpoints, textFillKonvaProps } from "@/lib/editor/textFill";
+import {
+  hasTextSpans,
+  textSpanFontFamilies,
+  textSpanStyleAt,
+  textSpansAffectLayout,
+  type TextSpan,
+} from "@/lib/editor/textSpans";
+import {
+  layoutRichText,
+  paintRichText,
+  richTextFontDescriptors,
+  type RichTextInput,
+} from "@/lib/editor/richText";
 import {
   clearTextBoxMeasurementCache,
   layoutTextLines,
   measureTextBox,
   resolveSnugTextBox,
   textBoxAnchorDeltaX,
+  textBoxStartAnchorDeltaX,
   type TextBoxInput,
 } from "@/lib/editor/textBox";
 import { planTextLayerMerge, type TextMergeSource } from "@/lib/editor/mergeTextLayers";
 import {
   revealFraction,
+  revealedCharOffset,
+  typewriterCharAlphas,
   glyphVisual,
   splitWordsForMotion,
   layoutWordsSingleLine,
@@ -380,6 +413,7 @@ function isDrawableMediaReady(media: unknown) {
 class VideoFrameSurface {
   private canvas: HTMLCanvasElement | null = null;
   private painted = false;
+  private paintedSrc = "";
 
   /** Copy the element's current frame when it has one; a not-ready element leaves the last frame. */
   paint(media: HTMLVideoElement | null | undefined) {
@@ -394,6 +428,7 @@ class VideoFrameSurface {
     try {
       context.drawImage(media, 0, 0);
       this.painted = true;
+      this.paintedSrc = media.currentSrc || media.src || "";
     } catch {
       // A frame that cannot be copied (decoder mid-swap) keeps the previous one.
     }
@@ -402,6 +437,17 @@ class VideoFrameSurface {
   /** Forget the held frame — a new source must never show the old clip's picture. */
   reset() {
     this.painted = false;
+    this.paintedSrc = "";
+  }
+
+  /**
+   * Forget the held frame only when [media] plays a DIFFERENT clip. A handed-over element (see
+   * acquireSharedVideo) is the same clip mid-seek to the new layer's start, and its last frame is
+   * what covers that seek — resetting here blanked the page for the seek's two frames.
+   */
+  resetUnlessSameClip(media: HTMLVideoElement) {
+    const src = media.currentSrc || media.src || "";
+    if (!this.painted || !src || src !== this.paintedSrc) this.reset();
   }
 
   get frame(): HTMLCanvasElement | null {
@@ -659,7 +705,7 @@ function CanvasBackgroundImageImpl({
   pageWidth: number;
   pageHeight: number;
 }) {
-  const [image] = useImage(src, "anonymous");
+  const [image] = useCachedImage(src, "anonymous");
   const layout = useMemo(
     () => resolveBackgroundCoverLayout(image, pageWidth, pageHeight),
     [image, pageHeight, pageWidth]
@@ -840,7 +886,7 @@ function CanvasImageNodeImpl({
     shouldRecolorRaster,
     vectorShapeSource,
   ]);
-  const [image] = useImage(resolvedSource, "anonymous");
+  const [image] = useCachedImage(resolvedSource, "anonymous");
   const imageRef = useRef<Konva.Image | null>(null);
   const onImageMetadataRef = useRef(onImageMetadata);
   const isGif = useMemo(() => isGifSource(resolvedSource), [resolvedSource]);
@@ -930,7 +976,7 @@ function CanvasImageNodeImpl({
   // The settled still the importer stored next to the GIF. A Canva sticker's frame 0 is blank (it
   // paints in from nothing), so an EXPLICIT sync to the start — the thumbnail capture, a scrub to
   // 0:00 — shows this instead; the free-running loop plays the real first frame.
-  const [animatedPosterImage] = useImage(animatedCandidate ? String(element.posterSrc || "").trim() : "", "anonymous");
+  const [animatedPosterImage] = useCachedImage(animatedCandidate ? String(element.posterSrc || "").trim() : "", "anonymous");
   const animatedPosterRef = useRef<HTMLImageElement | null>(null);
   useEffect(() => {
     animatedPosterRef.current = animatedPosterImage || null;
@@ -974,6 +1020,19 @@ function CanvasImageNodeImpl({
   // a timestamp), after which the free-running clock takes over again.
   const animatedHoldUntilRef = useRef(0);
   const animatedClockRef = useRef<{ anchorNow: number; anchorMs: number } | null>(null);
+  const animatedPlayheadMsRef = useRef(0);
+  useEffect(() => {
+    animatedPlayheadMsRef.current = (playheadFrame / Math.max(1, previewFps)) * 1000;
+  }, [playheadFrame, previewFps]);
+  useEffect(() => {
+    // Live playback (the timeline stops forcing sync): run the clock from the playhead, as a video
+    // is aligned once when play starts — otherwise it keeps the anchor from when the frames
+    // decoded, harmless for a looping sticker but a one-shot overlay (a CapCut veil) would play
+    // out of step with the timeline.
+    if (!animatedFrames || forceTimelineSync) return;
+    animatedClockRef.current = { anchorNow: performance.now(), anchorMs: animatedPlayheadMsRef.current };
+    animatedHoldUntilRef.current = 0;
+  }, [animatedFrames, forceTimelineSync]);
   useEffect(() => {
     if (!animatedFrames || !forceTimelineSync) return;
     // The scrubber / export renderer placed the playhead: show that exact frame (the poster at the
@@ -1141,6 +1200,69 @@ function CanvasImageNodeImpl({
   );
 }
 
+// ── shared video elements ───────────────────────────────────────────────────────────────────────
+// One <video> per source, handed from layer to layer. A Canva video page's backdrop is the same
+// clip restarting with every scene (one layer per scene, back to back); a fresh element per layer
+// needed 270–660 ms to reach `canplay`, and the page showed WHITE behind the next scene's text for
+// that long at every cut — the "flash" when a text appears (DAHNlJ_f8mI). A layer that finds the
+// element free takes it as it is (loaded, holding the previous scene's last frame) and only seeks;
+// a layer that finds it busy gets a private element, exactly as before. A released element lingers
+// a while for the next taker, then frees its stream (Chrome's cache lock starves any later element
+// loading the same url while a paused one keeps its request open).
+type PooledVideo = { video: HTMLVideoElement; users: number; releaseTimer: number | null };
+const sharedVideoPool = new Map<string, PooledVideo>();
+const SHARED_VIDEO_LINGER_MS = 15000;
+
+function createPlaybackVideoElement(src: string) {
+  const video = document.createElement("video");
+  video.src = src;
+  video.crossOrigin = "anonymous";
+  video.muted = true;
+  video.defaultMuted = true;
+  video.autoplay = true;
+  video.controls = false;
+  video.loop = true;
+  video.preload = "auto";
+  video.playsInline = true;
+  video.setAttribute("playsinline", "true");
+  video.load();
+  return video;
+}
+
+function acquireSharedVideo(src: string): HTMLVideoElement {
+  const pooled = sharedVideoPool.get(src);
+  if (pooled && pooled.users === 0) {
+    if (pooled.releaseTimer !== null) {
+      window.clearTimeout(pooled.releaseTimer);
+      pooled.releaseTimer = null;
+    }
+    pooled.users = 1;
+    return pooled.video;
+  }
+  const video = createPlaybackVideoElement(src);
+  if (!pooled) sharedVideoPool.set(src, { video, users: 1, releaseTimer: null });
+  return video;
+}
+
+function releaseSharedVideo(src: string, video: HTMLVideoElement) {
+  video.pause();
+  const pooled = sharedVideoPool.get(src);
+  if (!pooled || pooled.video !== video) {
+    // A private element (the source was busy when this layer mounted): free its stream now.
+    video.removeAttribute("src");
+    video.load();
+    return;
+  }
+  pooled.users = Math.max(0, pooled.users - 1);
+  if (pooled.users > 0) return;
+  pooled.releaseTimer = window.setTimeout(() => {
+    if (sharedVideoPool.get(src) !== pooled || pooled.users > 0) return;
+    sharedVideoPool.delete(src);
+    video.removeAttribute("src");
+    video.load();
+  }, SHARED_VIDEO_LINGER_MS);
+}
+
 function CanvasVideoNodeImpl({
   element,
   pose,
@@ -1181,17 +1303,8 @@ function CanvasVideoNodeImpl({
     }
 
     let mounted = true;
-    const htmlVideo = document.createElement("video");
-    htmlVideo.src = element.src;
-    htmlVideo.crossOrigin = "anonymous";
-    htmlVideo.muted = true;
-    htmlVideo.defaultMuted = true;
-    htmlVideo.autoplay = true;
-    htmlVideo.controls = false;
-    htmlVideo.loop = true;
-    htmlVideo.preload = "auto";
-    htmlVideo.playsInline = true;
-    htmlVideo.setAttribute("playsinline", "true");
+    const videoSrc = element.src;
+    const htmlVideo = acquireSharedVideo(videoSrc);
 
     const handleLoadedMetadata = () => {
       const duration = Number.isFinite(htmlVideo.duration) ? Math.max(0, htmlVideo.duration) : 0;
@@ -1215,40 +1328,27 @@ function CanvasVideoNodeImpl({
 
     htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
     htmlVideo.addEventListener("canplay", handleCanPlay);
-    htmlVideo.load();
+    // A handed-over element is already loaded: keep its current frame on screen while the seek
+    // below lands (the shape draws the held frame mid-seek), then publish it right away.
+    if (htmlVideo.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) heldFrame.paint(htmlVideo);
+    if (htmlVideo.readyState >= HTMLMediaElement.HAVE_METADATA) handleLoadedMetadata();
+    if (htmlVideo.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) handleCanPlay();
 
     return () => {
       mounted = false;
-      htmlVideo.pause();
+      htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      htmlVideo.removeEventListener("canplay", handleCanPlay);
+      releaseSharedVideo(videoSrc, htmlVideo);
       if (videoRef.current === htmlVideo) {
         videoRef.current = null;
       }
-      htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      htmlVideo.removeEventListener("canplay", handleCanPlay);
       setVideo((current) => (current === htmlVideo ? null : current));
     };
-  }, [element.src, element.videoEnd, element.videoStart]);
+  }, [element.src, element.videoEnd, element.videoStart, heldFrame]);
 
-  // Poster (first frame) drawn until the video decodes — see EditorElement.posterSrc. Kept with
-  // its source so a stale image never draws for a changed src; set only from the load callback.
-  const [poster, setPoster] = useState<{ src: string; image: HTMLImageElement } | null>(null);
-  useEffect(() => {
-    const source = String(element.posterSrc || "").trim();
-    if (!source) return undefined;
-    let mounted = true;
-    const image = new window.Image();
-    image.crossOrigin = "anonymous";
-    image.onload = () => {
-      if (!mounted) return;
-      setPoster({ src: source, image });
-      mediaRef.current?.getLayer()?.batchDraw();
-    };
-    image.src = source;
-    return () => {
-      mounted = false;
-    };
-  }, [element.posterSrc]);
-  const posterImage = poster && poster.src === String(element.posterSrc || "").trim() ? poster.image : null;
+  // Poster (first frame) drawn until the video decodes — see EditorElement.posterSrc. From the
+  // shared image cache, so a scene opening on a video has it on its first frame (no page flash).
+  const [posterImage] = useCachedImage(String(element.posterSrc || "").trim(), "anonymous");
   const syncVideoToFrame = useCallback(
     async (frame: number, fps: number) => {
       const media = videoRef.current;
@@ -1424,7 +1524,7 @@ function CanvasVideoNodeImpl({
   useEffect(() => {
     const media = videoRef.current;
     if (!media) return;
-    heldFrame.reset();
+    heldFrame.resetUnlessSameClip(media);
     const redraw = () => {
       heldFrame.paint(media);
       mediaRef.current?.getLayer()?.batchDraw();
@@ -1699,7 +1799,13 @@ function CanvasFrameNodeImpl({
     };
   }, [element.frameShape]);
   const transform = element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM;
-  const [image] = useImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
+  const [image] = useCachedImage(frameContent?.kind === "image" ? frameContent.src : "", "anonymous");
+  // A framed video's poster stands in until the clip has a picture to draw (and for good when the
+  // clip never decodes) — the frame used to sit empty meanwhile.
+  const [posterImage] = useCachedImage(
+    frameContent?.kind === "video" ? String(frameContent.posterSrc || "") : "",
+    "anonymous"
+  );
   const [video, setVideo] = useState<HTMLVideoElement | null>(null);
   const heldFrame = useState(() => new VideoFrameSurface())[0];
   const [heldFrameCanvas, setHeldFrameCanvas] = useState<HTMLCanvasElement | null>(null);
@@ -1741,17 +1847,8 @@ function CanvasFrameNodeImpl({
     }
 
     let mounted = true;
-    const htmlVideo = document.createElement("video");
-    htmlVideo.src = frameContent.src;
-    htmlVideo.crossOrigin = "anonymous";
-    htmlVideo.muted = true;
-    htmlVideo.defaultMuted = true;
-    htmlVideo.autoplay = true;
-    htmlVideo.controls = false;
-    htmlVideo.loop = true;
-    htmlVideo.preload = "auto";
-    htmlVideo.playsInline = true;
-    htmlVideo.setAttribute("playsinline", "true");
+    const videoSrc = frameContent.src;
+    const htmlVideo = acquireSharedVideo(videoSrc);
 
     const handleLoadedMetadata = () => {
       if (!mounted) return;
@@ -1784,16 +1881,18 @@ function CanvasFrameNodeImpl({
 
     htmlVideo.addEventListener("loadedmetadata", handleLoadedMetadata);
     htmlVideo.addEventListener("canplay", handleCanPlay);
-    htmlVideo.load();
+    // A handed-over element is already loaded (see acquireSharedVideo): publish it right away.
+    if (htmlVideo.readyState >= HTMLMediaElement.HAVE_METADATA) handleLoadedMetadata();
+    if (htmlVideo.readyState >= HTMLMediaElement.HAVE_FUTURE_DATA) handleCanPlay();
 
     return () => {
       mounted = false;
-      htmlVideo.pause();
+      htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
+      htmlVideo.removeEventListener("canplay", handleCanPlay);
+      releaseSharedVideo(videoSrc, htmlVideo);
       if (videoRef.current === htmlVideo) {
         videoRef.current = null;
       }
-      htmlVideo.removeEventListener("loadedmetadata", handleLoadedMetadata);
-      htmlVideo.removeEventListener("canplay", handleCanPlay);
       setVideo((current) => (current === htmlVideo ? null : current));
     };
   }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, frameContent?.videoStart, transform.fit]);
@@ -1963,7 +2062,7 @@ function CanvasFrameNodeImpl({
   useEffect(() => {
     const media = videoRef.current;
     if (!media) return;
-    heldFrame.reset();
+    heldFrame.resetUnlessSameClip(media);
     const redraw = () => {
       heldFrame.paint(media);
       setHeldFrameCanvas((current) => (current === heldFrame.frame ? current : heldFrame.frame));
@@ -2051,7 +2150,11 @@ function CanvasFrameNodeImpl({
 
   // A video frame draws from the held copy of its last decoded frame (see VideoFrameSurface):
   // Konva.Image paints nothing from a seeking <video>, so the copy is what keeps the picture up.
-  const mediaSource = frameContent?.kind === "video" ? heldFrameCanvas ?? video : image;
+  const videoHasPicture = Boolean(video && Number(video.videoWidth) > 0);
+  const mediaSource =
+    frameContent?.kind === "video"
+      ? heldFrameCanvas ?? (videoHasPicture ? video : posterImage ?? null)
+      : image;
   const mediaLayout = useMemo(
     () =>
       resolveFrameContentLayout(
@@ -2289,6 +2392,8 @@ interface CanvasPageSceneProps {
   onUpdateImageMetadata?: (element: EditorElement, meta: { width: number; height: number }) => void;
   onUpdateVideoMetadata?: (element: EditorElement, meta: { duration: number }) => void;
   onBeginInlineTextEdit?: (node: Konva.Node, element: EditorElement) => void;
+  /** The text layer open in the on-canvas editor: its glyphs are hidden under the editor's. */
+  inlineEditingTextId?: string | null;
 }
 
 /** Stable per-element handler bundle handed to the memoized canvas node components. */
@@ -2365,6 +2470,7 @@ function CanvasPageSceneImpl({
   onUpdateImageMetadata,
   onUpdateVideoMetadata,
   onBeginInlineTextEdit,
+  inlineEditingTextId = null,
 }: CanvasPageSceneProps) {
   const sceneNodeRefs = useRef<Map<string, Konva.Node>>(new Map());
   const safeRegisterRef = useCallback(
@@ -2382,6 +2488,15 @@ function CanvasPageSceneImpl({
     [registerPreviewMediaController]
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Warm the shared image cache with every image this page will show — layers mount only inside
+  // their timeline window, and one opening mid-play must not wait a frame for its picture.
+  useEffect(() => {
+    for (const element of elements) {
+      if (element.type === "image" && element.src) void preloadImage(String(element.src), "anonymous");
+      const poster = String((element as { posterSrc?: string }).posterSrc || "").trim();
+      if (poster) void preloadImage(poster, "anonymous");
+    }
+  }, [elements]);
   // Stable so the memoized node components below are not re-rendered by a fresh object identity.
   const poseOptions = useMemo<RenderPoseOptions>(() => ({ settled: settledPose }), [settledPose]);
 
@@ -2821,6 +2936,11 @@ function CanvasPageSceneImpl({
               // scales and animates with the glyphs — including mid-drag and mid-transform, which
               // a sibling layer driven by React state would trail.
               const textBackground = resolveTextBackgroundBox(element);
+              // Multi-style text (lib/editor/textSpans.ts): the same node, painted by
+              // lib/editor/richText.ts so each styled range draws in its own style.
+              const richInput = hasTextSpans(element)
+                ? buildRichTextInput(element, direction === "rtl" ? "rtl" : "ltr", textFillProps)
+                : null;
               const textBackgroundRect = textBackground ? (
                 <Rect
                   x={textBackground.x}
@@ -2834,11 +2954,14 @@ function CanvasPageSceneImpl({
                 />
               ) : null;
 
+              // Open in the on-canvas editor: the editor draws the text over this spot.
+              const editingThisText = inlineEditingTextId === element.id;
               if (hasTextCurve) {
                 return (
                   <Group
                     key={element.id}
                     {...commonProps}
+                    {...(editingThisText ? { opacity: 0 } : {})}
                     onDblClick={
                       interactive
                         ? (event) => onBeginInlineTextEdit?.(event.target, element)
@@ -2853,23 +2976,13 @@ function CanvasPageSceneImpl({
                     <Rect width={element.width} height={element.height} fill="rgba(0,0,0,0)" />
                     {/* The app keeps a curved layer's box on the UN-curved frame; so do we. */}
                     {textBackgroundRect}
-                    <TextPath
-                      {...textStrokeProps}
-                      data={resolveTextCurvePath(element, resolveCssFontFamily(element.fontFamily), konvaFontStyle)}
-                      text={element.text}
-                      fill={element.color || element.fill}
-                      {...textFillProps}
-                      fontSize={element.fontSize}
-                      fontFamily={resolveCssFontFamily(element.fontFamily)}
-                      fontStyle={konvaFontStyle}
-                      fontVariant="normal"
-                      // The arc is exactly the text's advance (see resolveTextCurvePath), so the
-                      // text is laid from its start, as the app does — alignment has no room to act.
-                      align="left"
-                      letterSpacing={element.letterSpacing}
-                      textDecoration={element.textDecoration}
-                      textBaseline="middle"
+                    {/* The app's curve: each line shaped whole, then bent onto its own arc
+                        (lib/editor/curvedText.ts + curvedTextPaint.ts). */}
+                    <Shape
                       listening={false}
+                      sceneFunc={(context) =>
+                        paintCurvedText(context._context as CanvasRenderingContext2D, buildCurvedTextPaintInput(element))
+                      }
                     />
                   </Group>
                 );
@@ -2905,6 +3018,7 @@ function CanvasPageSceneImpl({
                       ...(textStrokeWidthPx > 0 && String(element.stroke || "").trim()
                         ? { stroke: element.stroke, strokeWidth: textStrokeWidthPx }
                         : {}),
+                      ...(hasTextSpans(element) ? { spans: element.textSpans } : {}),
                     }}
                   />
                 );
@@ -2918,9 +3032,21 @@ function CanvasPageSceneImpl({
               if (
                 textFx?.glyphMotion &&
                 (perWordType === "ASCEND" || perWordType === "ONE_WORD") &&
-                !element.text.includes("\n")
+                !element.text.includes("\n") &&
+                // Ranges in another font or size are laid out by richText.ts, not word by word.
+                !textSpansAffectLayout(element.textSpans)
               ) {
                 const words = splitWordsForMotion(element.text);
+                // A multi-style text paints each word in the colour at its first letter.
+                const wordColors: Array<string | undefined> = [];
+                if (hasTextSpans(element)) {
+                  let cursor = 0;
+                  for (const word of words) {
+                    const at = element.text.indexOf(word, cursor);
+                    wordColors.push(at >= 0 ? textSpanStyleAt(element.textSpans, at).color : undefined);
+                    cursor = at >= 0 ? at + word.length : cursor;
+                  }
+                }
                 if (words.length > 0) {
                   const gm = textFx.glyphMotion;
                   const rtl = direction === "rtl";
@@ -2949,15 +3075,17 @@ function CanvasPageSceneImpl({
                             x={b.x}
                             y={gv.translateYEm * lineHeightPx}
                             text={b.text}
-                            fill={element.color || element.fill}
+                            fill={wordColors[b.wordIndex] || element.color || element.fill}
                             // One ramp across the whole box, not one per word.
-                            {...textFillKonvaProps(
-                              element.textFill,
-                              element.width,
-                              element.height,
-                              b.x,
-                              gv.translateYEm * lineHeightPx
-                            )}
+                            {...(wordColors[b.wordIndex]
+                              ? {}
+                              : textFillKonvaProps(
+                                  element.textFill,
+                                  element.width,
+                                  element.height,
+                                  b.x,
+                                  gv.translateYEm * lineHeightPx
+                                ))}
                             fontSize={element.fontSize}
                             fontFamily={resolveCssFontFamily(element.fontFamily)}
                             fontStyle={konvaFontStyle}
@@ -2989,7 +3117,54 @@ function CanvasPageSceneImpl({
                     ),
                   };
                 }
+                // A finished reveal hides nothing, so it must not clip either: its box can be
+                // shorter than the glyphs (line height under 1 em — CapCut's packed lines, Arabic
+                // marks), and a resting full-box clip cut their descenders off.
+                if (clip && clip.progress >= 1) clip = null;
                 const bar = textFx.overlayBar;
+                // A typewriter is drawn as the app draws it: the typed characters, line by line
+                // (Konva's own line layout), with no fade — the WIPE and alpha it also carries are
+                // the fallback for surfaces that cannot address characters. Multi-style texts keep
+                // that fallback.
+                const typewriter = textFx.textReveal && !richInput ? textFx.textReveal : null;
+                let typewriterRects: ReturnType<typeof typewriterRevealRects> | null = null;
+                // Letters mid-fade under a CapCut pacing (`typePacing`): each its own clipped pass.
+                const fadingLetters: Array<{ rect: NonNullable<ReturnType<typeof typewriterCharRect>>; alpha: number }> = [];
+                let groupOpacity = commonProps.opacity;
+                if (typewriter) {
+                  clip = null;
+                  groupOpacity = Math.min(1, commonProps.opacity / Math.max(0.01, Math.min(1, 0.12 + typewriter.progress * 0.88)));
+                  const alphas = typewriterCharAlphas(typewriter.pacing, typewriter.progress, typewriter.durationMs, element.text);
+                  let revealed = alphas ? alphas.findIndex((alpha) => alpha < 0.999) : -1;
+                  if (revealed < 0) revealed = alphas ? element.text.length : revealedCharOffset(typewriter.progress, typewriter.mode, typewriter.durationMs, element.text);
+                  if (revealed < element.text.length) {
+                    const probe = new Konva.Text({
+                      width: element.width,
+                      text: element.text,
+                      fontSize: element.fontSize,
+                      fontFamily: resolveCssFontFamily(element.fontFamily),
+                      fontStyle: konvaFontStyle,
+                      lineHeight: element.lineHeight,
+                      letterSpacing: element.letterSpacing,
+                      align: element.align,
+                    });
+                    const lines = (probe.textArr || []).map((line) => ({ text: line.text, width: line.width, lastInParagraph: line.lastInParagraph }));
+                    const layoutOptions = {
+                      boxWidth: element.width,
+                      lineHeightPx: element.fontSize * (element.lineHeight || 1),
+                      align: element.align || "left",
+                      rtl,
+                      measure: (prefix: string) => probe.measureSize(prefix).width,
+                    };
+                    typewriterRects = typewriterRevealRects(lines, revealed, layoutOptions);
+                    alphas?.forEach((alpha, index) => {
+                      if (index < revealed || alpha <= 0.002 || element.text[index] === "\n") return;
+                      const rect = typewriterCharRect(lines, index, layoutOptions);
+                      if (rect) fadingLetters.push({ rect, alpha: Math.min(1, alpha) });
+                    });
+                    probe.destroy();
+                  }
+                }
                 const localTextProps = {
                   ...textStrokeProps,
                   width: element.width,
@@ -3009,19 +3184,34 @@ function CanvasPageSceneImpl({
                   listening: false,
                 };
                 return (
-                  <Group key={element.id} {...commonProps}>
+                  <Group key={element.id} {...commonProps} opacity={groupOpacity}>
                     {/* Outside the reveal clip: the box is the layer's, not part of the reveal. */}
                     {textBackgroundRect}
                     <Group
                       listening={false}
                       clipFunc={
-                        clip
-                          ? (ctx) => drawRevealClip(ctx, clip!, element.width, element.height, rtl)
-                          : undefined
+                        typewriterRects
+                          ? (ctx) => typewriterRects!.forEach((r) => ctx.rect(r.x, r.y, r.width, r.height))
+                          : clip
+                            ? (ctx) => drawRevealClip(ctx, clip!, element.width, element.height, rtl)
+                            : undefined
                       }
                     >
-                      <Text {...localTextProps} />
+                      <Text
+                        {...localTextProps}
+                        sceneFunc={richInput ? richTextSceneFunc(richInput, null) : undefined}
+                      />
                     </Group>
+                    {fadingLetters.map(({ rect, alpha }, index) => (
+                      <Group
+                        key={`fade-${index}`}
+                        listening={false}
+                        opacity={alpha}
+                        clipFunc={(ctx) => ctx.rect(rect.x, rect.y, rect.width, rect.height)}
+                      >
+                        <Text {...localTextProps} />
+                      </Group>
+                    ))}
                     {bar ? (
                       // BLOCK's bar rides ON TOP of the text (outside the text's clip): the whole
                       // layer box sliding across, clipped to that box, in the imported bar colour
@@ -3055,6 +3245,7 @@ function CanvasPageSceneImpl({
                 <Text
                   key={element.id}
                   {...commonProps}
+                  {...(editingThisText ? { opacity: 0 } : {})}
                   {...textStrokeProps}
                   width={element.width}
                   height={element.height}
@@ -3074,14 +3265,16 @@ function CanvasPageSceneImpl({
                   // the snug-fit all address it as one), so the box is painted as an underlay in
                   // its own scene function rather than as a sibling node.
                   sceneFunc={
-                    textBackground
-                      ? (context, shape) => {
-                          drawTextBackground(context._context, textBackground);
-                          (shape as unknown as { _sceneFunc: (ctx: Konva.Context) => void })._sceneFunc(
-                            context
-                          );
-                        }
-                      : undefined
+                    richInput
+                      ? richTextSceneFunc(richInput, textBackground)
+                      : textBackground
+                        ? (context, shape) => {
+                            drawTextBackground(context._context, textBackground);
+                            (shape as unknown as { _sceneFunc: (ctx: Konva.Context) => void })._sceneFunc(
+                              context
+                            );
+                          }
+                        : undefined
                   }
                   onDblClick={
                     interactive
@@ -3099,7 +3292,7 @@ function CanvasPageSceneImpl({
 
             if (element.type === "circle") {
               return (
-                <Circle
+                <Ellipse
                   key={element.id}
                   {...commonProps}
                   // Konva draws Circle/Star around their POSITION, but every other element type —
@@ -3110,7 +3303,11 @@ function CanvasPageSceneImpl({
                   // the top-left like every other shape.
                   offsetX={-element.width / 2}
                   offsetY={-element.height / 2}
-                  radius={Math.max(4, Math.min(element.width, element.height) / 2)}
+                  // The ellipse fills its box, so a side handle stretches it into an oval (a
+                  // square box is still a circle). It used to be a circle on the SHORTER side,
+                  // so a stretch snapped back as soon as the handle was let go.
+                  radiusX={Math.max(2, element.width / 2)}
+                  radiusY={Math.max(2, element.height / 2)}
                   fill={element.fill}
                   stroke={Number(element.strokeWidth) > 0 ? element.stroke : undefined}
                   strokeWidth={Number(element.strokeWidth) > 0 ? Number(element.strokeWidth) : 0}
@@ -3269,6 +3466,91 @@ function resolveTextDirection(text: string) {
   return /[\u0590-\u08FF]/.test(String(text || "")) ? "rtl" : "ltr";
 }
 
+/** A text's spans with their families resolved to the CSS lists the canvas draws with. */
+function canvasTextSpans(spans: ReadonlyArray<TextSpan> | null | undefined): TextSpan[] {
+  return (spans ?? []).map((span) =>
+    span.fontFamily ? { ...span, fontFamily: resolveCssFontFamily(span.fontFamily) } : span
+  );
+}
+
+/**
+ * What lib/editor/richText.ts lays out and paints for a multi-style text layer — the same props
+ * the plain <Text> gets, plus the spans.
+ */
+function buildRichTextInput(
+  element: EditorElement,
+  direction: "rtl" | "ltr",
+  gradient: Record<string, unknown> | null
+): RichTextInput {
+  return {
+    text: String(element.text || ""),
+    width: Math.max(1, Number(element.width) || 1),
+    height: Number(element.height) > 0 ? Number(element.height) : null,
+    fontSize: Math.max(1, Number(element.fontSize) || 1),
+    fontFamily: resolveCssFontFamily(element.fontFamily),
+    fontWeight: String(element.fontWeight || "400"),
+    fontStyle: element.fontStyle === "italic" ? "italic" : "normal",
+    lineHeight: Number(element.lineHeight) || 1,
+    align: element.align,
+    direction,
+    letterSpacing: Number(element.letterSpacing) || 0,
+    color: element.color || element.fill,
+    textDecoration: element.textDecoration || "",
+    stroke: String(element.stroke || ""),
+    strokeWidth: Number(element.strokeWidth) || 0,
+    spans: canvasTextSpans(element.textSpans),
+    gradient: gradient && Object.keys(gradient).length > 0 ? gradient : null,
+  };
+}
+
+function curvedStrokeWidthPx(widthPx: number) {
+  return widthPx > 0 ? Math.max(0.5, widthPx) : 0;
+}
+
+/** What curvedTextPaint needs to draw (and size) a curved text layer. */
+function buildCurvedTextPaintInput(element: EditorElement): CurvedTextPaintInput {
+  const fontSize = Math.max(1, Number(element.fontSize) || 1);
+  const shadowVisible =
+    Boolean(element.shadowColor) &&
+    (Number(element.shadowBlur) > 0 || Number(element.shadowOffsetX) !== 0 || Number(element.shadowOffsetY) !== 0);
+  return {
+    text: String(element.text || ""),
+    width: Math.max(1, Number(element.width) || 1),
+    height: Math.max(1, Number(element.height) || 1),
+    fontSize,
+    fontFamily: resolveCssFontFamily(element.fontFamily),
+    fontWeight: String(element.fontWeight || "400"),
+    fontStyle: element.fontStyle === "italic" ? "italic" : "normal",
+    lineHeight: Number(element.lineHeight) || 1.2,
+    letterSpacing: Number(element.letterSpacing) || 0,
+    color: element.color || element.fill || "#000000",
+    stroke: String(element.stroke || ""),
+    // The app's curved renderer never draws a visible outline thinner than half a pixel.
+    strokeWidthPx: curvedStrokeWidthPx(resolveTextStrokeWidthPx(element.strokeWidth, fontSize)),
+    textFill: element.textFill ?? null,
+    spans: canvasTextSpans(element.textSpans),
+    arcDegrees: resolveTextCurveConfig({ ...element, scaleX: 1 }).arcDegrees,
+    ringSpread: curvedTextRingSpread(element),
+    shadow: shadowVisible
+      ? {
+          color: String(element.shadowColor),
+          blur: Number(element.shadowBlur) || 0,
+          offsetX: Number(element.shadowOffsetX) || 0,
+          offsetY: Number(element.shadowOffsetY) || 0,
+        }
+      : null,
+  };
+}
+
+/** A scene function painting a multi-style text (and the layer's background box under it). */
+function richTextSceneFunc(input: RichTextInput, background: ReturnType<typeof resolveTextBackgroundBox>) {
+  return (context: Konva.Context) => {
+    const ctx = context._context as CanvasRenderingContext2D;
+    if (background) drawTextBackground(ctx, background);
+    paintRichText(ctx, layoutRichText(input), input);
+  };
+}
+
 /**
  * Where a gradient page background runs. With an `angle` (a Canva import, or anything authored
  * against the app's convention) it is the app's own ramp — centre to the farthest edges — so
@@ -3284,36 +3566,6 @@ function pageGradientEndpoints(page: { width: number; height: number; background
   return { start: { x: endpoints.startX, y: endpoints.startY }, end: { x: endpoints.endX, y: endpoints.endY } };
 }
 
-// One off-screen TextPath measures the text exactly as the drawn one will (Konva's own per-glyph
-// widths and font shorthand), so the arc is sized to the advance the glyphs really take.
-let curveMeasureNode: Konva.TextPath | null = null;
-
-/**
- * The circle the app lays this curved text on (lib/editor/textCurve.ts): the text's advance fills
- * `arcDegrees` exactly, the arc is centred on the box's axis and its sag in the box. The path
- * starts at the arc's start and the TextPath is laid out from offset 0, so each glyph's centre
- * lands where the app puts it; it runs a little past the end so the last glyph is drawn.
- */
-function resolveTextCurvePath(element: EditorElement, fontFamily: string, fontStyle: string) {
-  const width = Math.max(2, Number(element.width) || 2);
-  const height = Math.max(2, Number(element.height) || 2);
-  const fontSize = Math.max(1, Number(element.fontSize) || 1);
-  const letterSpacing = Number(element.letterSpacing) || 0;
-  const text = String(element.text || "").replace(/\n/g, " ");
-  // The app's curve follows the box's own (unscaled) width; the group scales the whole drawing.
-  const config = resolveTextCurveConfig({ ...element, scaleX: 1 });
-  if (typeof window !== "undefined" && !curveMeasureNode) {
-    curveMeasureNode = new Konva.TextPath({ data: "M 0 0 L 1 0", text: "" });
-  }
-  let glyphWidths = text.length * fontSize * 0.55;
-  if (curveMeasureNode) {
-    curveMeasureNode.setAttrs({ text, fontSize, fontFamily, fontStyle, fontVariant: "normal", letterSpacing: 0 });
-    glyphWidths = curveMeasureNode.getTextWidth();
-  }
-  const advance = glyphWidths + Array.from(text).length * letterSpacing;
-  const arc = resolveCurvedTextArc(advance, config.arcDegrees, width, height);
-  return curvedTextArcPath(arc, fontSize + Math.abs(letterSpacing) * 2);
-}
 
 /**
  * Konva concatenates this into the canvas font shorthand (`${fontStyle} ${fontVariant}
@@ -3357,6 +3609,13 @@ function normalizeRect(rect: { x: number; y: number; width: number; height: numb
     height: Math.abs(rect.height),
   };
 }
+
+const CORNER_TRANSFORMER_ANCHORS = ["top-left", "top-right", "bottom-left", "bottom-right"];
+const NO_SNAP_GUIDES: SnapGuide[] = [];
+const NO_SPACING_MARKS: SpacingMark[] = [];
+const ROTATION_SNAP_ANGLES = [0, 45, 90, 135, 180, 225, 270, 315];
+/** The box Konva's Transformer hands boundBoxFunc: absolute (screen) px, rotation in radians. */
+type TransformerBox = { x: number; y: number; width: number; height: number; rotation: number };
 
 const TRANSFORMER_ANCHORS = [
   "top-left",
@@ -3563,11 +3822,22 @@ export default function CanvasEditor() {
     let detachRetry: (() => void) | undefined;
     const MAX_LINE_HEIGHT = 1.15;
 
+    // The ink is captured with a one-em margin round the box: a tall face's ink reaches past its
+    // own box (at the 1.15 clamp DAHNZVrSYZM's Arabic title rises 4 px above the top), and a
+    // capture of the box alone clips it — the "same visual spot" shift below then came out short
+    // by what was clipped (3 px instead of 7.7). Coordinates stay box-relative (top may be < 0).
     const measureInk = (cfg: Konva.TextConfig) => {
       const node = new Konva.Text(cfg);
+      const margin = Math.ceil(Number(cfg.fontSize) || 0) + 4;
       let result: { left: number; top: number; w: number; h: number } | null = null;
       try {
-        const canvas = node.toCanvas({ pixelRatio: 1 });
+        const canvas = node.toCanvas({
+          pixelRatio: 1,
+          x: -margin,
+          y: -margin,
+          width: Math.ceil(node.width()) + margin * 2,
+          height: Math.ceil(node.height()) + margin * 2,
+        });
         const ctx = canvas.getContext("2d");
         if (ctx && canvas.width > 0 && canvas.height > 0) {
           const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
@@ -3586,7 +3856,7 @@ export default function CanvasEditor() {
             }
           }
           if (maxX >= minX && maxY >= minY) {
-            result = { left: minX, top: minY, w: maxX - minX + 1, h: maxY - minY + 1 };
+            result = { left: minX - margin, top: minY - margin, w: maxX - minX + 1, h: maxY - minY + 1 };
           }
         }
       } catch {
@@ -3616,12 +3886,17 @@ export default function CanvasEditor() {
       // Preload every text font up-front so the measurement pass below is fully
       // synchronous: calling updateElement mid-pass would churn `pages` and could
       // abort us, so we measure everything first and apply all fits at the end.
+      // With the weight/style: a bold text's own cut is a separate face, and measuring it before
+      // that face arrives sizes the ink of a fallback — the x/y shift below then moves the glyphs
+      // (DAHNZVrSYZM's 700 "في بيتنا أجمل" landed 5 px off on one load in two).
       const fontShorthands = new Set<string>();
       snapshot.forEach((page) => {
         (page.elements || []).forEach((element) => {
           const fontSize = Number(element.fontSize) || 0;
           if (element.type === "text" && fontSize > 0) {
-            fontShorthands.add(`${fontSize}px ${resolveCssFontFamily(element.fontFamily)}`);
+            fontShorthands.add(
+              `${toKonvaFontStyle(element.fontStyle, element.fontWeight)} ${fontSize}px ${resolveCssFontFamily(element.fontFamily)}`
+            );
           }
         });
       });
@@ -3637,6 +3912,13 @@ export default function CanvasEditor() {
         (page.elements || []).forEach((element) => {
           if (element.type !== "text") return;
           if (fittedTextIdsRef.current.has(element.id)) return;
+          // A curved text is one line laid on its arc, which is centred in the imported box (the
+          // app's frame). Measured straight it can "wrap" (DAHNZVrSYZM's 22-tatweel kashida runs
+          // ~6% wider here than in Canva), and the grown height dropped the arc ~86 px below the
+          // words it joins. The snug-fit leaves curves alone for the same reason.
+          if (isCurvedText(element)) return;
+          // Its ink is not one Konva.Text's: ranges in other fonts/sizes are boxed by the snug-fit.
+          if (textSpansAffectLayout(element.textSpans)) return;
           const text = String(element.text || "");
           if (!text.trim() || /[\r\n]/.test(text)) return;
           if (Math.abs((element.scaleX ?? 1) - 1) > 0.01 || Math.abs((element.scaleY ?? 1) - 1) > 0.01) return;
@@ -3647,12 +3929,12 @@ export default function CanvasEditor() {
             deferred = true;
             return;
           }
+          const fontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
           try {
-            if (!document.fonts.check(`${fontSize}px ${fontFamily}`)) return; // font not ready
+            if (!document.fonts.check(`${fontStyle} ${fontSize}px ${fontFamily}`)) return; // face not ready
           } catch {
             /* proceed if check unsupported */
           }
-          const fontStyle = toKonvaFontStyle(element.fontStyle, element.fontWeight);
           const letterSpacing = Number(element.letterSpacing) || 0;
           const lineHeight = Number(element.lineHeight) || 1.1;
           const direction = resolveTextDirection(text); // Arabic/Hebrew render RTL
@@ -3723,15 +4005,21 @@ export default function CanvasEditor() {
             return;
           }
 
-          // Keep the glyph's rendered position fixed; only the box changes.
+          // Keep the glyph's rendered position fixed; only the box changes. The ink moved inside
+          // the box's own axes while `x`/`y` live in page space (the node turns about them), so
+          // the shift turns with the layer — added straight, DAHNZVrSYZM's tilted "ــه" (11.4°)
+          // and "عروسـ" (−8.3°) slid 3–5 px off the kashida they join.
+          const radians = ((Number(element.rotation) || 0) * Math.PI) / 180;
+          const inkShiftX = cur.left - newInk.left;
+          const inkShiftY = cur.top - newInk.top;
           fittedTextIdsRef.current.add(element.id);
           fits.push({
             id: element.id,
             patch: {
               width: newWidth,
               height: newHeight,
-              x: element.x + cur.left - newInk.left,
-              y: element.y + cur.top - newInk.top,
+              x: element.x + inkShiftX * Math.cos(radians) - inkShiftY * Math.sin(radians),
+              y: element.y + inkShiftX * Math.sin(radians) + inkShiftY * Math.cos(radians),
               lineHeight: newLineHeight,
             },
           });
@@ -3772,10 +4060,24 @@ export default function CanvasEditor() {
     null
   );
   const [drawPoints, setDrawPoints] = useState<number[] | null>(null);
-  const [snapGuides, setSnapGuides] = useState<{ x: number | null; y: number | null }>({
-    x: null,
-    y: null,
+  const [snapGuides, setSnapGuidesState] = useState<{ lines: SnapGuide[]; spacings: SpacingMark[] }>({
+    lines: NO_SNAP_GUIDES,
+    spacings: NO_SPACING_MARKS,
   });
+  // Guides change only when the snap does; skip the re-render for every identical drag frame.
+  const snapGuidesKeyRef = useRef("");
+  const setSnapGuides = useCallback((lines: SnapGuide[], spacings: SpacingMark[] = NO_SPACING_MARKS) => {
+    const key = [
+      ...lines.map((guide) => `${guide.orientation}${guide.position}:${guide.start}:${guide.end}`),
+      ...spacings.map((mark) => `${mark.orientation}~${mark.from}:${mark.to}:${mark.at}`),
+    ].join("|");
+    if (key === snapGuidesKeyRef.current) return;
+    snapGuidesKeyRef.current = key;
+    setSnapGuidesState({
+      lines: lines.length ? lines : NO_SNAP_GUIDES,
+      spacings: spacings.length ? spacings : NO_SPACING_MARKS,
+    });
+  }, []);
   const [contextMenu, setContextMenu] = useState<{ x: number; y: number; targetId: string } | null>(null);
   const [frameDropTargetId, setFrameDropTargetId] = useState("");
   const [frameContentEditId, setFrameContentEditId] = useState("");
@@ -5462,6 +5764,13 @@ export default function CanvasEditor() {
   // a selection made purely of (uncurved) text — dragging them would just snap back.
   const transformerAnchors = useMemo(() => {
     if (selectedIds.length === 0) return TRANSFORMER_ANCHORS;
+    // A curved text's box is derived from its arc (the app hides its side handles too): only the
+    // corners, which scale the font.
+    const anyCurved = selectedIds.some((id) => {
+      const element = elements.find((item) => item.id === id);
+      return Boolean(element && isCurvedText(element));
+    });
+    if (anyCurved) return CORNER_TRANSFORMER_ANCHORS;
     const allText = selectedIds.every((id) => {
       const element = elements.find((item) => item.id === id);
       return Boolean(element && element.type === "text" && !isCurvedText(element));
@@ -5487,11 +5796,22 @@ export default function CanvasEditor() {
       new Set(
         elements
           .filter((element) => element.type === "text")
-          .map((element) => String(element.fontFamily || "").trim())
+          .flatMap((element) => [String(element.fontFamily || "").trim(), ...textSpanFontFamilies(element.textSpans)])
           .filter(Boolean)
       )
     );
     if (textFamilies.length === 0) return;
+    // Every cut a multi-style text draws (a bold word, an italic one, another family) — a bare
+    // "16px family" only ever pulls in the 400 face.
+    const richDescriptors = Array.from(
+      new Set(
+        elements
+          .filter((element) => element.type === "text" && hasTextSpans(element))
+          .flatMap((element) =>
+            richTextFontDescriptors(buildRichTextInput(element, resolveTextDirection(element.text), null))
+          )
+      )
+    );
 
     // Konva measures a text node's lines ONCE (in _setTextData, on construction and on
     // text-affecting attr changes) and caches the wrap points plus each line's width — a
@@ -5511,9 +5831,10 @@ export default function CanvasEditor() {
     let cancelled = false;
     const loadFontsAndRedraw = async () => {
       if (document.fonts?.load) {
-        await Promise.allSettled(
-          textFamilies.map((family) => document.fonts.load(`16px "${family.replace(/"/g, '\\"')}"`))
-        );
+        await Promise.allSettled([
+          ...textFamilies.map((family) => document.fonts.load(`16px "${family.replace(/"/g, '\\"')}"`)),
+          ...richDescriptors.map((descriptor) => document.fonts.load(descriptor)),
+        ]);
       }
       if (!cancelled) {
         remeasureText();
@@ -5705,55 +6026,145 @@ export default function CanvasEditor() {
     ]
   );
 
+  // ── Smart snapping (lib/editor/snapping.ts) ───────────────────────────────────────────────────
+  // One session per gesture: the lines to snap to (the page and every layer NOT being moved), and
+  // the moving selection's box when the gesture began. Captured at drag/transform START, before
+  // anything has moved — the Transformer moves the other selected layers after this node's own
+  // dragmove, so measuring them mid-drag would lag a frame. Hold Alt to place freely.
+  const snapSessionRef = useRef<{
+    node: Konva.Node;
+    targets: SnapTargets;
+    startBox: SnapRect | null;
+    startAbs: { x: number; y: number };
+  } | null>(null);
+  const snapSuspendedRef = useRef(false);
+  const snapContextRef = useRef({ activePage, selectedIds });
+  snapContextRef.current = { activePage, selectedIds };
+
+  const beginSnapSession = useCallback((node: Konva.Node) => {
+    const { activePage: page, selectedIds: selection } = snapContextRef.current;
+    const layer = node.getLayer();
+    if (!page || !layer) {
+      snapSessionRef.current = null;
+      return null;
+    }
+    const rectOf = (target: Konva.Node | null | undefined): SnapRect | null => {
+      if (!target) return null;
+      const rect = target.getClientRect({ relativeTo: layer, skipShadow: true });
+      return { x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+    };
+    const moving = new Set(selection);
+    const movingNodes = selection.map((id) => nodeRefs.current[id]).filter((item): item is Konva.Node => Boolean(item));
+    if (!movingNodes.includes(node)) movingNodes.push(node);
+    const others = (page.elements || [])
+      .filter((item) => !moving.has(item.id) && item.visible !== false && nodeRefs.current[item.id] !== node)
+      .map((item) => {
+        const target = nodeRefs.current[item.id];
+        return target && target.isVisible() ? rectOf(target) : null;
+      });
+    const session = {
+      node,
+      targets: buildSnapTargets(page, others),
+      startBox: unionRect(movingNodes.map(rectOf)),
+      startAbs: node.absolutePosition(),
+    };
+    snapSessionRef.current = session;
+    return session;
+  }, []);
+
+  useEffect(() => {
+    const syncAlt = (event: KeyboardEvent) => {
+      snapSuspendedRef.current = event.altKey;
+    };
+    const release = () => {
+      snapSuspendedRef.current = false;
+    };
+    window.addEventListener("keydown", syncAlt);
+    window.addEventListener("keyup", syncAlt);
+    window.addEventListener("blur", release);
+    return () => {
+      window.removeEventListener("keydown", syncAlt);
+      window.removeEventListener("keyup", syncAlt);
+      window.removeEventListener("blur", release);
+    };
+  }, []);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!stage) return;
+    const begin = (event: Konva.KonvaEventObject<Event>) => {
+      if (event.target === stage) return;
+      beginSnapSession(event.target);
+    };
+    const end = () => {
+      snapSessionRef.current = null;
+    };
+    stage.on("dragstart.snapping transformstart.snapping", begin);
+    stage.on("dragend.snapping transformend.snapping", end);
+    return () => {
+      stage.off(".snapping");
+    };
+  }, [beginSnapSession]);
+
   const applySnapping = useCallback(
-    (event: Konva.KonvaEventObject<DragEvent>, element: EditorElement) => {
-      if (!activePage) return;
-
+    (event: Konva.KonvaEventObject<DragEvent>) => {
       const node = event.target;
-      let x = node.x();
-      let y = node.y();
-
-      const width = Math.max(2, element.width * Math.abs(node.scaleX()));
-      const height = Math.max(2, element.height * Math.abs(node.scaleY()));
-
-      const threshold = 6;
-      let guideX: number | null = null;
-      let guideY: number | null = null;
-
-      const centerX = x + width / 2;
-      const centerY = y + height / 2;
-
-      if (Math.abs(centerX - activePage.width / 2) < threshold) {
-        x = activePage.width / 2 - width / 2;
-        guideX = activePage.width / 2;
+      const session =
+        snapSessionRef.current && snapSessionRef.current.node === node
+          ? snapSessionRef.current
+          : beginSnapSession(node);
+      if (!session?.startBox || snapSuspendedRef.current || event.evt?.altKey) {
+        setSnapGuides(NO_SNAP_GUIDES);
+        return;
       }
-      if (Math.abs(centerY - activePage.height / 2) < threshold) {
-        y = activePage.height / 2 - height / 2;
-        guideY = activePage.height / 2;
-      }
-
-      if (Math.abs(x) < threshold) {
-        x = 0;
-        guideX = 0;
-      }
-      if (Math.abs(y) < threshold) {
-        y = 0;
-        guideY = 0;
-      }
-
-      if (Math.abs(x + width - activePage.width) < threshold) {
-        x = activePage.width - width;
-        guideX = activePage.width;
-      }
-      if (Math.abs(y + height - activePage.height) < threshold) {
-        y = activePage.height - height;
-        guideY = activePage.height;
-      }
-
-      node.position({ x, y });
-      setSnapGuides({ x: guideX, y: guideY });
+      const scale = viewport.scale || 1;
+      const abs = node.absolutePosition();
+      const box = {
+        ...session.startBox,
+        x: session.startBox.x + (abs.x - session.startAbs.x) / scale,
+        y: session.startBox.y + (abs.y - session.startAbs.y) / scale,
+      };
+      const { dx, dy, guides, spacings } = snapMovingRect(box, session.targets, SNAP_THRESHOLD_SCREEN_PX / scale);
+      if (dx !== 0 || dy !== 0) node.absolutePosition({ x: abs.x + dx * scale, y: abs.y + dy * scale });
+      setSnapGuides(guides, spacings);
     },
-    [activePage]
+    [beginSnapSession, setSnapGuides, viewport.scale]
+  );
+
+  // The Transformer's box hook, in ABSOLUTE (screen) px: snap what a resize moves — the moving
+  // edges of an upright box, or the moving corners of a turned one (its edges are slanted).
+  const snapTransformBox = useCallback(
+    (oldBox: TransformerBox, newBox: TransformerBox): TransformerBox => {
+      const session = snapSessionRef.current;
+      const stage = stageRef.current;
+      const transformer = transformerRef.current;
+      if (!session || !stage || !transformer || snapSuspendedRef.current) {
+        setSnapGuides(NO_SNAP_GUIDES);
+        return newBox;
+      }
+      const toPage = stage.getAbsoluteTransform().copy().invert();
+      const toScreen = stage.getAbsoluteTransform();
+      const scale = viewport.scale || 1;
+      const pageBox = (box: TransformerBox) => {
+        const origin = toPage.point({ x: box.x, y: box.y });
+        return { x: origin.x, y: origin.y, width: box.width / scale, height: box.height / scale, rotation: box.rotation };
+      };
+      const anchor = String(transformer.getActiveAnchor?.() || "");
+      const keepRatio = /^(top|bottom)-(left|right)$/.test(anchor) && transformer.keepRatio();
+      const threshold = SNAP_THRESHOLD_SCREEN_PX / scale;
+      const upright = Math.abs(newBox.rotation) <= 1e-4;
+      const { box, guides } = upright
+        ? (() => {
+            const result = snapResizedRect(pageBox(oldBox), pageBox(newBox), session.targets, threshold, keepRatio);
+            return { box: { ...result.rect, rotation: newBox.rotation }, guides: result.guides };
+          })()
+        : snapResizedRotatedBox(pageBox(oldBox), pageBox(newBox), session.targets, threshold, keepRatio);
+      setSnapGuides(guides);
+      if (!guides.length) return newBox;
+      const origin = toScreen.point({ x: box.x, y: box.y });
+      return { ...newBox, x: origin.x, y: origin.y, width: box.width * scale, height: box.height * scale };
+    },
+    [setSnapGuides, viewport.scale]
   );
 
   const updateNodeTransform = useCallback(
@@ -5795,7 +6206,7 @@ export default function CanvasEditor() {
           });
           node.scaleX(signX);
           node.scaleY(signY);
-          setSnapGuides({ x: null, y: null });
+          setSnapGuides(NO_SNAP_GUIDES);
           return;
         }
 
@@ -5811,7 +6222,7 @@ export default function CanvasEditor() {
           });
           node.scaleX(signX);
           node.scaleY(1);
-          setSnapGuides({ x: null, y: null });
+          setSnapGuides(NO_SNAP_GUIDES);
           return;
         }
       }
@@ -5831,14 +6242,14 @@ export default function CanvasEditor() {
 
       node.scaleX(signX);
       node.scaleY(signY);
-      setSnapGuides({ x: null, y: null });
+      setSnapGuides(NO_SNAP_GUIDES);
     },
-    [updateElement]
+    [setSnapGuides, updateElement]
   );
 
   const updateNodeDrag = useCallback(
     (event: Konva.KonvaEventObject<DragEvent>, element: EditorElement) => {
-      applySnapping(event, element);
+      applySnapping(event);
       if (element.type === "image" || element.type === "video") {
         activateFrameDropTarget(findFrameDropTargetForNode(element, event.target));
       }
@@ -5895,7 +6306,7 @@ export default function CanvasEditor() {
           );
           deleteElement(element.id);
           setSelectedIds([frameTargetId]);
-          setSnapGuides({ x: null, y: null });
+          setSnapGuides(NO_SNAP_GUIDES);
           return;
         }
       }
@@ -5904,7 +6315,7 @@ export default function CanvasEditor() {
         y: event.target.y(),
       });
       clearFrameDropTarget(true);
-      setSnapGuides({ x: null, y: null });
+      setSnapGuides(NO_SNAP_GUIDES);
     },
     [
       clearFrameDropTarget,
@@ -5915,6 +6326,7 @@ export default function CanvasEditor() {
       setSelectedIds,
       updateElement,
       updateFrameContentTransform,
+      setSnapGuides,
     ]
   );
 
@@ -5955,94 +6367,64 @@ export default function CanvasEditor() {
 
   const inlineEditActiveRef = useRef(false);
 
+  // The on-canvas text editor (inlineRichTextEditor.ts): shows every styled range in its own
+  // style; its selection drives the text style controls (useTextStyleTarget) until it closes.
+  const [inlineEditingTextId, setInlineEditingTextId] = useState<string | null>(null);
+  const inlineEditorRef = useRef<InlineRichTextEditor | null>(null);
+  const setTextRangeSelection = useEditorStore((state) => state.setTextRangeSelection);
   const beginInlineTextEdit = useCallback(
     (node: Konva.Node, element: EditorElement) => {
       const stage = stageRef.current;
       if (!stage || !containerRef.current) return;
-      if (inlineEditActiveRef.current) return; // a textarea is already open
+      if (inlineEditActiveRef.current) return; // an editor is already open
       inlineEditActiveRef.current = true;
 
       const textPosition = node.absolutePosition();
       const containerRect = stage.container().getBoundingClientRect();
-
-      const areaPosition = {
-        x: containerRect.left + textPosition.x,
-        y: containerRect.top + textPosition.y,
-      };
-
-      const textarea = document.createElement("textarea");
-      document.body.appendChild(textarea);
-
-      textarea.value = element.text;
-      textarea.style.position = "absolute";
-      textarea.style.top = `${areaPosition.y}px`;
-      textarea.style.left = `${areaPosition.x}px`;
-      textarea.style.width = `${Math.max(80, element.width * viewport.scale)}px`;
-      textarea.style.height = `${Math.max(40, element.height * viewport.scale)}px`;
-      textarea.style.fontSize = `${Math.max(12, element.fontSize * viewport.scale)}px`;
-      textarea.style.fontFamily = resolveCssFontFamily(element.fontFamily);
-      textarea.style.fontWeight = String(element.fontWeight);
-      textarea.style.fontStyle = element.fontStyle;
-      textarea.style.color = element.color || element.fill;
-      textarea.style.lineHeight = String(element.lineHeight);
-      textarea.style.letterSpacing = `${element.letterSpacing}px`;
-      textarea.style.padding = "0";
-      textarea.style.margin = "0";
-      textarea.style.border = "1px solid #3b82f6";
-      textarea.style.background = "rgba(255,255,255,0.95)";
-      textarea.style.outline = "none";
-      textarea.style.resize = "none";
-      textarea.style.zIndex = "9999";
-      textarea.style.transformOrigin = "left top";
-      textarea.style.transform = `rotate(${element.rotation}deg)`;
-      textarea.style.textAlign = element.align;
-      textarea.style.direction = resolveTextDirection(element.text);
-      textarea.dir = resolveTextDirection(element.text);
-
-      textarea.focus();
-
-      let finalized = false;
-      const cleanup = () => {
+      const original = { text: element.text, textSpans: element.textSpans };
+      const end = () => {
         inlineEditActiveRef.current = false;
-        textarea.removeEventListener("keydown", handleKeyDown);
-        textarea.removeEventListener("blur", handleBlur);
-        if (textarea.parentNode) {
-          textarea.parentNode.removeChild(textarea);
-        }
+        inlineEditorRef.current = null;
+        setInlineEditingTextId(null);
+        setTextRangeSelection(null);
       };
-
-      const commit = () => {
-        if (finalized) return;
-        finalized = true;
-        const next = textarea.value;
-        updateElement(element.id, { text: next });
-        cleanup();
-      };
-
-      const destroy = () => {
-        if (finalized) return;
-        finalized = true;
-        cleanup();
-      };
-
-      const handleKeyDown = (event: KeyboardEvent) => {
-        if (event.key === "Escape") {
-          event.preventDefault();
-          destroy();
-        }
-        if (event.key === "Enter" && !event.shiftKey) {
-          event.preventDefault();
-          commit();
-        }
-      };
-
-      const handleBlur = () => commit();
-
-      textarea.addEventListener("keydown", handleKeyDown);
-      textarea.addEventListener("blur", handleBlur);
+      inlineEditorRef.current = openInlineRichTextEditor({
+        element,
+        left: containerRect.left + textPosition.x,
+        top: containerRect.top + textPosition.y,
+        scale: viewport.scale,
+        direction: resolveTextDirection(element.text),
+        resolveFamily: (family) => resolveCssFontFamily(family),
+        onChange: (text, textSpans) => updateElement(element.id, { text, textSpans }, { recordHistory: false }),
+        onSelectionChange: (start, finish) => setTextRangeSelection({ elementId: element.id, start, end: finish }),
+        onCommit: (text, textSpans) => {
+          updateElement(element.id, { text, textSpans });
+          end();
+        },
+        onCancel: () => {
+          updateElement(element.id, { text: original.text, textSpans: original.textSpans ?? [] }, { recordHistory: false });
+          end();
+        },
+        isChromeNode: (target) => {
+          const host = target instanceof Element ? target : (target?.parentElement ?? null);
+          return Boolean(host?.closest?.("[data-editor-chrome]"));
+        },
+      });
+      setInlineEditingTextId(element.id);
     },
-    [updateElement, viewport.scale]
+    [setTextRangeSelection, updateElement, viewport.scale]
   );
+
+  // A style applied from the toolbar while the editor is open re-renders it (its own typing is
+  // already in the editor and is skipped there).
+  useEffect(() => {
+    if (!inlineEditingTextId) return;
+    const element = elements.find((item) => item.id === inlineEditingTextId);
+    if (element) inlineEditorRef.current?.update(element);
+  }, [elements, inlineEditingTextId]);
+
+  // Never leave an editor behind on unmount.
+  useEffect(() => () => inlineEditorRef.current?.close(), []);
 
   // A text layer's selection overlay IS its Konva box, so a box bigger than the text reads as
   // padding around the glyphs, and a box that ignores `fontSize` looks frozen at its old size
@@ -6069,23 +6451,94 @@ export default function CanvasEditor() {
     const declaredFamilies: { current: Set<string> | null } = { current: null };
 
     elements.forEach((element) => {
-      if (element.type !== "text" || isCurvedText(element)) return;
+      if (element.type !== "text") return;
       const text = String(element.text || "");
       if (!text.trim()) return;
       const fontSize = Number(element.fontSize) || 0;
       if (fontSize <= 0) return;
 
+      // A curved text's box is DERIVED, as in the app: the arc's bounding box per line plus 0.45 em
+      // padding (a visible background box uses its own padding), kept centred where it is. The arcs
+      // are centred in the box, so resizing it around its centre never moves a glyph.
+      if (isCurvedText(element)) {
+        try {
+          if (
+            !isTextFontDeclared(element.fontFamily, declaredFamilies) ||
+            (document.fonts?.check &&
+              !document.fonts.check(`${toKonvaFontStyle(element.fontStyle, element.fontWeight)} ${fontSize}px ${resolveCssFontFamily(element.fontFamily)}`))
+          ) {
+            waitingOnFonts = true;
+            return;
+          }
+        } catch {
+          /* measure anyway */
+        }
+        const background = Boolean(element.textBackgroundEnabled);
+        const frame = curvedTextFrameFor(
+          buildCurvedTextPaintInput(element),
+          background
+            ? {
+                x: (Number(element.textBackgroundPaddingX) || 0) * fontSize * 0.5,
+                y: (Number(element.textBackgroundPaddingY) || 0) * fontSize * 0.5,
+              }
+            : null
+        );
+        if (!frame) return;
+        const currentWidth = Math.max(0, Number(element.width) || 0);
+        const currentHeight = Math.max(0, Number(element.height) || 0);
+        if (Math.abs(frame.width - currentWidth) <= 0.5 && Math.abs(frame.height - currentHeight) <= 0.5) return;
+        const radians = ((Number(element.rotation) || 0) * Math.PI) / 180;
+        const cos = Math.cos(radians);
+        const sin = Math.sin(radians);
+        const signX = (Number(element.scaleX) || 1) < 0 ? -1 : 1;
+        const signY = (Number(element.scaleY) || 1) < 0 ? -1 : 1;
+        // The box's centre in page space (the node turns and mirrors about its top-left).
+        const half = (w: number, h: number) => ({ x: (w * signX) / 2, y: (h * signY) / 2 });
+        const was = half(currentWidth, currentHeight);
+        const next = half(frame.width, frame.height);
+        const centerX = (Number(element.x) || 0) + was.x * cos - was.y * sin;
+        const centerY = (Number(element.y) || 0) + was.x * sin + was.y * cos;
+        updateElement(
+          element.id,
+          {
+            width: frame.width,
+            height: frame.height,
+            x: centerX - (next.x * cos - next.y * sin),
+            y: centerY - (next.x * sin + next.y * cos),
+          },
+          { recordHistory: false }
+        );
+        return;
+      }
+
       const fontFamily = resolveCssFontFamily(element.fontFamily);
+      // Ranges in another font, weight, size or spacing change the box too: their fonts must be
+      // in before it is measured (lib/editor/richText.ts lays such a text out).
+      const metricSpans = textSpansAffectLayout(element.textSpans);
       try {
         // Fitting before a library font's face is declared sizes the box to the FALLBACK: an
         // imported 2-line label hugged a 1-line fallback width, then widened to one line when the
         // real font landed. Wait for the face; the loadingdone listener below re-runs the fit.
-        if (!isTextFontDeclared(element.fontFamily, declaredFamilies)) {
+        if (
+          !isTextFontDeclared(element.fontFamily, declaredFamilies) ||
+          (metricSpans &&
+            textSpanFontFamilies(element.textSpans).some((family) => !isTextFontDeclared(family, declaredFamilies)))
+        ) {
           waitingOnFonts = true;
           return;
         }
         // Measuring against the fallback font would size the box for glyphs nobody sees.
         if (document.fonts?.check && !document.fonts.check(`${fontSize}px ${fontFamily}`)) {
+          waitingOnFonts = true;
+          return;
+        }
+        if (
+          metricSpans &&
+          document.fonts?.check &&
+          richTextFontDescriptors(buildRichTextInput(element, resolveTextDirection(text), null)).some(
+            (descriptor) => !document.fonts.check(descriptor)
+          )
+        ) {
           waitingOnFonts = true;
           return;
         }
@@ -6102,6 +6555,7 @@ export default function CanvasEditor() {
         lineHeight: Number(element.lineHeight) || 1,
         align: element.align,
         direction: resolveTextDirection(text),
+        ...(metricSpans ? { spans: canvasTextSpans(element.textSpans) } : {}),
       };
 
       const currentWidth = Math.max(0, Number(element.width) || 0);
@@ -6131,8 +6585,11 @@ export default function CanvasEditor() {
       let nextX = Number(element.x) || 0;
       let nextY = Number(element.y) || 0;
       if (widthChanged) {
+        // A line wider than the box was drawn from the box's start edge: keep that edge.
         const localShift =
-          textBoxAnchorDeltaX(element.align, currentWidth, fit.width) * (Number(element.scaleX) || 1);
+          (fit.overflowed
+            ? textBoxStartAnchorDeltaX(input.direction, currentWidth, fit.width)
+            : textBoxAnchorDeltaX(element.align, currentWidth, fit.width)) * (Number(element.scaleX) || 1);
         const radians = ((Number(element.rotation) || 0) * Math.PI) / 180;
         nextX += localShift * Math.cos(radians);
         nextY += localShift * Math.sin(radians);
@@ -6753,6 +7210,7 @@ export default function CanvasEditor() {
             onUpdateImageMetadata={handleUpdateImageMetadata}
             onUpdateVideoMetadata={handleUpdateVideoMetadata}
             onBeginInlineTextEdit={beginInlineTextEdit}
+            inlineEditingTextId={inlineEditingTextId}
           />
           <Group
             clipX={0}
@@ -6787,25 +7245,54 @@ export default function CanvasEditor() {
             />
           ) : null}
 
-          {snapGuides.x !== null ? (
+          {snapGuides.lines.map((guide) => (
             <Line
-              points={[snapGuides.x, 0, snapGuides.x, activePage.height]}
-              stroke="#3b82f6"
+              key={`${guide.orientation}-${guide.position}`}
+              points={
+                guide.orientation === "vertical"
+                  ? [guide.position, guide.start, guide.position, guide.end]
+                  : [guide.start, guide.position, guide.end, guide.position]
+              }
+              stroke="#e0488b"
               strokeWidth={1 / viewport.scale}
-              dash={[6 / viewport.scale, 6 / viewport.scale]}
               listening={false}
             />
-          ) : null}
+          ))}
 
-          {snapGuides.y !== null ? (
-            <Line
-              points={[0, snapGuides.y, activePage.width, snapGuides.y]}
-              stroke="#3b82f6"
-              strokeWidth={1 / viewport.scale}
-              dash={[6 / viewport.scale, 6 / viewport.scale]}
-              listening={false}
-            />
-          ) : null}
+          {snapGuides.spacings.map((mark) => {
+            const horizontal = mark.orientation === "horizontal";
+            const unit = 1 / viewport.scale;
+            const cap = 5 * unit;
+            const gap = Math.round(mark.to - mark.from);
+            const label = String(gap);
+            const labelWidth = (label.length * 7 + 10) * unit;
+            const labelHeight = 16 * unit;
+            const middle = (mark.from + mark.to) / 2;
+            const along = (value: number, across: number) => (horizontal ? [value, across] : [across, value]);
+            const labelX = horizontal ? middle - labelWidth / 2 : mark.at + 4 * unit;
+            const labelY = horizontal ? mark.at - labelHeight - 4 * unit : middle - labelHeight / 2;
+            return (
+              <Group key={`spacing-${mark.orientation}-${mark.from}-${mark.to}-${mark.at}`} listening={false}>
+                <Line points={[...along(mark.from, mark.at), ...along(mark.to, mark.at)]} stroke="#e0488b" strokeWidth={unit} />
+                <Line points={[...along(mark.from, mark.at - cap), ...along(mark.from, mark.at + cap)]} stroke="#e0488b" strokeWidth={unit} />
+                <Line points={[...along(mark.to, mark.at - cap), ...along(mark.to, mark.at + cap)]} stroke="#e0488b" strokeWidth={unit} />
+                <Rect x={labelX} y={labelY} width={labelWidth} height={labelHeight} cornerRadius={labelHeight / 2} fill="#e0488b" />
+                <Text
+                  x={labelX}
+                  y={labelY}
+                  width={labelWidth}
+                  height={labelHeight}
+                  text={label}
+                  align="center"
+                  verticalAlign="middle"
+                  fontSize={11 * unit}
+                  fontFamily="Inter, system-ui, sans-serif"
+                  fontStyle="600"
+                  fill="#ffffff"
+                />
+              </Group>
+            );
+          })}
 
           <Transformer
             ref={(node) => {
@@ -6840,11 +7327,14 @@ export default function CanvasEditor() {
               );
             })()}
             enabledAnchors={transformerAnchors}
+            // Rotation clicks onto every 45° when within 4° of it.
+            rotationSnaps={ROTATION_SNAP_ANGLES}
+            rotationSnapTolerance={4}
             boundBoxFunc={(oldBox, newBox) => {
               if (newBox.width < 5 || newBox.height < 5) {
                 return oldBox;
               }
-              return newBox;
+              return snapTransformBox(oldBox, newBox);
             }}
           />
         </Layer>

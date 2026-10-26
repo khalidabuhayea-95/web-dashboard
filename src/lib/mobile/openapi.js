@@ -260,10 +260,10 @@ const reusableParameters = {
     name: "subCategoryId",
     in: "query",
     required: false,
-    description: "Sub category GUID (recommended).",
+    description:
+      "Sub category GUID (recommended), or the sub category's `value` slug (e.g. `empty-invitations`) — resolved the same way. Clients whose cached taxonomy predates a sub category ask by the slug their template rails carry.",
     schema: {
       type: "string",
-      format: "uuid",
     },
   },
   query: {
@@ -1036,7 +1036,6 @@ const schemas = {
     type: "object",
     required: [
       "id",
-      "name",
       "createdAt",
       "updatedAt",
       "canvasWidth",
@@ -1047,7 +1046,11 @@ const schemas = {
     ],
     properties: {
       id: { type: "string" },
-      name: { type: "string" },
+      name: {
+        type: "string",
+        description:
+          "Not sent for a template (2026-10-19): template names stay in the dashboard, and the app names each design itself.",
+      },
       createdAt: { type: "integer", format: "int64" },
       updatedAt: { type: "integer", format: "int64" },
       canvasWidth: { type: "number" },
@@ -1061,7 +1064,7 @@ const schemas = {
       layers: {
         type: "array",
         description:
-          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. IMAGE layers that are animated stickers (Canva GIFs) carry an `animatedImage` object (`kind: \"gif\"`, `uri` = the GIF, `durationMs`, `frameCount`, `loop`); such a layer's `imageUri` is the settled POSTER still, so a client without GIF playback renders exactly today's look — a client that can, loops `animatedImage.uri` in its place (it is never recolorable: `colorEditMode` is `none`). TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
+          "Project layers. Every layer now includes `timelineStartMs`, `timelineEndMs`, an `animation` object (LEGACY single slot) and, when any slot is set, an `animations` object with the three independent `entrance`/`exit`/`loop` slots. Prefer `animations` and fall back to `animation`; both are emitted so older builds keep working. IMAGE layers that are animated stickers (Canva GIFs) carry an `animatedImage` object (`kind: \"gif\"`, `uri` = the GIF, `durationMs`, `frameCount`, `loop`); such a layer's `imageUri` is the settled POSTER still, so a client without GIF playback renders exactly today's look — a client that can, loops `animatedImage.uri` in its place (it is never recolorable: `colorEditMode` is `none`). TEXT layers include a `font` object with resolved font download metadata (`downloadUrl`, `mobileDownloadUrl`, compatibility, and source), and a `wrapWidth` (project px) giving the editor's text-column width — clients MUST soft-wrap the text at `wrapWidth` to reproduce the editor's line breaks. It is a MAX cap: text narrower than it keeps its natural box. Omitted when the editor had no usable box width. A TEXT layer's `transform.scale`/`scaleX`/`scaleY` are always unit magnitude (sign = flip only); text geometry lives in `size` + `wrapWidth`, never in a scale factor. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. A multi-style TEXT layer carries `spans`: style overrides for character RANGES of `text` — UTF-16 `[start, end)` offsets (Kotlin/JS string indices), sorted, non-overlapping, snapped to whole graphemes — each listing ONLY the keys that differ from the layer, in the layer's own names and units: `fontName` (+ its own `font` download record; load it like the layer's), `size` (project px), `fontWeight` (100–900, with `bold` = weight ≥ 600), `italic`, `colorHex` (`#RRGGBB`/`#AARRGGBB`), `letterSpacing` (px), `underline`/`strikethrough`, `stroke` (`enabled`, `colorHex`, `opacity`, `width` 0–100 of the RANGE's size) and `highlight` (`colorHex`, `opacity`: a band behind the range, glyph boxes ± 0.1 em wide, 1.2 em tall centred on the line box, 0.25 em corners; em = the range's size). Every line takes the height of the text's biggest range (layer `lineHeight` × the largest size in the whole text) and every range sits on one shared baseline; paragraph settings (alignment, line height, curve, background box, gradient fill, shadow) stay on the layer. A client that ignores `spans` draws the whole text in the layer's own style. FRAME layers include `shape`, `content`, and `contentTransform`; template frame image content is returned as a `previewOnly` frame-box PNG with zeroed content transform for mobile preview rendering.",
         items: {
           type: "object",
           additionalProperties: true,
@@ -1081,6 +1084,20 @@ const schemas = {
             },
             animations: {
               $ref: "#/components/schemas/MobileLayerAnimations",
+            },
+            motionPath: {
+              type: "array",
+              description:
+                "Canva custom motion path, present only on a layer that has one (≥ 2 points, sorted by `t`): the layer's offset from its resting place over time, exactly as the web editor plays it. `t` is ms from the layer's `timelineStartMs`; `x`/`y` are project-px offsets in PAGE axes (not turned or mirrored with the layer). Interpolate linearly between points; before the first point hold its offset, after the last point hold the last one. It moves the layer on top of whatever its `animation`/`animations` do.",
+              items: {
+                type: "object",
+                required: ["t", "x", "y"],
+                properties: {
+                  t: { type: "number", description: "Milliseconds from the layer's timeline start." },
+                  x: { type: "number", description: "Horizontal offset from the resting place, project px." },
+                  y: { type: "number", description: "Vertical offset from the resting place, project px." },
+                },
+              },
             },
           },
         },
@@ -1344,6 +1361,11 @@ const schemas = {
           stackWiggleT: { type: "number", description: "t = (Vd + 1) / 2 of the stacked Wiggle (default 0.5)." },
           stackPhaseMs: { type: "number", description: "Clock offset for the stacked effects." },
           r1From: { type: "number", description: "BREATHE/DRIFT/TECTONIC (concurrent): ramp start value (scale, or px)." },
+          typePacing: {
+            type: "number",
+            description:
+              "TYPEWRITER_CHARS: per-letter pacing instead of the 160 ms cadence (CapCut imports) — 1 Type 2 (sinIn starts over 3/4, letters fade in), 2 Random Typewriter (even slots, current letter stepping 0.33/0.66/1), 3 Typewriter (CapCut's typing rhythm over the first 1/1.2, letters pop in). Every character of the text is a unit, line breaks included.",
+          },
           r1To: { type: "number", description: "Ramp stage-1 end value." },
           r1Start: { type: "number", description: "Ramp stage-1 start, layer-local ms." },
           r1Dur: { type: "number", description: "Ramp stage-1 duration ms; <= 0 jumps to r1To." },
@@ -1355,6 +1377,9 @@ const schemas = {
           y1From: { type: "number", description: "BREATHE: vertical drift px at the ramp start (same timing as r1/r2)." },
           y1To: { type: "number", description: "BREATHE: vertical drift px at the end of stage 1." },
           y2To: { type: "number", description: "BREATHE: vertical drift px at the end of stage 2." },
+          x1From: { type: "number", description: "BREATHE: sideways drift px at the ramp start (same timing as r1/r2; Canva Photo Flow)." },
+          x1To: { type: "number", description: "BREATHE: sideways drift px at the end of stage 1." },
+          x2To: { type: "number", description: "BREATHE: sideways drift px at the end of stage 2." },
           fadeEase: { type: "number", description: "FADE: 1 = LINEAR in and out instead of the quadratic eases." },
           unit: {
             type: "number",
@@ -1541,7 +1566,6 @@ const schemas = {
     type: "object",
     required: [
       "id",
-      "title",
       "version",
       "updatedAt",
       "canvasWidth",
@@ -1563,7 +1587,6 @@ const schemas = {
           "Template lifecycle status. Only ever \"published\" for normal accounts; a tester account (MobileAuthUser.role = \"tester\") also receives \"draft\" templates so a designer can review them before publishing.",
       },
       id: { type: "string", format: "uuid" },
-      title: { type: "string" },
       version: { type: "integer" },
       updatedAt: { type: "integer", format: "int64" },
       canvasWidth: { type: "number" },
@@ -1630,14 +1653,12 @@ const schemas = {
     type: "object",
     required: [
       "id",
-      "title",
       "canvasWidth",
       "canvasHeight",
       "thumbnailUrl",
     ],
     properties: {
       id: { type: "string", format: "uuid" },
-      title: { type: "string" },
       canvasWidth: { type: "number" },
       canvasHeight: { type: "number" },
       pageCount: {
@@ -1694,7 +1715,6 @@ const schemas = {
     type: "object",
     required: [
       "id",
-      "title",
       "category",
       "categoryValue",
       "subCategory",
@@ -1710,7 +1730,6 @@ const schemas = {
           "Template lifecycle status. Only ever \"published\" for normal accounts; a tester account (MobileAuthUser.role = \"tester\") also receives \"draft\" templates so a designer can review them before publishing.",
       },
       id: { type: "string", format: "uuid" },
-      title: { type: "string" },
       category: { type: "string", description: "Localized category label." },
       categoryValue: { type: "string" },
       subCategory: { type: "string", description: "Localized sub category label." },
@@ -1776,7 +1795,7 @@ const schemas = {
           layers: {
             type: "array",
             description:
-              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. IMAGE layers that are animated stickers carry `animatedImage` (`kind: \"gif\"`, `uri`, `durationMs`, `frameCount`, `loop`) with `imageUri` as the poster still (see the list endpoint). TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor. The same `filters` object also carries the layer's own `blurRadius` (0–40 project px) and its drop shadow (`shadowColorHex`/`shadowOpacity`/`shadowBlurRadius`/`shadowOffsetX`/`shadowOffsetY`) — both authored in the web editor's Blur and Shadow controls.",
+              "Project layers for editor/render state. Common fields include `id`, `type`, `transform` (center-based: `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotation`, `flipX`, `flipY`), `opacity`, `locked`, `hidden`, `zIndex`, `timelineStartMs`, `timelineEndMs`, `animation` (legacy single slot) and `animations` (the three `entrance`/`exit`/`loop` slots; prefer it and fall back to `animation`), plus `motionPath` on a layer with a Canva custom motion path (`[{ t, x, y }]`: ms from `timelineStartMs`, project-px offsets in page axes, linear, held before/after — see the list endpoint). Flip lives on the sign of `scaleX`/`scaleY` (negative = mirrored); `flipX`/`flipY` booleans restate that sign (`flipX === scaleX < 0`) — apply one, not both. IMAGE layers that are animated stickers carry `animatedImage` (`kind: \"gif\"`, `uri`, `durationMs`, `frameCount`, `loop`) with `imageUri` as the poster still (see the list endpoint). TEXT layers expose a slim `font` object and a `wrapWidth` (project px) that clients MUST soft-wrap at to reproduce the editor's line breaks; it is a MAX cap, and is omitted when the editor had no usable box width. TEXT `transform` scales are always unit magnitude (sign = flip only) — text geometry lives in `size` + `wrapWidth`. A gradient-coloured TEXT layer carries `fill` (`type: \"gradient\"`, `gradientKind` `linear`|`radial`, `angle` in degrees — 0 runs left→right, 90 top→bottom — `startColorHex`, `endColorHex`, and `stops` of `colorHex` (`#RRGGBB`/`#AARRGGBB`) + `position` 0–1) painted through the glyphs over the text box, the ramp spanning the box from its centre to the farthest corners; `colorHex` stays the flat fallback for clients without glyph fills. FRAME layers expose `shape`, `content`, `contentTransform`, and `filters` without preset/name metadata. TEXT layers also carry `shadow` (`enabled`, `colorHex`, `opacity`, `blurRadius`, `offsetX`, `offsetY`) and `stroke` (`enabled`, `colorHex`, `opacity`, `width`) — the outline `width` is a 0–100 PERCENTAGE of the font size, NOT pixels: renderedPx = size × (width / 100) × 0.22; `shadow.enabled` is true only when the shadow is actually VISIBLE — offset or blurred, and not fully transparent — so a layer with no authored shadow now reports `enabled: false` rather than a 0-radius black one. A multi-style TEXT layer carries `spans`: style overrides for character RANGES of `text` — UTF-16 `[start, end)` offsets (Kotlin/JS string indices), sorted, non-overlapping, snapped to whole graphemes — each listing ONLY the keys that differ from the layer, in the layer's own names and units: `fontName` (+ its own `font` download record; load it like the layer's), `size` (project px), `fontWeight` (100–900, with `bold` = weight ≥ 600), `italic`, `colorHex` (`#RRGGBB`/`#AARRGGBB`), `letterSpacing` (px), `underline`/`strikethrough`, `stroke` (`enabled`, `colorHex`, `opacity`, `width` 0–100 of the RANGE's size) and `highlight` (`colorHex`, `opacity`: a band behind the range, glyph boxes ± 0.1 em wide, 1.2 em tall centred on the line box, 0.25 em corners; em = the range's size). Every line takes the height of the text's biggest range (layer `lineHeight` × the largest size in the whole text) and every range sits on one shared baseline; paragraph settings (alignment, line height, curve, background box, gradient fill, shadow) stay on the layer. A client that ignores `spans` draws the whole text in the layer's own style. IMAGE and VIDEO layers carry a `filters` object (see `MobileMediaLayerFilters`) whose `cornerRadius` (0–0.5 ratio of the shorter side) and `strokeColorHex`/`strokeOpacity`/`strokeWidth` (project-px border) describe rounded corners and a border — render them so image/video corner-rounding and outlines match the web editor. The same `filters` object also carries the layer's own `blurRadius` (0–40 project px) and its drop shadow (`shadowColorHex`/`shadowOpacity`/`shadowBlurRadius`/`shadowOffsetX`/`shadowOffsetY`) — both authored in the web editor's Blur and Shadow controls.",
             items: {
               type: "object",
               additionalProperties: true,
@@ -2360,7 +2379,6 @@ const schemas = {
     type: "object",
     required: [
       "id",
-      "title",
       "status",
       "category",
       "subCategory",
@@ -2371,7 +2389,6 @@ const schemas = {
     ],
     properties: {
       id: { type: "string", format: "uuid" },
-      title: { type: "string" },
       status: {
         type: "string",
         description: "Template lifecycle status (for example `published`).",

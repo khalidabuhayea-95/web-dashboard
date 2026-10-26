@@ -57,7 +57,7 @@ The script prints:
 ## Chrome extension mode
 
 - Extension path:
-  - `/Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/extension/canva-importer`
+  - `/Users/khalidabuhayea/AndroidStudioProjects/web-dashboard/extensions/canva-importer`
 - Generate token from dashboard `/canva-import` (`Generate extension token`).
 - Paste token in extension popup.
 - Open Canva tab and click `Import current tab`.
@@ -78,7 +78,7 @@ never stores WHEN an element animates — a tile click stores `{type, animation:
 config — and its own scheduler derives every window at play time from the page. The importer ports
 that scheduler and writes the result as explicit slots.
 
-- Extraction happens in the MAIN world off Canva's React model (`extension/canva-importer/canva-fiber-main.js`;
+- Extraction happens in the MAIN world off Canva's React model (`extensions/canva-importer/canva-fiber-main.js`;
   the `canva-animation-extract` block is kept byte-identical in `background.js`'s fallback walk and
   `canva-scraper.js`'s, and a test fails if they drift). Per element: the raw config (`qg` / `Bf`
   legs with their raw µs + `reverse`, `direction`, `Vd`, `scale`, `ID`, `NV`, `color` — found
@@ -122,9 +122,9 @@ that scheduler and writes the result as explicit slots.
   (types only; windows, durations, intensity and `params` untouched), `resolveElementAnimations`
   prefers explicit slots over the legacy mirror, and the mobile API (`toMobileProject`) serialises
   `animations` (params included) with intensity clamped to 0..4.
-- Tests: `node --test extension/canva-importer/test/animation-mapping.test.mjs` (raw Canva model →
+- Tests: `node --test extensions/canva-importer/test/animation-mapping.test.mjs` (raw Canva model →
   Canva's scheduler → fabric fields, every expectation written from Canva's formulas, plus a replay
-  of the records Canva really stores — `extension/canva-importer/test/fixtures/canva-live-records-2026-09-22.json`)
+  of the records Canva really stores — `extensions/canva-importer/test/fixtures/canva-live-records-2026-09-22.json`)
   and `node --import tsx --test src/lib/tools/canvaImportAnimations.server.test.js` (server passthrough).
 
 ## Notes

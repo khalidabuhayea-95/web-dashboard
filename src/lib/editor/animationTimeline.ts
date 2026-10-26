@@ -391,6 +391,19 @@ const ANIMATION_TYPE_ALIASES: Record<string, EditorAnimationType> = {
   "اهتزاز سريع بالاتجاه...": "WIGGLE",
   "تقلص العنصر وتمدد": "PULSE",
   "تقلص العنصر وتمدد...": "PULSE",
+  // The app's own tile names (the editor shows them since 2026-10-14; Canva's stay above).
+  "صعود": "RISE",
+  "تحريك جانبي": "PAN",
+  "مسح": "WIPE",
+  "تتابع": "SUCCESSION",
+  "تنفّس": "BREATHE",
+  "تنفس": "BREATHE",
+  "تكتوني": "TECTONIC",
+  "تدحرج": "TUMBLE",
+  "ارتطام": "STOMP",
+  "وميض": "FLICKER",
+  "نبض": "PULSE",
+  "تمايل": "WIGGLE",
 };
 
 const SUPPORTED_ANIMATION_TYPES = new Set<EditorAnimationType>([
@@ -598,7 +611,13 @@ export function getPageDurationMs(page: { durationMs?: number | null } | null | 
     return Math.max(maxDurationMs, nextDurationMs);
   }, 0);
   if (longestVideoDurationMs > 0) {
-    return Math.max(MIN_LAYER_DURATION_MS, longestVideoDurationMs);
+    // The longest clip sets a video page's length — unless the page was authored LONGER than its
+    // clips: the clip then loops inside its window (Canva restarts its backdrop clip with every
+    // scene; DAHNlJ_f8mI's 15 s clip under 44.9 s of scenes cut the page to 15 s). The default
+    // length is not an authored one: a fresh page with a shorter clip still takes the clip's.
+    const authoredMs =
+      Number.isFinite(raw) && raw > 0 && Math.round(raw) !== DEFAULT_PAGE_DURATION_MS ? Math.round(raw) : 0;
+    return Math.max(MIN_LAYER_DURATION_MS, longestVideoDurationMs, authoredMs);
   }
   return Math.max(
     MIN_LAYER_DURATION_MS,

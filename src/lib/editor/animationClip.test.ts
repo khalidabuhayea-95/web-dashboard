@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { drawRevealClip, type ClipMask } from "./animationClip";
+import { drawRevealClip, typewriterRevealRects, type ClipMask } from "./animationClip";
 
 /** A recording stub for the canvas 2D subset drawRevealClip uses. */
 function rec() {
@@ -78,4 +78,25 @@ test("RADIAL sweeps a wedge from its start angle", () => {
   assert.equal(r.calls[0], "moveTo(50,50)");
   assert.ok(r.calls.some((c) => c.startsWith("arc(50,50")));
   assert.equal(r.calls[r.calls.length - 1], "close");
+});
+
+test("the typewriter shows whole lines, then the typed part of the current one, nothing after", () => {
+  const lines = [
+    { text: "Aziza", width: 100, lastInParagraph: true },
+    { text: "&", width: 20, lastInParagraph: true },
+    { text: "Ammar", width: 120, lastInParagraph: true },
+  ];
+  const measure = (text: string) => text.length * 20;
+  const options = { boxWidth: 200, lineHeightPx: 50, align: "center", rtl: false, measure };
+  // 3 of "Aziza": one rect, starting at the centred line's left edge, 60 px of glyphs.
+  assert.deepEqual(typewriterRevealRects(lines, 3, options), [{ x: 50 - 50, y: -50, width: 60 + 50, height: 50 + 10 + 50 }]);
+  // "Aziza\n&\n" typed (8 chars) + "Am": two whole bands and 40 px of the last line.
+  const rects = typewriterRevealRects(lines, 10, options);
+  assert.equal(rects.length, 3);
+  assert.deepEqual(rects[1], { x: -50, y: 50, width: 300, height: 50 });
+  assert.deepEqual(rects[2], { x: 40 - 50, y: 100, width: 40 + 50, height: 100 });
+  // Right-to-left: the typed part grows from the line's right end.
+  const rtl = typewriterRevealRects([{ text: "سلام", width: 80 }], 2, { ...options, rtl: true });
+  assert.deepEqual(rtl, [{ x: 60 + 80 - 40, y: -50, width: 40 + 50, height: 50 + 50 + 50 }]);
+  assert.deepEqual(typewriterRevealRects(lines, 0, options), []);
 });

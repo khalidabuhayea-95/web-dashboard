@@ -12,6 +12,7 @@
     "import:canva": "node scripts/import-canva-template.mjs",
     "backfill:background-previews": "node scripts/backfill-background-previews.mjs",
     "cleanup:orphan-media": "node --env-file=.env --env-file=.env.local --import tsx scripts/cleanup-orphan-media.ts",
+    "convert:element-webp": "node --env-file=.env --env-file=.env.local --import tsx scripts/convert-element-pngs-to-webp.ts",
     "backfill:font-names": "node --env-file=.env --env-file=.env.local --import tsx scripts/backfill-font-names.ts",
     "dedupe:backgrounds": "node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-backgrounds.ts",
     "dedupe:fonts": "node --env-file=.env --env-file=.env.local --import tsx scripts/dedupe-fonts.ts",
@@ -38,7 +39,10 @@
     "test:occasions": "node --import tsx --test src/lib/occasions/*.test.ts src/lib/occasions/*.test.js src/lib/editor/assetBoostOrder.test.js",
     "smoke:featured": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-featured-templates.ts",
     "smoke:template-premium": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-template-premium.ts",
-    "test:featured": "node --import tsx --test src/lib/templates/featured.test.js"
+    "test:featured": "node --import tsx --test src/lib/templates/featured.test.js",
+    "test:search": "node --import tsx --test src/lib/search/searchPlan.test.js src/lib/search/searchTranslate.test.js src/lib/text/arabicSearch.test.js",
+    "search:backfill": "node --env-file=.env --env-file=.env.local --import tsx scripts/search-backfill.ts",
+    "smoke:search": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-search.ts"
   },
   "dependencies": {
     "@apple/app-store-server-library": "^3.1.0",

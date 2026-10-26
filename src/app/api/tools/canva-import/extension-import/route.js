@@ -41,7 +41,7 @@ const logger = createLogger("api.tools.canva-extension-import");
 const require = createRequire(import.meta.url);
 const {
   CANVA_IMPORTER_SHARED_CONSTANTS = {},
-} = require("../../../../../../extension/canva-importer/shared-constants.js");
+} = require("../../../../../../extensions/canva-importer/shared-constants.js");
 const EXTENSION_IMPORT_IP_LIMIT = {
   limit: 120,
   windowMs: 60_000,
@@ -395,12 +395,19 @@ function deriveUsedFontsFromFabricObjects(objects) {
   objects.forEach((object) => {
     const type = String(object?.type || "").toLowerCase();
     if (type !== "text" && type !== "textbox" && type !== "i-text") return;
-    const family = normalizeFontFamilyName(object?.fontFamily || object?.fontName);
-    if (!family) return;
-    const key = family.toLowerCase();
-    if (seen.has(key)) return;
-    seen.add(key);
-    usedFonts.push(family);
+    // The layer's family, then any family only a styled range of it uses (textSpans).
+    const families = [
+      object?.fontFamily || object?.fontName,
+      ...(Array.isArray(object?.textSpans) ? object.textSpans.map((span) => span?.fontFamily) : []),
+    ];
+    families.forEach((value) => {
+      const family = normalizeFontFamilyName(value);
+      if (!family) return;
+      const key = family.toLowerCase();
+      if (seen.has(key)) return;
+      seen.add(key);
+      usedFonts.push(family);
+    });
   });
   return usedFonts;
 }
@@ -438,13 +445,24 @@ function collectFontCategoryHintsFromObjects(objects, resultMap) {
     }
 
     if (type !== "text" && type !== "textbox" && type !== "i-text") return;
-    const family = normalizeFontFamilyName(object.fontFamily || object.fontName);
-    if (!family) return;
-    const key = family.toLowerCase();
-    const textSample = String(object.text || "").trim() || family;
-    const existing = new Set(resultMap.get(key) || ["EXCLUSIVE"]);
-    existing.add(containsArabicScript(textSample) ? "ARABIC" : "ENGLISH");
-    resultMap.set(key, Array.from(existing));
+    const text = String(object.text || "");
+    // The layer's family over its whole text, and each styled range's family over its own letters.
+    const uses = [
+      { family: object.fontFamily || object.fontName, sample: text },
+      ...(Array.isArray(object.textSpans) ? object.textSpans : []).map((span) => ({
+        family: span?.fontFamily,
+        sample: text.slice(Number(span?.start) || 0, Number(span?.end) || 0),
+      })),
+    ];
+    uses.forEach(({ family: value, sample }) => {
+      const family = normalizeFontFamilyName(value);
+      if (!family) return;
+      const key = family.toLowerCase();
+      const textSample = String(sample || "").trim() || family;
+      const existing = new Set(resultMap.get(key) || ["EXCLUSIVE"]);
+      existing.add(containsArabicScript(textSample) ? "ARABIC" : "ENGLISH");
+      resultMap.set(key, Array.from(existing));
+    });
   });
 }
 
@@ -487,6 +505,15 @@ function remapFontFamilyInObjects(objects, fromFamily, toFamily) {
         object[field] = toFamily;
         changed += 1;
       }
+    }
+    // A run styled in this family inside a multi-style text (its textSpans).
+    if (Array.isArray(object.textSpans)) {
+      object.textSpans.forEach((span) => {
+        if (span && typeof span === "object" && normalizeFontFamilyName(span.fontFamily).toLowerCase() === fromKey) {
+          span.fontFamily = toFamily;
+          changed += 1;
+        }
+      });
     }
   });
   return changed;
@@ -1583,12 +1610,26 @@ export async function POST(request) {
   try {
     body = await readExtensionImportBody(request);
   } catch (error) {
+    // The size is the first thing to check: a body past next.config's proxyClientMaxBodySize is cut
+    // there, and the truncated multipart then fails to parse (a 250 MB collage import).
+    const contentLengthMb = Math.round((Number(request.headers.get("content-length")) || 0) / 1048576);
     requestLogger.warn("Invalid extension import body", {
       contentType: String(request.headers.get("content-type") || ""),
       contentEncoding: String(request.headers.get("content-encoding") || ""),
+      contentLengthMb,
       reason: String(error?.message || error || ""),
     });
-    return withCorsRequest(NextResponse.json({ error: "Invalid request body." }, { status: 400 }));
+    return withCorsRequest(
+      NextResponse.json(
+        {
+          error:
+            contentLengthMb >= 590
+              ? `Invalid request body: the import is ${contentLengthMb} MB, the dashboard accepts 600 MB.`
+              : "Invalid request body.",
+        },
+        { status: 400 }
+      )
+    );
   }
 
   const token = getToken(request, body);
@@ -1676,6 +1717,7 @@ export async function POST(request) {
       sourceLabel: "canva-extension",
       preserveSvg: false,
       traceRasterToSvg: false,
+      convertPngToWebp: true,
       rewriteExternalUrls: true,
     });
   } catch (error) {
@@ -1730,6 +1772,7 @@ export async function POST(request) {
             sourceLabel: "canva-extension-layer-crop-fallback",
             preserveSvg: false,
             traceRasterToSvg: false,
+            convertPngToWebp: true,
             rewriteExternalUrls: true,
           });
           break;
@@ -1782,6 +1825,7 @@ export async function POST(request) {
         sourceLabel: "canva-extension-snapshot-fallback",
         preserveSvg: false,
         traceRasterToSvg: false,
+        convertPngToWebp: true,
         rewriteExternalUrls: true,
       });
       forcedSnapshotFallbackWarning =
