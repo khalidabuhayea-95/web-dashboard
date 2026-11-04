@@ -37,6 +37,7 @@ import {
   ToolDivider,
   ToolPopover,
 } from "@/components/editor/EditorChrome";
+import { TextEffectsPopover } from "@/components/editor/TextEffectsPopover";
 import { FilmstripFrames, FilmstripOverlay } from "@/components/editor/TimelineFilmstrip";
 import { useTimelineScrubber } from "@/components/editor/useTimelineScrubber";
 import {
@@ -1328,6 +1329,8 @@ export default function ContextToolbar() {
                   ))}
                 </div>
               </ToolPopover>
+
+              <TextEffectsPopover element={activeTextElement} onApply={updateSelectedElements} />
 
               {mergeButton ? (
                 <>

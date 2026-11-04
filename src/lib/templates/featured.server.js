@@ -16,9 +16,8 @@ export function preserveTemplateUpdatedAt() {
  * Features (or unfeatures) templates in one statement and returns the rows it changed —
  * the only writer of `Template.isFeatured` / `featuredAt`.
  *
- * Featuring is curation, not an edit, so `updatedAt` must not move: a bump would hide the
- * template's ready preview video from the app (isTemplatePreviewStale in mobileProject.js),
- * change its thumbnail cache token and move it in every newest-first list. Hence raw SQL that
+ * Featuring is curation, not an edit, so `updatedAt` must not move: a bump would change the
+ * template's thumbnail cache token and move it in every newest-first list. Hence raw SQL that
  * never mentions `updatedAt` (Prisma stamps `@updatedAt` on every update) inside a transaction
  * that opts out of the table trigger. Reading rows and writing their old `updatedAt` back
  * instead would undo a designer's save that lands in between. Re-featuring keeps the original

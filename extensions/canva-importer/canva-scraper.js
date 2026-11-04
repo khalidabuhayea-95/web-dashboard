@@ -1546,6 +1546,7 @@
             if (pageAnimation) result.__pageAnimation = pageAnimation;
             const pageDurationUs = readPageDurationUs(firstPage);
             if (pageDurationUs) result.__pageDurationMs = Math.round(pageDurationUs / 1000);
+            if (pageDurationUs) result.__pageDurationAuthored = true;
             else {
               // An un-timed page runs for its longest timed element (never under the nominal 5s,
               // which the consumers already assume when this stays unset).
@@ -4201,6 +4202,15 @@
       // mixed with Latin words, the two directions also order the words differently.
       const RTL_LETTER = /[֐-ࣿיִ-﷿ﹰ-﻿]/;
       const BIDI_MIRRORED_PAIRS = { "(": ")", ")": "(", "[": "]", "]": "[", "{": "}", "}": "{", "<": ">", ">": "<", "«": "»", "»": "«" };
+      // A run that joins the right-to-left flow reads right to left: reverse it, and swap the
+      // paired brackets the right-to-left layout mirrors back.
+      const flipBidiRun = (run) => [...run].reverse().map((char) => BIDI_MIRRORED_PAIRS[char] || char).join("");
+      const moveEndPunctuation = (inner) => {
+        // Marks (tashkeel, tanween) belong to their letter, never to the punctuation.
+        const [, leading, body, trailing] = inner.match(/^([^\p{L}\p{N}\p{M}]*)([\s\S]*?)([^\p{L}\p{N}\p{M}]*)$/u);
+        if (!leading && !trailing) return inner;
+        return `${flipBidiRun(trailing)}${body}${flipBidiRun(leading)}`;
+      };
       const matchCanvaParagraphDirection = (text, canvaDirection) => {
         const value = String(text ?? "");
         if (canvaDirection !== "ltr") return value;
@@ -4219,13 +4229,21 @@
               return needsMark ? `${outerStart}\u200E${inner}${outerEnd}` : line;
             }
             if (!letters.every((letter) => RTL_LETTER.test(letter))) return line;
-            // Marks (tashkeel, tanween) belong to their letter, never to the punctuation.
-            const [, leading, body, trailing] = inner.match(/^([^\p{L}\p{N}\p{M}]*)([\s\S]*?)([^\p{L}\p{N}\p{M}]*)$/u);
-            if (!leading && !trailing) return line;
-            // A run that joins the right-to-left flow reads right to left: reverse it, and swap the
-            // paired brackets the right-to-left layout mirrors back.
-            const flip = (run) => [...run].reverse().map((char) => BIDI_MIRRORED_PAIRS[char] || char).join("");
-            return `${outerStart}${flip(trailing)}${body}${flip(leading)}${outerEnd}`;
+            // A number BEFORE the first letter ("25 يونيو", DAHZk2fauFU's date): Canva's
+            // left-to-right layout keeps it on the LEFT of the words, a right-to-left one puts it
+            // first, on the right. Moved after the words it lands on the left again. A number
+            // anywhere else already joins the words' right-to-left run in both layouts, and
+            // Arabic-Indic digits (٢٥) always do. Anything but digits in it gets the left-to-right
+            // mark, so its own order holds (see the numbers-only lines above).
+            const firstLetter = inner.search(/\p{L}/u);
+            const head = inner.slice(0, firstLetter);
+            if (/[0-9\u06F0-\u06F9]/.test(head)) {
+              const [, number, gap] = head.match(/^([\s\S]*?)(\s*)$/u);
+              const mark = /[^\p{N}\s]/u.test(number) && !number.startsWith("\u200E") ? "\u200E" : "";
+              return `${outerStart}${moveEndPunctuation(inner.slice(firstLetter))}${gap}${mark}${number}${outerEnd}`;
+            }
+            const moved = moveEndPunctuation(inner);
+            return moved === inner ? line : `${outerStart}${moved}${outerEnd}`;
           })
           .join("\n");
       };
@@ -6045,6 +6063,27 @@
         return { x: centerX - width / 2, y: centerY - height / 2, width, height, angle };
       };
       // ── canva-supplement-geometry:end
+
+      // ── canva-supplement-shape:start
+      // A SHAPE on the page that the layer walk rejected for its size on SCREEN: a 480×2 divider is
+      // 0.6 px tall and a 44 px icon 13.9 px wide at a fit-to-screen zoom (DAHZk2fauFU's line under
+      // «دعوة» and its calendar and clock icons), and Canva's clip-path paint is only read off
+      // elements of 80 px or more. The model draws it at design size: the editable circle/rect, or
+      // the rebuilt vector (background.js takes both before any screenshot path). Null for anything
+      // else — a shape with no node on the page (not rendered at all), an invisible one, or one the
+      // model cannot draw (a photo frame: extractShape and extractVectorShape both leave those out).
+      const supplementShapeFields = (el, { rendered, opacity }) => {
+        if (!el || el.type !== "shape" || !rendered || !(Number(opacity) > 0.01)) return null;
+        if (el.shape) return { modelShape: el.shape, fill: el.shape.fillColor || "" };
+        const svg = el.vector && typeof el.vector.svg === "string" ? el.vector.svg : "";
+        return svg ? { modelVectorSvg: svg, snapshotIsLossyFallback: true, fill: "" } : null;
+      };
+      // Whether a supplemented element is too small to keep (design px). A hairline divider is
+      // legitimately 1 px tall — a line keeps its thin axis, and so does a shape (a 480×1 rect used
+      // as a divider, either way up).
+      const supplementTooSmall = (type, width, height) =>
+        type === "shape" ? width <= 1 && height <= 1 : width <= 1 || (height <= 1 && type !== "line");
+      // ── canva-supplement-shape:end
 
       // ── canva-layer-frame-size:start
       // A layer's frame in design px: the un-rotated style box when it agrees with the measured
@@ -8543,6 +8582,7 @@
           const supplementImages = [];
           let supplementText = 0;
           let supplementLines = 0;
+          let supplementShapes = 0;
           let unresolvedMedia = 0;
           let unresolvedAnimated = 0;
           // Unresolved elements that DO have a rendered node: the DOM walk rejected them (size
@@ -8749,8 +8789,7 @@
             });
             const w = Math.max(1, Math.round(useDomRect ? domRect.width * sx : el.width));
             const h = Math.max(1, Math.round(useDomRect ? domRect.height * sy : el.height));
-            // A hairline divider is legitimately 1px tall — don't drop lines on the thin-axis gate.
-            if (w <= 1 || (h <= 1 && el.type !== "line")) continue;
+            if (supplementTooSmall(el.type, w, h)) continue;
             // Model-only elements are placed through their groups (a top-level one is unchanged).
             const modelFrame = useDomRect ? null : modelElementPageFrame(el, fiberModelById);
             const x = useDomRect ? (domRect.left - rect.x) * sx : modelFrame.x;
@@ -8781,6 +8820,7 @@
               fromModel: true,
               ...(el.animation ? { animation: el.animation } : {}),
             };
+            const shapeFields = supplementShapeFields(el, { rendered: Boolean(domNode), opacity: base.opacity });
             if (el.type === "text" && el.text && String(el.text.plaintext || "").trim()) {
               const t = el.text;
               const plainText = String(t.plaintext).replace(/[\r\n]+$/, "");
@@ -8967,6 +9007,37 @@
                 isFullPageBackground: false,
               });
               supplementLines += 1;
+            } else if (shapeFields) {
+              // A shape the layer walk rejected for its size on screen (canva-supplement-shape).
+              layers.push({
+                ...base,
+                name: `Shape ${supplementShapes + 1}`,
+                kind: "shape",
+                imageSrc: "",
+                imageDataUrl: "",
+                preferSnapshot: false,
+                sourceWidth: undefined,
+                sourceHeight: undefined,
+                text: "",
+                textAlign: "left",
+                color: "#111827",
+                fontFamily: "",
+                fontSize: 0,
+                fontStyle: "normal",
+                fontWeight: 400,
+                lineHeight: 1.2,
+                letterSpacing: 0,
+                textDecoration: "none",
+                textBackgroundColor: "",
+                textBackgroundRadius: 0,
+                titleEn: "",
+                tagsEn: [],
+                labelsEn: [],
+                isBackgroundNode: false,
+                isFullPageBackground: false,
+                ...shapeFields,
+              });
+              supplementShapes += 1;
             }
           }
 
@@ -9132,14 +9203,15 @@
             /* best-effort */
           }
 
-          if (supplementText || supplementImages.length || unresolvedMedia || backgroundPosterAdded) {
+          if (supplementText || supplementImages.length || supplementShapes || unresolvedMedia || backgroundPosterAdded) {
             console.log(
-              `[canva-scraper] timeline supplement: +${supplementText} text, +${supplementImages.length} image (off-screen model layers); ${unresolvedMedia} media unresolved; bgPoster=${backgroundPosterAdded}`
+              `[canva-scraper] timeline supplement: +${supplementText} text, +${supplementImages.length} image, +${supplementShapes} shape (model layers the walk missed); ${unresolvedMedia} media unresolved; bgPoster=${backgroundPosterAdded}`
             );
           }
           timelineSupplementSummary = {
             addedText: supplementText,
             addedImages: supplementImages.length,
+            addedShapes: supplementShapes,
             unresolvedMedia,
             unresolvedAnimated,
             unresolvedRendered,
@@ -9214,8 +9286,14 @@
               parent = parent.parentId ? modelById[String(parent.parentId)] : null;
               hops += 1;
             }
-            if (!Number.isFinite(durationUs) || durationUs <= 0) return null;
             const startMs = Math.max(0, Math.round(startUs / 1000));
+            // A start with no length runs to the page's end (Canva's own rule — canvaElementTiming's
+            // `runsToEnd`): durMs null, so the layer gets a start and an open end. DAHZLxjJX8A's
+            // envelope opens first and the card's arch, roses, verse, names and suit come in from
+            // 4.05 s to 7.45 s, each with a start only; dropping those windows showed everything at
+            // 0:00 on top of the closed envelope.
+            if (!Number.isFinite(durationUs)) return startMs > 0 ? { startMs, durMs: null } : null;
+            if (durationUs <= 0) return null;
             const durMs = Math.round(durationUs / 1000);
             return durMs > 0 ? { startMs, durMs } : null;
           };
@@ -9263,14 +9341,16 @@
               const partWindow = resolveModelWindowMs(windowModelOf(layer), fiberModelById);
               if (designHasMotion && windowsAreSequenced && partWindow) {
                 layer.timelineStartMs = partWindow.startMs;
-                layer.timelineEndMs = partWindow.startMs + partWindow.durMs;
+                if (partWindow.durMs === null) delete layer.timelineEndMs;
+                else layer.timelineEndMs = partWindow.startMs + partWindow.durMs;
               }
               continue;
             }
             const modelWindow = resolveModelWindowMs(model, fiberModelById);
             if (designHasMotion && windowsAreSequenced && modelWindow) {
               layer.timelineStartMs = modelWindow.startMs;
-              layer.timelineEndMs = modelWindow.startMs + modelWindow.durMs;
+              if (modelWindow.durMs === null) delete layer.timelineEndMs;
+              else layer.timelineEndMs = modelWindow.startMs + modelWindow.durMs;
             }
             // Carry the model's simple-shape classification so background.js can emit an editable
             // circle/rect instead of the DOM's protected raster (which snapshot-crops with a

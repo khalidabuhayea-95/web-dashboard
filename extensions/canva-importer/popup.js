@@ -210,6 +210,9 @@ async function importActiveTab() {
 
 async function main() {
   logger.info("Popup initialized");
+  $("batchButton")?.addEventListener("click", () => {
+    chrome.tabs.create({ url: chrome.runtime.getURL("batch.html") });
+  });
   renderBuildVersion();
   await loadSettings();
 

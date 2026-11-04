@@ -237,7 +237,7 @@ const REFERENCE_TEXT_SOURCES: Array<[string, string]> = [
   ["AiTemplate", `SELECT COALESCE("beforeUrl",'') || ' ' || COALESCE("afterUrl",'') || ' ' || COALESCE("thumbUrl",'') AS t FROM "AiTemplate"`],
   ["MagicTool", `SELECT COALESCE("beforeUrl",'') || ' ' || COALESCE("afterUrl",'') || ' ' || COALESCE("thumbUrl",'') AS t FROM "MagicTool"`],
   ["GalleryImage", `SELECT COALESCE(url,'') AS t FROM "GalleryImage"`],
-  ["TextEffect", `SELECT COALESCE("previewUrl",'') AS t FROM "TextEffect"`],
+  ["TextEffect", `SELECT COALESCE("previewUrl",'') || ' ' || COALESCE("textureUrl",'') || ' ' || COALESCE("textureVideoUrl",'') AS t FROM "TextEffect"`],
   ["AppSetting", `SELECT value::text AS t FROM "AppSetting"`],
   ["PushCampaign", `SELECT payload::text AS t FROM "PushCampaign"`],
   ["StoreNotification", `SELECT payload::text AS t FROM "StoreNotification"`],

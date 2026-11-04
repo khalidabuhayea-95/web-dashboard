@@ -8,7 +8,7 @@ import {
   resolveRequestId,
 } from "@/lib/logging/request";
 import prisma from "@/lib/prisma";
-import { normalizeTextEffectSpec } from "@/lib/textEffects/spec";
+import { serializeTextEffect } from "@/lib/textEffects/spec";
 
 export const runtime = "nodejs";
 
@@ -35,20 +35,17 @@ export async function GET(request: NextRequest) {
         spec: true,
         previewUrl: true,
         isPremium: true,
+        category: true,
+        textureUrl: true,
+        textureVideoUrl: true,
+        inlayTextureUrl: true,
       },
     });
 
     // Normalised on the way out too: a row written before a spec field existed
     // still reaches the app with every field filled, so old and new builds
-    // never have to null-check.
-    const effects = rows.map((row: any) => ({
-      id: row.slug,
-      titleEn: row.titleEn,
-      titleAr: row.titleAr,
-      isPremium: row.isPremium,
-      previewUrl: row.previewUrl || null,
-      spec: normalizeTextEffectSpec(row.spec),
-    }));
+    // never have to null-check. Texture URLs ride inside `spec.fill.texture`.
+    const effects = rows.map((row: any) => serializeTextEffect(row));
 
     return attachRequestIdHeader(
       NextResponse.json(

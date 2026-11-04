@@ -57,6 +57,7 @@ import {
   SVG_SHAPE_RASTER_SCALE,
 } from "@/lib/editor/imageCrop";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
+import { createPreviewFrameSink, type PreviewFrameSink } from "@/lib/editor/previewFrameEncoder";
 import {
   elementPlaysCanvaUnits,
   frameToSampleTimeMs,
@@ -94,6 +95,14 @@ import { openInlineRichTextEditor, type InlineRichTextEditor } from "@/component
 import { resolveTextStrokeWidthPx } from "@/lib/editor/textStroke";
 import { drawTextBackground, resolveTextBackgroundBox } from "@/lib/editor/textBackground";
 import { resolveLinearGradientEndpoints, textFillKonvaProps } from "@/lib/editor/textFill";
+import {
+  ensureTextEffectAssets,
+  getTextEffectCatalogItem,
+  normalizeEditorTextEffect,
+  paintTextEffectOnNode,
+  textureVideoUrl,
+  useTextEffectCatalog,
+} from "@/lib/editor/textEffects";
 import {
   hasTextSpans,
   textSpanFontFamilies,
@@ -162,12 +171,27 @@ function isTextFontDeclared(fontFamily: unknown, declared: { current: Set<string
   return declared.current.has(key);
 }
 
+interface PreviewMediaSyncOptions {
+  /**
+   * Wait (up to this long) until the frame at the target is actually decoded. Only the
+   * frame-by-frame recorder asks for it: without it the seek is just issued, and a recording that
+   * draws straight after would show each clip a frame or more behind.
+   */
+  settleTimeoutMs?: number;
+}
+
 interface PreviewMediaController {
   /**
    * Put the element on the exact frame [frame]. A seek — correct for a still, and the only way to
    * get an exact one, but far too slow to run once per frame of a recording (see [beginPlayback]).
    */
-  syncToFrame: (frame: number, fps: number) => Promise<void>;
+  syncToFrame: (frame: number, fps: number, options?: PreviewMediaSyncOptions) => Promise<void>;
+  /**
+   * Whether the element has loaded a frame at all. Chrome does not start loading media in a tab
+   * that has never been shown, so a preview requested from a background tab has to know when its
+   * clips are still waiting for that.
+   */
+  hasDrawableFrame?: () => boolean;
   /**
    * ★Start rolling the element at 1x for a real-time capture, positioned for timeline [atMs].
    *
@@ -378,6 +402,38 @@ function getSupportedPreviewRecorderMimeType() {
   return candidates.find((candidate) => MediaRecorder.isTypeSupported(candidate)) || "";
 }
 
+function isDocumentHidden() {
+  return typeof document !== "undefined" && document.visibilityState === "hidden";
+}
+
+/**
+ * Thrown by the live recorder when the tab goes to the background mid-recording: a hidden page
+ * stops painting, so the canvas stream stops receiving frames. recordTimelinePreviewVideo catches
+ * it and records the preview again frame by frame.
+ */
+class PreviewTabHiddenError extends Error {
+  constructor() {
+    super("The tab went to the background during a live preview recording.");
+    this.name = "PreviewTabHiddenError";
+  }
+}
+
+/** How long one clip may take to land on a frame before the frame-by-frame recorder draws anyway. */
+const PREVIEW_FRAME_SETTLE_TIMEOUT_MS = 4000;
+/** Waiting for clips this long in a hidden tab means Chrome is holding their load back. */
+const PREVIEW_MEDIA_LOAD_NOTICE_MS = 3000;
+/** Once the tab is in view, a clip that still has not loaded after this is treated as broken. */
+const PREVIEW_MEDIA_LOAD_TIMEOUT_MS = 10_000;
+
+interface TimelinePreviewRecordingOptions {
+  fps?: number;
+  maxDimension?: number;
+  durationMs?: number;
+  signal?: AbortSignal;
+  /** Progress the toolbar shows, for the waits a background recording can hit. */
+  onStatus?: (message: string) => void;
+}
+
 function createAbortError(message: string) {
   if (typeof DOMException !== "undefined") {
     return new DOMException(message, "AbortError");
@@ -559,6 +615,37 @@ async function syncVideoElementToTime(
       finish();
     }
   });
+}
+
+/**
+ * Seek [media] to [targetTime] and wait until the frame there is decoded, bounded by [timeoutMs].
+ *
+ * syncVideoElementToTime is done as soon as the seek is issued (currentTime reports the target at
+ * once), which suits scrubbing. The frame-by-frame recorder draws right after, with no clock to keep
+ * up with, so it waits for the seek to land and for a current frame.
+ */
+async function settleVideoElementAtTime(
+  media: HTMLVideoElement,
+  targetTime: number,
+  tolerance: number,
+  timeoutMs: number
+) {
+  const safeTargetTime = Math.max(0, Number(targetTime) || 0);
+  media.pause();
+  if (Math.abs(media.currentTime - safeTargetTime) > tolerance) {
+    try {
+      media.currentTime = safeTargetTime;
+    } catch {
+      return;
+    }
+  }
+  const startedAt = performance.now();
+  while (
+    (media.seeking || media.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) &&
+    performance.now() - startedAt < timeoutMs
+  ) {
+    await waitForCaptureTick();
+  }
 }
 
 function resolveKonvaImageCrop(
@@ -1350,7 +1437,7 @@ function CanvasVideoNodeImpl({
   // shared image cache, so a scene opening on a video has it on its first frame (no page flash).
   const [posterImage] = useCachedImage(String(element.posterSrc || "").trim(), "anonymous");
   const syncVideoToFrame = useCallback(
-    async (frame: number, fps: number) => {
+    async (frame: number, fps: number, options?: PreviewMediaSyncOptions) => {
       const media = videoRef.current;
       if (!media) return;
       const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
@@ -1373,7 +1460,12 @@ function CanvasVideoNodeImpl({
         sourceStart,
         sourceEnd,
       });
-      await syncVideoElementToTime(media, targetTime, Math.max(0.012, 1 / Math.max(12, fps)));
+      const tolerance = Math.max(0.012, 1 / Math.max(12, fps));
+      if (options?.settleTimeoutMs !== undefined) {
+        await settleVideoElementAtTime(media, targetTime, tolerance, options.settleTimeoutMs);
+      } else {
+        await syncVideoElementToTime(media, targetTime, tolerance);
+      }
       media.pause();
       mediaRef.current?.getLayer()?.batchDraw();
     },
@@ -1460,6 +1552,7 @@ function CanvasVideoNodeImpl({
     if (!registerPreviewMediaController) return undefined;
     registerPreviewMediaController(element.id, {
       syncToFrame: syncVideoToFrame,
+      hasDrawableFrame: () => isDrawableMediaReady(videoRef.current),
       beginPlayback: beginVideoPlayback,
       resyncPlayback: resyncVideoPlayback,
       endPlayback: endVideoPlayback,
@@ -1898,7 +1991,7 @@ function CanvasFrameNodeImpl({
   }, [frameContent?.kind, frameContent?.src, frameContent?.videoEnd, frameContent?.videoStart, transform.fit]);
 
   const syncFrameContentVideoToFrame = useCallback(
-    async (frame: number, fps: number) => {
+    async (frame: number, fps: number, options?: PreviewMediaSyncOptions) => {
       const media = videoRef.current;
       if (!media || frameContent?.kind !== "video") return;
       const duration = Number.isFinite(media.duration) ? Math.max(0, media.duration) : 0;
@@ -1921,11 +2014,29 @@ function CanvasFrameNodeImpl({
         sourceStart,
         sourceEnd,
       });
-      await syncVideoElementToTime(media, targetTime, Math.max(0.012, 1 / Math.max(12, fps)));
+      const tolerance = Math.max(0.012, 1 / Math.max(12, fps));
+      if (options?.settleTimeoutMs !== undefined) {
+        await settleVideoElementAtTime(media, targetTime, tolerance, options.settleTimeoutMs);
+      } else {
+        await syncVideoElementToTime(media, targetTime, tolerance);
+      }
       media.pause();
       mediaRef.current?.getLayer()?.batchDraw();
     },
     [element, frameContent, pageDurationMs]
+  );
+  // The recorder's entry point. This node draws the held copy, which its `seeked` listener
+  // refreshes a task later than a settled seek returns; the frame-by-frame recorder draws before
+  // then, so copy the landed frame first.
+  const syncFrameContentVideoForRecorder = useCallback(
+    async (frame: number, fps: number, options?: PreviewMediaSyncOptions) => {
+      await syncFrameContentVideoToFrame(frame, fps, options);
+      const media = videoRef.current;
+      if (options?.settleTimeoutMs === undefined || !media) return;
+      heldFrame.paint(media);
+      setHeldFrameCanvas((current) => (current === heldFrame.frame ? current : heldFrame.frame));
+    },
+    [heldFrame, syncFrameContentVideoToFrame]
   );
 
   // Same play-don't-seek treatment as a bare video layer — a clip inside a frame is decoded by the
@@ -2007,7 +2118,8 @@ function CanvasFrameNodeImpl({
       return undefined;
     }
     registerPreviewMediaController(element.id, {
-      syncToFrame: syncFrameContentVideoToFrame,
+      syncToFrame: syncFrameContentVideoForRecorder,
+      hasDrawableFrame: () => isDrawableMediaReady(videoRef.current),
       beginPlayback: beginFrameContentPlayback,
       resyncPlayback: resyncFrameContentPlayback,
       endPlayback: endFrameContentPlayback,
@@ -2022,7 +2134,7 @@ function CanvasFrameNodeImpl({
     frameContent?.kind,
     registerPreviewMediaController,
     resyncFrameContentPlayback,
-    syncFrameContentVideoToFrame,
+    syncFrameContentVideoForRecorder,
   ]);
 
   useEffect(() => {
@@ -2439,6 +2551,178 @@ function getCheckerboardPattern(): HTMLCanvasElement | null {
   return checkerboardPatternCanvas;
 }
 
+interface TextEffectMediaDriverProps {
+  elementId: string;
+  effectId: string;
+  videoUrl: string;
+  /** The scene's clip per text layer, read by the layer's scene function at draw time. */
+  videos: React.RefObject<Map<string, HTMLVideoElement>>;
+  getNode: (id: string) => Konva.Node | undefined;
+  playheadFrame?: number;
+  previewFps?: number;
+  forceTimelineSync?: boolean;
+  suspendMediaTimelineSync?: boolean;
+  registerPreviewMediaController?: (id: string, controller: PreviewMediaController | null) => void;
+}
+
+/**
+ * The media behind one text layer's effect (lib/editor/textEffects.ts). Renders nothing: it loads
+ * the catalog entry and still texture and repaints the layer when they land, runs a looping
+ * texture clip, and registers with the preview recorder like a video layer does — so a recording
+ * waits for the texture and seeks the clip frame by frame instead of capturing a stale frame.
+ *
+ * One <video> per layer per scene: the export scene seeks its own copy while the editor's loops.
+ * The clip's time is the timeline's, wrapped to the clip length.
+ */
+function TextEffectMediaDriver({
+  elementId,
+  effectId,
+  videoUrl,
+  videos,
+  getNode,
+  playheadFrame = 0,
+  previewFps = 30,
+  forceTimelineSync = false,
+  suspendMediaTimelineSync = false,
+  registerPreviewMediaController,
+}: TextEffectMediaDriverProps) {
+  const mediaRef = useRef<HTMLVideoElement | null>(null);
+  // Keyed by URL, so a swapped clip stops drawing without a reset inside the effect.
+  const [loaded, setLoaded] = useState<{ url: string; media: HTMLVideoElement | null }>({ url: "", media: null });
+  const video = videoUrl && loaded.url === videoUrl ? loaded.media : null;
+  const redraw = useCallback(() => getNode(elementId)?.getLayer()?.batchDraw(), [elementId, getNode]);
+
+  useEffect(() => {
+    let live = true;
+    void ensureTextEffectAssets(effectId).then(() => {
+      if (live) redraw();
+    });
+    return () => {
+      live = false;
+    };
+  }, [effectId, redraw]);
+
+  useEffect(() => {
+    if (!videoUrl) return undefined;
+    const media = document.createElement("video");
+    media.crossOrigin = "anonymous";
+    media.muted = true;
+    media.loop = true;
+    media.playsInline = true;
+    media.preload = "auto";
+    mediaRef.current = media;
+    const map = videos.current;
+    const ready = () => {
+      map.set(elementId, media);
+      setLoaded({ url: videoUrl, media });
+      redraw();
+    };
+    media.addEventListener("loadeddata", ready, { once: true });
+    media.addEventListener("seeked", redraw);
+    media.src = videoUrl;
+    return () => {
+      media.removeEventListener("loadeddata", ready);
+      media.removeEventListener("seeked", redraw);
+      if (map.get(elementId) === media) map.delete(elementId);
+      if (mediaRef.current === media) mediaRef.current = null;
+      media.pause();
+      media.removeAttribute("src");
+      media.load();
+    };
+  }, [elementId, redraw, videoUrl, videos]);
+
+  const clipSecondsAt = useCallback((timelineMs: number) => {
+    const media = mediaRef.current;
+    const duration = media && Number.isFinite(media.duration) && media.duration > 0 ? media.duration : 0;
+    return duration ? (Math.max(0, timelineMs) / 1000) % duration : 0;
+  }, []);
+
+  const seekTo = useCallback(
+    async (timelineMs: number, settleTimeoutMs?: number) => {
+      const media = mediaRef.current;
+      if (!media) return;
+      const target = clipSecondsAt(timelineMs);
+      if (settleTimeoutMs !== undefined) await settleVideoElementAtTime(media, target, 0.02, settleTimeoutMs);
+      else await syncVideoElementToTime(media, target, 0.02);
+      media.pause();
+      redraw();
+    },
+    [clipSecondsAt, redraw]
+  );
+
+  useEffect(() => {
+    if (!registerPreviewMediaController) return undefined;
+    const id = `${elementId}::text-effect`;
+    registerPreviewMediaController(id, {
+      syncToFrame: async (frame, fps, options) => {
+        await ensureTextEffectAssets(effectId);
+        if (videoUrl) await seekTo((frame / Math.max(1, fps)) * 1000, options?.settleTimeoutMs);
+        else redraw();
+      },
+      hasDrawableFrame: () =>
+        Boolean(getTextEffectCatalogItem(effectId)) && (!videoUrl || isDrawableMediaReady(mediaRef.current)),
+      beginPlayback: async (atMs) => {
+        const media = mediaRef.current;
+        if (!media) return;
+        await syncVideoElementToTime(media, clipSecondsAt(atMs), 0.05);
+        media.loop = true;
+        try {
+          await media.play();
+        } catch {
+          // The capture holds this layer's current frame.
+        }
+      },
+      resyncPlayback: (targetMs) => {
+        const media = mediaRef.current;
+        if (!media || media.paused) return;
+        const target = clipSecondsAt(targetMs);
+        if (Math.abs(media.currentTime - target) * 1000 <= PREVIEW_PLAYBACK_RESYNC_THRESHOLD_MS) return;
+        try {
+          media.currentTime = target;
+        } catch {
+          // A refused seek just leaves this tick where it is.
+        }
+      },
+      endPlayback: () => mediaRef.current?.pause(),
+      waitUntilDrawable: async (timeoutMs) => {
+        await Promise.race([
+          ensureTextEffectAssets(effectId),
+          new Promise((resolve) => setTimeout(resolve, timeoutMs ?? 2500)),
+        ]);
+        if (videoUrl) await waitForPublishedVideoFrame(() => mediaRef.current, timeoutMs);
+        redraw();
+      },
+    });
+    return () => registerPreviewMediaController(id, null);
+  }, [clipSecondsAt, effectId, elementId, redraw, registerPreviewMediaController, seekTo, videoUrl]);
+
+  // A parked playhead (or the recorder) puts the clip on the playhead's frame…
+  useEffect(() => {
+    if (!video || !forceTimelineSync || suspendMediaTimelineSync) return;
+    void seekTo((playheadFrame / Math.max(1, previewFps)) * 1000);
+  }, [forceTimelineSync, playheadFrame, previewFps, seekTo, suspendMediaTimelineSync, video]);
+
+  // …otherwise the material loops on its own, repainted every frame while it plays.
+  useEffect(() => {
+    const media = mediaRef.current;
+    if (!video || !media || forceTimelineSync || suspendMediaTimelineSync) return undefined;
+    media.loop = true;
+    void media.play().catch(() => undefined);
+    let frame = 0;
+    const tick = () => {
+      redraw();
+      frame = window.requestAnimationFrame(tick);
+    };
+    frame = window.requestAnimationFrame(tick);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      media.pause();
+    };
+  }, [forceTimelineSync, redraw, suspendMediaTimelineSync, video]);
+
+  return null;
+}
+
 function CanvasPageSceneImpl({
   page,
   elements,
@@ -2488,6 +2772,11 @@ function CanvasPageSceneImpl({
     [registerPreviewMediaController]
   );
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  // Dashboard text effects (lib/editor/textEffects.ts): the catalog, each layer's texture clip,
+  // and a node lookup for the drivers' repaints.
+  const textEffectCatalog = useTextEffectCatalog();
+  const textEffectVideos = useRef(new Map<string, HTMLVideoElement>());
+  const getSceneNode = useCallback((id: string) => sceneNodeRefs.current.get(id), []);
   // Warm the shared image cache with every image this page will show — layers mount only inside
   // their timeline window, and one opening mid-play must not wait a frame for its picture.
   useEffect(() => {
@@ -2941,6 +3230,24 @@ function CanvasPageSceneImpl({
               const richInput = hasTextSpans(element)
                 ? buildRichTextInput(element, direction === "rtl" ? "rtl" : "ltr", textFillProps)
                 : null;
+              // A dashboard text effect paints the glyphs in place of Konva's own pass, from the
+              // same line layout (lib/editor/textEffects.ts). Ranges that change the layout keep
+              // their rich-text painter; colour-only ranges give way to the material.
+              const textEffect = normalizeEditorTextEffect(element.textEffect);
+              const textEffectItem =
+                textEffect && textEffectCatalog && !textSpansAffectLayout(element.textSpans)
+                  ? textEffectCatalog.get(textEffect.effectId) || null
+                  : null;
+              const effectSceneFunc = (withBackground: boolean) =>
+                textEffect && textEffectItem
+                  ? (context: Konva.Context, shape: Konva.Shape) => {
+                      if (withBackground && textBackground) drawTextBackground(context._context, textBackground);
+                      const node = shape as Konva.Text;
+                      if (!paintTextEffectOnNode(context, node, textEffectItem, textEffect, textEffectVideos.current.get(element.id))) {
+                        node._sceneFunc(context);
+                      }
+                    }
+                  : undefined;
               const textBackgroundRect = textBackground ? (
                 <Rect
                   x={textBackground.x}
@@ -3199,7 +3506,7 @@ function CanvasPageSceneImpl({
                     >
                       <Text
                         {...localTextProps}
-                        sceneFunc={richInput ? richTextSceneFunc(richInput, null) : undefined}
+                        sceneFunc={effectSceneFunc(false) ?? (richInput ? richTextSceneFunc(richInput, null) : undefined)}
                       />
                     </Group>
                     {fadingLetters.map(({ rect, alpha }, index) => (
@@ -3209,7 +3516,7 @@ function CanvasPageSceneImpl({
                         opacity={alpha}
                         clipFunc={(ctx) => ctx.rect(rect.x, rect.y, rect.width, rect.height)}
                       >
-                        <Text {...localTextProps} />
+                        <Text {...localTextProps} sceneFunc={effectSceneFunc(false)} />
                       </Group>
                     ))}
                     {bar ? (
@@ -3265,7 +3572,8 @@ function CanvasPageSceneImpl({
                   // the snug-fit all address it as one), so the box is painted as an underlay in
                   // its own scene function rather than as a sibling node.
                   sceneFunc={
-                    richInput
+                    effectSceneFunc(true) ??
+                    (richInput
                       ? richTextSceneFunc(richInput, textBackground)
                       : textBackground
                         ? (context, shape) => {
@@ -3274,7 +3582,7 @@ function CanvasPageSceneImpl({
                               context
                             );
                           }
-                        : undefined
+                        : undefined)
                   }
                   onDblClick={
                     interactive
@@ -3409,6 +3717,26 @@ function CanvasPageSceneImpl({
           );
         })}
       </Group>
+      {elements.map((element) => {
+        if (element.type !== "text") return null;
+        const textEffect = normalizeEditorTextEffect(element.textEffect);
+        if (!textEffect || !isElementVisibleAtPlayhead(element, playheadMs, pageDurationMs)) return null;
+        return (
+          <TextEffectMediaDriver
+            key={`${element.id}::text-effect`}
+            elementId={element.id}
+            effectId={textEffect.effectId}
+            videoUrl={textureVideoUrl(getTextEffectCatalogItem(textEffect.effectId))}
+            videos={textEffectVideos}
+            getNode={getSceneNode}
+            playheadFrame={playheadFrame}
+            previewFps={previewFps}
+            forceTimelineSync={forceTimelineSync}
+            suspendMediaTimelineSync={suspendMediaTimelineSync}
+            registerPreviewMediaController={safeRegisterPreviewMediaController}
+          />
+        );
+      })}
     </>
   );
 }
@@ -4085,6 +4413,10 @@ export default function CanvasEditor() {
   const [exportFrameOverride, setExportFrameOverride] = useState(0);
   // Only the POSTER frame is taken settled — the recorded frames must animate for real.
   const [exportSettledPose, setExportSettledPose] = useState(false);
+  // The frame-by-frame recorder seeks every export clip itself, frame by frame (see
+  // recordTimelinePreviewFrameByFrame); the nodes' own playhead-driven seek must stay out of it.
+  const exportFrameStepping = useEditorStore((state) => state.previewFrameStepping);
+  const setPreviewFrameStepping = useEditorStore((state) => state.setPreviewFrameStepping);
   const [exportMaxDimension, setExportMaxDimension] = useState(720);
   // The hidden export stage duplicates the entire scene (a second Konva node per
   // element, plus a second decoded bitmap/video per media layer). Keeping it
@@ -4433,11 +4765,14 @@ export default function CanvasEditor() {
     []
   );
 
-  const syncExportPreviewMediaControllers = useCallback(async (frame: number, fps: number) => {
-    const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
-    if (controllers.length === 0) return;
-    await Promise.all(controllers.map((controller) => controller.syncToFrame(frame, fps)));
-  }, []);
+  const syncExportPreviewMediaControllers = useCallback(
+    async (frame: number, fps: number, options?: PreviewMediaSyncOptions) => {
+      const controllers = Array.from(exportPreviewMediaControllersRef.current.values());
+      if (controllers.length === 0) return;
+      await Promise.all(controllers.map((controller) => controller.syncToFrame(frame, fps, options)));
+    },
+    []
+  );
 
   /** Start every export-stage clip rolling at 1x, positioned for timeline [atMs]. */
   const beginExportPreviewMediaPlayback = useCallback(async (atMs: number) => {
@@ -4942,8 +5277,8 @@ export default function CanvasEditor() {
     ]
   );
 
-  const recordTimelinePreviewVideo = useCallback(
-    async (options?: { fps?: number; maxDimension?: number; durationMs?: number; signal?: AbortSignal }) => {
+  const recordTimelinePreviewInRealTime = useCallback(
+    async (options?: TimelinePreviewRecordingOptions) => {
       if (!activePage) return null;
       const stage = await ensureExportStage();
       if (!stage) return null;
@@ -5144,6 +5479,7 @@ export default function CanvasEditor() {
           }
 
           const runPlayback = async () => {
+            if (isDocumentHidden()) throw new PreviewTabHiddenError();
             activeRecorder.start(250);
             await started;
             ensureNotAborted();
@@ -5182,14 +5518,11 @@ export default function CanvasEditor() {
             while (true) {
               ensureNotAborted();
               const elapsedMs = Math.max(0, performance.now() - startedAt);
-              // In a background tab the timeline's own playback loop (PagesTimeline, rAF-driven)
-              // stops advancing the playhead; keep it on the wall clock from here so the recording
-              // keeps moving. Both drivers count from the same start, so switching between them as
-              // the tab is hidden and shown again is seamless.
-              if (typeof document !== "undefined" && document.visibilityState !== "visible") {
-                useEditorStore
-                  .getState()
-                  .setTimelinePlayheadMs(Math.min(durationMs, Math.round(elapsedMs)));
+              // A background tab stops painting, and the canvas stream only receives frames when
+              // the page paints: keeping the playhead on the wall clock here still recorded one
+              // frozen frame. Hand over to the frame-by-frame recorder, which needs neither.
+              if (isDocumentHidden()) {
+                throw new PreviewTabHiddenError();
               }
               // The imperative playback driver is switched off while a preview records (it would
               // fight the recorder), and it is the ONLY thing that advances these two refs. Reading
@@ -5357,6 +5690,241 @@ export default function CanvasEditor() {
       ensureExportStage,
       releaseExportStage,
     ]
+  );
+
+  /**
+   * ★Records the preview one frame at a time — the path a BACKGROUND tab takes.
+   *
+   * The live recorder plays the timeline at 1x and lets a MediaRecorder sample the export canvas.
+   * A hidden tab paints nothing, so that canvas stream receives no frames and the recording froze
+   * the moment the user switched tabs. Nothing here runs against the clock: each frame puts the
+   * scene on its time, seeks every clip there and waits for the decoded picture, draws, and hands
+   * the canvas to an encoder with an explicit timestamp (previewFrameEncoder). Slower than real
+   * time on pages with video — one seek per clip per frame — and exact on every page.
+   */
+  const recordTimelinePreviewFrameByFrame = useCallback(
+    async (options?: TimelinePreviewRecordingOptions) => {
+      if (!activePage) return null;
+      const stage = await ensureExportStage();
+      if (!stage) return null;
+      const ensureNotAborted = () => {
+        if (options?.signal?.aborted) {
+          throw createAbortError("Preview generation was canceled.");
+        }
+      };
+      ensureNotAborted();
+      const fps = resolvePreviewRenderFps(options?.fps ?? designTimeline.fps);
+      const durationMs = Math.max(
+        300,
+        Math.round(
+          Number(options?.durationMs) ||
+            Number(designTimeline.totalDurationMs) ||
+            Number(activePageDurationMs) ||
+            0
+        )
+      );
+      const requestedMaxDimension = Math.max(120, Math.round(Number(options?.maxDimension) || 720));
+      // Same cadence the live recorder captures at; the server resamples both to [fps].
+      const captureFps = Math.max(1, Math.min(fps, PREVIEW_CAPTURE_FPS));
+      const frameCount = Math.max(1, Math.ceil((durationMs * captureFps) / 1000));
+      const restoreTimelinePlayheadMs = timelinePlayheadMsRef.current;
+      let sink: PreviewFrameSink | null = null;
+
+      // The whole scene — poses, reveals, clips, stickers — on timeline time [timelineMs].
+      const renderFrameAt = async (timelineMs: number) => {
+        flushSync(() => {
+          // While the timeline shows as playing, this component reads the playhead from the ref
+          // (its store subscription is frozen during playback); the store copy moves the
+          // timeline's own playhead. Both get the frame being recorded.
+          livePlaybackPlayheadMsRef.current = timelineMs;
+          timelinePlayheadMsRef.current = timelineMs;
+          setTimelinePlayheadMs(timelineMs);
+          forcePlaybackRender();
+        });
+        const pageMs = Math.max(0, Math.min(durationMs, timelineMs - activePageTimelineStartMs));
+        const frame = getFrameAlignedPlayheadFrame(pageMs, previewRenderFps, activePageDurationMs);
+        await syncExportPreviewMediaControllers(frame, fps, {
+          settleTimeoutMs: PREVIEW_FRAME_SETTLE_TIMEOUT_MS,
+        });
+        // Let the `seeked` handlers that refresh held frames run, then put everything on the exact
+        // frame once more: an animated sticker's own loop takes over again when its short hold
+        // runs out, and a slow clip seek can outlast that hold. The clips are already there, so
+        // for them this second pass returns at once.
+        await waitForCaptureTick();
+        await syncExportPreviewMediaControllers(frame, fps);
+        stage.getLayers().forEach((layer) => layer.draw());
+      };
+
+      // Chrome does not start loading media in a tab that has never been shown, so a preview
+      // requested from one waits here until the user opens it once (the load then carries on in the
+      // background). In view, a clip that never loads (a broken link) stops holding it up.
+      const waitForExportClipsToLoad = async () => {
+        const hasUnloadedClip = () =>
+          Array.from(exportPreviewMediaControllersRef.current.values()).some(
+            (controller) => controller.hasDrawableFrame && !controller.hasDrawableFrame()
+          );
+        const startedAt = performance.now();
+        let visibleSinceMs: number | null = null;
+        let announced = false;
+        while (hasUnloadedClip()) {
+          ensureNotAborted();
+          if (isDocumentHidden()) {
+            visibleSinceMs = null;
+            if (!announced && performance.now() - startedAt > PREVIEW_MEDIA_LOAD_NOTICE_MS) {
+              announced = true;
+              options?.onStatus?.(
+                "Waiting for this tab to be opened once: the browser only loads its videos after that. The preview then records by itself."
+              );
+            }
+          } else {
+            visibleSinceMs ??= performance.now();
+            if (performance.now() - visibleSinceMs > PREVIEW_MEDIA_LOAD_TIMEOUT_MS) break;
+          }
+          await waitForCaptureTick();
+        }
+        if (announced) options?.onStatus?.("Recording preview video...");
+      };
+
+      try {
+        setTimelinePlaying(false);
+        flushSync(() => {
+          setPreviewFrameStepping(true);
+          setExportMaxDimension(requestedMaxDimension);
+          setExportFrameOverride(0);
+          // The poster is taken settled, exactly as the live recorder takes it.
+          setExportSettledPose(true);
+        });
+        await waitForCaptureTick();
+        await waitForStageDrawableMedia(stage);
+        await waitForExportClipsToLoad();
+        await waitForExportPreviewMediaDrawable();
+        ensureNotAborted();
+
+        await renderFrameAt(0);
+        const initialCapture = renderExportPageToCanvas();
+        if (!initialCapture) {
+          throw new Error("Unable to capture the current template preview.");
+        }
+        let posterDataUrl = "";
+        try {
+          posterDataUrl = initialCapture.canvas.toDataURL("image/png");
+        } catch {
+          posterDataUrl = "";
+        }
+        flushSync(() => {
+          setExportSettledPose(false);
+        });
+        ensureNotAborted();
+
+        const exportLayer = stage.getLayers()[0];
+        const exportCanvas =
+          exportLayer && typeof exportLayer.getNativeCanvasElement === "function"
+            ? exportLayer.getNativeCanvasElement()
+            : null;
+        if (!exportCanvas) {
+          throw new Error("Preview export canvas is unavailable.");
+        }
+
+        sink = await createPreviewFrameSink({
+          width: exportCanvas.width,
+          height: exportCanvas.height,
+          fps: captureFps,
+          waitForEncoder: waitForCaptureTick,
+        });
+        // Play the timeline for the recording, as the live recorder does: the play button shows
+        // it and the playhead runs through the design — here at the pace frames are rendered,
+        // since previewFrameStepping keeps the timeline's real-time loop out of it.
+        flushSync(() => {
+          setTimelinePlaying(true);
+        });
+        for (let index = 0; index < frameCount; index += 1) {
+          ensureNotAborted();
+          await renderFrameAt(Math.min(durationMs, Math.round((index * 1000) / captureFps)));
+          await sink.add(exportCanvas, index);
+        }
+        const encoded = await sink.finish();
+        ensureNotAborted();
+
+        const formData = new FormData();
+        formData.set("expectedDurationMs", String(durationMs));
+        if (encoded.kind === "video") {
+          formData.set("fps", String(fps));
+          formData.set("mimeType", encoded.file.type);
+          formData.set("sourceVideo", encoded.file);
+        } else {
+          // The frame-sequence input encodes one image per frame at the rate it is given.
+          formData.set("fps", String(encoded.fps));
+          formData.set("expectedFrameCount", String(encoded.files.length));
+          encoded.files.forEach((file) => formData.append("frame", file));
+        }
+
+        const response = await fetch("/api/editor/media/encode-preview", {
+          method: "POST",
+          body: formData,
+          signal: options?.signal,
+        });
+        if (!response.ok) {
+          const payload = await response.json().catch(() => ({} as { error?: string }));
+          throw new Error(payload?.error || "Preview encoder failed to create the video.");
+        }
+        const mimeType =
+          String(response.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
+        const blob = new Blob([await response.arrayBuffer()], { type: mimeType });
+
+        return {
+          blob,
+          mimeType,
+          durationMs,
+          posterDataUrl,
+          width: exportCanvas.width,
+          height: exportCanvas.height,
+        };
+      } finally {
+        sink?.close();
+        // Stop playing in the same commit that lifts the stepping flag, so the timeline's
+        // real-time loop never starts in between.
+        flushSync(() => {
+          setTimelinePlaying(false);
+          setPreviewFrameStepping(false);
+          setExportFrameOverride(0);
+          setExportSettledPose(false);
+        });
+        setTimelinePlayheadMs(restoreTimelinePlayheadMs);
+        stage.getLayers().forEach((layer) => layer.draw());
+        releaseExportStage();
+      }
+    },
+    [
+      activePage,
+      activePageDurationMs,
+      designTimeline.fps,
+      designTimeline.totalDurationMs,
+      activePageTimelineStartMs,
+      previewRenderFps,
+      renderExportPageToCanvas,
+      syncExportPreviewMediaControllers,
+      waitForExportPreviewMediaDrawable,
+      setTimelinePlayheadMs,
+      setTimelinePlaying,
+      setPreviewFrameStepping,
+      ensureExportStage,
+      releaseExportStage,
+    ]
+  );
+
+  // Live while the tab is in front (fast, and how previews have always been made); frame by frame
+  // when it is in the background, including a tab that goes there partway through a recording.
+  const recordTimelinePreviewVideo = useCallback(
+    async (options?: TimelinePreviewRecordingOptions) => {
+      if (isDocumentHidden()) return recordTimelinePreviewFrameByFrame(options);
+      try {
+        return await recordTimelinePreviewInRealTime(options);
+      } catch (error) {
+        if (!(error instanceof PreviewTabHiddenError)) throw error;
+        return recordTimelinePreviewFrameByFrame(options);
+      }
+    },
+    [recordTimelinePreviewFrameByFrame, recordTimelinePreviewInRealTime]
   );
 
   const captureTimelineStripDataUrls = useCallback(
@@ -7376,7 +7944,7 @@ export default function CanvasEditor() {
                   // per-frame seek inside each media node must stand down for the recording. It only
                   // ran once before, because nothing re-rendered this scene mid-recording; now that
                   // every captured frame renders, leaving it on made the video record as garbled bands.
-                  suspendMediaTimelineSync={previewGenerationActive && timelineIsPlaying}
+                  suspendMediaTimelineSync={(previewGenerationActive && timelineIsPlaying) || exportFrameStepping}
                   interactive={false}
                   toolMode={toolMode}
                   includePageOutline={false}

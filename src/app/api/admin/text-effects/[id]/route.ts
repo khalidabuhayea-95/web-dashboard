@@ -11,8 +11,14 @@ import { logger } from "@/lib/logging/logger";
 import { deleteStorageForUrls } from "@/lib/storage/assetReferences.server";
 import {
   MAX_TEXT_EFFECT_TITLE_LENGTH,
-  normalizeTextEffectSpec,
+  normalizeTextEffectCategory,
+  storableTextEffectSpec,
 } from "@/lib/textEffects/spec";
+import {
+  textEffectRowForBrowser,
+  textEffectSpecFromBrowser,
+  textEffectUrlFromBrowser,
+} from "@/lib/textEffects/rows.server";
 
 export const runtime = "nodejs";
 
@@ -45,11 +51,16 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (titleAr.length > MAX_TEXT_EFFECT_TITLE_LENGTH) return handleBadRequest("Arabic title is too long");
       data.titleAr = titleAr;
     }
-    if (body.spec !== undefined) data.spec = normalizeTextEffectSpec(body.spec);
+    if (body.spec !== undefined) data.spec = storableTextEffectSpec(textEffectSpecFromBrowser(body.spec));
     if (body.previewUrl !== undefined) {
-      const previewUrl = String(body.previewUrl || "").trim();
+      const previewUrl = textEffectUrlFromBrowser(String(body.previewUrl || "").trim());
       data.previewUrl = previewUrl || null;
     }
+    if (body.category !== undefined) data.category = normalizeTextEffectCategory(body.category);
+    // Texture files only arrive through the upload route; here they can only be removed.
+    if (body.textureUrl === null) data.textureUrl = null;
+    if (body.textureVideoUrl === null) data.textureVideoUrl = null;
+    if (body.inlayTextureUrl === null) data.inlayTextureUrl = null;
     if (body.isPremium !== undefined) data.isPremium = Boolean(body.isPremium);
     if (body.published !== undefined) data.published = Boolean(body.published);
 
@@ -59,7 +70,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!existing) return handleNotFound("Text effect");
 
     const effect = await prisma.textEffect.update({ where: { id }, data });
-    return NextResponse.json({ ok: true, effect });
+    // A removed texture leaves storage only once the row no longer points at it.
+    const dropped = [
+      data.textureUrl === null ? existing.textureUrl : null,
+      data.textureVideoUrl === null ? existing.textureVideoUrl : null,
+      data.inlayTextureUrl === null ? existing.inlayTextureUrl : null,
+      data.previewUrl !== undefined && data.previewUrl !== existing.previewUrl ? existing.previewUrl : null,
+    ].filter(Boolean);
+    if (dropped.length) await deleteStorageForUrls(dropped, { slug: existing.slug });
+    return NextResponse.json({ ok: true, effect: textEffectRowForBrowser(effect) });
   } catch (error) {
     return handleApiError(error, "Failed to update text effect");
   }
@@ -140,7 +159,10 @@ export async function DELETE(_request: Request, { params }: { params: Promise<{ 
 
     await prisma.textEffect.delete({ where: { id } });
     // Row first, then storage: the images are only unreferenced once the row is gone.
-    const storage = await deleteStorageForUrls([existing.previewUrl], { slug: existing.slug });
+    const storage = await deleteStorageForUrls(
+      [existing.previewUrl, existing.textureUrl, existing.textureVideoUrl, existing.inlayTextureUrl],
+      { slug: existing.slug }
+    );
     logger.info("Text effect deleted", {
       userId: session.userId,
       slug: existing.slug,

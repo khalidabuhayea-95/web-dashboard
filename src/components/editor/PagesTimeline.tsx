@@ -230,6 +230,7 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   const designTimeline = useEditorStore((state) => state.designTimeline);
   const timelinePlayheadMs = useEditorStore((state) => state.timelinePlayheadMs);
   const timelineIsPlaying = useEditorStore((state) => state.timelineIsPlaying);
+  const previewFrameStepping = useEditorStore((state) => state.previewFrameStepping);
   const timelineCollapsed = useEditorStore((state) => state.timelineCollapsed);
   const setTimelineCollapsed = useEditorStore((state) => state.setTimelineCollapsed);
   const stageApi = useEditorStore((state) => state.stageApi);
@@ -455,7 +456,9 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
   }, [showTimeline, timelineCollapsed, timelineRightInsetPx]);
 
   useEffect(() => {
-    if (!timelineIsPlaying || totalDurationMs <= 0) return;
+    // The frame-by-frame preview recorder plays the timeline by stepping the playhead itself; a
+    // real-time loop here would drag the playhead ahead of the frame actually being recorded.
+    if (!timelineIsPlaying || totalDurationMs <= 0 || previewFrameStepping) return;
 
     let frame = 0;
     const playStartTimestamp = performance.now();
@@ -480,7 +483,14 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
 
     frame = window.requestAnimationFrame(tick);
     return () => window.cancelAnimationFrame(frame);
-  }, [setTimelinePlayheadMs, setTimelinePlaying, timelineFps, timelineIsPlaying, totalDurationMs]);
+  }, [
+    previewFrameStepping,
+    setTimelinePlayheadMs,
+    setTimelinePlaying,
+    timelineFps,
+    timelineIsPlaying,
+    totalDurationMs,
+  ]);
 
   useEffect(
     () => () => {
@@ -660,12 +670,15 @@ export default function PagesTimeline({ showTimeline = true }: PagesTimelineProp
       }
     }
 
-    if (timelineIsPlaying && !timelineIsScrubbing) {
+    // A stepped recording moves the playhead slower than real time; a playing element would just
+    // be re-seeked behind it every frame.
+    if (timelineIsPlaying && !timelineIsScrubbing && !previewFrameStepping) {
       void video.play().catch(() => undefined);
     } else {
       video.pause();
     }
   }, [
+    previewFrameStepping,
     previewUrl,
     scrubFrameStepMs,
     totalDurationMs,

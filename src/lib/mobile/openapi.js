@@ -623,7 +623,7 @@ const schemas = {
   TextEffectSpec: {
     type: "object",
     description:
-      "How to paint a text layer. Declarative on purpose: the app draws it natively, so it is free, instant, and the text stays editable afterwards. All sizes are FRACTIONS of the font size, never pixels, so one effect holds up at 40px on a phone and 400px on a poster.\n\nPaint order, bottom to top: shadow → stroke → fill → sheen. Draw them in that order or the outline lands on top of the material.",
+      "How to paint a text layer. Declarative on purpose: the app draws it natively, so it is free, instant, and the text stays editable afterwards. All sizes are FRACTIONS of the font size, never pixels, so one effect holds up at 40px on a phone and 400px on a poster.\n\nPaint order, bottom to top: shadow → stroke → fill → bevel → sheen → inlay. Draw them in that order or the outline lands on top of the material.",
     properties: {
       version: { type: "integer", example: 1, description: "Spec version. Ignore fields you do not know." },
       fill: {
@@ -632,8 +632,8 @@ const schemas = {
         properties: {
           kind: {
             type: "string",
-            enum: ["gradient", "solid", "pattern"],
-            description: "`gradient` for metals and gems, `solid` for plain colour, `pattern` for a tiled texture image.",
+            enum: ["gradient", "solid", "pattern", "texture"],
+            description: "`gradient` for metals and gems, `solid` for plain colour, `pattern` for a tiled texture image, `texture` for a material image (or short looping clip) cover-fitted to the text box, clipped to the glyphs and blended over `color`.",
           },
           angle: { type: "number", description: "Gradient direction in degrees; 90 = top to bottom.", example: 90 },
           color: { type: "string", description: "Used for `solid`, and as the fallback if a pattern image fails to load.", example: "#ffffff" },
@@ -645,6 +645,19 @@ const schemas = {
           },
           patternUrl: { type: "string", description: "Tileable texture for `pattern` fills. Empty otherwise." },
           patternScale: { type: "number", description: "Texture scale relative to font size." },
+          texture: {
+            type: "object",
+            description: "Used when `kind` is `texture`. Fill the glyphs with `color`, then draw the texture cover-fitted to the text's box (zoomed by `scale`), clipped to the glyphs, with `blendMode` at `opacity`. A `bw` texture is greyscale: multiply it by `tint` (the user's colour) first. No URL (or a failed load) = plain `color`.",
+            properties: {
+              url: { type: "string", description: "Still texture (PNG/WebP). Absent when the effect has none." },
+              videoUrl: { type: "string", description: "Optional short looping MP4 to play instead of `url` where video plays; draw its current frame each animation frame. Fall back to `url`." },
+              blendMode: { type: "string", enum: ["source-over", "multiply", "screen", "overlay", "soft-light", "hard-light", "color-dodge", "color-burn", "darken", "lighten", "luminosity", "color"], description: "Canvas compositing name. `source-over` = normal." },
+              opacity: { type: "number", description: "0–1; the user's intensity multiplies it." },
+              renderMode: { type: "string", enum: ["color", "bw"] },
+              tint: { type: "string", description: "Default tint for `bw` textures; the user's colour replaces it." },
+              scale: { type: "number", description: "1 = cover the text box exactly; larger zooms in." },
+            },
+          },
         },
       },
       stroke: {
@@ -675,6 +688,60 @@ const schemas = {
           offsetY: { type: "number", description: "Fraction of font size; negative lifts the rim." },
         },
       },
+      bevel: {
+        type: "object",
+        description: "Embossed edge, clipped to the glyphs: a `light` rim on the top-left edges and a `dark` rim on the bottom-right.",
+        properties: {
+          enabled: { type: "boolean" },
+          depth: { type: "number", description: "Rim thickness, fraction of font size." },
+          softness: { type: "number", description: "0–1; blurs the rim by up to its depth." },
+          light: { type: "string" },
+          dark: { type: "string" },
+        },
+      },
+      inlay: {
+        type: "object",
+        description:
+          "Optional second material set INSIDE the letters (e.g. diamond pavé in a gold rim). When `enabled`: everything above becomes the rim — grow its glyph shape outward by `outset` (fill + a stroke of 2×outset in the same material, used for the fill, texture clip, bevel and stroke). Then paint the inlay on top: the glyphs shrunk by `inset` (fill, then erase a stroke of 2×inset), filled with `color`, the texture laid over it, clipped to that shape; then the inner shadow (shadow of everything outside the shape, drawn only inside it); then `sparkles`. Old builds that ignore it still show the rim material.",
+        properties: {
+          enabled: { type: "boolean" },
+          inset: { type: "number", description: "Rim band kept inside the outline, fraction of font size." },
+          outset: { type: "number", description: "How far the rim grows outside the outline, fraction of font size." },
+          color: { type: "string", description: "Inlay base colour under its texture." },
+          texture: {
+            type: "object",
+            properties: {
+              url: { type: "string", description: "Inlay material image. Absent when none." },
+              fit: { type: "string", enum: ["tile", "cover"], description: "`tile`: repeat the image `scale` × font size tall, anchored to the text box. `cover`: one image cover-fitted to the box." },
+              scale: { type: "number" },
+              blendMode: { type: "string" },
+              opacity: { type: "number" },
+              renderMode: { type: "string", enum: ["color", "bw"] },
+              tint: { type: "string" },
+            },
+          },
+          innerShadow: {
+            type: "object",
+            properties: {
+              enabled: { type: "boolean" },
+              color: { type: "string" },
+              blur: { type: "number", description: "Fraction of font size." },
+              offsetX: { type: "number", description: "Fraction of font size." },
+              offsetY: { type: "number", description: "Fraction of font size." },
+            },
+          },
+          sparkles: {
+            type: "object",
+            description: "Star glints over the inlay, positions from a seeded PRNG (state = state × 16807 mod 2³¹−1, starting at `seed`) so every platform matches.",
+            properties: {
+              count: { type: "integer" },
+              size: { type: "number", description: "Fraction of font size." },
+              color: { type: "string" },
+              seed: { type: "integer" },
+            },
+          },
+        },
+      },
     },
     required: ["version", "fill", "stroke", "shadow", "sheen"],
   },
@@ -685,7 +752,11 @@ const schemas = {
       titleEn: { type: "string", example: "Gold" },
       titleAr: { type: "string", example: "ذهبي" },
       isPremium: { type: "boolean", description: "Show locked for free users." },
+      category: { type: "string", description: "Strip grouping for filter chips (gold, glass, threads…); empty = none.", example: "gold" },
       previewUrl: { type: "string", nullable: true, description: "Optional sample image for the strip. Null means render your own preview from `spec` — that is cheaper and always current." },
+      textureUrl: { type: "string", nullable: true, description: "Same as `spec.fill.texture.url`, for listing." },
+      textureVideoUrl: { type: "string", nullable: true, description: "Same as `spec.fill.texture.videoUrl`, for listing." },
+      inlayTextureUrl: { type: "string", nullable: true, description: "Same as `spec.inlay.texture.url`, for listing." },
       spec: { $ref: "#/components/schemas/TextEffectSpec" },
     },
     required: ["id", "titleEn", "titleAr", "isPremium", "spec"],

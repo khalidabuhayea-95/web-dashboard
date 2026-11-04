@@ -53,7 +53,7 @@ const SOURCES: Array<[string, string]> = [
   ["AiTemplate", `SELECT COALESCE("beforeUrl",'') || ' ' || COALESCE("afterUrl",'') || ' ' || COALESCE("thumbUrl",'') AS t FROM "AiTemplate"`],
   ["MagicTool", `SELECT COALESCE("beforeUrl",'') || ' ' || COALESCE("afterUrl",'') || ' ' || COALESCE("thumbUrl",'') AS t FROM "MagicTool"`],
   ["GalleryImage", `SELECT COALESCE(url,'') AS t FROM "GalleryImage"`],
-  ["TextEffect", `SELECT COALESCE("previewUrl",'') AS t FROM "TextEffect"`],
+  ["TextEffect", `SELECT COALESCE("previewUrl",'') || ' ' || COALESCE("textureUrl",'') || ' ' || COALESCE("textureVideoUrl",'') || ' ' || COALESCE("inlayTextureUrl",'') || ' ' || spec::text AS t FROM "TextEffect"`],
   ["AppSetting", `SELECT value::text AS t FROM "AppSetting"`],
   // Notification payloads embed image URLs — easy to overlook because neither table looks
   // media-related from its name.

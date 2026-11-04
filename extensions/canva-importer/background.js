@@ -5424,6 +5424,7 @@ function extractCanvaFiberModel() {
       if (pageAnimation) result.__pageAnimation = pageAnimation;
       const pageDurationUs = readPageDurationUs(firstPage);
       if (pageDurationUs) result.__pageDurationMs = Math.round(pageDurationUs / 1000);
+      if (pageDurationUs) result.__pageDurationAuthored = true;
       else {
         // An un-timed page runs for its longest timed element (never under the nominal 5s, which
         // the consumers already assume when this stays unset).
@@ -5694,6 +5695,7 @@ function sliceFiberModelForPage(fiberModel, pageIndex) {
   if (Number(page.durationMs) > 0) {
     sliced.__pageDurationMs = Number(page.durationMs);
   }
+  if (page.durationAuthored) sliced.__pageDurationAuthored = true;
   // The page's design size when the model states it (Drift/Tectonic amplitude scales with it).
   if (Number(page.width) > 0 && Number(page.height) > 0) {
     sliced.__pageWidth = Number(page.width);
@@ -6331,6 +6333,55 @@ function probeCanvaVideosInPage(mode, videoId) {
   return out;
 }
 
+// ── canva-worker-video-resources:start
+// The video fetches a worker's Resource Timing holds: Canva hosts only, no images, and a video
+// extension, the clip's id, or a /video/ path — the same test the page probe applies. Runs inside
+// the worker (serialized), so it uses nothing from outside its own body.
+function collectWorkerVideoResources(entries, videoId) {
+  const videoExt = /\.(mp4|m4s|m4v|webm|mov|mpd|m3u8|ts)(\?|#|$)/i;
+  const imageExt = /\.(jpe?g|png|webp|gif|svg|avif|bmp|ico)(\?|#|$)/i;
+  const out = [];
+  for (const entry of Array.isArray(entries) ? entries : []) {
+    const name = String((entry && entry.name) || "");
+    if (!/^https:\/\/[^/]*\.canva\.com\//i.test(name) || imageExt.test(name)) continue;
+    let decoded = name;
+    try {
+      decoded = decodeURIComponent(name);
+    } catch (_e) {
+      decoded = name;
+    }
+    const matches =
+      videoExt.test(name) || videoExt.test(decoded.split("?")[0]) || (videoId && name.includes(videoId)) || /\/video\//i.test(name);
+    if (!matches) continue;
+    out.push({
+      url: name,
+      initiatorType: `worker:${String((entry && entry.initiatorType) || "")}`,
+      bytes: Number((entry && (entry.transferSize || entry.encodedBodySize)) || 0),
+      startTime: Number((entry && entry.startTime) || 0),
+    });
+  }
+  return out;
+}
+// ── canva-worker-video-resources:end
+
+async function readWorkerVideoResources(tabId, sessionIds, videoId) {
+  const out = [];
+  const expression = `(${collectWorkerVideoResources.toString()})(performance.getEntriesByType("resource").map((e) => ({ name: e.name, initiatorType: e.initiatorType, transferSize: e.transferSize, encodedBodySize: e.encodedBodySize, startTime: e.startTime })), ${JSON.stringify(String(videoId || ""))})`;
+  for (const sessionId of Array.isArray(sessionIds) ? sessionIds : []) {
+    try {
+      const evaluated = await chrome.debugger.sendCommand({ tabId, sessionId }, "Runtime.evaluate", {
+        expression,
+        returnByValue: true,
+      });
+      const value = evaluated && evaluated.result ? evaluated.result.value : null;
+      if (Array.isArray(value)) out.push(...value);
+    } catch (_error) {
+      // A worker that went away (or refuses evaluation) has nothing to offer.
+    }
+  }
+  return out;
+}
+
 async function probeCanvaVideos(tabId, mode, videoId) {
   try {
     const results = await chrome.scripting.executeScript({
@@ -6497,6 +6548,7 @@ async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress
   const diagnostics = { videoId, attached: false, requests: 0, mediaRequests: 0, method: "", probeResources: 0 };
   const requests = new Map();
   const mediaOrder = [];
+  const workerSessionIds = [];
   let lastMediaAt = 0;
   const onEvent = (source, method, params) => {
     if (!source || source.tabId !== tabId || !params) return;
@@ -6506,6 +6558,7 @@ async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress
       const type = String(params.targetInfo?.type || "");
       if ((type === "worker" || type === "shared_worker") && params.sessionId) {
         diagnostics.workerSessions = (diagnostics.workerSessions || 0) + 1;
+        workerSessionIds.push(String(params.sessionId));
         chrome.debugger
           .sendCommand({ tabId, sessionId: params.sessionId }, "Network.enable", {
             maxTotalBufferSize: 256 * 1024 * 1024,
@@ -6615,6 +6668,15 @@ async function captureCanvaBackgroundVideo(tabId, { videoId = "", reportProgress
     const stopProbe = await probeCanvaVideos(tabId, "stop", videoId);
     diagnostics.videoElementsAtEnd = stopProbe.videos.length;
     if (stopProbe.videos.length > 0) probe.videos = stopProbe.videos;
+    // Canva's web worker downloads some clips (an uploaded video on DAHZMKoVRF8) long before the
+    // capture attaches, and the player feeds them to MediaSource from memory: playing makes no
+    // request at all, and the page's Resource Timing never saw the fetch. The worker's does.
+    const workerResources = await readWorkerVideoResources(tabId, workerSessionIds, videoId);
+    diagnostics.workerResources = workerResources.length;
+    const knownUrls = new Set(probe.resources.map((resource) => resource.url));
+    for (const resource of workerResources) {
+      if (!knownUrls.has(resource.url)) probe.resources.push(resource);
+    }
     if (playButtonClicked) {
       // Leave the design where the user had it: the same control now reads "pause" — click it
       // only in that state (a blind second click could START a playback that never began).
@@ -6862,7 +6924,7 @@ async function attachCapturedElementVideos(fabricObjects, context) {
     if (!capture?.ok) {
       logger.warn("Element video capture failed; keeping poster", { videoId, reason: capture?.reason });
       warnings.push(
-        `Video element "${String(object.layerName || videoId)}" imported as its poster frame (capture: ${String(capture?.reason || "unknown")}).`
+        `Video element "${String(object.layerName || videoId)}" imported as its poster frame (capture: ${String(capture?.reason || "unknown")}; requests=${Number(capture?.diagnostics?.requests || 0)} media=${Number(capture?.diagnostics?.mediaRequests || 0)} videoEls=${Number(capture?.diagnostics?.videoElements || 0)} workers=${Number(capture?.diagnostics?.workerSessions || 0)} workerRes=${Number(capture?.diagnostics?.workerResources || 0)} pageRes=${Number(capture?.diagnostics?.probeResources || 0)}).`
       );
       next[index] = rest;
       continue;
@@ -6927,6 +6989,22 @@ function canvaVideoPageLengthMs(capturedMs, modelMs, clipsTotalMs) {
       Number.isFinite(Number(value)) && Number(value) > 0 ? Math.round(Number(value)) : 0
     )
   );
+}
+// The end of a page's longest video ELEMENT (its window start + the clip's own length), 0 when it
+// has none. An un-timed Canva page plays to its longest timed item, a video element included — and
+// only the clip capture knows that length: DAHZLxjJX8A's 12.2 s envelope-opening video ran on a 5 s
+// page (the model's guess), so the app would stop before the card even came in.
+function canvaElementVideoEndMs(objects) {
+  let endMs = 0;
+  for (const object of Array.isArray(objects) ? objects : []) {
+    if (!object || String(object.imageProvenance || "") !== "element-video") continue;
+    const start = Math.max(0, Number(object.timelineStartMs) || 0);
+    const clipStart = Math.max(0, Number(object.videoStart) || 0);
+    const clipEnd = Number(object.videoEnd) > clipStart ? Number(object.videoEnd) : Number(object.videoDuration) || 0;
+    const lengthMs = Math.round(Math.max(0, clipEnd - clipStart) * 1000);
+    if (lengthMs > 0) endMs = Math.max(endMs, start + lengthMs);
+  }
+  return endMs;
 }
 // ── canva-backdrop-clips:end
 
@@ -8612,6 +8690,7 @@ async function importActiveCanvaTab(message, options = {}) {
       );
       fabricObjects = elementVideos.objects;
     }
+    const elementVideoEndMs = canvaElementVideoEndMs(fabricObjects);
     // Canva's animation scheduler (docs/canva-animation-parity.md §8.5) over the whole page model,
     // now that the page's objects exist and its length is final (a captured background video is
     // the only source of a video page's length). It writes each animated object's slots, legacy
@@ -8625,7 +8704,15 @@ async function importActiveCanvaTab(message, options = {}) {
         modelPages && Number(modelPages[pageIndex]?.durationMs) > 0
           ? Number(modelPages[pageIndex].durationMs)
           : Number(designFiberModel?.__pageDurationMs) || 0;
-      const scheduledPageMs = canvaVideoPageLengthMs(backgroundVideoDurationMs, modelPageMs, backgroundClipsTotalMs);
+      const pageLengthAuthored =
+        modelPages && modelPages[pageIndex]
+          ? Boolean(modelPages[pageIndex].durationAuthored)
+          : Boolean(designFiberModel?.__pageDurationAuthored);
+      const scheduledPageMs = canvaVideoPageLengthMs(
+        Math.max(backgroundVideoDurationMs, pageLengthAuthored ? 0 : elementVideoEndMs),
+        modelPageMs,
+        backgroundClipsTotalMs
+      );
       const pageCount = Math.max(totalPageCount, Number(designFiberModel?.__pageCount) || 0);
       applyCanvaPageAnimations(fabricObjects, extractedLayers, pageAnimationModel, {
         hasNextPage: pageIndex < pageCount - 1,
@@ -8702,6 +8789,7 @@ async function importActiveCanvaTab(message, options = {}) {
       hasExtractedLayers: pageHasExtractedLayers,
       backgroundVideoDurationMs,
       backgroundClipsTotalMs,
+      elementVideoEndMs,
       // The page's gradient fill, when Canva paints one (see pageBackgroundGradient in the scraper).
       pageBackgroundGradient: captureMeta?.pageBackgroundGradient || null,
     };
@@ -8853,6 +8941,7 @@ async function importActiveCanvaTab(message, options = {}) {
     Boolean(designFiberModel?.__pageAnimation) ||
     Boolean(designFiberModel?.__background) ||
     capturedArtifacts.some((artifacts) => Number(artifacts?.backgroundVideoDurationMs) > 0) ||
+    capturedArtifacts.some((artifacts) => Number(artifacts?.elementVideoEndMs) > 0) ||
     (Array.isArray(fabricObjects) &&
       fabricObjects.some(
         (object) =>
@@ -8868,7 +8957,10 @@ async function importActiveCanvaTab(message, options = {}) {
     const pages = Array.isArray(designFiberModel?.__pages) ? designFiberModel.__pages : null;
     const fromPage = pages && pages[pageIndex] ? Number(pages[pageIndex].durationMs) : 0;
     const modelMs = fromPage > 0 ? fromPage : Number(designFiberModel?.__pageDurationMs);
-    return canvaVideoPageLengthMs(captured, modelMs, clipsTotal);
+    // An un-timed page also runs to the end of its longest video element.
+    const authored = pages && pages[pageIndex] ? Boolean(pages[pageIndex].durationAuthored) : Boolean(designFiberModel?.__pageDurationAuthored);
+    const elementVideoMs = authored ? 0 : Number(capturedArtifacts[pageIndex]?.elementVideoEndMs) || 0;
+    return canvaVideoPageLengthMs(Math.max(Number(captured) || 0, elementVideoMs), modelMs, clipsTotal);
   };
   const pageBackgroundFor = (pageIndex) =>
     canvaPageGradientToBackground(capturedArtifacts[pageIndex]?.pageBackgroundGradient);

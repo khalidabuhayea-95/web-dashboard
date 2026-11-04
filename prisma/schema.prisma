@@ -634,6 +634,15 @@ model TextEffect {
   /// Sample rendering shown in the effects strip. Generated from `spec`, so it
   /// can always be rebuilt and never drifts from what the effect actually does.
   previewUrl String?
+  /// Strip grouping shown as filter chips ("gold", "glass", "threads"…); "" = none.
+  category   String   @default("")
+  /// The material image a `texture` fill paints inside the glyphs (PNG/WebP). Kept as
+  /// columns, not inside `spec`, so storage cleanup can see them like every other URL.
+  textureUrl String?
+  /// Optional short looping clip (MP4) used instead of `textureUrl` where video plays.
+  textureVideoUrl String?
+  /// The inlay's material (e.g. diamond pavé) set inside a rim of the main fill (`spec.inlay`).
+  inlayTextureUrl String?
   isPremium  Boolean  @default(false)
   published  Boolean  @default(true)
   sortOrder  Int      @default(0)

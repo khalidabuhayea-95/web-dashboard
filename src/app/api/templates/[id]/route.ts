@@ -94,6 +94,9 @@ async function isObjectKeyReferencedOutsideTemplate(key: string, templateId: str
       SELECT 1
       FROM "TextEffect"
       WHERE POSITION(${key} IN COALESCE("previewUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("textureUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("textureVideoUrl", '')) > 0
+        OR POSITION(${key} IN COALESCE("inlayTextureUrl", '')) > 0
     ) refs
   `;
 

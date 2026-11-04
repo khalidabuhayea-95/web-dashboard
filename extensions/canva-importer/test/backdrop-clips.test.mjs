@@ -19,7 +19,7 @@ const end = source.indexOf("// ── canva-backdrop-clips:end");
 assert.ok(start >= 0 && end > start, "canva-backdrop-clips markers missing");
 const context = vm.createContext({});
 vm.runInContext(
-  `${source.slice(start, end)}\nthis.windows = canvaBackdropClipWindows; this.length = canvaVideoPageLengthMs;`,
+  `${source.slice(start, end)}\nthis.windows = canvaBackdropClipWindows; this.length = canvaVideoPageLengthMs; this.elementEnd = canvaElementVideoEndMs;`,
   context
 );
 
@@ -56,4 +56,19 @@ test("the page runs for the longest of clip, model page and scene total", () => 
   assert.equal(context.length(0, 5000, 0), 5000);
   assert.equal(context.length(0, 0, 0), 0);
   assert.equal(context.length("junk", null, undefined), 0);
+});
+
+test("an un-timed page runs to the end of its longest video element", () => {
+  // DAHZLxjJX8A: the 12.2 s envelope-opening video on a page the model guessed at 5 s.
+  const objects = [
+    { imageProvenance: "element-video", videoStart: 0, videoEnd: 12.2, videoDuration: 12.2 },
+    { imageProvenance: "fetch", videoEnd: 99 },
+    { imageProvenance: "element-video", timelineStartMs: 2000, videoStart: 1, videoEnd: 4, videoDuration: 10 },
+  ];
+  assert.equal(context.elementEnd(objects), 12200);
+  assert.equal(context.length(Math.max(0, context.elementEnd(objects)), 5000, 0), 12200);
+  // A trimmed clip counts its trimmed length from its own window start.
+  assert.equal(context.elementEnd([{ imageProvenance: "element-video", timelineStartMs: 3000, videoStart: 2, videoEnd: 6 }]), 7000);
+  assert.equal(context.elementEnd([]), 0);
+  assert.equal(context.elementEnd(null), 0);
 });

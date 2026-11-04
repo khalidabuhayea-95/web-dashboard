@@ -2107,19 +2107,11 @@ function toTimestampMs(value) {
   return Number.isFinite(timestamp) ? timestamp : NaN;
 }
 
-function isPreviewReadyStatus(value) {
-  return String(value || "").trim().toLowerCase() === "ready";
-}
-
-function isTemplatePreviewStale(template, previewUpdatedAtMs) {
-  if (!Number.isFinite(previewUpdatedAtMs)) return false;
-  const templateUpdatedAtMs = toTimestampMs(template?.updatedAt);
-  if (!Number.isFinite(templateUpdatedAtMs)) return false;
-
-  // Prisma's @updatedAt can be a few milliseconds after previewUpdatedAt in the
-  // same save. Only suppress previews when the template clearly changed later.
-  return templateUpdatedAtMs - previewUpdatedAtMs > 1000;
-}
+// ★A ready preview is served as-is, even when the template was saved after it was recorded.
+// Previews are recorded by hand from the editor ("Generate preview"), so a save never brings a
+// new one. Hiding the video whenever updatedAt passed previewUpdatedAt meant re-saving a template
+// — even with nothing changed — dropped its preview from the app until someone re-recorded it.
+// The stored video stays until the editor records (or clears) another.
 
 function mapTemplatePreview(template, options = {}) {
   const status = String(template?.previewStatus || "").trim();
@@ -2129,22 +2121,20 @@ function mapTemplatePreview(template, options = {}) {
   const updatedAt = toTimestampMs(template?.previewUpdatedAt);
   const version = numberOr(template?.previewVersion, NaN);
   const error = String(template?.previewError || "").trim();
-  const previewIsStale = isPreviewReadyStatus(status) && isTemplatePreviewStale(template, updatedAt);
   const versionToken = Number.isFinite(updatedAt)
     ? String(updatedAt)
     : Number.isFinite(version)
       ? String(version)
       : "";
-  const url = previewIsStale ? "" : appendVersionParam(rawUrl, versionToken);
-  const posterUrl = previewIsStale ? "" : appendVersionParam(rawPosterUrl, versionToken);
-  const effectiveStatus = previewIsStale ? "not_requested" : status;
+  const url = appendVersionParam(rawUrl, versionToken);
+  const posterUrl = appendVersionParam(rawPosterUrl, versionToken);
 
   if (!status && !url && !posterUrl && !Number.isFinite(durationMs) && !Number.isFinite(updatedAt) && !Number.isFinite(version) && !error) {
     return null;
   }
 
   return {
-    status: effectiveStatus || "not_requested",
+    status: status || "not_requested",
     url: url || null,
     posterUrl: posterUrl || null,
     durationMs: Number.isFinite(durationMs) ? Math.max(0, Math.round(durationMs)) : null,
@@ -2161,22 +2151,20 @@ function mapTemplatePreviewSlim(template, options = {}) {
   const durationMs = numberOr(template?.previewDurationMs, NaN);
   const updatedAt = toTimestampMs(template?.previewUpdatedAt);
   const version = numberOr(template?.previewVersion, NaN);
-  const previewIsStale = isPreviewReadyStatus(status) && isTemplatePreviewStale(template, updatedAt);
   const versionToken = Number.isFinite(updatedAt)
     ? String(updatedAt)
     : Number.isFinite(version)
       ? String(version)
       : "";
-  const url = previewIsStale ? "" : appendVersionParam(rawUrl, versionToken);
-  const posterUrl = previewIsStale ? "" : appendVersionParam(rawPosterUrl, versionToken);
-  const effectiveStatus = previewIsStale ? "not_requested" : status;
+  const url = appendVersionParam(rawUrl, versionToken);
+  const posterUrl = appendVersionParam(rawPosterUrl, versionToken);
 
   if (!status && !url && !posterUrl && !Number.isFinite(durationMs)) {
     return null;
   }
 
   return {
-    status: effectiveStatus || "not_requested",
+    status: status || "not_requested",
     ...(url ? { url } : {}),
     ...(posterUrl ? { posterUrl } : {}),
     ...(Number.isFinite(durationMs) ? { durationMs: Math.max(0, Math.round(durationMs)) } : {}),

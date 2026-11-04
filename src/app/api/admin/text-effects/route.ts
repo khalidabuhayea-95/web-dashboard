@@ -5,8 +5,10 @@ import { handleApiError, handleBadRequest, handleForbidden } from "@/lib/api/err
 import { logger } from "@/lib/logging/logger";
 import {
   MAX_TEXT_EFFECT_TITLE_LENGTH,
-  normalizeTextEffectSpec,
+  normalizeTextEffectCategory,
+  storableTextEffectSpec,
 } from "@/lib/textEffects/spec";
+import { textEffectRowForBrowser, textEffectSpecFromBrowser } from "@/lib/textEffects/rows.server";
 
 export const runtime = "nodejs";
 
@@ -27,7 +29,7 @@ export async function GET() {
       return handleForbidden("Only admins can view text effects");
     }
     const effects = await prisma.textEffect.findMany({ orderBy: { sortOrder: "asc" } });
-    return NextResponse.json({ ok: true, effects });
+    return NextResponse.json({ ok: true, effects: effects.map(textEffectRowForBrowser) });
   } catch (error) {
     return handleApiError(error, "Failed to load text effects");
   }
@@ -57,7 +59,7 @@ export async function POST(request: Request) {
 
     // Normalising on the way in means the database only ever holds specs both
     // platforms can render — a malformed one can't reach the app.
-    const spec = normalizeTextEffectSpec(body.spec);
+    const spec = storableTextEffectSpec(textEffectSpecFromBrowser(body.spec));
 
     const base = slugify(titleEn) || "effect";
     let slug = base;
@@ -76,6 +78,7 @@ export async function POST(request: Request) {
         titleEn,
         titleAr,
         spec,
+        category: normalizeTextEffectCategory(body.category),
         isPremium: Boolean(body.isPremium),
         published: body.published === undefined ? true : Boolean(body.published),
         sortOrder: (last?.sortOrder ?? -1) + 1,
@@ -83,7 +86,7 @@ export async function POST(request: Request) {
     });
 
     logger.info("Text effect created", { userId: session.userId, slug });
-    return NextResponse.json({ ok: true, effect }, { status: 201 });
+    return NextResponse.json({ ok: true, effect: textEffectRowForBrowser(effect) }, { status: 201 });
   } catch (error) {
     return handleApiError(error, "Failed to create text effect");
   }

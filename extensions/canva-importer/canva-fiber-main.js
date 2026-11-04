@@ -1575,6 +1575,14 @@
         // never shorter than its nominal 5s (what the editor's 0:05 shows on an empty page).
         // (Page animation, page size and the page list come from the shared
         // canva-animation-extract block: readPageAnimation / readPageSize / listCanvaPages.)
+        const pageDurationIsAuthored = (obj) => {
+          try {
+            const us = Number(unwrapObservable(obj && obj.durationUs));
+            return Number.isFinite(us) && us > 0;
+          } catch (_e) {
+            return false;
+          }
+        };
         const readPageDurationMs = (obj, fillRecord, elements) => {
           try {
             const us = Number(unwrapObservable(obj && obj.durationUs));
@@ -1601,6 +1609,9 @@
           result.__pageDurationMs =
             readPageDurationMs(livePages[0], pageFill, result) ||
             readPageDurationMs(pageObj, pageFill, result);
+          // Whether the author timed the page. An un-timed page plays to its longest timed item —
+          // a video ELEMENT included, whose length only the clip capture knows (background.js).
+          if (pageDurationIsAuthored(livePages[0]) || pageDurationIsAuthored(pageObj)) result.__pageDurationAuthored = true;
           const pageDimensions = readPageSize(livePages[0]) || readPageSize(pageObj) || readPageSize(doc);
           if (pageDimensions) {
             result.__pageWidth = pageDimensions.width;
@@ -1772,6 +1783,7 @@
                 fill: pageFillForPage,
                 animation: readPageAnimation(pageRoot) || readPageAnimation(pageObjForPage),
                 durationMs: readPageDurationMs(pageRoot, pageFillForPage, pageElements),
+                ...(pageDurationIsAuthored(pageRoot) || pageDurationIsAuthored(pageObjForPage) ? { durationAuthored: true } : {}),
                 ...(readPageSize(pageRoot) || readPageSize(pageObjForPage) || {}),
               });
             }

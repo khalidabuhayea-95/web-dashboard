@@ -47,7 +47,10 @@ const REFERENCE_SOURCES = [
      OR POSITION($1 IN COALESCE("afterUrl",'')) > 0
      OR POSITION($1 IN COALESCE("thumbUrl",'')) > 0`,
   `SELECT 1 FROM "GalleryImage" WHERE POSITION($1 IN url) > 0`,
-  `SELECT 1 FROM "TextEffect" WHERE POSITION($1 IN COALESCE("previewUrl",'')) > 0`,
+  `SELECT 1 FROM "TextEffect" WHERE POSITION($1 IN COALESCE("previewUrl",'')) > 0
+     OR POSITION($1 IN COALESCE("textureUrl",'')) > 0
+     OR POSITION($1 IN COALESCE("textureVideoUrl",'')) > 0
+     OR POSITION($1 IN COALESCE("inlayTextureUrl",'')) > 0`,
   `SELECT 1 FROM "AppSetting" WHERE POSITION($1 IN value::text) > 0`,
   `SELECT 1 FROM "PushCampaign" WHERE POSITION($1 IN payload::text) > 0`,
   `SELECT 1 FROM "StoreNotification" WHERE POSITION($1 IN payload::text) > 0`,

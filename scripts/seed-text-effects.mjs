@@ -55,6 +55,7 @@ try {
       spec: normalizeTextEffectSpec(preset.spec),
       isPremium: Boolean(preset.isPremium),
       sortOrder: index,
+      ...(preset.category !== undefined ? { category: preset.category } : {}),
     };
 
     await prisma.textEffect.upsert({
@@ -67,9 +68,12 @@ try {
 
   if (!args["keep-extra"]) {
     const extraWhere = { slug: { notIn: PRESETS.map((preset) => preset.slug) } };
-    const extraArt = await prisma.textEffect.findMany({ where: extraWhere, select: { previewUrl: true } });
+    const extraArt = await prisma.textEffect.findMany({
+      where: extraWhere,
+      select: { previewUrl: true, textureUrl: true, textureVideoUrl: true },
+    });
     const removed = await prisma.textEffect.deleteMany({ where: extraWhere });
-    await deleteStorageForUrls(extraArt.map((item) => item.previewUrl), {
+    await deleteStorageForUrls(extraArt.flatMap((item) => [item.previewUrl, item.textureUrl, item.textureVideoUrl]), {
       reason: "seed removed effects not in the library",
     });
     if (removed.count) console.log(`Removed ${removed.count} effect(s) not in the library.`);

@@ -202,6 +202,104 @@ export const PRESETS = [
   },
 ];
 
+// Texture materials (fill.kind "texture"). The images are painted procedurally by
+// scripts/text-effects/generate-textures.mjs, which also creates these rows with their
+// files; `texture.painter` names the painter there. Without the files they paint their
+// base colour, so seeding them alone is harmless.
+export const TEXTURE_PRESETS = [
+  {
+    slug: "gold-leaf",
+    titleEn: "Gold Leaf",
+    titleAr: "ذهب مطروق",
+    category: "gold",
+    texture: { painter: "gold", video: true },
+    spec: {
+      fill: { kind: "texture", color: "#b8860b", texture: { blendMode: "source-over", opacity: 1, scale: 1 } },
+      stroke: { width: 0.018, color: "#4a3006" },
+      shadow: shadow({ color: "rgba(40,24,0,0.45)", blur: 0.045, offsetX: 0, offsetY: 0.045 }),
+      bevel: { enabled: true, depth: 0.02, softness: 0.5, light: "rgba(255,248,215,0.8)", dark: "rgba(70,40,0,0.5)" },
+      sheen: { enabled: false },
+    },
+  },
+  {
+    slug: "brushed-silver",
+    titleEn: "Brushed Silver",
+    titleAr: "فضة مصقولة",
+    category: "silver",
+    texture: { painter: "silver" },
+    spec: {
+      fill: { kind: "texture", color: "#a9adb4", texture: { blendMode: "source-over", opacity: 1, scale: 1 } },
+      stroke: { width: 0.014, color: "#43474e" },
+      shadow: shadow({ color: "rgba(0,0,0,0.4)", blur: 0.045, offsetX: 0, offsetY: 0.04 }),
+      bevel: { enabled: true, depth: 0.018, softness: 0.45, light: "rgba(255,255,255,0.85)", dark: "rgba(0,0,0,0.42)" },
+      sheen: { enabled: false },
+    },
+  },
+  {
+    slug: "frosted-glass",
+    titleEn: "Glass",
+    titleAr: "زجاج",
+    category: "glass",
+    texture: { painter: "glass" },
+    spec: {
+      // A see-through body: the page shows through, the highlights stay opaque.
+      fill: { kind: "texture", color: "rgba(180,212,250,0.38)", texture: { blendMode: "source-over", opacity: 1, scale: 1 } },
+      stroke: { width: 0.012, color: "rgba(90,130,180,0.55)" },
+      shadow: shadow({ color: "rgba(20,50,90,0.28)", blur: 0.06, offsetX: 0, offsetY: 0.03 }),
+      bevel: { enabled: true, depth: 0.03, softness: 0.6, light: "rgba(255,255,255,0.9)", dark: "rgba(30,70,120,0.55)" },
+      sheen: { enabled: false },
+    },
+  },
+  {
+    slug: "embroidery-thread",
+    titleEn: "Embroidery Thread",
+    titleAr: "تطريز بالخيط",
+    category: "threads",
+    texture: { painter: "thread" },
+    spec: {
+      // Greyscale satin stitches: "bw" takes the user's colour (the tint is the default).
+      fill: {
+        kind: "texture",
+        color: "#c2185b",
+        texture: { blendMode: "source-over", opacity: 1, renderMode: "bw", tint: "#c2185b", scale: 1 },
+      },
+      stroke: { width: 0.016, color: "rgba(0,0,0,0.35)" },
+      shadow: shadow({ color: "rgba(0,0,0,0.38)", blur: 0.02, offsetX: 0, offsetY: 0.022 }),
+      bevel: { enabled: true, depth: 0.014, softness: 0.4, light: "rgba(255,255,255,0.3)", dark: "rgba(0,0,0,0.32)" },
+      sheen: { enabled: false },
+    },
+  },
+  {
+    // Andalusi's "ألماس": a beveled gold rim with diamond pavé set inside the letters.
+    // The rim is the gold-leaf material; the pavé image (`inlay.file`, generated once with
+    // Magnific) tiles inside, recessed by an inner shadow, with a few seeded glints.
+    slug: "diamond-inlay",
+    titleEn: "Diamonds",
+    titleAr: "ألماس",
+    category: "gems",
+    texture: { painter: "gold" },
+    inlay: { file: "assets/diamond-pave.webp" },
+    spec: {
+      fill: { kind: "texture", color: "#c9962e", texture: { blendMode: "source-over", opacity: 1, scale: 1 } },
+      stroke: { width: 0.006, color: "#5a3a06" },
+      shadow: shadow({ color: "rgba(40,24,0,0.45)", blur: 0.06, offsetX: 0, offsetY: 0.04 }),
+      bevel: { enabled: true, depth: 0.022, softness: 0.4, light: "rgba(255,250,225,0.95)", dark: "rgba(70,40,5,0.8)" },
+      sheen: { enabled: false },
+      inlay: {
+        enabled: true,
+        inset: 0.03,
+        outset: 0.03,
+        color: "#dfe5ec",
+        texture: { fit: "tile", scale: 0.85, blendMode: "source-over", opacity: 1 },
+        innerShadow: { enabled: true, color: "rgba(0,0,0,0.7)", blur: 0.04, offsetX: 0.012, offsetY: 0.018 },
+        sparkles: { count: 14, size: 0.05, color: "rgba(255,255,255,0.95)", seed: 7 },
+      },
+    },
+  },
+];
+
+PRESETS.push(...TEXTURE_PRESETS);
+
 export function getPreset(slug) {
   return PRESETS.find((preset) => preset.slug === slug) || null;
 }

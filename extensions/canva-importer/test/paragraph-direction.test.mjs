@@ -49,6 +49,35 @@ test("anything the two layouts already agree on is left alone", () => {
   assert.equal(match(""), "");
 });
 
+test("a number before the words moves after them, so it stays on the left (DAHZk2fauFU's date)", () => {
+  // Canva drew "25 يونيو" (a left-to-right box) with 25 on the LEFT; laid out right to left, the
+  // same text put 25 on the right.
+  assert.equal(match("25 يونيو"), "يونيو 25");
+  assert.equal(match("25يونيو"), "يونيو25");
+  // Extended Arabic-Indic digits are European numbers to the layout too.
+  assert.equal(match("۲۵ يونيو"), "يونيو ۲۵");
+  // A number with separators keeps its own order behind a left-to-right mark.
+  assert.equal(match("2024 .10.10 يوم السبت"), "يوم السبت ‎2024 .10.10");
+  // End punctuation of the words still moves to the end it shows at. (These and the lines above
+  // were checked pixel for pixel in Chrome: canvas fillText of Canva's text left-to-right against
+  // ours right-to-left, 0 pixels apart.)
+  assert.equal(match("25 يونيو!"), "!يونيو 25");
+  assert.equal(match("«25 يونيو»"), "«يونيو ‎«25");
+  // Each line on its own; outer whitespace stays.
+  assert.equal(match("  25 يونيو  \nالساعة 6"), "  يونيو 25  \nالساعة 6");
+});
+
+test("numbers the two layouts already agree on stay where they are", () => {
+  // After the first letter a number joins the words' right-to-left run either way.
+  assert.equal(match("يونيو 25"), "يونيو 25");
+  assert.equal(match("الساعة 6 مساءً"), "الساعة 6 مساءً");
+  // Arabic-Indic digits are right-to-left numbers in both layouts.
+  assert.equal(match("٢٥ يونيو"), "٢٥ يونيو");
+  // Canva laid it out right to left too; mixed with Latin words, nothing moves.
+  assert.equal(match("25 يونيو", "rtl"), "25 يونيو");
+  assert.equal(match("25 June يونيو"), "25 June يونيو");
+});
+
 test("a left-to-right line of numbers keeps its order under Arabic (DAHMphBrpuo's date)", () => {
   assert.equal(match("2024 .10.10"), "\u200E2024 .10.10");
   assert.equal(match("10:30 - 12:00"), "\u200E10:30 - 12:00");

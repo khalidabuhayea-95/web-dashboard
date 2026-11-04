@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+  <head>
+    <meta charset="utf-8" />
+    <title>استيراد دفعة من Canva</title>
+    <link rel="stylesheet" href="popup.css" />
+    <style>
+      body { max-width: 860px; margin: 24px auto; padding: 0 16px; }
+      textarea { width: 100%; min-height: 160px; direction: ltr; font: 12px/1.5 ui-monospace, monospace; }
+      .row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin: 12px 0; }
+      .stats { font-size: 15px; font-weight: 600; }
+      .bar { height: 10px; background: #e5e7eb; border-radius: 6px; overflow: hidden; }
+      .bar > div { height: 100%; background: #2f7d7a; width: 0; transition: width .3s; }
+      #log { direction: ltr; font: 12px/1.6 ui-monospace, monospace; max-height: 360px; overflow: auto; background: #f7f7f8; padding: 8px; border-radius: 8px; white-space: pre-wrap; }
+      .ok { color: #1a7f37; } .err { color: #c0392b; } .skip { color: #888; }
+    </style>
+  </head>
+  <body>
+    <h1>استيراد دفعة من Canva</h1>
+    <p class="hint">
+      الصق روابط تصاميم Canva (رابط بكل سطر) أو اختر ملف القائمة، ثم اضغط «ابدأ». كل تصميم يُفتح بتبويب،
+      يُستورد بنفس طريقة زر «Import current tab»، ثم يُغلق التبويب. التقدم محفوظ — لو أغلقت الصفحة أو توقّف
+      الجهاز، افتحها واضغط «ابدأ» فيكمل من حيث وقف. اترك هذه النافذة مفتوحة.
+    </p>
+    <textarea id="urls" placeholder="https://www.canva.com/design/DAxxxxxxx/edit"></textarea>
+    <div class="row">
+      <input id="file" type="file" accept=".txt,.tsv,.csv" />
+      <label><input id="skipExisting" type="checkbox" checked /> تخطَّ ما تم استيراده سابقاً في هذه الدفعة</label>
+      <label>انتظار بين التصاميم (ثانية) <input id="gap" type="number" min="0" value="3" style="width:64px" /></label>
+    </div>
+    <div class="row">
+      <button id="start" type="button">ابدأ</button>
+      <button id="pause" type="button" class="secondary" disabled>إيقاف مؤقت</button>
+      <button id="retry" type="button" class="secondary">إعادة الفاشلة</button>
+      <button id="export" type="button" class="secondary">تنزيل التقرير</button>
+      <button id="reset" type="button" class="secondary">مسح التقدم</button>
+    </div>
+    <div class="stats" id="stats">—</div>
+    <div class="bar"><div id="barFill"></div></div>
+    <div id="log"></div>
+    <script src="logger.js"></script>
+    <script src="batch.js"></script>
+  </body>
+</html>

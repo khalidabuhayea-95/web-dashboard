@@ -34,6 +34,7 @@ import {
   type EditorAnimationSlots,
 } from "@/lib/editor/animationSlots";
 import type { TextFill } from "@/lib/editor/textFill";
+import type { EditorTextEffect } from "@/lib/editor/textEffects";
 import {
   hasTextSpans,
   normalizeTextSpans,
@@ -221,6 +222,12 @@ export interface EditorElement {
    * the base; absent/empty = one style. Ships to mobile as the TEXT layer's `spans`.
    */
   textSpans?: TextSpan[];
+  /**
+   * A dashboard text effect (lib/editor/textEffects.ts): the effect's slug plus the user's
+   * intensity / colour. The spec and texture stay in the catalog, so re-tuning an effect updates
+   * every design using it. Absent = the plain fill.
+   */
+  textEffect?: EditorTextEffect;
   color: string;
   timelineStartMs?: number;
   timelineEndMs?: number;
@@ -354,11 +361,16 @@ interface StageApi {
    */
   captureThumbnailDataUrlForPage: (pageId: string) => Promise<string>;
   captureTimelineStripDataUrls: (playheadsMs: number[]) => Promise<string[]>;
+  /**
+   * Records the timeline as the template's preview video — live while the tab is in front, frame
+   * by frame when it is in the background. [onStatus] receives progress worth showing the user.
+   */
   recordTimelinePreviewVideo: (options?: {
     fps?: number;
     maxDimension?: number;
     durationMs?: number;
     signal?: AbortSignal;
+    onStatus?: (message: string) => void;
   }) => Promise<{
     blob: Blob;
     mimeType: string;
@@ -441,6 +453,12 @@ interface EditorStore {
   timelinePlayheadMs: number;
   timelineIsPlaying: boolean;
   previewGenerationActive: boolean;
+  /**
+   * The frame-by-frame preview recorder (a background tab) is moving the playhead itself, one
+   * rendered frame at a time. The timeline still shows as playing, but its own real-time loop
+   * must stand down (PagesTimeline).
+   */
+  previewFrameStepping: boolean;
   selectedIds: string[];
   /**
    * The characters selected inside the text being edited on the canvas (UTF-16 offsets into its
@@ -497,6 +515,7 @@ interface EditorStore {
   setTimelinePlayheadMs: (value: number) => void;
   setTimelinePlaying: (value: boolean) => void;
   setPreviewGenerationActive: (value: boolean) => void;
+  setPreviewFrameStepping: (value: boolean) => void;
   toggleTimelinePlaying: () => void;
 
   setSelectedIds: (ids: string[]) => void;
@@ -1214,6 +1233,7 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   timelinePlayheadMs: 0,
   timelineIsPlaying: false,
   previewGenerationActive: false,
+  previewFrameStepping: false,
   selectedIds: [],
   textRangeSelection: null,
   publishCandidateIds: [],
@@ -1283,6 +1303,8 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
   setTimelinePlaying: (timelineIsPlaying) => set({ timelineIsPlaying: Boolean(timelineIsPlaying) }),
   setPreviewGenerationActive: (previewGenerationActive) =>
     set({ previewGenerationActive: Boolean(previewGenerationActive) }),
+  setPreviewFrameStepping: (previewFrameStepping) =>
+    set({ previewFrameStepping: Boolean(previewFrameStepping) }),
   toggleTimelinePlaying: () =>
     set((state) => {
       const totalDurationMs = getTotalTimelineDurationMs(state.pages);

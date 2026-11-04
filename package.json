@@ -32,6 +32,7 @@
     "smoke:ai-tools": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-ai-tools.ts",
     "backfill:ai-tool-thumbs": "node --env-file=.env --env-file=.env.local scripts/backfill-ai-tool-thumbs.mjs",
     "seed:text-effects": "node --env-file=.env --env-file=.env.local --import tsx scripts/seed-text-effects.mjs",
+    "seed:text-effect-textures": "node --env-file=.env --env-file=.env.local --import tsx scripts/text-effects/generate-textures.mjs",
     "ai:worker": "ai-worker/.venv/bin/python ai-worker/local_server.py",
     "smoke:ai-worker": "ai-worker/.venv/bin/python ai-worker/scripts/smoke_test.py",
     "seed:occasions": "node --env-file=.env --env-file=.env.local --import tsx scripts/seed-occasions.mjs",

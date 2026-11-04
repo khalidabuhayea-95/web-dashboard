@@ -64,3 +64,14 @@ test("an untimed child of a timed group inherits the group's window", () => {
   };
   assert.deepEqual(resolve(byId.child, byId), { startMs: 20917, durMs: 10458 });
 });
+
+test("a start with no length runs to the page's end: start only, open end", () => {
+  // DAHZLxjJX8A: the card's parts come in after the envelope opens, each with a startUs only.
+  assert.deepEqual(resolve({ startUs: 4052373 }, {}), { startMs: 4052, durMs: null });
+  assert.deepEqual(resolve({ startUs: 7451126, durationUs: undefined }, {}), { startMs: 7451, durMs: null });
+  // No start and no length: nothing to stamp, as before.
+  assert.equal(resolve({}, {}), null);
+  assert.equal(resolve({ startUs: 0 }, {}), null);
+  // A group with a length still bounds an open-ended child.
+  assert.deepEqual(resolve({ parentId: "g", startUs: 1_000_000 }, { g: { startUs: 2_000_000, durationUs: 5_000_000 } }), { startMs: 3000, durMs: 4000 });
+});

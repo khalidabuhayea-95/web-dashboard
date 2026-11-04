@@ -287,15 +287,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
         setPreviewToast({ tone: "error", message: "The canvas is not ready yet. Try again in a moment." });
         return;
       }
-      // A hidden tab pauses compositing: every recorded frame — and the poster — would be blank,
-      // and that blank preview would ship to the list and the app. Keep the existing preview.
-      if (typeof document !== "undefined" && document.visibilityState === "hidden") {
-        setPreviewToast({
-          tone: "error",
-          message: "Keep this tab open and in front while the preview records.",
-        });
-        return;
-      }
+      // A hidden tab is fine: the recorder renders frame by frame there (CanvasEditor).
 
       previewAbortControllerRef.current?.abort();
       const jobId = previewGenerationIdRef.current + 1;
@@ -384,6 +376,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
           maxDimension: TEMPLATE_PREVIEW_VIDEO_MAX_DIMENSION,
           durationMs: previewTimelineDurationMs,
           signal: controller.signal,
+          onStatus: (message) => announce("info", message),
         });
         if (!recorded?.blob || recorded.blob.size <= 0) {
           throw new Error("Preview renderer did not return a video.");
@@ -441,12 +434,18 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
           || appendPreviewVersion(uploadedVideo.url, previewVersionToken);
         const resolvedPosterUrl = String(template?.preview?.posterUrl || "").trim()
           || appendPreviewVersion(posterUrl || "", previewVersionToken);
+        // The server's timestamp, not the moment recording started: the next save sends this back
+        // as previewUpdatedAt, and a different value changes the video's ?v= token — so a plain
+        // re-save made the list and the app reload the preview as if it were a new one.
+        const serverPreviewUpdatedAt = Number(template?.preview?.updatedAt);
 
         setLocalPreviewState({
           status: "ready",
           url: resolvedPreviewUrl || null,
           posterUrl: resolvedPosterUrl || null,
-          generatedAt: nextGeneratedAt,
+          generatedAt: Number.isFinite(serverPreviewUpdatedAt) && serverPreviewUpdatedAt > 0
+            ? new Date(serverPreviewUpdatedAt).toISOString()
+            : nextGeneratedAt,
           error: null,
         });
         announce("success", "Template preview is ready.", {
@@ -811,8 +810,8 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
     setIsTogglingPremium(true);
     try {
       // Only a template that was never saved needs a save to get an id. Saving an existing
-      // one would bump its updatedAt, and the app then drops its ready preview video
-      // (isTemplatePreviewStale) — the Pro flag itself never touches the design.
+      // one would bump its updatedAt (and its place in newest-first lists) — the Pro flag
+      // itself never touches the design.
       const saved = activeTemplateId ? null : await saveTemplate();
       const templateId = String(saved?.id || activeTemplateId || "");
       if (!templateId) return;
