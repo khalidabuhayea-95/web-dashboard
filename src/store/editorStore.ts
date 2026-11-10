@@ -44,6 +44,7 @@ import {
 } from "@/lib/editor/textSpans";
 import {
   DEFAULT_FRAME_CONTENT_TRANSFORM,
+  clampFrameContentTransform,
   createFrameShapeFromPreset,
   normalizeFrameContentTransform,
   resolveFramePreset,
@@ -371,13 +372,17 @@ interface StageApi {
     durationMs?: number;
     signal?: AbortSignal;
     onStatus?: (message: string) => void;
+    /** Given, the encoder stores the assets under this template and `stored` carries their URLs. */
+    templateId?: string;
   }) => Promise<{
-    blob: Blob;
+    /** The encoded MP4 — only when no templateId was given. */
+    blob: Blob | null;
     mimeType: string;
     durationMs: number;
     posterDataUrl: string;
     width: number;
     height: number;
+    stored: { videoUrl: string; posterUrl: string | null } | null;
   } | null>;
   mergeSelectedLayers: () => Promise<{ merged: boolean; message?: string }>;
   /**
@@ -1785,12 +1790,19 @@ export const useEditorStore = create<EditorStore>((set, get) => ({
         ...page,
         elements: page.elements.map((element) => {
           if (element.id !== targetId || element.type !== "frame") return element;
+          // The photo never leaves the frame: no zooming out past cover, no empty edge.
           return {
             ...element,
-            frameContentTransform: normalizeFrameContentTransform({
-              ...(element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM),
-              ...patch,
-            }),
+            frameContentTransform: clampFrameContentTransform(
+              element.width,
+              element.height,
+              element.frameContent?.sourceWidth,
+              element.frameContent?.sourceHeight,
+              {
+                ...(element.frameContentTransform || DEFAULT_FRAME_CONTENT_TRANSFORM),
+                ...patch,
+              }
+            ),
           };
         }),
       })),

@@ -28,7 +28,10 @@ import {
 //   2. a bare key (FontFile.storagePath) — a slash-joined path that does NOT sit inside a URL.
 // Over-matching junk like "image/png" is harmless: a token only matters if it equals a real
 // bucket key, so extra tokens can only make the sweep more conservative.
-const URL_SHAPE = /https?:\/\/[^\s"'\\<>)]+/g;
+// The relative proxy form (/api/storage/public/<key>) is how most editor-saved columns store
+// media (thumbnailDataUrl, template data, merged layers). Matching only absolute URLs once made
+// ~500 live objects — every thumbnail among them — read as orphans.
+const URL_SHAPE = /(?:https?:\/\/|\/api\/storage\/public\/)[^\s"'\\<>)]+/g;
 const BARE_KEY_SHAPE = /(?<![A-Za-z0-9._:/-])[A-Za-z0-9][A-Za-z0-9._-]*(?:\/[A-Za-z0-9._-]+)+/g;
 
 function extractKeys(text: string, into: Set<string>): number {

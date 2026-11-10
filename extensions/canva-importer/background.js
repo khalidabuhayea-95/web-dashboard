@@ -3389,6 +3389,19 @@ async function layerToFabricObject(layer, index) {
     } else if (Number(border.cornerRadius) > 0) {
       imageObject.cornerRadius = Math.round(Number(border.cornerRadius));
     }
+    // It IS a Canva frame (a shape filled with a photo), so it loads as an editor FRAME: the photo
+    // stays swappable, as in Canva. The editor clips a frame's outline to the frame, which would
+    // cut an outlined frame's ring in half, so a frame WITH a border stays a masked image.
+    // The fields above stay as the fallback for any reader that does not know frames.
+    if (!imageObject.stroke) {
+      imageObject.frameShape = border.circleFrame
+        ? { presetId: "canva-circle-frame", kind: "circle" }
+        : {
+            presetId: "canva-rect-frame",
+            kind: "rect",
+            ...(Number(imageObject.cornerRadius) > 0 ? { cornerRadius: Number(imageObject.cornerRadius) } : {}),
+          };
+    }
   }
 
   // Shaped photo frame (arch, blob, badge…): the scraper sampled Canva's clip outline into a
@@ -4977,7 +4990,7 @@ function extractCanvaFiberModel() {
         const d = String(p0.d || "").trim();
         let shapeKind = null;
         if (/^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d)) shapeKind = "rect";
-        else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d)) shapeKind = "circle";
+        else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1) shapeKind = "circle";
         if (!shapeKind) return null;
         // Solid fill AND/OR an outline stroke — Canva photo frames, pill labels and dividers are
         // stroke-only rects/circles (no fill). Emit whichever paint(s) the shape carries.
@@ -5012,8 +5025,8 @@ function extractCanvaFiberModel() {
         // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
         // instead of the isolation snapshot (which has no alpha outside the mask, and so
         // came back as an opaque rectangle with the page baked into its corners).
-        const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
-        if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+        const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1;
+        if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame && !rectFrame) return null;
         return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
       } catch (_e) {
         return null;

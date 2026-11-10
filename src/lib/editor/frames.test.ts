@@ -7,8 +7,10 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  clampFrameContentTransform,
   frameStrokeWidthForMediaBorder,
   mediaBorderWidthForFrameStroke,
+  resolveFrameContentLayout,
   resolveFrameMediaAsLayerBox,
 } from "@/lib/editor/frames";
 
@@ -45,8 +47,14 @@ test("a layer converted to a frame with its crop converts back to the same crop"
   close(box.crop.height, 400);
 });
 
-test("media panned wholly outside the frame has nothing to show", () => {
-  assert.equal(resolveFrameMediaAsLayerBox(300, 300, 600, 600, { fit: "manual", scale: 1, offsetX: 1000, offsetY: 0 }), null);
+test("media panned past the frame's edge is pulled back to cover it", () => {
+  // A photo can no longer leave its frame (clampFrameContentTransform): 600 px in a 300 px frame
+  // slides at most 150 px, so the converted layer is the frame's whole box, cut from the left.
+  const box = resolveFrameMediaAsLayerBox(300, 300, 600, 600, { fit: "manual", scale: 1, offsetX: 1000, offsetY: 0 });
+  assert.ok(box);
+  assert.deepEqual([box.localX, box.localY, box.width, box.height], [0, 0, 300, 300]);
+  close(box.crop.x, 0);
+  close(box.crop.y, 150);
 });
 
 test("a media border converts to the frame stroke that shows the same ring", () => {
@@ -66,4 +74,29 @@ test("frame stroke → media border is the exact inverse", () => {
   close(mediaBorderWidthForFrameStroke(frameStroke, 0.6108, 0.61), 12);
   assert.equal(mediaBorderWidthForFrameStroke(24, 1, 1), 12);
   assert.equal(mediaBorderWidthForFrameStroke(0, 1, 1), 0);
+});
+
+test("a frame's photo cannot be zoomed out past cover or slid off an edge (Canva's rule)", () => {
+  // 400x300 frame, 800x400 photo: cover scale 0.75 → 600x300, 100 px of slack each side.
+  assert.deepEqual(
+    clampFrameContentTransform(400, 300, 800, 400, { fit: "cover", scale: 0.4, offsetX: 500, offsetY: -80 }),
+    { fit: "cover", scale: 1, offsetX: 100, offsetY: 0 }
+  );
+  // Zoomed in 2x: 1200x600, slack 400 x 150.
+  assert.deepEqual(
+    clampFrameContentTransform(400, 300, 800, 400, { fit: "cover", scale: 2, offsetX: -999, offsetY: 120 }),
+    { fit: "cover", scale: 2, offsetX: -400, offsetY: 120 }
+  );
+  // Manual fit (a photo dropped into the frame): scale is in source px, so the floor is cover.
+  const manual = clampFrameContentTransform(400, 300, 800, 400, { fit: "manual", scale: 0.25, offsetX: 0, offsetY: 0 });
+  assert.equal(manual.scale, 0.75);
+  // A deliberate letterbox keeps its gaps.
+  assert.deepEqual(
+    clampFrameContentTransform(400, 300, 800, 400, { fit: "contain", scale: 1, offsetX: 30, offsetY: 0 }),
+    { fit: "contain", scale: 1, offsetX: 30, offsetY: 0 }
+  );
+  // The layout always covers the frame box.
+  const layout = resolveFrameContentLayout(400, 300, 800, 400, { fit: "cover", scale: 0.5, offsetX: 300, offsetY: 0 });
+  assert.ok(layout.x <= 0 && layout.y <= 0);
+  assert.ok(layout.x + layout.width >= 400 && layout.y + layout.height >= 300);
 });

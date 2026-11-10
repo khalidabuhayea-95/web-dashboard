@@ -1,0 +1,32 @@
+{
+ "text_transform_alpha": {
+  "p50_ms": 4.15,
+  "p95_ms": 4.66,
+  "fits60fps": true
+ },
+ "text_blur": {
+  "p50_ms": 25.82,
+  "p95_ms": 70.27,
+  "fits60fps": false
+ },
+ "clip_reveal": {
+  "p50_ms": 3.36,
+  "p95_ms": 4.44,
+  "fits60fps": true
+ },
+ "shimmer": {
+  "p50_ms": 10.33,
+  "p95_ms": 11.75,
+  "fits60fps": true
+ },
+ "gradient_particles": {
+  "p50_ms": 96.12,
+  "p95_ms": 105.95,
+  "fits60fps": false
+ },
+ "fullscreen_blur": {
+  "p50_ms": 180.49,
+  "p95_ms": 196.65,
+  "fits60fps": false
+ }
+}

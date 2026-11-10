@@ -8,6 +8,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { handleApiError, handleBadRequest } from "@/lib/api/errors";
 import { logger } from "@/lib/logging/logger";
 import { MediaToolMissingError, runFfmpeg, runFfprobe } from "@/lib/media/ffmpeg.server";
+import {
+  resolveTemplatePreviewTarget,
+  sanitizeTemplateId,
+  storeTemplatePreviewAsset,
+} from "@/lib/templates/previewAssets.server";
 import { getEditorSession } from "@/lib/templates/server";
 
 export const runtime = "nodejs";
@@ -112,6 +117,16 @@ export async function POST(request: NextRequest) {
       .sort((left, right) => String(left.name || "").localeCompare(String(right.name || "")));
     if (!sourceVideo && frames.length === 0) {
       return handleBadRequest("Missing preview video source");
+    }
+
+    // With a templateId the encoded MP4 (and the poster, when sent) are stored straight under the
+    // template and the response carries their URLs — the file used to travel back to the browser
+    // only to be uploaded again from there. Without one the MP4 is returned as bytes.
+    const templateId = sanitizeTemplateId(formData.get("templateId"));
+    const poster = formData.get("poster") instanceof File ? (formData.get("poster") as File) : null;
+    const target = templateId ? await resolveTemplatePreviewTarget(templateId, session.userId) : null;
+    if (templateId && !target) {
+      return handleBadRequest("Template not found for preview");
     }
 
     const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "nayroz-preview-encode-"));
@@ -238,6 +253,38 @@ export async function POST(request: NextRequest) {
         verifiedHeight: probe.height,
         outputBytes: bytes.length,
       });
+
+      if (target) {
+        const [storedVideo, storedPoster] = await Promise.all([
+          storeTemplatePreviewAsset({
+            target,
+            variant: "template-preview-video",
+            bytes,
+            mimeType: "video/mp4",
+            actorUserId: session.userId,
+          }),
+          poster && poster.size > 0
+            ? storeTemplatePreviewAsset({
+                target,
+                variant: "template-preview-poster",
+                bytes: Buffer.from(await poster.arrayBuffer()),
+                mimeType: poster.type || "image/png",
+                actorUserId: session.userId,
+              })
+            : Promise.resolve(null),
+        ]);
+        return NextResponse.json(
+          {
+            video: { url: storedVideo.url, mimeType: storedVideo.mimeType, size: storedVideo.size },
+            poster: storedPoster ? { url: storedPoster.url, mimeType: storedPoster.mimeType } : null,
+            durationMs: probe.durationMs,
+            fps: actualFps,
+            width: probe.width,
+            height: probe.height,
+          },
+          { headers: { "Cache-Control": "no-store" } }
+        );
+      }
 
       return new NextResponse(bytes, {
         headers: {

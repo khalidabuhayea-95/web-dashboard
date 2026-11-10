@@ -1,0 +1,103 @@
+<!doctype html>
+<html><head><meta charset="utf-8">
+<style>
+@font-face{font-family:Amiri;src:url(../fonts/Amiri-Regular.ttf)}
+@font-face{font-family:Amiri;font-weight:700;src:url(../fonts/Amiri-Bold.ttf)}
+@font-face{font-family:Ruqaa;src:url(../fonts/ArefRuqaa-Bold.ttf)}
+@font-face{font-family:ReemKufi;src:url(../fonts/ReemKufi.ttf);font-weight:400 700}
+@font-face{font-family:Messiri;src:url(../fonts/ElMessiri.ttf);font-weight:400 700}
+@font-face{font-family:Tajawal;src:url(../fonts/Tajawal-Medium.ttf)}
+@font-face{font-family:Lalezar;src:url(../fonts/Lalezar-Regular.ttf)}
+@font-face{font-family:Cairo;src:url(../fonts/Cairo.ttf);font-weight:200 1000}
+@font-face{font-family:Cormorant;src:url(../fonts/Cormorant.ttf);font-weight:300 700}
+@font-face{font-family:Rakkas;src:url(../fonts/Rakkas-Regular.ttf)}
+html,body{margin:0;background:#111}
+#stage{position:relative;width:540px;height:960px;overflow:hidden;background:#000}
+.el{position:absolute;will-change:transform,opacity;transform-origin:50% 50%}
+.c{left:0;right:0;text-align:center}
+.w{display:inline-block;white-space:pre}
+.gold{background:linear-gradient(100deg,#9c7a2f 0%,#f3dc96 35%,#b8913c 60%,#f7e7b2 80%,#9c7a2f 100%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.sh{position:relative}
+.sh::after{content:attr(data-t);position:absolute;inset:0;background:linear-gradient(105deg,transparent calc(var(--sh)*100% - 12%),rgba(255,248,225,.75) calc(var(--sh)*100%),transparent calc(var(--sh)*100% + 12%));-webkit-background-clip:text;background-clip:text;color:transparent;pointer-events:none}
+</style>
+<script src="../engine/motion-engine.js"></script>
+<script src="../engine/presets.js"></script>
+<script src="scenes.js"></script>
+</head><body>
+<div id="stage"></div>
+<script>
+const S = 0.5; // presets authored at 1080w; stage is 540w
+const stage = document.getElementById('stage');
+const params = new URLSearchParams(location.search);
+const sceneId = params.get('scene');
+const reduced = params.get('reduced') === '1';
+const scene = SCENES[sceneId];
+stage.style.background = scene.bg || '#000';
+const nodes = {};       // key -> element
+const drawPaths = {};   // key -> [paths,len]
+const custom = {};      // key -> fn(props,t)
+for (const e of scene.elements) {
+  let n;
+  if (e.type === 'canvas') { n = document.createElement('canvas'); n.width = 540; n.height = 960; custom[e.key] = e.draw.bind(null, n.getContext('2d')); }
+  else { n = document.createElement('div'); n.innerHTML = e.html || ''; }
+  n.className = 'el ' + (e.cls || ''); n.style.cssText += e.style || '';
+  if (e.text) n.textContent = e.text;
+  if (/[\u0600-\u06FF]/.test(n.textContent) && !(e.style||'').includes('direction')) n.style.direction = 'rtl'; // Arabic: force RTL paragraph so split units keep order
+  stage.appendChild(n); nodes[e.key] = n;
+  if (e.split) {
+    // split into units. word: keep shaping inside each word (safe for Arabic). letter: per-char (BREAKS Arabic joining - test only)
+    const txt = n.textContent; n.textContent = '';
+    const parts = e.split === 'word' ? txt.split(/(\s+)/) : e.split === 'line' ? txt.split('\n') : [...txt];
+    let i = 0;
+    parts.forEach((p) => {
+      if (e.split === 'word' && /^\s+$/.test(p)) { n.appendChild(document.createTextNode(p)); return; }
+      const s = document.createElement('span'); s.className = 'w'; s.textContent = p; if (e.unitCls) s.className += ' ' + e.unitCls;
+      if (e.split === 'line') { s.style.display = 'block'; }
+      n.appendChild(s); nodes[e.key + '#' + (i++)] = s;
+    });
+    e.units = i;
+  }
+  if (e.custom) custom[e.key] = e.custom.bind(null, n);
+  n.querySelectorAll('path[data-draw],circle[data-draw],line[data-draw],polygon[data-draw]').forEach(p => { (drawPaths[e.key] = drawPaths[e.key] || []).push([p, p.getTotalLength()]); });
+}
+for (const t of scene.tracks) { if (t.el) { const e = scene.elements.find(x => x.key === t.el); if (e && e.units) t.units = e.units; } }
+const laid = MotionEngine.layout(scene, Object.assign({}, PRESETS, scene.presets || {}));
+
+function apply(key, p) {
+  const n = nodes[key]; if (!n) return;
+  const x = (p.x || 0) * S, y = (p.y || 0) * S;
+  const sc = (p.scale ?? 1);
+  let tf = `translate(${x}px,${y}px)`;
+  if (p.rotateX || p.rotateY) tf = `perspective(900px) ` + tf + ` rotateX(${p.rotateX || 0}deg) rotateY(${p.rotateY || 0}deg)`;
+  if (p.rotate) tf += ` rotate(${p.rotate}deg)`;
+  if (p.skewX) tf += ` skewX(${p.skewX}deg)`;
+  tf += ` scale(${sc * (p.scaleX ?? 1)},${sc * (p.scaleY ?? 1)})`;
+  n.style.transform = tf;
+  n.style.opacity = p.opacity ?? 1;
+  const f = [];
+  if (p.blur) f.push(`blur(${Math.max(0, p.blur * S)}px)`);
+  if (p.brightness !== undefined && p.brightness !== 1) f.push(`brightness(${p.brightness})`);
+  n.style.filter = f.join(' ');
+  if (p.clipT || p.clipR || p.clipB || p.clipL) n.style.clipPath = `inset(${p.clipT || 0}% ${p.clipR || 0}% ${p.clipB || 0}% ${p.clipL || 0}%)`; else n.style.clipPath = '';
+  if (p.rgbSplit) n.style.textShadow = `${p.rgbSplit * S}px 0 rgba(255,0,60,.85), ${-p.rgbSplit * S}px 0 rgba(0,220,255,.85)`; else if (n.dataset.ts !== undefined) n.style.textShadow = n.dataset.ts; else n.style.textShadow = '';
+  if (p.shimmer !== undefined) n.style.setProperty('--sh', p.shimmer);
+  if (p.draw !== undefined && drawPaths[key]) for (const [path, len] of drawPaths[key]) { path.style.strokeDasharray = len; path.style.strokeDashoffset = len * (1 - p.draw); }
+}
+let renderCost = [];
+function render(t) {
+  const t0 = performance.now();
+  const st = MotionEngine.evaluate(laid, t, { reducedMotion: reduced });
+  for (const k in st) apply(k, st[k]);
+  for (const k in custom) custom[k](st[k] || {}, reduced ? 0 : t);
+  renderCost.push(performance.now() - t0);
+}
+window.__seek = t => { render(t); return document.fonts.ready.then(() => true); };
+window.__duration = scene.duration;
+window.__play = (ms) => new Promise(res => {
+  const dts = []; renderCost = []; let last = performance.now(); const start = last;
+  function f(now) { dts.push(now - last); last = now; render((now - start) % scene.duration); if (now - start < ms) requestAnimationFrame(f); else res({ dts: dts.slice(2), cost: renderCost.slice(2) }); }
+  requestAnimationFrame(f);
+});
+render(0);
+</script>
+</body></html>

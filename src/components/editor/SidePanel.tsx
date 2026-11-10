@@ -104,7 +104,7 @@ import {
   type EditorAnimationSlots,
 } from "@/lib/editor/animationSlots";
 import type { AnimationSpecInput } from "@/lib/editor/animationVisual";
-import { FRAME_PRESETS, type FramePreset } from "@/lib/editor/frames";
+import { FRAME_PRESETS, type FramePreset, type FrameShape } from "@/lib/editor/frames";
 import { getPublishablePageElements } from "@/lib/editor/publishableElements";
 import {
   createElementFromAsset,
@@ -1817,28 +1817,38 @@ function toEditorDesignFromTemplate(
       const importedFrameIsVideo = type === "video" || (type === "image" && importedLayerType === "video");
       const importedFrameShape =
         (type === "image" || type === "video") && item.frameShape && typeof item.frameShape === "object"
-          ? (item.frameShape as { presetId?: unknown; kind?: unknown; points?: unknown })
+          ? (item.frameShape as { presetId?: unknown; kind?: unknown; points?: unknown; cornerRadius?: unknown })
           : null;
       const importedFramePoints =
         importedFrameShape && Array.isArray(importedFrameShape.points)
           ? (importedFrameShape.points as unknown[]).map((value) => Number(value)).filter(Number.isFinite)
           : [];
-      if (
-        importedFrameShape &&
-        String(importedFrameShape.kind || "") === "polygon" &&
-        importedFramePoints.length >= 6 &&
-        typeof item.src === "string" &&
-        item.src
-      ) {
+      const importedFrameKind = String(importedFrameShape?.kind || "");
+      // A polygon needs its outline; Canva's round and rectangular frames (the extension's
+      // circleFrame / rectFrame) are whole-box shapes, a rect with an optional corner radius.
+      const importedFrameCornerRadius = Math.max(0, toNumber(importedFrameShape?.cornerRadius, 0));
+      const importedFrameShapeValue: FrameShape | null =
+        importedFrameKind === "polygon" && importedFramePoints.length >= 6
+          ? {
+              presetId: String(importedFrameShape?.presetId || "canva-clip-path"),
+              kind: "polygon",
+              points: importedFramePoints,
+            }
+          : importedFrameKind === "circle"
+            ? { presetId: String(importedFrameShape?.presetId || "canva-circle-frame"), kind: "circle" }
+            : importedFrameKind === "rect"
+              ? {
+                  presetId: String(importedFrameShape?.presetId || "canva-rect-frame"),
+                  kind: "rect",
+                  ...(importedFrameCornerRadius > 0 ? { cornerRadius: importedFrameCornerRadius } : {}),
+                }
+              : null;
+      if (importedFrameShapeValue && typeof item.src === "string" && item.src) {
         elements.push(
           createElementFromAsset(pageId, {
             ...common,
             type: "frame",
-            frameShape: {
-              presetId: String(importedFrameShape.presetId || "canva-clip-path"),
-              kind: "polygon",
-              points: importedFramePoints,
-            },
+            frameShape: importedFrameShapeValue,
             frameContent: importedFrameIsVideo
               ? (() => {
                   const videoDuration = Math.max(0, toNumber(item.videoDuration, toNumber(item.videoDurationSec, 0)));

@@ -1,0 +1,1 @@
+checks=1234 fails=0 maxAbsErr=4.978550904866097E-10 evaluateCost=13.1us/frame (luxury scene, 17 tracks)

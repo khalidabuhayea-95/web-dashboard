@@ -34,7 +34,7 @@ const TABS = [
   },
 ];
 
-const PAGE_SIZE = 40;
+const PAGE_SIZE = 100;
 
 export default function ProAssetsClient() {
   const [tabKey, setTabKey] = useState(TABS[0].key);
@@ -370,7 +370,7 @@ export default function ProAssetsClient() {
         </Card>
       ) : null}
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6">
+      <div className="grid grid-cols-3 gap-2.5 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10">
         {items.map((item) => {
           const saving = Boolean(savingIds[item.id]);
           const label = item.title || item.titleEn || "Untitled";
@@ -380,7 +380,7 @@ export default function ProAssetsClient() {
           return (
             <div
               key={item.id}
-              className={`rounded-xl border bg-card p-2.5 ${
+              className={`rounded-lg border bg-card p-1.5 ${
                 selected ? "border-primary ring-2 ring-primary" : item.isPremium ? "border-primary" : ""
               }`}
             >
@@ -406,7 +406,7 @@ export default function ProAssetsClient() {
                     src={item.thumbnailUrl || item.assetUrl}
                     alt={label}
                     loading="lazy"
-                    className="aspect-square w-full rounded-lg bg-white object-contain"
+                    className="aspect-square w-full rounded-md bg-white object-contain"
                   />
                 </button>
                 {item.isPremium ? (
@@ -415,12 +415,12 @@ export default function ProAssetsClient() {
                   </span>
                 ) : null}
               </div>
-              <div className="mt-2 truncate text-xs font-medium" title={label}>
+              <div className="mt-1.5 truncate text-[11px] font-medium" title={label}>
                 {label}
               </div>
               {tab.categorized ? (
                 <div
-                  className="mt-0.5 truncate text-[11px] text-muted-foreground"
+                  className="mt-0.5 truncate text-[10px] text-muted-foreground"
                   title={categoryLabel || "Uncategorized"}
                 >
                   {categoryLabel || "Uncategorized"}

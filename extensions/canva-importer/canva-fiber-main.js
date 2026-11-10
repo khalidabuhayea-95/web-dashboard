@@ -836,7 +836,7 @@
           const d = String(p0.d || "").trim();
           let shapeKind = null;
           if (/^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d)) shapeKind = "rect";
-          else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d)) shapeKind = "circle";
+          else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1) shapeKind = "circle";
           if (!shapeKind) return null;
           // Solid fill AND/OR an outline stroke — Canva photo frames, pill labels and dividers are
           // stroke-only rects/circles (no fill). Emit whichever paint(s) the shape carries so the
@@ -876,10 +876,10 @@
           // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
           // instead of the isolation snapshot (which has no alpha outside the mask, and so
           // came back as an opaque rectangle with the page baked into its corners).
-          const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
+          const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1;
           // A circle frame is worth reporting even with no stroke and no radius — the round mask
           // itself is the thing the editor needs to know about.
-          if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+          if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame && !rectFrame) return null;
           return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
         } catch (_e) {
           return null;

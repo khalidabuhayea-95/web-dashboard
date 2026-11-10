@@ -1487,18 +1487,33 @@ function normalizeFrameContentTransform(value) {
 // produces it: cover fills the frame (max ratio), contain fits inside it (min ratio), and the web's
 // own scale and offsets ride on top. A 1920×1080 clip in a 520×733 arch is 0.679, not 1 — at 1 the
 // app showed a 1.47× zoomed centre slice.
+// The photo always covers its frame, as in Canva and the web editor (clampFrameContentTransform):
+// no scale below cover, no offset past the frame's edge. Applied to what ships, so a template
+// saved before the editor clamped (or a frame resized after its photo was placed) is fixed too.
+// A deliberate "contain" letterbox is left as it is.
 function manualFrameContentTransform(value, content, frameWidth, frameHeight) {
   const transform = normalizeFrameContentTransform(value);
-  if (transform.fit === "manual") return transform;
   const sourceWidth = Math.max(numberOr(content?.sourceWidth, 1), 1);
   const sourceHeight = Math.max(numberOr(content?.sourceHeight, 1), 1);
-  const ratioX = Math.max(numberOr(frameWidth, 1), 1) / sourceWidth;
-  const ratioY = Math.max(numberOr(frameHeight, 1), 1) / sourceHeight;
-  const fitScale = transform.fit === "contain" ? Math.min(ratioX, ratioY) : Math.max(ratioX, ratioY);
+  const width = Math.max(numberOr(frameWidth, 1), 1);
+  const height = Math.max(numberOr(frameHeight, 1), 1);
+  const ratioX = width / sourceWidth;
+  const ratioY = height / sourceHeight;
+  const coverScale = Math.max(ratioX, ratioY);
+  const fitScale =
+    transform.fit === "manual" ? 1 : transform.fit === "contain" ? Math.min(ratioX, ratioY) : coverScale;
+  const manualScale = fitScale * transform.scale;
+  if (transform.fit === "contain") {
+    return { ...transform, fit: "manual", scale: Math.round(manualScale * 1e6) / 1e6 };
+  }
+  const scale = Math.max(manualScale, coverScale);
+  const slackX = Math.max(0, (sourceWidth * scale - width) / 2);
+  const slackY = Math.max(0, (sourceHeight * scale - height) / 2);
   return {
-    ...transform,
     fit: "manual",
-    scale: Math.round(fitScale * transform.scale * 1e6) / 1e6,
+    scale: Math.round(scale * 1e6) / 1e6,
+    offsetX: clamp(transform.offsetX, -slackX, slackX) || 0,
+    offsetY: clamp(transform.offsetY, -slackY, slackY) || 0,
   };
 }
 

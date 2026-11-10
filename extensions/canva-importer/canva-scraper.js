@@ -1097,7 +1097,7 @@
               const d = String(p0.d || "").trim();
               let shapeKind = null;
               if (/^M0[ ,]0\s*H[\d.]+\s*V[\d.]+\s*H0\s*z?$/i.test(d)) shapeKind = "rect";
-              else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d)) shapeKind = "circle";
+              else if (/A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1) shapeKind = "circle";
               if (!shapeKind) return null;
               // Solid fill AND/OR an outline stroke (frames/pills/dividers are stroke-only).
               const fillColor = p0.fill && typeof p0.fill.color === "string" ? p0.fill.color : null;
@@ -1131,8 +1131,8 @@
               // `mediaShape: "circle"` at any aspect, so the layer keeps its clean fetched asset
               // instead of the isolation snapshot (which has no alpha outside the mask, and so
               // came back as an opaque rectangle with the page baked into its corners).
-              const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d);
-              if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame) return null;
+              const circleFrame = !rectFrame && /A/.test(d) && !/[LlCcQqSsTtHhVv]/.test(d) && (d.match(/M/gi) || []).length === 1;
+              if (!(strokeColor && strokeWidth > 0) && !(cornerRadius > 0) && !circleFrame && !rectFrame) return null;
               return { strokeColor, strokeWidth, cornerRadius, rectFrame, circleFrame };
             } catch (_e) {
               return null;
@@ -6470,6 +6470,14 @@
         [layerNode, ...getScopedDescendants(layerNode)].forEach((candidate) => {
           if (!(candidate instanceof Element)) return;
           if (imageElement && candidate.contains(imageElement)) return;
+          // `options.side` keeps only the pieces Canva paints before ("below") or after ("above")
+          // the photo — DOM order is its paint order inside a layer (marker canva-frame-artwork-side).
+          if (imageElement && (options.side === "below" || options.side === "above")) {
+            const photoFollows = Boolean(
+              candidate.compareDocumentPosition(imageElement) & Node.DOCUMENT_POSITION_FOLLOWING
+            );
+            if ((options.side === "below") !== photoFollows) return;
+          }
           let style = null;
           try {
             style = window.getComputedStyle(candidate);
@@ -7497,7 +7505,9 @@
               // then stretched that crop 8% taller (the 3D "8" on DAHOnpYP5LI). Fit to the model
               // frame instead, which is exactly what that block will hand the editor.
               const modelFrameForFit = fiberModelById[String(node.id || "")] || null;
+              // A window frame is the window, not the model's whole frame (see clipWindowFrame).
               const fitToModelFrame =
+                !clipWindow &&
                 (!shouldUseVisibleGeometry || layerTakesModelFrame) &&
                 modelFrameForFit &&
                 Math.abs(Number(modelFrameForFit.rotation) || 0) > 0.5 &&
@@ -8329,23 +8339,26 @@
             }
           }
           // The card and trim rings a window frame was cut out of: every clipped, filled element
-          // of the layer that does not hold the photo, drawn over the layer's WHOLE box as one
-          // shape above the frame (the rings overlap the window's edge, the card has it cut out).
+          // of the layer that does not hold the photo, drawn over the layer's WHOLE box. Canva
+          // paints them in DOM order, so the pieces before the photo go in one shape BELOW it and
+          // the rest in one ABOVE: a polaroid's card has the window cut out and its rings overlap
+          // the window's edge, but DAHaVGc8OiA's stamp card is SOLID (no hole) under the photo,
+          // with only a thin ring on top — one shape above hid the photo behind the cream card.
           let frameArtworkRecord = null;
+          let frameBackArtworkRecord = null;
+          const frameDecorationRecords = [];
           if (kind === "image" && clipWindow && viewportInfo.rawRect) {
+            layerRecord.clipWindowFrame = true;
             const fullRect = viewportInfo.rawRect;
             const fullWidth = Math.max(1, Math.round(layerFrameSize.width));
             const fullHeight = Math.max(1, Math.round(layerFrameSize.height));
             const fullX = centerDesignX - fullWidth / 2;
             const fullY = centerDesignY - fullHeight / 2;
-            const artworkDataUrl = serializeClipPathArtworkToDataUrl(node, imageElement, fullWidth, fullHeight, {
-              rotated: Math.abs(Number(normalizedLayerAngle) || 0) >= 0.5,
-            });
-            if (artworkDataUrl.startsWith("data:image/")) {
-              frameArtworkRecord = {
-                id: `${String(node.id || `layer-${layerIndex + 1}`)}__frame`,
+            const artworkRotated = Math.abs(Number(normalizedLayerAngle) || 0) >= 0.5;
+            const buildFrameArtworkRecord = (artworkDataUrl, { idSuffix, nameSuffix, zOffset }) => ({
+                id: `${String(node.id || `layer-${layerIndex + 1}`)}${idSuffix}`,
                 parentId: parentId || null,
-                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} Frame`,
+                name: `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} ${nameSuffix}`,
                 kind: "image",
                 x: fullX,
                 y: fullY,
@@ -8371,7 +8384,7 @@
                 sourceHeight: fullHeight,
                 text: "",
                 fill: "",
-                zIndex: (zIndex ?? layerIndex) + 0.5,
+                zIndex: (zIndex ?? layerIndex) + zOffset,
                 opacity: effectiveOpacity,
                 titleEn: "",
                 tagsEn: [],
@@ -8381,8 +8394,132 @@
                 fallback: false,
                 fallbackReason: "",
                 hasCompanionText: false,
-              };
+              });
+            const backDataUrl = serializeClipPathArtworkToDataUrl(node, imageElement, fullWidth, fullHeight, {
+              rotated: artworkRotated,
+              side: "below",
+            });
+            if (backDataUrl.startsWith("data:image/")) {
+              frameBackArtworkRecord = buildFrameArtworkRecord(backDataUrl, {
+                idSuffix: "__frameback",
+                nameSuffix: "Frame back",
+                zOffset: -0.5,
+              });
             }
+            const frontDataUrl = serializeClipPathArtworkToDataUrl(node, imageElement, fullWidth, fullHeight, {
+              rotated: artworkRotated,
+              side: "above",
+            });
+            if (frontDataUrl.startsWith("data:image/")) {
+              frameArtworkRecord = buildFrameArtworkRecord(frontDataUrl, {
+                idSuffix: "__frame",
+                nameSuffix: "Frame",
+                zOffset: 0.5,
+              });
+            }
+            // A frame whose decoration is a PICTURE, not a filled shape: DAHaVBnln3A's "Ripped
+            // Paper Frame" is a torn-paper PNG with a transparent hole, painted over the photo's
+            // window. The artwork above only draws clipped colour fills, so the paper was lost and
+            // the photo stood bare. Each such image becomes its own layer on its own box (in the
+            // layer's axes, turned with it), below or above the photo by Canva's paint order.
+            // (marker canva-frame-decoration-image)
+            const photoWrapper = (() => {
+              for (let el = imageElement?.parentElement; el && el !== node; el = el.parentElement) {
+                const style = window.getComputedStyle(el);
+                if (String(style.clipPath || "none") !== "none") return el;
+              }
+              return null;
+            })();
+            const layerLocalWidth = Math.max(1, node.offsetWidth || 1);
+            const layerLocalHeight = Math.max(1, node.offsetHeight || 1);
+            const decorationGroups = [];
+            Array.from(node.querySelectorAll("img")).forEach((img) => {
+              if (img === imageElement || (photoWrapper && photoWrapper.contains(img))) return;
+              if (isInsideForeignLayer(img, node)) return;
+              const style = window.getComputedStyle(img);
+              if (style.visibility === "hidden" || Number.parseFloat(style.opacity || "1") <= 0.01) return;
+              const local = localBoxWithin(img, node);
+              if (!local || !(local.width > 1) || !(local.height > 1)) return;
+              // Responsive copies of one picture share its box: keep them as one decoration.
+              const group = decorationGroups.find(
+                (entry) =>
+                  Math.abs(entry.local.x - local.x) < 1 &&
+                  Math.abs(entry.local.y - local.y) < 1 &&
+                  Math.abs(entry.local.width - local.width) < 1 &&
+                  Math.abs(entry.local.height - local.height) < 1
+              );
+              if (group) group.copies.push(img);
+              else decorationGroups.push({ local, copies: [img] });
+            });
+            decorationGroups.forEach((group, groupIndex) => {
+              const [primary, ...alternates] = group.copies;
+              const below = Boolean(
+                imageElement && primary.compareDocumentPosition(imageElement) & Node.DOCUMENT_POSITION_FOLLOWING
+              );
+              const placed = placeClipWindow({
+                frameWidth: layerFrameSize.width,
+                frameHeight: layerFrameSize.height,
+                centerX: centerDesignX,
+                centerY: centerDesignY,
+                angle: rotationSourceAngle,
+                opening: {
+                  x: group.local.x / layerLocalWidth,
+                  y: group.local.y / layerLocalHeight,
+                  width: group.local.width / layerLocalWidth,
+                  height: group.local.height / layerLocalHeight,
+                },
+              });
+              const decoWidth = Math.max(1, Math.round(placed.width));
+              const decoHeight = Math.max(1, Math.round(placed.height));
+              const decoX = placed.centerX - decoWidth / 2;
+              const decoY = placed.centerY - decoHeight / 2;
+              const decoTitle = String(primary.getAttribute("alt") || "").trim();
+              frameDecorationRecords.push({
+                below,
+                record: {
+                  id: `${String(node.id || `layer-${layerIndex + 1}`)}${below ? "__framebackimg" : "__frameimg"}${groupIndex + 1}`,
+                  parentId: parentId || null,
+                  name: decoTitle || `${String(layerRecord.name || `Layer ${layerIndex + 1}`)} Frame`,
+                  kind: "image",
+                  x: decoX,
+                  y: decoY,
+                  width: decoWidth,
+                  height: decoHeight,
+                  angle: normalizedLayerAngle,
+                  flipX: false,
+                  flipY: false,
+                  viewportRect: { x: fullRect.left ?? fullRect.x ?? 0, y: fullRect.top ?? fullRect.y ?? 0, width: fullRect.width, height: fullRect.height },
+                  pageRelativeRect: { x: decoX, y: decoY, width: decoWidth, height: decoHeight },
+                  imageSrc: getImageElementSource(primary),
+                  imageDataUrl: "",
+                  imageProvenance: "",
+                  imageAcquisitionJob: {
+                    kind: "element",
+                    element: primary,
+                    alternates,
+                    keepAnimated: false,
+                    width: decoWidth,
+                    height: decoHeight,
+                  },
+                  preferSnapshot: false,
+                  snapshotIsLossyFallback: true,
+                  sourceWidth: undefined,
+                  sourceHeight: undefined,
+                  text: "",
+                  fill: "",
+                  zIndex: (zIndex ?? layerIndex) + (below ? -0.4 : 0.6) + groupIndex * 0.001,
+                  opacity: effectiveOpacity,
+                  titleEn: decoTitle,
+                  tagsEn: decoTitle ? uniqueMetadataStrings(tokenizeMetadataLabel(decoTitle)) : [],
+                  labelsEn: decoTitle ? uniqueMetadataStrings([decoTitle, ...tokenizeMetadataLabel(decoTitle)]) : [],
+                  isBackgroundNode: false,
+                  isFullPageBackground: false,
+                  fallback: false,
+                  fallbackReason: "",
+                  hasCompanionText: false,
+                },
+              });
+            });
           }
           if (kind === "image") {
             imageMetadataCandidates.push({
@@ -8397,6 +8534,13 @@
               isFullPageBackground,
             });
           }
+          // Before the photo, so DOM order (and the z-order pass) keeps the card underneath it.
+          if (frameBackArtworkRecord && !isDuplicateLayerEntry(frameBackArtworkRecord)) {
+            layers.push(frameBackArtworkRecord);
+          }
+          frameDecorationRecords
+            .filter((entry) => entry.below)
+            .forEach((entry) => layers.push(entry.record));
           if (gridCellRecords.length > 0) {
             gridCellRecords.forEach((record) => {
               if (!isDuplicateLayerEntry(record)) layers.push(record);
@@ -8414,6 +8558,9 @@
           if (frameArtworkRecord && !isDuplicateLayerEntry(frameArtworkRecord)) {
             layers.push(frameArtworkRecord);
           }
+          frameDecorationRecords
+            .filter((entry) => !entry.below)
+            .forEach((entry) => layers.push(entry.record));
           tableCellTextRecords.forEach((record) => {
             if (!isDuplicateLayerEntry(record)) layers.push(record);
           });
@@ -9441,6 +9588,10 @@
               // Same reason as the rotation guard above: a DOM-derived box is already correct in
               // page space, while model.left/top/width/height are LOCAL to the element's group.
               !layer.domGeometry &&
+              // A window frame is the photo's OPENING inside the element (placeClipWindow already
+              // turned it with the layer); the model's box is the whole stamp/polaroid, and taking it
+              // stretched DAHaVGc8OiA's 4° stamp photo over its cream border.
+              !layer.clipWindowFrame &&
               modelPageOffset &&
               String(layer.kind || "") === "image" &&
               Number(model.width) >= 2 &&
@@ -9484,9 +9635,16 @@
             layers.forEach((layer, i) => {
               const model = fiberModelById[String((layer && layer.id) || "")];
               const mo = model ? Number(model.zOrder) : NaN;
+              // A window frame's card sits right under its own photo, wherever the scan met it.
+              const backOf = /__frameback(img\d+)?$/.test(String((layer && layer.id) || ""))
+                ? fiberModelById[String(layer.id).replace(/__frameback(img\d+)?$/, "")]
+                : null;
+              const backZ = backOf ? Number(backOf.zOrder) : NaN;
               if (Number.isFinite(mo)) {
                 layer.__zkey = mo;
                 lastZ = mo;
+              } else if (Number.isFinite(backZ)) {
+                layer.__zkey = backZ - 0.0005;
               } else if (layer && (layer.isFullPageBackground || layer.isBackgroundNode)) {
                 layer.__zkey = -1;
               } else {

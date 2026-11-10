@@ -111,7 +111,24 @@ test("a framed video is cover-fitted in the app's own scale (source x scale), no
   // A web frame that contains its clip keeps the whole clip inside.
   const [contained] = layersOf([{ ...video, frameContentTransform: { fit: "contain", scale: 1 } }]);
   assert.ok(Math.abs(contained.contentTransform.scale - 520 / 1920) < 1e-4);
-  // A manual transform is passed through untouched.
-  const [manual] = layersOf([{ ...video, frameContentTransform: { fit: "manual", scale: 0.5, offsetX: 10 } }]);
-  assert.deepEqual(manual.contentTransform, { fit: "manual", scale: 0.5, offsetX: 10, offsetY: 0 });
+  // A manual transform that covers the frame is passed through untouched…
+  const [manual] = layersOf([{ ...video, frameContentTransform: { fit: "manual", scale: 1, offsetX: 10 } }]);
+  assert.deepEqual(manual.contentTransform, { fit: "manual", scale: 1, offsetX: 10, offsetY: 0 });
+  // …one that would leave the frame partly empty is lifted to cover and pulled back inside.
+  const [tooSmall] = layersOf([{ ...video, frameContentTransform: { fit: "manual", scale: 0.5, offsetX: 900 } }]);
+  assert.ok(Math.abs(tooSmall.contentTransform.scale - 733 / 1080) < 1e-4, String(tooSmall.contentTransform.scale));
+  assert.ok(Math.abs(tooSmall.contentTransform.offsetX - (1920 * (733 / 1080) - 520) / 2) < 1e-2);
+  assert.equal(tooSmall.contentTransform.offsetY, 0);
+});
+
+test("an imported round or rectangular Canva frame ships as a FRAME of that kind", () => {
+  const [round, rect] = layersOf([
+    importedPhoto({ mediaShape: "circle", cornerRadius: 225, frameShape: { presetId: "canva-circle-frame", kind: "circle" } }),
+    importedPhoto({ cornerRadius: 24, frameShape: { presetId: "canva-rect-frame", kind: "rect", cornerRadius: 24 } }),
+  ]);
+  assert.equal(round.type, "FRAME");
+  assert.equal(round.shape.kind, "circle");
+  assert.equal(rect.type, "FRAME");
+  assert.equal(rect.shape.kind, "rect");
+  assert.equal(rect.shape.cornerRadius, 24);
 });

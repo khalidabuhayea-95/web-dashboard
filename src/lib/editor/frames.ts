@@ -261,6 +261,53 @@ export function normalizeFrameContentTransform(
   };
 }
 
+function frameContentBaseScale(
+  fit: FrameFitMode,
+  width: number,
+  height: number,
+  contentWidth: number,
+  contentHeight: number
+) {
+  if (fit === "manual") return 1;
+  if (fit === "contain") return Math.min(width / contentWidth, height / contentHeight);
+  return Math.max(width / contentWidth, height / contentHeight);
+}
+
+/**
+ * Keeps a frame's photo covering the whole frame, as Canva does: it can be zoomed in and slid
+ * around, but never zoomed out past "cover" or moved far enough to show an empty edge. The frame
+ * box is the bound (the frame's shape sits inside it). A "contain" fit is a deliberate letterbox
+ * and is left alone.
+ */
+export function clampFrameContentTransform(
+  frameWidth: number,
+  frameHeight: number,
+  sourceWidth: number | undefined,
+  sourceHeight: number | undefined,
+  transform: Partial<FrameContentTransform> | null | undefined
+): FrameContentTransform {
+  const safeTransform = normalizeFrameContentTransform(transform);
+  if (safeTransform.fit === "contain") return safeTransform;
+  const width = Math.max(1, Number(frameWidth) || 1);
+  const height = Math.max(1, Number(frameHeight) || 1);
+  const contentWidth = Math.max(1, Number(sourceWidth) || width);
+  const contentHeight = Math.max(1, Number(sourceHeight) || height);
+  const baseScale = frameContentBaseScale(safeTransform.fit, width, height, contentWidth, contentHeight);
+  const coverScale = Math.max(width / contentWidth, height / contentHeight);
+  const scale = Math.max(safeTransform.scale, coverScale / baseScale);
+  const renderedWidth = contentWidth * baseScale * scale;
+  const renderedHeight = contentHeight * baseScale * scale;
+  const slackX = Math.max(0, (renderedWidth - width) / 2);
+  const slackY = Math.max(0, (renderedHeight - height) / 2);
+  return {
+    ...safeTransform,
+    scale,
+    // `|| 0` folds the -0 a zero slack gives back into 0.
+    offsetX: Math.min(slackX, Math.max(-slackX, safeTransform.offsetX)) || 0,
+    offsetY: Math.min(slackY, Math.max(-slackY, safeTransform.offsetY)) || 0,
+  };
+}
+
 export function resolveFrameContentLayout(
   frameWidth: number,
   frameHeight: number,
@@ -272,13 +319,10 @@ export function resolveFrameContentLayout(
   const height = Math.max(1, Number(frameHeight) || 1);
   const contentWidth = Math.max(1, Number(sourceWidth) || width);
   const contentHeight = Math.max(1, Number(sourceHeight) || height);
-  const safeTransform = normalizeFrameContentTransform(transform);
-  const baseScale =
-    safeTransform.fit === "manual"
-      ? 1
-      : safeTransform.fit === "contain"
-        ? Math.min(width / contentWidth, height / contentHeight)
-        : Math.max(width / contentWidth, height / contentHeight);
+  // Clamped here too, so a frame resized after its photo was placed (or an older template)
+  // still shows the photo covering it.
+  const safeTransform = clampFrameContentTransform(width, height, contentWidth, contentHeight, transform);
+  const baseScale = frameContentBaseScale(safeTransform.fit, width, height, contentWidth, contentHeight);
   const resolvedScale = Math.max(0.01, baseScale * safeTransform.scale);
   const renderedWidth = contentWidth * resolvedScale;
   const renderedHeight = contentHeight * resolvedScale;

@@ -127,9 +127,28 @@ export default function ElementCategoriesSection({ canEdit }) {
     );
   }, []);
 
+  // A new row lands at the end of a long list, so open it and bring it on screen; otherwise the
+  // click looks like it did nothing.
+  const pendingScrollKeyRef = useRef("");
   const addCategory = useCallback(() => {
-    setSettings((current) => [...current, createEmptyElementCategory()]);
-  }, []);
+    const created = createEmptyElementCategory();
+    pendingScrollKeyRef.current = created._uid;
+    const newIndex = settings.length;
+    setSettings((current) => [...current, created]);
+    setExpandedCategories((expanded) =>
+      Array.from({ length: newIndex + 1 }, (_, index) => (index === newIndex ? true : expanded[index] ?? false))
+    );
+  }, [settings.length]);
+
+  useEffect(() => {
+    const key = pendingScrollKeyRef.current;
+    if (!key) return;
+    const node = document.querySelector(`[data-category-key="${key}"]`);
+    if (!node) return;
+    pendingScrollKeyRef.current = "";
+    node.scrollIntoView({ behavior: "smooth", block: "center" });
+    node.querySelector('input:not([type="file"]):not([type="checkbox"])')?.focus({ preventScroll: true });
+  }, [settings]);
 
   const removeCategory = useCallback(
     (index) => {
@@ -445,6 +464,7 @@ export default function ElementCategoriesSection({ canEdit }) {
                 return (
                   <article
                     key={rowKey}
+                    data-category-key={rowKey}
                     className={`h-fit rounded-xl border bg-background p-4 transition-shadow hover:shadow-sm ${
                       isDragOver
                         ? dragOverCategory.position === "after"

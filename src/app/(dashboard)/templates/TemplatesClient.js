@@ -236,6 +236,8 @@ export default function TemplatesClient() {
   const [tagFilter, setTagFilter] = useState("");
   // "" = all, "1" = featured only, "0" = not featured — sent as-is as ?featured=.
   const [featuredFilter, setFeaturedFilter] = useState("");
+  // "" = all, "draft" / "published" — sent as-is as ?status=.
+  const [statusFilter, setStatusFilter] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
   const [taxonomySettings, setTaxonomySettings] = useState(TEMPLATE_CATEGORY_SETTINGS);
   const [deletingTemplateId, setDeletingTemplateId] = useState("");
@@ -371,6 +373,7 @@ export default function TemplatesClient() {
       if (subCategoryFilter.trim()) query.set("subCategory", subCategoryFilter.trim());
       if (tagFilter.trim()) query.set("tag", tagFilter.trim());
       if (featuredFilter) query.set("featured", featuredFilter);
+      if (statusFilter) query.set("status", statusFilter);
       query.set("page", String(currentPage));
       query.set("perPage", String(PAGE_SIZE));
 
@@ -396,7 +399,7 @@ export default function TemplatesClient() {
     } finally {
       setRefreshing(false);
     }
-  }, [categoryFilter, subCategoryFilter, currentPage, tagFilter, featuredFilter]);
+  }, [categoryFilter, subCategoryFilter, currentPage, tagFilter, featuredFilter, statusFilter]);
 
   useEffect(() => {
     loadTemplates();
@@ -404,7 +407,7 @@ export default function TemplatesClient() {
 
   useEffect(() => {
     setCurrentPage(1);
-  }, [categoryFilter, subCategoryFilter, tagFilter, featuredFilter]);
+  }, [categoryFilter, subCategoryFilter, tagFilter, featuredFilter, statusFilter]);
 
   useEffect(() => {
     setCurrentPage((prev) => Math.min(prev, totalPages));
@@ -732,7 +735,7 @@ export default function TemplatesClient() {
         </CardHeader>
         <CardContent className="!p-0">
           <div className="space-y-4 p-5">
-            <div className="grid gap-3 md:grid-cols-4">
+            <div className="grid gap-3 md:grid-cols-5">
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select value={categoryFilter} onChange={(event) => onCategoryFilterChange(event.target.value)}>
@@ -773,6 +776,14 @@ export default function TemplatesClient() {
                   <option value="">All templates</option>
                   <option value="1">Featured only (app order)</option>
                   <option value="0">Not featured</option>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
+                  <option value="">All statuses</option>
+                  <option value="draft">Draft</option>
+                  <option value="published">Published</option>
                 </Select>
               </div>
             </div>

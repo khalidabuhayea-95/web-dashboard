@@ -34,6 +34,7 @@ import {
   ToolPopover,
 } from "@/components/editor/EditorChrome";
 import { dataUrlToFile, uploadEditorMediaFile } from "@/lib/editor/mediaUpload";
+import { resolveCssFontFamily, resolveFontByName } from "@/lib/templates/fontCatalog";
 import { hasAnimatedTemplateContent } from "@/lib/editor/animationTimeline";
 import { PREVIEW_RENDER_FPS } from "@/lib/editor/previewRuntime";
 import { buildTemplateShareUrl } from "@/lib/shareLink";
@@ -54,6 +55,107 @@ interface ToolbarProps {
 const TEMPLATE_PREVIEW_VIDEO_MAX_DIMENSION = 240;
 /** Per-page ceiling for off-screen preview capture during a save. */
 const PAGE_THUMBNAIL_CAPTURE_TIMEOUT_MS = 6000;
+/** How long "Regenerate preview" from the list waits for the design's fonts before recording. */
+const REGENERATE_PREVIEW_FONT_WAIT_MS = 8000;
+/** One beat after the fonts land, so the fitted text is on the stage the recorder samples. */
+const REGENERATE_PREVIEW_SETTLE_MS = 300;
+
+/**
+ * Held for the whole of a preview generation. Chrome freezes a tab that has been in the
+ * background for a few minutes — every timer, worker tick and fetch in it stops — unless the page
+ * holds a Web Lock (among a few other exemptions). The recording already survives throttling;
+ * this keeps the tab from being frozen outright, so a long multi-page render finishes while the
+ * user is elsewhere. Shared mode: two editor tabs generating at once must not queue on each other.
+ */
+const PREVIEW_GENERATION_LOCK_NAME = "nayroz:template-preview-generation";
+
+async function runHoldingBackgroundLock<T>(fn: () => Promise<T>): Promise<T> {
+  const locks = typeof navigator !== "undefined" ? navigator.locks : undefined;
+  if (!locks || typeof locks.request !== "function") return fn();
+  let started = false;
+  try {
+    return await locks.request(PREVIEW_GENERATION_LOCK_NAME, { mode: "shared" }, async () => {
+      started = true;
+      return fn();
+    });
+  } catch (error) {
+    // Only a lock the browser refused falls back to running without one; a failure inside the
+    // work itself is the work's own and must not run it twice.
+    if (started) throw error;
+    return fn();
+  }
+}
+
+interface TemplateSaveMeta {
+  name: string;
+  category: string;
+  subCategory: string;
+  categories: unknown;
+  tags: unknown;
+}
+
+/**
+ * What a save writes, as one string: the pages, the timeline (minus the preview, which a save
+ * only mirrors back and a recording rewrites) and the template's own fields. Two equal
+ * signatures mean a save would store what the server already holds.
+ */
+function buildTemplateSaveSignature(design: EditorDesign, meta: TemplateSaveMeta) {
+  return JSON.stringify({
+    pages: design.pages,
+    timeline: { ...(design.timeline || {}), preview: null },
+    meta,
+  });
+}
+
+const fontFamilyKey = (value: unknown) =>
+  String(value || "").replace(/^['"]+|['"]+$/g, "").trim().toLowerCase();
+
+/**
+ * Resolves once every text family in [pages] is declared and loaded, or after [timeoutMs].
+ *
+ * A library font is declared (@font-face) asynchronously once the font list arrives; until then
+ * `document.fonts.load()` succeeds at once for the FALLBACK, so the wait first looks for the
+ * declaration and only then loads the face. Catalog fonts map to system stacks and need neither.
+ */
+async function waitForDesignFonts(pages: EditorDesign["pages"], timeoutMs: number) {
+  if (typeof document === "undefined" || !document.fonts) return;
+  const startedAt = performance.now();
+  const remaining = () => Math.max(0, timeoutMs - (performance.now() - startedAt));
+  const shorthandsByFamily = new Map<string, string>();
+  pages.forEach((page) => {
+    (page.elements || []).forEach((element) => {
+      if (element.type !== "text") return;
+      const family = String(element.fontFamily || "").trim();
+      if (!family) return;
+      const size = Math.max(1, Math.round(Number(element.fontSize) || 16));
+      const weight = Number(element.fontWeight) || 400;
+      shorthandsByFamily.set(
+        family,
+        `${element.fontStyle === "italic" ? "italic" : "normal"} ${weight} ${size}px ${resolveCssFontFamily(family)}`
+      );
+    });
+  });
+  if (shorthandsByFamily.size === 0) return;
+
+  const needsDeclaration = (family: string) => !resolveFontByName(family);
+  while (remaining() > 0) {
+    const declared = new Set<string>();
+    document.fonts.forEach((face) => declared.add(fontFamilyKey(face.family)));
+    const pending = Array.from(shorthandsByFamily.keys()).filter(
+      (family) => needsDeclaration(family) && !declared.has(fontFamilyKey(family))
+    );
+    if (pending.length === 0) break;
+    await new Promise<void>((resolve) => window.setTimeout(resolve, 100));
+  }
+  await Promise.race([
+    Promise.all(
+      Array.from(shorthandsByFamily.values()).map((shorthand) =>
+        document.fonts.load(shorthand).catch(() => undefined)
+      )
+    ),
+    new Promise<void>((resolve) => window.setTimeout(resolve, remaining())),
+  ]);
+}
 
 function extensionFromMimeType(mimeType: string) {
   const value = String(mimeType || "").trim().toLowerCase();
@@ -76,6 +178,14 @@ function isAbortError(error: unknown) {
     (error instanceof DOMException && error.name === "AbortError") ||
     (error instanceof Error && error.name === "AbortError")
   );
+}
+
+/** The server refused a preview PATCH because the template has moved past the version it names. */
+class StalePreviewVersionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "StalePreviewVersionError";
+  }
 }
 
 function buildCanceledPreviewPayload(fallbackPosterDataUrl: string, templateVersion: number, durationMs: number) {
@@ -144,6 +254,10 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
   const undo = useEditorStore((state) => state.undo);
   const redo = useEditorStore((state) => state.redo);
   const exportDesign = useEditorStore((state) => state.exportDesign);
+  // The last successful save of this session: "Generate preview" saves first so the recording
+  // and the stored template agree, but a second recording of an untouched design has nothing to
+  // save — and a save re-captures every page's thumbnail off-screen, which is the slow part.
+  const lastSavedRef = useRef<{ templateId: string; version: number; signature: string } | null>(null);
   const setTemplateMeta = useEditorStore((state) => state.setTemplateMeta);
   const updateTimeline = useEditorStore((state) => state.updateTimeline);
   const setTimelinePlaying = useEditorStore((state) => state.setTimelinePlaying);
@@ -262,6 +376,11 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
         signal: options?.signal,
       });
       const payload = await response.json().catch(() => ({}));
+      if (response.status === 409) {
+        throw new StalePreviewVersionError(
+          payload?.error || "Preview update is stale for the current template version."
+        );
+      }
       if (!response.ok) {
         throw new Error(payload?.error || "Failed to update template preview.");
       }
@@ -275,11 +394,17 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
       templateId,
       templateVersion,
       fallbackPosterDataUrl,
+      returnStaleBeforeRecording = false,
     }: {
       templateId: string;
       templateVersion: number;
       fallbackPosterDataUrl: string;
-    }) => {
+      /**
+       * When the server says the version is stale at the very first PATCH (before anything is
+       * recorded), give up quietly and return "stale" so the caller can save and retry.
+       */
+      returnStaleBeforeRecording?: boolean;
+    }): Promise<"stale" | void> => {
       const stageRecorder = stageApi?.recordTimelinePreviewVideo;
       if (!templateId || !stageRecorder) {
         // Both of these used to return in silence, which from the outside is a button that does
@@ -358,16 +483,34 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
           error: null,
         });
 
-        await patchTemplatePreview({
-          id: templateId,
-          preview: {
-            status: "processing",
-            posterUrl: null,
-            durationMs: previewTimelineDurationMs,
-            version: templateVersion,
-            error: null,
-          },
-        }, { signal: controller.signal });
+        try {
+          await patchTemplatePreview({
+            id: templateId,
+            preview: {
+              status: "processing",
+              posterUrl: null,
+              durationMs: previewTimelineDurationMs,
+              version: templateVersion,
+              error: null,
+            },
+          }, { signal: controller.signal });
+        } catch (error) {
+          if (returnStaleBeforeRecording && error instanceof StalePreviewVersionError) {
+            logPreviewProgress("Template version moved since the last save; saving before recording.", {
+              templateId,
+              templateVersion,
+            });
+            setLocalPreviewState({
+              status: designTimeline.preview.status,
+              url: designTimeline.preview.url,
+              posterUrl: designTimeline.preview.posterUrl,
+              generatedAt: designTimeline.preview.generatedAt,
+              error: designTimeline.preview.error,
+            });
+            return "stale";
+          }
+          throw error;
+        }
         announce("info", "Recording preview video...");
 
         setTimelinePlaying(false);
@@ -377,43 +520,67 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
           durationMs: previewTimelineDurationMs,
           signal: controller.signal,
           onStatus: (message) => announce("info", message),
-        });
-        if (!recorded?.blob || recorded.blob.size <= 0) {
-          throw new Error("Preview renderer did not return a video.");
-        }
-        announce("info", "Uploading preview assets...", {
-          mimeType: recorded.mimeType,
-          durationMs: recorded.durationMs,
-          width: recorded.width,
-          height: recorded.height,
-        });
-
-        const videoExtension = extensionFromMimeType(recorded.mimeType);
-        const videoFile = new File([recorded.blob], `template-preview-${templateId}.${videoExtension}`, {
-          type: recorded.mimeType,
-        });
-        const uploadedVideo = await uploadEditorMediaFile(videoFile, "video", {
-          signal: controller.signal,
-          variant: "template-preview-video",
+          // The encoder stores the MP4 and the poster under the template itself and hands back
+          // their URLs; the uploads below only run if it did not.
           templateId,
         });
-
-        let posterUrl = fallbackPosterDataUrl || designTimeline.preview.posterUrl || "";
-        if (recorded.posterDataUrl) {
-          const posterFile = dataUrlToFile(recorded.posterDataUrl, `template-preview-${templateId}.png`);
-          const uploadedPoster = await uploadEditorMediaFile(posterFile, "image", {
-            signal: controller.signal,
-            variant: "template-preview-poster",
-            templateId,
-          });
-          posterUrl = uploadedPoster.url;
+        if (!recorded || (!recorded.stored && (!recorded.blob || recorded.blob.size <= 0))) {
+          throw new Error("Preview renderer did not return a video.");
         }
+
+        let videoUrl = "";
+        let posterUrl = "";
+        if (recorded.stored) {
+          announce("info", "Preview assets stored.", {
+            mimeType: recorded.mimeType,
+            durationMs: recorded.durationMs,
+            width: recorded.width,
+            height: recorded.height,
+          });
+          videoUrl = recorded.stored.videoUrl;
+          posterUrl = recorded.stored.posterUrl || "";
+        } else if (recorded.blob) {
+          announce("info", "Uploading preview assets...", {
+            mimeType: recorded.mimeType,
+            durationMs: recorded.durationMs,
+            width: recorded.width,
+            height: recorded.height,
+          });
+
+          const videoExtension = extensionFromMimeType(recorded.mimeType);
+          const videoFile = new File([recorded.blob], `template-preview-${templateId}.${videoExtension}`, {
+            type: recorded.mimeType,
+          });
+          // The two uploads are independent (the server cleans up each variant's old objects on
+          // its own), so they go out together rather than one after the other.
+          const [uploadedVideo, uploadedPoster] = await Promise.all([
+            uploadEditorMediaFile(videoFile, "video", {
+              signal: controller.signal,
+              variant: "template-preview-video",
+              templateId,
+            }),
+            recorded.posterDataUrl
+              ? uploadEditorMediaFile(
+                  dataUrlToFile(recorded.posterDataUrl, `template-preview-${templateId}.png`),
+                  "image",
+                  {
+                    signal: controller.signal,
+                    variant: "template-preview-poster",
+                    templateId,
+                  }
+                )
+              : Promise.resolve(null),
+          ]);
+          videoUrl = uploadedVideo.url;
+          posterUrl = uploadedPoster?.url || "";
+        }
+        posterUrl = posterUrl || fallbackPosterDataUrl || designTimeline.preview.posterUrl || "";
 
         const template = await patchTemplatePreview({
           id: templateId,
           preview: {
             status: "ready",
-            url: uploadedVideo.url,
+            url: videoUrl,
             posterUrl: posterUrl || null,
             durationMs: recorded.durationMs,
             version: templateVersion,
@@ -431,7 +598,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
           String(template?.preview?.version || "").trim() ||
           String(Date.parse(nextGeneratedAt) || Date.now());
         const resolvedPreviewUrl = String(template?.preview?.url || "").trim()
-          || appendPreviewVersion(uploadedVideo.url, previewVersionToken);
+          || appendPreviewVersion(videoUrl, previewVersionToken);
         const resolvedPosterUrl = String(template?.preview?.posterUrl || "").trim()
           || appendPreviewVersion(posterUrl || "", previewVersionToken);
         // The server's timestamp, not the moment recording started: the next save sends this back
@@ -622,16 +789,28 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
 
       const template = payload?.template || null;
       if (template?.id) {
-        setTemplateMeta({
-          id: String(template.id),
+        const savedMeta: TemplateSaveMeta = {
           name: String(template.name || nextName),
-          status: template.status === "published" ? "published" : "draft",
           category: String(template.category || activeTemplateCategory || "general"),
           subCategory: String(template.subCategory || activeTemplateSubCategory || "general"),
-          ...(Array.isArray(template.categories) ? { categories: template.categories } : {}),
+          categories: Array.isArray(template.categories) ? template.categories : activeTemplateCategories,
           tags: Array.isArray(template.tags) ? template.tags : activeTemplateTags,
+        };
+        setTemplateMeta({
+          id: String(template.id),
+          name: savedMeta.name,
+          status: template.status === "published" ? "published" : "draft",
+          category: savedMeta.category,
+          subCategory: savedMeta.subCategory,
+          ...(Array.isArray(template.categories) ? { categories: template.categories } : {}),
+          tags: savedMeta.tags as typeof activeTemplateTags,
         });
         updateTemplateIdInUrl(String(template.id));
+        lastSavedRef.current = {
+          templateId: String(template.id),
+          version: Number(template.version) || 0,
+          signature: buildTemplateSaveSignature(parsedDesign, savedMeta),
+        };
       } else {
         setTemplateMeta({ name: nextName });
       }
@@ -701,27 +880,64 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
   ]);
 
   // Save first, then record: the capture reads the live stage, and the server rejects a preview
-  // whose version is older than the template's — saving makes both match what is stored.
+  // whose version is older than the template's — saving makes both match what is stored. A
+  // design untouched since this session's last save is already stored, so it records at once.
+  // The whole run holds a Web Lock so a background tab is throttled at most, never frozen.
   const handleGeneratePreview = useCallback(async () => {
     if (previewGenerationActive || isSavingTemplate) return;
     if (!stageApi?.recordTimelinePreviewVideo) {
       window.alert("The canvas is not ready yet. Try again in a moment.");
       return;
     }
-    const saved = await saveTemplate();
-    const templateId = String(saved?.id || activeTemplateId || "").trim();
-    if (!templateId) return;
-    await generateTemplatePreview({
-      templateId,
-      templateVersion: Number(saved?.version || 0),
-      fallbackPosterDataUrl:
-        String(saved?.preview?.posterUrl || "").trim() ||
-        String(saved?.thumbnailDataUrl || "").trim() ||
-        String(designTimeline.preview.posterUrl || "").trim(),
+    await runHoldingBackgroundLock(async () => {
+      const lastSaved = lastSavedRef.current;
+      const currentTemplateId = String(activeTemplateId || "").trim();
+      const unchangedSinceSave = Boolean(
+        lastSaved &&
+          currentTemplateId &&
+          lastSaved.templateId === currentTemplateId &&
+          lastSaved.signature ===
+            buildTemplateSaveSignature(JSON.parse(exportDesign()) as EditorDesign, {
+              name: activeTemplateName.trim(),
+              category: activeTemplateCategory || "general",
+              subCategory: activeTemplateSubCategory || "general",
+              categories: activeTemplateCategories,
+              tags: activeTemplateTags,
+            })
+      );
+      if (unchangedSinceSave && lastSaved) {
+        logPreviewProgress("Template unchanged since the last save; recording without saving.");
+        const outcome = await generateTemplatePreview({
+          templateId: lastSaved.templateId,
+          templateVersion: lastSaved.version,
+          fallbackPosterDataUrl: String(designTimeline.preview.posterUrl || "").trim(),
+          // Something moved the version on (another tab's save, a publish): save, then record.
+          returnStaleBeforeRecording: true,
+        });
+        if (outcome !== "stale") return;
+        lastSavedRef.current = null;
+      }
+      const saved = await saveTemplate();
+      const templateId = String(saved?.id || activeTemplateId || "").trim();
+      if (!templateId) return;
+      await generateTemplatePreview({
+        templateId,
+        templateVersion: Number(saved?.version || 0),
+        fallbackPosterDataUrl:
+          String(saved?.preview?.posterUrl || "").trim() ||
+          String(saved?.thumbnailDataUrl || "").trim() ||
+          String(designTimeline.preview.posterUrl || "").trim(),
+      });
     });
   }, [
+    activeTemplateCategories,
+    activeTemplateCategory,
     activeTemplateId,
+    activeTemplateName,
+    activeTemplateSubCategory,
+    activeTemplateTags,
     designTimeline.preview.posterUrl,
+    exportDesign,
     generateTemplatePreview,
     isSavingTemplate,
     previewGenerationActive,
@@ -732,18 +948,42 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
   // The templates list's "Regenerate preview" opens the editor with ?regeneratePreview=1. That is
   // an explicit click too, so it runs once the template is loaded — nothing else is automatic.
   const requestedPreviewRef = useRef("");
+  const handleGeneratePreviewRef = useRef(handleGeneratePreview);
   useEffect(() => {
-    if (!regeneratePreviewFromQuery) return undefined;
+    handleGeneratePreviewRef.current = handleGeneratePreview;
+  }, [handleGeneratePreview]);
+  // The query puts the id in the store before the template's content arrives; the name (and the
+  // pages' elements) land with the content, so the gate waits for one of them.
+  const templateContentLoaded =
+    activeTemplateName.trim().length > 0 || pages.some((page) => (page.elements || []).length > 0);
+  useEffect(() => {
+    if (!regeneratePreviewFromQuery || !templateContentLoaded) return undefined;
     const templateId = String(activeTemplateId || "").trim();
     if (!templateId || requestedPreviewRef.current === templateId) return undefined;
     if (!stageApi?.recordTimelinePreviewVideo) return undefined;
     requestedPreviewRef.current = templateId;
-    // Fonts and media are still streaming in right after load; the recorder samples the live stage.
-    const timeoutId = window.setTimeout(() => {
-      void handleGeneratePreview();
-    }, 3000);
-    return () => window.clearTimeout(timeoutId);
-  }, [activeTemplateId, handleGeneratePreview, regeneratePreviewFromQuery, stageApi]);
+    // The recorder samples the live stage, so the text has to be drawn in its real faces first.
+    // This used to be a flat 3-second timer: too long for a cached template, and not long enough
+    // for a font that was still downloading. Wait for the faces instead (bounded), then give the
+    // fitted text one paint to reach the stage. The recorder itself waits for the media.
+    void (async () => {
+      await waitForDesignFonts(useEditorStore.getState().pages, REGENERATE_PREVIEW_FONT_WAIT_MS);
+      await new Promise<void>((resolve) => window.setTimeout(resolve, REGENERATE_PREVIEW_SETTLE_MS));
+      if (requestedPreviewRef.current !== templateId) return;
+      void handleGeneratePreviewRef.current();
+    })();
+    return undefined;
+  }, [activeTemplateId, regeneratePreviewFromQuery, stageApi, templateContentLoaded]);
+
+  // Publish and unpublish bump the template's version without changing the design, so the
+  // "unchanged since the last save" shortcut must follow them or its next preview PATCH is stale.
+  const syncLastSavedVersion = useCallback((template: { id?: unknown; version?: unknown } | null | undefined) => {
+    const lastSaved = lastSavedRef.current;
+    const version = Number(template?.version);
+    if (!lastSaved || !template?.id || String(template.id) !== lastSaved.templateId) return;
+    if (!Number.isFinite(version) || version <= 0) return;
+    lastSavedRef.current = { ...lastSaved, version };
+  }, []);
 
   const publishTemplate = useCallback(async () => {
     if (isPublishingTemplate || activeTemplateStatus === "published") return;
@@ -768,6 +1008,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
       }
 
       const template = payload?.template;
+      syncLastSavedVersion(template);
       if (template?.id) {
         setTemplateMeta({
           id: String(template.id),
@@ -796,6 +1037,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
     isPublishingTemplate,
     saveTemplate,
     setTemplateMeta,
+    syncLastSavedVersion,
   ]);
 
   /**
@@ -872,6 +1114,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
       }
 
       const template = payload?.template;
+      syncLastSavedVersion(template);
       if (template?.id) {
         setTemplateMeta({
           id: String(template.id),
@@ -900,6 +1143,7 @@ export default function Toolbar({ navItems = [], canManagePremium = false }: Too
     activeTemplateTags,
     isUnpublishingTemplate,
     setTemplateMeta,
+    syncLastSavedVersion,
   ]);
 
   const publishSelectedElements = useCallback(async () => {

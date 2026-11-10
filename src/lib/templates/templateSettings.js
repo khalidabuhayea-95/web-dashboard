@@ -1,3 +1,5 @@
+import { resolveCategoryKey, storedCategoryKeys } from "../categoryKey.js";
+
 export const DEFAULT_TEMPLATE_CATEGORY = "general";
 export const DEFAULT_TEMPLATE_SUBCATEGORY = "general";
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -141,12 +143,19 @@ export function sanitizeTemplateCategorySettings(input) {
   const categories = [];
   const usedCategoryValues = new Set();
   const usedCategoryIds = new Set();
+  const reservedCategoryValues = storedCategoryKeys(source);
 
   source.forEach((category, categoryIndex) => {
     const rawCategoryEn = String(category?.labelEn || category?.label || "").trim();
     const rawCategoryAr = String(category?.labelAr || "").trim();
-    const categoryValue = toKey(category?.value || rawCategoryEn || `category-${categoryIndex + 1}`);
-    if (!categoryValue || usedCategoryValues.has(categoryValue)) return;
+    const categoryValue = resolveCategoryKey({
+      storedValue: category?.value,
+      label: rawCategoryEn,
+      fallback: `category-${categoryIndex + 1}`,
+      used: usedCategoryValues,
+      reserved: reservedCategoryValues,
+    });
+    if (!categoryValue) return;
     const categoryIdSeed = `category:${categoryValue}`;
     let categoryId = resolveGuid(category?.id, categoryIdSeed);
     let categoryIdSuffix = 1;
@@ -160,14 +169,19 @@ export function sanitizeTemplateCategorySettings(input) {
     const usedSubCategoryValues = new Set();
     const usedSubCategoryIds = new Set();
     const rawSubCategories = Array.isArray(category?.subCategories) ? category.subCategories : [];
+    const reservedSubCategoryValues = storedCategoryKeys(rawSubCategories);
 
     rawSubCategories.forEach((subCategory, subCategoryIndex) => {
       const rawSubCategoryEn = String(subCategory?.labelEn || subCategory?.label || "").trim();
       const rawSubCategoryAr = String(subCategory?.labelAr || "").trim();
-      const subCategoryValue = toKey(
-        subCategory?.value || rawSubCategoryEn || `sub-category-${subCategoryIndex + 1}`
-      );
-      if (!subCategoryValue || usedSubCategoryValues.has(subCategoryValue)) return;
+      const subCategoryValue = resolveCategoryKey({
+        storedValue: subCategory?.value,
+        label: rawSubCategoryEn,
+        fallback: `sub-category-${subCategoryIndex + 1}`,
+        used: usedSubCategoryValues,
+        reserved: reservedSubCategoryValues,
+      });
+      if (!subCategoryValue) return;
       const subCategoryIdSeed = `subcategory:${categoryValue}:${subCategoryValue}`;
       let subCategoryId = resolveGuid(subCategory?.id, subCategoryIdSeed);
       let subCategoryIdSuffix = 1;
@@ -181,7 +195,7 @@ export function sanitizeTemplateCategorySettings(input) {
       subCategories.push({
         id: subCategoryId,
         value: subCategoryValue,
-        labelEn: toText(rawSubCategoryEn, subCategoryValue),
+        labelEn: toText(rawSubCategoryEn, rawSubCategoryAr || subCategoryValue),
         labelAr: toText(rawSubCategoryAr, rawSubCategoryEn || subCategoryValue),
         published: subCategoryPublished,
       });
@@ -202,7 +216,7 @@ export function sanitizeTemplateCategorySettings(input) {
     categories.push({
       id: categoryId,
       value: categoryValue,
-      labelEn: toText(rawCategoryEn, categoryValue),
+      labelEn: toText(rawCategoryEn, rawCategoryAr || categoryValue),
       labelAr: toText(rawCategoryAr, rawCategoryEn || categoryValue),
       published: categoryPublished,
       subCategories,

@@ -373,6 +373,26 @@ const backgroundTicker = (() => {
 })();
 
 /**
+ * One macrotask, through a MessageChannel. The frame-by-frame recorder yields this between frames
+ * on a page with no media to wait for: unlike a timer it is not throttled in a hidden tab, and
+ * unlike an animation frame it returns at once rather than at the next paint, so such a page
+ * renders as fast as React and the encoder allow while aborts and toasts still get their turn.
+ */
+function yieldToEventLoop() {
+  if (typeof MessageChannel === "undefined") {
+    return new Promise<void>((resolve) => window.setTimeout(resolve, 0));
+  }
+  return new Promise<void>((resolve) => {
+    const channel = new MessageChannel();
+    channel.port1.onmessage = () => {
+      channel.port1.close();
+      resolve();
+    };
+    channel.port2.postMessage(null);
+  });
+}
+
+/**
  * The next animation frame — or the next background tick, whichever comes first. Every wait on
  * the preview/export path goes through this so a recording carries on when the tab is hidden.
  */
@@ -432,6 +452,91 @@ interface TimelinePreviewRecordingOptions {
   signal?: AbortSignal;
   /** Progress the toolbar shows, for the waits a background recording can hit. */
   onStatus?: (message: string) => void;
+  /**
+   * The template this preview belongs to. Given, the encoder stores the MP4 and the poster under
+   * it and the result carries their URLs ([stored]); otherwise the MP4 comes back as a blob.
+   */
+  templateId?: string;
+}
+
+interface StoredTemplatePreviewAssets {
+  videoUrl: string;
+  posterUrl: string | null;
+}
+
+interface TimelinePreviewRecordingResult {
+  /** The encoded MP4 — only when no templateId was given (see [stored]). */
+  blob: Blob | null;
+  mimeType: string;
+  durationMs: number;
+  posterDataUrl: string;
+  width: number;
+  height: number;
+  /** Where the encoder stored the assets, when it was given the template. */
+  stored: StoredTemplatePreviewAssets | null;
+}
+
+function canvasToBlob(canvas: HTMLCanvasElement, type: string): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob((blob) => resolve(blob), type);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+/**
+ * Hands an encoder input (a recorded file or a frame sequence, already on [formData]) to
+ * /api/editor/media/encode-preview. With a template id the server stores the MP4 and the poster
+ * itself and answers with their URLs — one request instead of an encode, a download and two
+ * uploads. Without one the MP4 comes back as bytes, for a caller that stores it on its own.
+ */
+async function submitPreviewEncode(
+  formData: FormData,
+  options: { templateId?: string; posterBlob: Blob | null; signal?: AbortSignal }
+): Promise<{ blob: Blob | null; mimeType: string; stored: StoredTemplatePreviewAssets | null }> {
+  const templateId = String(options.templateId || "").trim();
+  if (templateId) {
+    formData.set("templateId", templateId);
+    if (options.posterBlob && options.posterBlob.size > 0) {
+      formData.set(
+        "poster",
+        new File([options.posterBlob], "poster.png", { type: options.posterBlob.type || "image/png" })
+      );
+    }
+  }
+  const response = await fetch("/api/editor/media/encode-preview", {
+    method: "POST",
+    body: formData,
+    signal: options.signal,
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({} as { error?: string }));
+    throw new Error(payload?.error || "Preview encoder failed to create the video.");
+  }
+  const contentType = String(response.headers.get("content-type") || "").trim().toLowerCase();
+  if (contentType.includes("application/json")) {
+    const payload = (await response.json().catch(() => ({}))) as {
+      video?: { url?: string; mimeType?: string };
+      poster?: { url?: string } | null;
+    };
+    const videoUrl = String(payload?.video?.url || "").trim();
+    if (!videoUrl) {
+      throw new Error("Preview encoder did not return the stored video.");
+    }
+    return {
+      blob: null,
+      mimeType: String(payload?.video?.mimeType || "video/mp4").trim() || "video/mp4",
+      stored: { videoUrl, posterUrl: String(payload?.poster?.url || "").trim() || null },
+    };
+  }
+  const mimeType = contentType || "video/mp4";
+  return {
+    blob: new Blob([await response.arrayBuffer()], { type: mimeType }),
+    mimeType,
+    stored: null,
+  };
 }
 
 function createAbortError(message: string) {
@@ -1162,7 +1267,9 @@ function CanvasImageNodeImpl({
       waitUntilDrawable: async (timeoutMs = 4000) => {
         const startedAt = performance.now();
         while (!animatedFramesRef.current && performance.now() - startedAt < timeoutMs) {
-          await new Promise((resolve) => setTimeout(resolve, 50));
+          // A main-thread timer is throttled to once a second in a hidden tab; the capture tick
+          // is not.
+          await waitForCaptureTick();
         }
       },
     });
@@ -2368,6 +2475,15 @@ function CanvasFrameNodeImpl({
           draggable={isContentEditing}
           listening={isContentEditing}
           perfectDrawEnabled={false}
+          onDragMove={(event) => {
+            // Stop at the frame's edges while dragging (Canva does), not only once it is dropped:
+            // the photo's box always covers the frame box. Its position is local to the frame.
+            event.cancelBubble = true;
+            if (transform.fit === "contain") return;
+            const node = event.target;
+            node.x(clamp(node.x(), Math.min(0, element.width - mediaLayout.width), 0));
+            node.y(clamp(node.y(), Math.min(0, element.height - mediaLayout.height), 0));
+          }}
           onDragEnd={(event) => {
             event.cancelBubble = true;
             onContentTransform({
@@ -2406,6 +2522,12 @@ function CanvasFrameNodeImpl({
         height={element.height}
         stroke={isContentEditing ? "#ff5c7a" : isDropTarget ? "#22828c" : element.stroke || "#94a3b8"}
         strokeWidth={isContentEditing || isDropTarget ? Math.max(3, element.strokeWidth || 2) : element.strokeWidth || 2}
+        // The 2 px default outline marks an EMPTY frame. A filled frame with no border of its own
+        // (strokeWidth 0, e.g. every Canva import) must not get one: it showed as a dark hairline
+        // round the photo, half of it clipped by the frame.
+        strokeEnabled={
+          isContentEditing || isDropTarget || !frameContent?.src || Number(element.strokeWidth || 0) > 0
+        }
         dash={isContentEditing ? [8, 6] : undefined}
         fillEnabled={false}
         sceneFunc={(context, shape) => {
@@ -4480,6 +4602,22 @@ export default function CanvasEditor() {
     () => getFrameAlignedPlayheadFrame(activePagePlayheadMs, previewRenderFps, activePageDurationMs),
     [activePageDurationMs, activePagePlayheadMs, previewRenderFps]
   );
+  // The EXPORT page's own playhead: the timeline playhead with that page's start taken off. The
+  // frame-by-frame recorder walks a multi-page design through every page, so the hidden stage
+  // samples whichever page it is pointed at on that page's time. With no override these equal the
+  // active page's values above.
+  const exportPageTimelineStartMs = useMemo(() => {
+    const entry = getTimelinePageEntries(pages).find((item) => item.page.id === exportPage?.id);
+    return entry?.startMs || 0;
+  }, [exportPage?.id, pages]);
+  const exportPagePlayheadMs = useMemo(
+    () => Math.max(0, Math.min(exportPageDurationMs, timelinePlayheadMs - exportPageTimelineStartMs)),
+    [exportPageDurationMs, exportPageTimelineStartMs, timelinePlayheadMs]
+  );
+  const exportPagePlayheadFrame = useMemo(
+    () => getFrameAlignedPlayheadFrame(exportPagePlayheadMs, previewRenderFps, exportPageDurationMs),
+    [exportPageDurationMs, exportPagePlayheadMs, previewRenderFps]
+  );
   const effectiveActivePageFrame =
     captureFrameOverride === null ? activePagePlayheadFrame : captureFrameOverride;
   const effectiveActivePagePlayheadMs =
@@ -4707,13 +4845,13 @@ export default function CanvasEditor() {
     timelineIsPlaying,
   ]);
   const effectiveExportPlayheadMs = Math.min(
-    activePageDurationMs,
+    exportPageDurationMs,
     previewGenerationActive
-      ? activePagePlayheadMs
+      ? exportPagePlayheadMs
       : frameToSampleTimeMs(exportFrameOverride, previewRenderFps)
   );
   const effectiveExportPlayheadFrame = previewGenerationActive
-    ? activePagePlayheadFrame
+    ? exportPagePlayheadFrame
     : exportFrameOverride;
   const isRenderingPreview = previewGenerationActive || captureFrameOverride !== null;
   // Mount the hidden export stage only when something needs it: an in-flight
@@ -5010,7 +5148,10 @@ export default function CanvasEditor() {
       );
     if (controllers.length > 0) {
       await syncAll(0);
-      await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      // Not a bare requestAnimationFrame: the tab can go to the background between the check
+      // above and here, and rAF then never fires — the save (and the preview waiting on it)
+      // hung for good. The capture tick keeps ticking in a hidden tab.
+      await waitForCaptureTick();
     }
     try {
       return captureThumbnailDataUrl();
@@ -5061,20 +5202,12 @@ export default function CanvasEditor() {
     });
     if (exportStageRef.current) return exportStageRef.current;
 
-    // Fallback: give React/Konva a couple of frames to attach the ref. Each wait races a timer
-    // because a backgrounded tab throttles rAF to a standstill — without it, any caller that
-    // awaits this (save, preview, filmstrip) would hang instead of failing fast.
-    for (let attempt = 0; attempt < 5; attempt += 1) {
-      await new Promise<void>((resolve) => {
-        let settled = false;
-        const done = () => {
-          if (settled) return;
-          settled = true;
-          resolve();
-        };
-        requestAnimationFrame(done);
-        window.setTimeout(done, 150);
-      });
+    // Fallback: give React/Konva a few ticks to attach the ref. Capture ticks, because a
+    // backgrounded tab stops rAF and throttles timers to once a second — without a clock that
+    // keeps going there, any caller that awaits this (save, preview, filmstrip) would hang
+    // instead of failing fast.
+    for (let attempt = 0; attempt < 20; attempt += 1) {
+      await waitForCaptureTick();
       if (exportStageRef.current) return exportStageRef.current;
     }
     return null;
@@ -5351,6 +5484,7 @@ export default function CanvasEditor() {
         } catch {
           posterDataUrl = "";
         }
+        const posterBlob = await canvasToBlob(initialCapture.canvas, "image/png");
 
         // Back to the real timeline: everything recorded from here on has to animate, starting
         // from the true frame 0 the settled poster deliberately skipped.
@@ -5616,7 +5750,11 @@ export default function CanvasEditor() {
 
         ensureNotAborted();
         const formData = new FormData();
-        formData.set("fps", String(fps));
+        // The file is encoded at the CAPTURE rate. [fps] is the 60-frame timeline grid the scene
+        // is sampled on, but the recorder only pushes [captureFps] frames a second; asking the
+        // server for 60 made it duplicate every frame, and every card on the phone decoded twice
+        // the frames it had.
+        formData.set("fps", String(captureFps));
         formData.set("expectedDurationMs", String(durationMs));
         formData.set("mimeType", recordedSource.mimeType);
         formData.set(
@@ -5628,28 +5766,19 @@ export default function CanvasEditor() {
           )
         );
 
-        const response = await fetch("/api/editor/media/encode-preview", {
-          method: "POST",
-          body: formData,
+        const encodedResult = await submitPreviewEncode(formData, {
+          templateId: options?.templateId,
+          posterBlob,
           signal: options?.signal,
         });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({} as { error?: string }));
-          throw new Error(payload?.error || "Preview encoder failed to create the video.");
-        }
-        const mimeType =
-          String(response.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
-        const encodedBytes = await response.arrayBuffer();
-        const blob = new Blob([encodedBytes], { type: mimeType });
 
         return {
-          blob,
-          mimeType,
+          ...encodedResult,
           durationMs,
           posterDataUrl,
           width: exportCanvas.width,
           height: exportCanvas.height,
-        };
+        } satisfies TimelinePreviewRecordingResult;
       } finally {
         if (abortListener && options?.signal) {
           options.signal.removeEventListener("abort", abortListener);
@@ -5730,8 +5859,39 @@ export default function CanvasEditor() {
       const restoreTimelinePlayheadMs = timelinePlayheadMsRef.current;
       let sink: PreviewFrameSink | null = null;
 
+      // ★A multi-page design records every page, in timeline order. The hidden stage draws one
+      // page at a time, so the recorder points it (exportPageIdOverride) at the page the playhead
+      // is on and the scene samples that page on its own time. A single page needs no override:
+      // the stage already mirrors the active page.
+      const pageEntries = getTimelinePageEntries(pages);
+      const walksPages = pageEntries.length > 1;
+      const pageEntryAt = (timelineMs: number) =>
+        pageEntries.find((entry) => timelineMs >= entry.startMs && timelineMs < entry.endMs) ||
+        pageEntries[pageEntries.length - 1] ||
+        null;
+      let stagedPageId = "";
+      const pointStageAtPage = async (pageId: string) => {
+        if (!walksPages || stagedPageId === pageId) return;
+        const page = pages.find((item) => item.id === pageId);
+        // Its bitmaps first: a page the user never opened has decoded nothing yet, and the
+        // bounded wait below would otherwise give up on a slow image and record it missing.
+        if (page) await preloadPageImageSources(page);
+        flushSync(() => {
+          setExportPageIdOverride(pageId);
+        });
+        stagedPageId = pageId;
+        // The new page's media nodes register their controllers from effects; give them a turn,
+        // then wait for the page's media exactly as the recorder does for its first page.
+        await waitForCaptureTick();
+        await waitForStageDrawableMedia(stage);
+        await waitForExportClipsToLoad();
+        await waitForExportPreviewMediaDrawable();
+      };
+
       // The whole scene — poses, reveals, clips, stickers — on timeline time [timelineMs].
       const renderFrameAt = async (timelineMs: number) => {
+        const entry = pageEntryAt(timelineMs);
+        if (entry) await pointStageAtPage(entry.page.id);
         flushSync(() => {
           // While the timeline shows as playing, this component reads the playhead from the ref
           // (its store subscription is frozen during playback); the store copy moves the
@@ -5741,17 +5901,24 @@ export default function CanvasEditor() {
           setTimelinePlayheadMs(timelineMs);
           forcePlaybackRender();
         });
-        const pageMs = Math.max(0, Math.min(durationMs, timelineMs - activePageTimelineStartMs));
-        const frame = getFrameAlignedPlayheadFrame(pageMs, previewRenderFps, activePageDurationMs);
-        await syncExportPreviewMediaControllers(frame, fps, {
-          settleTimeoutMs: PREVIEW_FRAME_SETTLE_TIMEOUT_MS,
-        });
-        // Let the `seeked` handlers that refresh held frames run, then put everything on the exact
-        // frame once more: an animated sticker's own loop takes over again when its short hold
-        // runs out, and a slow clip seek can outlast that hold. The clips are already there, so
-        // for them this second pass returns at once.
-        await waitForCaptureTick();
-        await syncExportPreviewMediaControllers(frame, fps);
+        const pageStartMs = entry ? entry.startMs : activePageTimelineStartMs;
+        const pageDurationMs = entry ? entry.durationMs : activePageDurationMs;
+        const pageMs = Math.max(0, Math.min(pageDurationMs, timelineMs - pageStartMs));
+        const frame = getFrameAlignedPlayheadFrame(pageMs, previewRenderFps, pageDurationMs);
+        // Only a page with media (clips, animated stickers) has anything to seek and settle. A
+        // page of text and images is drawn the moment React has rendered it, with no paint to
+        // wait for — which is what lets such a page record faster than real time.
+        if (exportPreviewMediaControllersRef.current.size > 0) {
+          await syncExportPreviewMediaControllers(frame, fps, {
+            settleTimeoutMs: PREVIEW_FRAME_SETTLE_TIMEOUT_MS,
+          });
+          // Let the `seeked` handlers that refresh held frames run, then put everything on the
+          // exact frame once more: an animated sticker's own loop takes over again when its short
+          // hold runs out, and a slow clip seek can outlast that hold. The clips are already
+          // there, so for them this second pass returns at once.
+          await waitForCaptureTick();
+          await syncExportPreviewMediaControllers(frame, fps);
+        }
         stage.getLayers().forEach((layer) => layer.draw());
       };
 
@@ -5795,9 +5962,16 @@ export default function CanvasEditor() {
           setExportSettledPose(true);
         });
         await waitForCaptureTick();
-        await waitForStageDrawableMedia(stage);
-        await waitForExportClipsToLoad();
-        await waitForExportPreviewMediaDrawable();
+        if (walksPages) {
+          // Open on the first page (which may not be the one the user is editing); this also
+          // waits for that page's media, so the single-page waits below are skipped.
+          const firstEntry = pageEntryAt(0);
+          if (firstEntry) await pointStageAtPage(firstEntry.page.id);
+        } else {
+          await waitForStageDrawableMedia(stage);
+          await waitForExportClipsToLoad();
+          await waitForExportPreviewMediaDrawable();
+        }
         ensureNotAborted();
 
         await renderFrameAt(0);
@@ -5811,6 +5985,7 @@ export default function CanvasEditor() {
         } catch {
           posterDataUrl = "";
         }
+        const posterBlob = await canvasToBlob(initialCapture.canvas, "image/png");
         flushSync(() => {
           setExportSettledPose(false);
         });
@@ -5841,44 +6016,40 @@ export default function CanvasEditor() {
           ensureNotAborted();
           await renderFrameAt(Math.min(durationMs, Math.round((index * 1000) / captureFps)));
           await sink.add(exportCanvas, index);
+          // A page with media already yielded inside renderFrameAt. Without one nothing in the
+          // loop would, and an abort, a toast or the encoder's own callbacks need the event loop.
+          if (exportPreviewMediaControllersRef.current.size === 0) await yieldToEventLoop();
         }
         const encoded = await sink.finish();
         ensureNotAborted();
 
         const formData = new FormData();
         formData.set("expectedDurationMs", String(durationMs));
+        // Both inputs are encoded at the rate the frames were rendered at (the capture rate), not
+        // the 60-frame grid they were sampled on — see the live recorder.
+        formData.set("fps", String(encoded.fps));
         if (encoded.kind === "video") {
-          formData.set("fps", String(fps));
           formData.set("mimeType", encoded.file.type);
           formData.set("sourceVideo", encoded.file);
         } else {
           // The frame-sequence input encodes one image per frame at the rate it is given.
-          formData.set("fps", String(encoded.fps));
           formData.set("expectedFrameCount", String(encoded.files.length));
           encoded.files.forEach((file) => formData.append("frame", file));
         }
 
-        const response = await fetch("/api/editor/media/encode-preview", {
-          method: "POST",
-          body: formData,
+        const encodedResult = await submitPreviewEncode(formData, {
+          templateId: options?.templateId,
+          posterBlob,
           signal: options?.signal,
         });
-        if (!response.ok) {
-          const payload = await response.json().catch(() => ({} as { error?: string }));
-          throw new Error(payload?.error || "Preview encoder failed to create the video.");
-        }
-        const mimeType =
-          String(response.headers.get("content-type") || "video/mp4").trim() || "video/mp4";
-        const blob = new Blob([await response.arrayBuffer()], { type: mimeType });
 
         return {
-          blob,
-          mimeType,
+          ...encodedResult,
           durationMs,
           posterDataUrl,
           width: exportCanvas.width,
           height: exportCanvas.height,
-        };
+        } satisfies TimelinePreviewRecordingResult;
       } finally {
         sink?.close();
         // Stop playing in the same commit that lifts the stepping flag, so the timeline's
@@ -5888,6 +6059,7 @@ export default function CanvasEditor() {
           setPreviewFrameStepping(false);
           setExportFrameOverride(0);
           setExportSettledPose(false);
+          setExportPageIdOverride("");
         });
         setTimelinePlayheadMs(restoreTimelinePlayheadMs);
         stage.getLayers().forEach((layer) => layer.draw());
@@ -5900,6 +6072,8 @@ export default function CanvasEditor() {
       designTimeline.fps,
       designTimeline.totalDurationMs,
       activePageTimelineStartMs,
+      pages,
+      preloadPageImageSources,
       previewRenderFps,
       renderExportPageToCanvas,
       syncExportPreviewMediaControllers,
@@ -5912,19 +6086,34 @@ export default function CanvasEditor() {
     ]
   );
 
-  // Live while the tab is in front (fast, and how previews have always been made); frame by frame
-  // when it is in the background, including a tab that goes there partway through a recording.
+  // ★Frame by frame is the default: every frame exact, nothing dropped on a slow machine, no
+  // dependence on the tab painting, and on a page without clips faster than real time. The live
+  // recorder only earns its keep where <video> elements decode forward in hardware — one page
+  // with video, in a visible tab (frame by frame seeks every clip once per frame there). A
+  // multi-page design always goes frame by frame: only that path walks the stage through the
+  // pages. A live recording whose tab goes to the background partway hands over as before.
   const recordTimelinePreviewVideo = useCallback(
     async (options?: TimelinePreviewRecordingOptions) => {
-      if (isDocumentHidden()) return recordTimelinePreviewFrameByFrame(options);
+      const liveWorthwhile = pages.length <= 1 && pageContainsVideoLayer && !isDocumentHidden();
+      if (!liveWorthwhile) return recordTimelinePreviewFrameByFrame(options);
       try {
         return await recordTimelinePreviewInRealTime(options);
       } catch (error) {
         if (!(error instanceof PreviewTabHiddenError)) throw error;
+        // The live recording cannot continue off-screen; the frame-by-frame one starts over
+        // and seeks the clips, so it is slower than the live one was — say so.
+        options?.onStatus?.(
+          "The tab went to the background: the preview is being recorded again frame by frame (slower on a page with video)."
+        );
         return recordTimelinePreviewFrameByFrame(options);
       }
     },
-    [recordTimelinePreviewFrameByFrame, recordTimelinePreviewInRealTime]
+    [
+      pageContainsVideoLayer,
+      pages.length,
+      recordTimelinePreviewFrameByFrame,
+      recordTimelinePreviewInRealTime,
+    ]
   );
 
   const captureTimelineStripDataUrls = useCallback(
@@ -5953,9 +6142,11 @@ export default function CanvasEditor() {
       const stage = await ensureExportStage();
       if (!stage) return [];
 
+      // Capture ticks, not bare animation frames: a tab that goes to the background mid-strip
+      // would otherwise hold the export stage forever (rAF never fires there).
       const waitForCanvasFrame = async () => {
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        await waitForCaptureTick();
+        await waitForCaptureTick();
       };
 
       // Filmstrip thumbs are tiny — capture downscaled so 10-24 frames stay cheap.
@@ -7933,10 +8124,11 @@ export default function CanvasEditor() {
                   page={exportPage}
                   elements={exportElements}
                   pageDurationMs={exportPageDurationMs}
-                  // An off-screen page is thumbnailed at its own start, not at the active
-                  // page's playhead (which is meaningless for a different page).
-                  playheadMs={exportPageIdOverride ? 0 : effectiveExportPlayheadMs}
-                  playheadFrame={exportPageIdOverride ? 0 : effectiveExportPlayheadFrame}
+                  // An off-screen page is thumbnailed at its own start. A recording that has
+                  // pointed the stage at another page wants that page's own playhead instead
+                  // (effectiveExportPlayheadMs already subtracts the page's start).
+                  playheadMs={exportPageIdOverride && !previewGenerationActive ? 0 : effectiveExportPlayheadMs}
+                  playheadFrame={exportPageIdOverride && !previewGenerationActive ? 0 : effectiveExportPlayheadFrame}
                   settledPose={exportSettledPose}
                   previewFps={previewRenderFps}
                   forceTimelineSync

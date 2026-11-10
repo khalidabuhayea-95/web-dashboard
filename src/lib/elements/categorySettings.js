@@ -1,3 +1,5 @@
+import { resolveCategoryKey, storedCategoryKeys } from "../categoryKey.js";
+
 export const DEFAULT_ELEMENT_CATEGORY = "general";
 const GUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -126,12 +128,19 @@ export function sanitizeElementCategorySettings(input) {
   const categories = [];
   const usedValues = new Set();
   const usedIds = new Set();
+  const reserved = storedCategoryKeys(source);
 
   source.forEach((category, categoryIndex) => {
     const rawLabelEn = String(category?.labelEn || category?.label || "").trim();
     const rawLabelAr = String(category?.labelAr || "").trim();
-    const value = toKey(category?.value || rawLabelEn || `element-category-${categoryIndex + 1}`);
-    if (!value || usedValues.has(value)) return;
+    const value = resolveCategoryKey({
+      storedValue: category?.value,
+      label: rawLabelEn,
+      fallback: `element-category-${categoryIndex + 1}`,
+      used: usedValues,
+      reserved,
+    });
+    if (!value) return;
 
     const idSeed = `element-category:${value}`;
     let id = resolveGuid(category?.id, idSeed);
@@ -144,7 +153,7 @@ export function sanitizeElementCategorySettings(input) {
     categories.push({
       id,
       value,
-      labelEn: toText(rawLabelEn, value),
+      labelEn: toText(rawLabelEn, rawLabelAr || value),
       labelAr: toText(rawLabelAr, rawLabelEn || value),
       thumbnailUrl: toUrl(category?.thumbnailUrl || category?.thumbnail || ""),
       published: typeof category?.published === "boolean" ? category.published : true,
