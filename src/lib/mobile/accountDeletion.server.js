@@ -1,5 +1,6 @@
 import prisma from "@/lib/prisma";
 import { logger } from "@/lib/logging/logger";
+import { deleteAllUserMedia } from "@/lib/designSync/media.server";
 
 /**
  * Google Play and the App Store both require an in-app path that erases the
@@ -15,12 +16,18 @@ import { logger } from "@/lib/logging/logger";
  * those columns are scrubbed here before the user row goes. The thread survives
  * for the support inbox; the person behind it does not.
  *
+ * Synced designs (src/lib/designSync) go with the row too — designs, folders and media records all
+ * cascade — but their FILES live in object storage, which no cascade reaches, so they are deleted
+ * here, after the transaction: a failed transaction must not leave a live account without its
+ * files. If storage cannot be reached the account is still erased and the leftover prefix is
+ * logged for cleanup (`users/<id>/` in the user-designs bucket).
+ *
  * NOTE: this does not cancel a live store subscription. Apple and Google own
  * that state and only the user can cancel it from their store account, which is
  * why the app's confirmation dialog says so before calling this.
  *
  * @param {string} mobileUserId
- * @returns {Promise<{ contactMessagesAnonymized: number }>}
+ * @returns {Promise<{ contactMessagesAnonymized: number, mediaObjectsDeleted: number }>}
  */
 export async function deleteMobileUserAccount(mobileUserId) {
   const userId = String(mobileUserId || "").trim();
@@ -46,9 +53,21 @@ export async function deleteMobileUserAccount(mobileUserId) {
     return { contactMessagesAnonymized: anonymized.count };
   });
 
+  let mediaObjectsDeleted = 0;
+  try {
+    mediaObjectsDeleted = await deleteAllUserMedia(userId);
+  } catch (error) {
+    // The person is gone from the database; what remains is anonymous bytes under a prefix.
+    logger.error("Account deleted but its design media could not be removed from storage", {
+      storagePrefix: `users/${userId}/`,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
+
   logger.info("Mobile account deleted", {
     contactMessagesAnonymized: result.contactMessagesAnonymized,
+    mediaObjectsDeleted,
   });
 
-  return result;
+  return { ...result, mediaObjectsDeleted };
 }

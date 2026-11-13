@@ -1,3 +1,8 @@
+import {
+  DESIGN_SYNC_TAG,
+  designSyncOpenApiPaths,
+  designSyncOpenApiSchemas,
+} from "../designSync/openapi.js";
 // Optional push-registration fields accepted by the mobile auth endpoints so a
 // device's FCM token can be captured during login/refresh/logout.
 const DEVICE_PUSH_FIELDS = {
@@ -2610,6 +2615,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Mobile Auth" },
       { name: "Mobile Templates" },
       { name: "Mobile Favorites" },
+      { name: DESIGN_SYNC_TAG },
       { name: "Mobile Fonts" },
       { name: "Mobile Elements" },
       { name: "Mobile Shapes" },
@@ -2621,6 +2627,8 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       { name: "Website" },
     ],
     paths: {
+      // Cloud sync of the user's own designs — documented beside its code (src/lib/designSync).
+      ...designSyncOpenApiPaths,
       "/api/mobile/auth/google": {
         post: {
           tags: ["Mobile Auth"],
@@ -3961,16 +3969,28 @@ export function buildMobileOpenApiSpec(serverOrigin) {
                 "application/json": {
                   schema: {
                     type: "object",
-                    required: ["packages"],
+                    required: ["packages", "freeStorageBytes"],
                     properties: {
+                      freeStorageBytes: {
+                        type: "integer",
+                        format: "int64",
+                        description: "Cloud storage of a free account, so the paywall can compare.",
+                        example: 1073741824,
+                      },
                       packages: {
                         type: "array",
                         items: {
                           type: "object",
-                          required: ["package", "monthlyAllowance", "plans"],
+                          required: ["package", "monthlyAllowance", "storageBytes", "plans"],
                           properties: {
                             package: { type: "string", enum: ["plus", "pro"] },
                             monthlyAllowance: { type: "integer", example: 10000 },
+                            storageBytes: {
+                              type: "integer",
+                              format: "int64",
+                              description: "Cloud storage for the account's designs on this package (dashboard-set).",
+                              example: 21474836480,
+                            },
                             plans: {
                               type: "array",
                               items: {
@@ -5109,7 +5129,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
             "Optional HMAC request signature, sent with `x-mobile-key` and `x-mobile-ts`. Verified and counted server-side; rejected only when the server runs with MOBILE_REQUEST_SIGNING_MODE=enforce.",
         },
       },
-      schemas,
+      schemas: { ...schemas, ...designSyncOpenApiSchemas },
     },
   });
 }

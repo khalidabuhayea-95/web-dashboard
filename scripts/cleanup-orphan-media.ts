@@ -62,6 +62,9 @@ const SOURCES: Array<[string, string]> = [
   // media-related from its name.
   ["PushCampaign", `SELECT payload::text AS t FROM "PushCampaign"`],
   ["StoreNotification", `SELECT payload::text AS t FROM "StoreNotification"`],
+  // ★Synced user designs reference the catalog media of the template they came from. Their own
+  // uploads live in the user-designs bucket and are not this sweep's business.
+  ["UserDesign", `SELECT data AS t FROM "UserDesign" WHERE data IS NOT NULL`],
 ];
 
 /**

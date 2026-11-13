@@ -204,33 +204,38 @@ model DashboardInviteToken {
 }
 
 model MobileUser {
-  id              String                   @id @default(uuid()) @db.Uuid
-  name            String?
-  email           String?
-  normalizedEmail String?
-  emailVerified   Boolean                  @default(false)
-  role            String                   @default("user")
-  bannedUntil     DateTime?
+  id                    String                   @id @default(uuid()) @db.Uuid
+  name                  String?
+  email                 String?
+  normalizedEmail       String?
+  emailVerified         Boolean                  @default(false)
+  role                  String                   @default("user")
+  bannedUntil           DateTime?
   // Per-user monthly AI credit allowance. Null = use the global default from
   // mobile app settings; set a number to give this account its own balance.
-  creditAllowance Int?
+  creditAllowance       Int?
   // Denormalized entitlement written by the billing webhook/verify pipeline
   // (src/lib/billing). "free" | "plus" | "pro". Read-fast copy for the request path —
   // Subscription rows hold the full store state. A paid row past
   // subscriptionExpiresAt is treated as free (webhook retries can run out),
   // see resolveUserTier in src/lib/billing/subscriptionTier.server.ts.
-  subscriptionTier      String    @default("free")
+  subscriptionTier      String                   @default("free")
   subscriptionExpiresAt DateTime?
-  lastLoginAt     DateTime?
-  createdAt       DateTime                 @default(now())
-  updatedAt       DateTime                 @updatedAt
-  identities      MobileIdentity[]
-  refreshTokens   MobileRefreshToken[]
-  deviceTokens    MobileDeviceToken[]
-  favorites       MobileFavoriteTemplate[]
-  contactMessages ContactMessage[]
-  mediaUsage      MediaUsage[]
-  subscriptions   Subscription[]
+  lastLoginAt           DateTime?
+  createdAt             DateTime                 @default(now())
+  updatedAt             DateTime                 @updatedAt
+  identities            MobileIdentity[]
+  refreshTokens         MobileRefreshToken[]
+  deviceTokens          MobileDeviceToken[]
+  favorites             MobileFavoriteTemplate[]
+  contactMessages       ContactMessage[]
+  mediaUsage            MediaUsage[]
+  subscriptions         Subscription[]
+  designLibrary         UserDesignLibrary?
+  designs               UserDesign[]
+  designFolders         UserDesignFolder[]
+  designMedia           UserMediaObject[]
+  designFonts           UserFont[]
 
   @@index([normalizedEmail])
   @@index([createdAt])
@@ -518,17 +523,17 @@ model editor_background_assets {
 }
 
 model editor_element_assets {
-  id                 String    @id @db.Uuid
+  id                 String               @id @db.Uuid
   source             String
   source_asset_id    String
-  owner_id           String?   @db.Uuid
-  kind               String    @default("icon")
+  owner_id           String?              @db.Uuid
+  kind               String               @default("icon")
   title_en           String
   title_ar           String
-  tags_en            Json      @default("[]")
-  tags_ar            Json      @default("[]")
-  labels_en          Json      @default("[]")
-  labels_ar          Json      @default("[]")
+  tags_en            Json                 @default("[]")
+  tags_ar            Json                 @default("[]")
+  labels_en          Json                 @default("[]")
+  labels_ar          Json                 @default("[]")
   slug               String?
   style_id           Int?
   style_name         String?
@@ -540,17 +545,17 @@ model editor_element_assets {
   thumbnail_url      String
   width              Int?
   height             Int?
-  free_svg           Boolean   @default(false)
+  free_svg           Boolean              @default(false)
   /// Pro-only element (see FontFamily.isPremium for the same concept).
-  is_premium         Boolean   @default(false)
+  is_premium         Boolean              @default(false)
   /// GENERATED search columns (migration 20261019120000) — read-only.
   search_title       Unsupported("text")?
   search_tags        Unsupported("text")?
-  source_payload     Json      @default("{}")
-  translation_status String    @default("fallback")
-  created_source_at  DateTime? @db.Timestamptz(6)
-  created_at         DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at         DateTime  @default(now()) @db.Timestamptz(6)
+  source_payload     Json                 @default("{}")
+  translation_status String               @default("fallback")
+  created_source_at  DateTime?            @db.Timestamptz(6)
+  created_at         DateTime             @default(now()) @db.Timestamptz(6)
+  updated_at         DateTime             @default(now()) @db.Timestamptz(6)
 
   @@unique([source, source_asset_id], map: "editor_element_assets_source_asset_unique")
   @@index([source, kind, updated_at(sort: Desc)], map: "editor_element_assets_source_kind_updated_idx")
@@ -590,29 +595,29 @@ model import_jobs {
 /// background remover), and each tool tunes its model through modelOptions
 /// rather than through wording.
 model MagicTool {
-  id            String   @id @default(uuid()) @db.Uuid
-  slug          String   @unique
-  titleEn       String
-  titleAr       String
+  id           String   @id @default(uuid()) @db.Uuid
+  slug         String   @unique
+  titleEn      String
+  titleAr      String
   /// Short Arabic line shown under the tool name in the app.
-  subtitleAr    String   @default("")
+  subtitleAr   String   @default("")
   /// Server-side instruction for prompt-driven models; empty for the
   /// specialist models that take an image and nothing else. Admin-only.
-  prompt        String   @default("")
-  model         String   @default("google/nano-banana")
+  prompt       String   @default("")
+  model        String   @default("google/nano-banana")
   /// Per-tool model knobs (upscale factor, colorizer variant, …) merged over
   /// the registry defaults. Lets two tools share one model and behave apart.
-  modelOptions  Json?
-  beforeUrl     String?
-  afterUrl      String?
+  modelOptions Json?
+  beforeUrl    String?
+  afterUrl     String?
   /// Grid-sized copy of afterUrl (400px) — see AiTemplate.thumbUrl.
-  thumbUrl      String?
-  creditCost    Int      @default(100)
-  isPremium     Boolean  @default(false)
-  published     Boolean  @default(true)
-  sortOrder     Int      @default(0)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  thumbUrl     String?
+  creditCost   Int      @default(100)
+  isPremium    Boolean  @default(false)
+  published    Boolean  @default(true)
+  sortOrder    Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   @@index([published, sortOrder])
 }
@@ -623,31 +628,31 @@ model MagicTool {
 /// mobile app (Compose) can each draw it natively. That keeps it free,
 /// instant, and — the whole point — the text stays editable afterwards.
 model TextEffect {
-  id         String   @id @default(uuid()) @db.Uuid
-  slug       String   @unique
-  titleEn    String
-  titleAr    String
+  id              String   @id @default(uuid()) @db.Uuid
+  slug            String   @unique
+  titleEn         String
+  titleAr         String
   /// Declarative fill/stroke/shadow description. See src/lib/textEffects/spec.js
   /// — both platforms render from this, so changing its shape is a contract
   /// change, not a local edit.
-  spec       Json
+  spec            Json
   /// Sample rendering shown in the effects strip. Generated from `spec`, so it
   /// can always be rebuilt and never drifts from what the effect actually does.
-  previewUrl String?
+  previewUrl      String?
   /// Strip grouping shown as filter chips ("gold", "glass", "threads"…); "" = none.
-  category   String   @default("")
+  category        String   @default("")
   /// The material image a `texture` fill paints inside the glyphs (PNG/WebP). Kept as
   /// columns, not inside `spec`, so storage cleanup can see them like every other URL.
-  textureUrl String?
+  textureUrl      String?
   /// Optional short looping clip (MP4) used instead of `textureUrl` where video plays.
   textureVideoUrl String?
   /// The inlay's material (e.g. diamond pavé) set inside a rim of the main fill (`spec.inlay`).
   inlayTextureUrl String?
-  isPremium  Boolean  @default(false)
-  published  Boolean  @default(true)
-  sortOrder  Int      @default(0)
-  createdAt  DateTime @default(now())
-  updatedAt  DateTime @updatedAt
+  isPremium       Boolean  @default(false)
+  published       Boolean  @default(true)
+  sortOrder       Int      @default(0)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   @@index([published, sortOrder])
 }
@@ -656,43 +661,43 @@ model TextEffect {
 /// Recurs yearly from a Hijri or Gregorian anchor; `dateOverrides` pins the real
 /// (moon-sighted / moved) start per year. See src/lib/occasions/dates.ts.
 model Occasion {
-  id               String   @id @default(uuid()) @db.Uuid
-  slug             String   @unique
+  id               String         @id @default(uuid()) @db.Uuid
+  slug             String         @unique
   titleEn          String
   titleAr          String
   /// islamic | national | international | seasonal
-  kind             String   @default("islamic")
+  kind             String         @default("islamic")
   /// hijri | gregorian
-  calendar         String   @default("gregorian")
+  calendar         String         @default("gregorian")
   month            Int
   /// Day of month for fixed dates; null when the weekday rule below is used.
   day              Int?
   /// Nth-weekday rule (gregorian only): weekday 0=Sun..6=Sat, weekOrdinal 1..4 or -1 (last).
   weekday          Int?
   weekOrdinal      Int?
-  durationDays     Int      @default(1)
+  durationDays     Int            @default(1)
   /// Days before the start when the dashboard starts reminding the team.
-  reminderLeadDays Int      @default(30)
+  reminderLeadDays Int            @default(30)
   /// Days before the start when linked content starts being boosted on mobile.
-  boostLeadDays    Int      @default(14)
+  boostLeadDays    Int            @default(14)
   /// ISO-3166 alpha-2 codes the occasion applies to; [] = everywhere.
-  countries        Json     @default("[]")
+  countries        Json           @default("[]")
   /// Search terms (ar + en) that pre-filter the content pickers.
-  keywords         Json     @default("[]")
+  keywords         Json           @default("[]")
   /// { "<gregorian or hijri year>": "YYYY-MM-DD" } — the real start, winning over the rule.
-  dateOverrides    Json     @default("{}")
+  dateOverrides    Json           @default("{}")
   /// Content ideas / phrases for the team. Free text.
-  notes            String   @default("")
-  emoji            String   @default("")
-  color            String   @default("")
-  enabled          Boolean  @default(true)
-  boostEnabled     Boolean  @default(true)
+  notes            String         @default("")
+  emoji            String         @default("")
+  color            String         @default("")
+  enabled          Boolean        @default(true)
+  boostEnabled     Boolean        @default(true)
   /// Move linked template/element/background/AI categories to the front of their lists
   /// while the boost window is active.
-  hoistCategories  Boolean  @default(true)
-  sortOrder        Int      @default(0)
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  hoistCategories  Boolean        @default(true)
+  sortOrder        Int            @default(0)
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
   items            OccasionItem[]
 
   @@index([enabled, calendar, month])
@@ -723,40 +728,40 @@ model OccasionItem {
 // touching this table. MobileUser.subscriptionTier/subscriptionExpiresAt are the
 // denormalized read-fast copy of the latest active row.
 model Subscription {
-  id           String     @id @default(uuid()) @db.Uuid
-  mobileUserId String     @db.Uuid
-  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+  id                   String     @id @default(uuid()) @db.Uuid
+  mobileUserId         String     @db.Uuid
+  mobileUser           MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
   /// "apple" | "google"
-  platform     String
+  platform             String
   /// Store product: App Store product id (nayroz_plus_monthly) or Play
   /// "subscriptionId:basePlanId" (nayroz_plus:monthly).
-  productId    String
+  productId            String
   /// "monthly" | "yearly" — parsed from productId so the app/admin never has to.
-  planKey      String
+  planKey              String
   /// The store's stable identity for the subscription: Apple
   /// originalTransactionId, Google the LATEST purchaseToken. This is the
   /// idempotency key and the guard against one receipt unlocking two accounts.
-  storeKey     String     @unique
+  storeKey             String     @unique
   /// Google resubscribe/upgrade issues a fresh token that voids the previous
   /// one (carried here) — applyStoreState expires the row it points at.
-  linkedPurchaseToken String?
+  linkedPurchaseToken  String?
   /// "active" | "trialing" | "cancelled" (auto-renew off, entitled until
   /// expiry) | "grace" | "hold" | "paused" | "expired" | "revoked"
-  status       String
+  status               String
   /// "trial" | "normal"
-  periodType   String     @default("normal")
-  currentPeriodEnd DateTime?
-  autoRenewing Boolean    @default(true)
+  periodType           String     @default("normal")
+  currentPeriodEnd     DateTime?
+  autoRenewing         Boolean    @default(true)
   /// "production" | "sandbox" | "xcode-test" — sandbox rows never flip the
   /// user tier unless ALLOW_SANDBOX_ENTITLEMENTS is set.
-  environment  String     @default("production")
+  environment          String     @default("production")
   lastNotificationType String?
   lastNotificationAt   DateTime?
   /// Latest raw store state (SubscriptionPurchaseV2 / decoded transaction) for
   /// debugging; never read by application logic.
-  raw          Json?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  raw                  Json?
+  createdAt            DateTime   @default(now())
+  updatedAt            DateTime   @updatedAt
 
   @@index([mobileUserId])
   @@index([status, currentPeriodEnd])
@@ -784,4 +789,150 @@ model StoreNotification {
   processedAt DateTime?
 
   @@index([platform, status, receivedAt])
+}
+
+// ---------------------------------------------------------------------------------------------
+// Cloud sync of a mobile user's own designs (src/lib/designSync).
+//
+// The app is local-first: a design lives in the device's database and is mirrored here in the
+// background, so it appears on the user's other devices and, later, in the web version. The
+// document is the MOBILE app's `DesignProject` JSON, stored as sent (in its "portable" form: local
+// media files appear as `nayroz-cloud-media:///<sha256>.<ext>`), versioned by `schemaVersion`.
+//
+// ★Ordering never relies on a device clock. Every write bumps the user's `changeSeq` under a row
+// lock on UserDesignLibrary and stamps it on the row it touched; devices pull "everything after
+// the last changeSeq I saw". The client's own timestamps are carried for display only.
+// ---------------------------------------------------------------------------------------------
+
+/// One row per user: the head of that user's change log. Locked (SELECT … FOR UPDATE) by every
+/// sync write, which makes the per-user sequence gap-free AND serialises quota checks.
+model UserDesignLibrary {
+  mobileUserId String     @id @db.Uuid
+  changeSeq    BigInt     @default(0)
+  updatedAt    DateTime   @updatedAt
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+}
+
+model UserDesign {
+  mobileUserId    String            @db.Uuid
+  /// The app's own design id ("project-<uuid>"). Unique per user, not globally: a guest design
+  /// left on a shared device may be claimed by a second account.
+  id              String            @db.VarChar(80)
+  name            String
+  /// The portable DesignProject JSON, as TEXT — exactly the bytes the app sent. ★Not `Json`:
+  /// jsonb reorders keys, and passing the document through JavaScript's number type corrupts any
+  /// integer above 2^53 (the app's Long fields). Stored verbatim, the document a second device
+  /// pulls hashes to the same `contentHash` the first one pushed. NULL once the design is purged
+  /// (the row stays as a tombstone so the user's other devices learn it is gone).
+  data            String?           @db.Text
+  schemaVersion   Int               @default(1)
+  /// Bumped by every accepted write. A document write must name the revision it was based on.
+  revision        Int               @default(1)
+  /// SHA-256 (hex) of the document as the client sent it; lets a header-only change (rename, Trash,
+  /// folder) be told apart from a content change without diffing JSON.
+  contentHash     String            @default("") @db.VarChar(64)
+  /// The last accepted write's id. A retry of that same write answers the current state instead
+  /// of a conflict (the first answer was lost on the way to the device).
+  lastMutationId  String?           @db.VarChar(64)
+  folderId        String?           @db.VarChar(80)
+  /// Epoch ms from the device, for display ("edited 2 days ago") — never used for ordering.
+  clientCreatedAt BigInt            @default(0)
+  clientUpdatedAt BigInt            @default(0)
+  /// Epoch ms the device moved it to the Trash (display); NULL = live.
+  deletedAt       BigInt?
+  /// SERVER time it entered the Trash. The 30-day purge counts from this, so a device with a wrong
+  /// clock can neither purge early nor keep a design forever.
+  trashedAt       DateTime?
+  purgedAt        DateTime?
+  jsonBytes       Int               @default(0)
+  /// SHA-256 of the preview the device rendered with the current document (a UserMediaObject).
+  thumbnailSha256 String?
+  changeSeq       BigInt            @default(0)
+  createdAt       DateTime          @default(now())
+  updatedAt       DateTime          @updatedAt
+  mobileUser      MobileUser        @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+  media           UserDesignMedia[]
+
+  @@id([mobileUserId, id])
+  @@index([mobileUserId, changeSeq])
+  @@index([mobileUserId, trashedAt])
+}
+
+model UserDesignFolder {
+  mobileUserId    String     @db.Uuid
+  id              String     @db.VarChar(80)
+  name            String
+  /// The app's explicit colour key ("teal", "coral", …).
+  colorKey        String     @db.VarChar(24)
+  revision        Int        @default(1)
+  lastMutationId  String?    @db.VarChar(64)
+  clientCreatedAt BigInt     @default(0)
+  clientUpdatedAt BigInt     @default(0)
+  /// Tombstone: the folder was deleted (its designs stay, in no folder).
+  deletedAt       DateTime?
+  changeSeq       BigInt     @default(0)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+  mobileUser      MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@id([mobileUserId, id])
+  @@index([mobileUserId, changeSeq])
+}
+
+/// A media file a user's designs reference, addressed by its content hash so the same photo is
+/// stored once however many designs (or devices) use it. The object lives in the PRIVATE user
+/// bucket at `storageKey`; the device uploads and downloads it directly with signed URLs.
+/// Every row — pending or ready — counts toward the user's storage quota.
+/// A font the user installed on one of their devices, synced to all of them. One row per font
+/// FILE (`id` = "font-<sha256>"); the file itself is a UserMediaObject, so it counts toward storage.
+model UserFont {
+  mobileUserId   String     @db.Uuid
+  id             String
+  fontName       String
+  displayName    String
+  sha256         String     @db.Char(64)
+  sizeBytes      BigInt
+  revision       Int        @default(1)
+  changeSeq      BigInt     @default(0)
+  lastMutationId String?
+  /// Removed from the account (no device can delete an installed font yet; kept for the API).
+  deletedAt      DateTime?
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+  mobileUser     MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@id([mobileUserId, id])
+  @@index([mobileUserId, changeSeq])
+}
+
+model UserMediaObject {
+  mobileUserId String     @db.Uuid
+  sha256       String     @db.Char(64)
+  sizeBytes    BigInt
+  contentType  String
+  storageKey   String
+  /// "pending" (upload URL issued) | "ready" (object verified in storage)
+  status       String     @default("pending")
+  /// Multipart uploads (files over 32 MB): storage's upload id while parts are arriving, and the
+  /// part size the device cuts the file in. Both NULL for a single-PUT file and once complete.
+  uploadId     String?
+  partBytes    Int?
+  createdAt    DateTime   @default(now())
+  readyAt      DateTime?
+  mobileUser   MobileUser @relation(fields: [mobileUserId], references: [id], onDelete: Cascade)
+
+  @@id([mobileUserId, sha256])
+  @@index([mobileUserId, status, createdAt])
+}
+
+/// Which media a design uses — derived by the server from the document itself on every write,
+/// never taken from the client's word.
+model UserDesignMedia {
+  mobileUserId String     @db.Uuid
+  designId     String     @db.VarChar(80)
+  sha256       String     @db.Char(64)
+  design       UserDesign @relation(fields: [mobileUserId, designId], references: [mobileUserId, id], onDelete: Cascade)
+
+  @@id([mobileUserId, designId, sha256])
+  @@index([mobileUserId, sha256])
 }

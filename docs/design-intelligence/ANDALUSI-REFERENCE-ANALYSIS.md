@@ -140,3 +140,23 @@ Each template is a stack of separate layers:
 5. Use cut-out figures or objects as a separate layer at the bottom, faceless.
 6. Allow at most 6 body lines.
 7. Use Andalusi's fixed wording, e.g. «يسرنا دعوتكم لتشريفنا وحضور», «بكل الحب والسرور ندعوكم لحضور», «وذلك مساء يوم…», «الموافق…», «نسعد بحضوركم ومشاركتكم».
+
+---
+
+# Deep study: Jordan / Independence Day in Andalusi (search «الأردن», about 55 templates), 2026-11-11
+Ali rejected batch JO (JO01–JO20): "same designs as the other countries, no new identity". This study is the base for batch JO2.
+
+## What Andalusi does that batch JO did not
+1. **Hero is a Thuluth calligraphy lockup (image), never a font.** Recurring lockups: «عيد الاستقلال الأردني», «عيد الاستقلال», «الأردن أرض العزم», «يحيا الوطن», «المملكة الأردنية الهاشمية», and a calligram «أردني وأفتخر» shaped as a man's head in a shemagh. Colours: white, gold 3D, flag green, black.
+2. **Micro-line under the lockup:** `✱ JORDAN INDEPENDENCE DAY ✱` + `25 MAY`, tiny, red stars.
+3. **A real waving flag is in almost every design:** flag on a pole, a long ribbon flag wrapping around the person or the numeral, flag as a diagonal corner, flag inside the map of Jordan.
+4. **One strong hero object per design:** gold 3D coat of arms, horseman carrying the flag, man in traditional dress with a falcon, dove whose wing is the flag, gold numeral of the anniversary wrapped in the flag, map of Jordan filled with shemagh or red, cave opening onto Petra.
+5. **Collage style:** black-and-white cut-out landmark (Citadel columns, Petra) over a flat colour with a coloured sun disc, small birds, torn-paper edges.
+6. **Heritage borders:** red cross-stitch embroidery (تطريز) panels and a shemagh triangle with tassels hanging from the top.
+7. **Personal templates:** person cut-out with the ribbon flag across the chest, circle with a calligraphy ring around it, postage-stamp frame with big quote marks, name line under a quote.
+8. **Grounds:** parchment beige, olive-to-yellow gradient, flat red, charcoal with gold, teal with faint pattern. Fireworks sparks as small accents.
+9. **Body copy** (their wording): «كل عام والمملكة الهاشمية شامخة», «كل عام والأردن عزيزاً قوياً آمناً», «دام عزّك مملكتي الحبيبة», «وطنٌ نعتزّ به ونفخر، وأرضٌ طيبة تستحق الحب والوفاء», «في عيد استقلالك موطني، نُعلي الهامات علوّ السماء، ونشرف الرؤوس بلباسها تاج العزّ والفخار», «الاستقلال ليس ذكرى نحتفل بها، بل عهدٌ نجدّد فيه الوفاء لوطن زرع فينا العزة والكرامة», «في كل ذرة تراب من هذا الوطن قصة فخر لا تنتهي».
+
+## Capability check (passed)
+- Google Nano Banana 2.1 in Magnific's free generator writes correct Jali Thuluth lockups for short phrases (tested: عيد الاستقلال الأردني, الأردن أرض العزم, يحيا الوطن). Generate black on white, turn into alpha, recolour locally, upload as a separate Canva layer. Always read the result letter by letter before use.
+- Canva's element library has waving Jordan flags, ribbon flags, flag on pole (not AI). Collect them once in an asset-carrier design (DAHam9fMlwk) through the editor, then copy per template.

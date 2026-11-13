@@ -20,6 +20,7 @@ import {
   normalizeObjectRemovalModelOrder,
 } from "../media/objectRemoval/models.js";
 import { normalizeMediaCreditSettings } from "../media/credits/config.js";
+import { normalizeDesignStorageSettings } from "../designSync/config.js";
 
 export const SUPPORTED_MOBILE_DEVICE_TYPES = ["android", "ios"];
 
@@ -38,6 +39,7 @@ const ROOT_SETTING_KEYS = new Set([
   "editImageModel",
   "imageGenerationModel",
   "mediaCredits",
+  "designStorage",
   "updatedAt",
 ]);
 
@@ -214,6 +216,8 @@ export function normalizeStoredMobileAppSettings(value = {}) {
     // Always fully populated (allowance + every feature cost + every model price),
     // so callers never have to null-check a partially-saved blob.
     mediaCredits: normalizeMediaCreditSettings(source.mediaCredits),
+    // Cloud storage per tier for synced designs (bytes); always fully populated, like the credits.
+    designStorage: normalizeDesignStorageSettings(source.designStorage),
     updatedAt: sanitizeString(source.updatedAt) || new Date().toISOString(),
   };
 }
@@ -265,6 +269,16 @@ export function mergeMobileAppSettingsInput(currentSettings, input = {}) {
             },
           })
         : current.mediaCredits,
+    // A partial payload (only the free limit, say) leaves the other tiers as they are.
+    designStorage:
+      "designStorage" in input
+        ? normalizeDesignStorageSettings({
+            limitsBytes: {
+              ...current.designStorage.limitsBytes,
+              ...(isPlainObject(input.designStorage?.limitsBytes) ? input.designStorage.limitsBytes : {}),
+            },
+          })
+        : current.designStorage,
     updatedAt: new Date().toISOString(),
   };
 }

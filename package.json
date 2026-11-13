@@ -24,6 +24,8 @@
     "smoke:object-remove": "node scripts/smoke-object-remove.mjs",
     "smoke:upscale": "node scripts/smoke-upscale.mjs",
     "smoke:credits": "node --env-file=.env --import tsx scripts/smoke-credits.ts",
+    "smoke:design-sync": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-design-sync.ts",
+    "test:design-sync": "node --import tsx --test src/lib/designSync/*.test.ts src/lib/designSync/*.test.js",
     "smoke:subscriptions": "node --env-file=.env --import tsx scripts/smoke-subscriptions.ts",
     "smoke:template-categories": "node --env-file=.env --env-file=.env.local --import tsx scripts/smoke-template-categories.ts",
     "dev:subscription": "node --env-file=.env --import tsx scripts/dev-subscription-state.ts",

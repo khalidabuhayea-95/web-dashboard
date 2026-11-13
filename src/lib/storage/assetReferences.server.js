@@ -54,6 +54,11 @@ const REFERENCE_SOURCES = [
   `SELECT 1 FROM "AppSetting" WHERE POSITION($1 IN value::text) > 0`,
   `SELECT 1 FROM "PushCampaign" WHERE POSITION($1 IN payload::text) > 0`,
   `SELECT 1 FROM "StoreNotification" WHERE POSITION($1 IN payload::text) > 0`,
+  // ★Synced user designs (src/lib/designSync) keep using the catalog media of the template they
+  // were made from — as an absolute URL or the relative /api/storage/public/<key> form, both of
+  // which contain the key. Without this row, deleting a template would delete media that users'
+  // own designs still show.
+  `SELECT 1 FROM "UserDesign" WHERE data IS NOT NULL AND POSITION($1 IN data) > 0`,
 ];
 
 export async function isStorageKeyReferenced(key) {

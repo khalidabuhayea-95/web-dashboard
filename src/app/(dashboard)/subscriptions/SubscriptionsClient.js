@@ -5,7 +5,8 @@ import { Crown, Store, AlertTriangle } from "lucide-react";
 import { Badge, Button, Card, CardContent, Input } from "@/components/ui";
 
 // The three packages, in the order they are sold. `allowanceKey` addresses the
-// mediaCredits settings blob; `priceKeys` address the reference-price map.
+// mediaCredits settings blob; `priceKeys` address the reference-price map; the package `key`
+// also addresses designStorage.limitsBytes (cloud storage for the account's designs).
 const PACKAGES = [
   // ★Free is a ONE-TIME grant, not a monthly refill — the field name is
   // historical (monthlyAllowance) but the credits never come back, so the
@@ -32,6 +33,20 @@ const STORE_COMMISSION = 0.15;
 
 const usd = (value) =>
   value === null || value === undefined ? "—" : `$${Number(value).toFixed(2)}`;
+
+const GB = 1024 * 1024 * 1024;
+
+// Defaults mirror DEFAULT_DESIGN_STORAGE_LIMITS (src/lib/designSync/config.js).
+const DEFAULT_STORAGE_GB = { free: 1, plus: 20, pro: 100 };
+
+// Shown with up to two decimals so a limit set in bytes elsewhere is not silently rounded on save.
+const bytesToGbInput = (bytes, fallbackGb) => {
+  const value = Number(bytes);
+  if (!Number.isFinite(value) || value < 0) return String(fallbackGb);
+  return String(Math.round((value / GB) * 100) / 100);
+};
+
+const gbInputToBytes = (input) => Math.max(0, Math.round((Number(input) || 0) * GB));
 
 const centsToInput = (cents) =>
   cents === null || cents === undefined ? "" : (Number(cents) / 100).toFixed(2);
@@ -66,11 +81,18 @@ export default function SubscriptionsClient() {
       const subsJson = await subsRes.json();
 
       const credits = settingsJson?.settings?.mediaCredits ?? {};
+      const storageLimits = settingsJson?.settings?.designStorage?.limitsBytes ?? {};
       setSettings(settingsJson.settings ?? {});
       setForm({
         monthlyAllowance: String(credits.monthlyAllowance ?? 200),
         plusMonthlyAllowance: String(credits.plusMonthlyAllowance ?? 10000),
         proMonthlyAllowance: String(credits.proMonthlyAllowance ?? 50000),
+        storageGb: Object.fromEntries(
+          Object.entries(DEFAULT_STORAGE_GB).map(([tier, gb]) => [
+            tier,
+            bytesToGbInput(storageLimits[tier], gb),
+          ])
+        ),
         referencePrices: Object.fromEntries(
           Object.entries(credits.referencePrices ?? {}).map(([key, cents]) => [
             key,
@@ -142,10 +164,15 @@ export default function SubscriptionsClient() {
             proMonthlyAllowance: Number(form.proMonthlyAllowance) || 0,
             referencePrices,
           },
+          designStorage: {
+            limitsBytes: Object.fromEntries(
+              Object.keys(DEFAULT_STORAGE_GB).map((tier) => [tier, gbInputToBytes(form.storageGb[tier])])
+            ),
+          },
         }),
       });
       if (!response.ok) throw new Error("Save failed");
-      setMessage("Saved. New allowances apply to every wallet immediately.");
+      setMessage("Saved. New allowances and storage limits apply to every account immediately.");
       await load();
     } catch (saveError) {
       setError(saveError.message || "Save failed");
@@ -231,7 +258,8 @@ export default function SubscriptionsClient() {
             <h2 className="text-lg font-semibold">Packages</h2>
             <p className="text-sm text-slate-600">
               Free credits are granted <strong>once per account</strong> and never refill; paid
-              tiers reset every month. Worst case assumes every credit is spent on the most
+              tiers reset every month. Cloud storage is what each account&apos;s synced designs may
+              take; lowering it deletes nothing — it only stops new uploads past the limit. Worst case assumes every credit is spent on the most
               expensive tool
               (${WORST_USD_PER_CREDIT.toFixed(4)}/credit). A package that clears it cannot be sold at
               a loss however it is used.
@@ -259,6 +287,22 @@ export default function SubscriptionsClient() {
                       setForm((current) => ({
                         ...current,
                         [pkg.allowanceKey]: event.target.value,
+                      }))
+                    }
+                  />
+
+                  <label className="mt-3 block text-xs font-medium text-slate-600">
+                    Cloud storage (GB)
+                  </label>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    value={form.storageGb[pkg.key]}
+                    onChange={(event) =>
+                      setForm((current) => ({
+                        ...current,
+                        storageGb: { ...current.storageGb, [pkg.key]: event.target.value },
                       }))
                     }
                   />

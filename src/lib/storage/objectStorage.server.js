@@ -1,8 +1,12 @@
 import {
+  AbortMultipartUploadCommand,
+  CompleteMultipartUploadCommand,
+  CreateMultipartUploadCommand,
   DeleteObjectsCommand,
   GetObjectCommand,
   HeadObjectCommand,
   ListObjectsV2Command,
+  ListPartsCommand,
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { S3Client } from "@aws-sdk/client-s3";
@@ -113,6 +117,17 @@ export function getPublicStorageBucketName() {
 
 export function getTemplateThumbnailBucketName() {
   return env("TEMPLATE_THUMBNAIL_BUCKET", getPublicStorageBucketName());
+}
+
+/**
+ * Where users' own design media lives (cloud sync, src/lib/designSync). Its own bucket in
+ * production (`R2_USER_DESIGNS_BUCKET`) — user files must never sit beside public catalog media,
+ * nor in the AI processing bucket whose objects are temporary by nature. Until that bucket is
+ * provisioned, development falls back to the private bucket (which has no expiry rule: only the
+ * default "abort incomplete multipart" lifecycle, checked 2026-11-12); every key is under `users/`.
+ */
+export function getUserDesignsBucketName() {
+  return env("R2_USER_DESIGNS_BUCKET", env("R2_PRIVATE_BUCKET", DEFAULT_PRIVATE_BUCKET));
 }
 
 export function getPrivateStorageBucketName() {
@@ -510,6 +525,237 @@ export async function createSignedDownloadUrl(
     unsignableHeaders: new Set(["x-amz-content-sha256"]),
   });
 
+  return formatHttpRequestUrl(presigned);
+}
+
+/**
+ * A URL the mobile app can PUT one object to, directly — the bytes never pass through this server
+ * (every upload route here buffers the whole body in memory, which a 250 MB video cannot afford).
+ *
+ * ★`content-length` and `content-type` are SIGNED: R2 answers 403 SignatureDoesNotMatch to a body
+ * of any other size or type (verified against R2, 2026-11-12), so a client cannot declare a small
+ * file for its quota and then upload a huge one. The caller must send exactly these two headers.
+ * A checksum header cannot be enforced the same way — the signer hoists `x-amz-*` headers into
+ * the query — so content integrity is checked by size at `complete`, not by hash.
+ *
+ * @param {string} bucket
+ * @param {string} key
+ * @param {{ contentLength: number, contentType: string, expiresInSeconds?: number }} options
+ * @returns {Promise<string>}
+ */
+export async function createSignedUploadUrl(
+  bucket,
+  key,
+  { contentLength, contentType, expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS }
+) {
+  const safeBucket = String(bucket || "").trim();
+  const safeKey = String(key || "").trim();
+  const length = Number(contentLength);
+  const type = String(contentType || "").trim();
+  if (!safeBucket || !safeKey) {
+    throw new Error("Bucket and key are required for signed upload URL generation.");
+  }
+  if (!Number.isSafeInteger(length) || length <= 0 || !type) {
+    throw new Error("A positive content length and a content type are required for a signed upload.");
+  }
+
+  const endpoint = getEndpointUrl();
+  const config = getClientConfig();
+  const signer = new SignatureV4({
+    credentials: config.credentials,
+    region: config.region,
+    service: "s3",
+    sha256: Hash.bind(null, "sha256"),
+    uriEscapePath: false,
+  });
+
+  const request = new HttpRequest({
+    protocol: endpoint.protocol,
+    hostname: endpoint.hostname,
+    port: endpoint.port ? Number(endpoint.port) : undefined,
+    method: "PUT",
+    path: `/${safeBucket}/${encodeObjectKey(safeKey)}`,
+    headers: {
+      host: endpoint.host,
+      "content-length": String(length),
+      "content-type": type,
+      "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+    },
+  });
+
+  const presigned = await signer.presign(request, {
+    expiresIn: Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_SIGNED_URL_TTL_SECONDS)),
+    unsignableHeaders: new Set(["x-amz-content-sha256"]),
+  });
+
+  return formatHttpRequestUrl(presigned);
+}
+
+// ---- Multipart uploads (design media over 32 MB) ------------------------------------------------
+// The device uploads each part straight to storage through a signed URL, like a whole file. The
+// server never needs the parts' ETags from the device: it asks storage (ListParts) what has arrived,
+// which is also what makes an upload resumable after the app or the phone restarts.
+
+/**
+ * Starts a multipart upload and returns its id.
+ * @param {string} bucket
+ * @param {string} key
+ * @param {string} contentType
+ * @returns {Promise<string>}
+ */
+export async function createMultipartUpload(bucket, key, contentType) {
+  const result = await createStorageClient().send(
+    new CreateMultipartUploadCommand({ Bucket: bucket, Key: key, ContentType: contentType })
+  );
+  if (!result.UploadId) throw new Error("Storage did not return an upload id.");
+  return result.UploadId;
+}
+
+/**
+ * Every part storage holds for [uploadId] (all pages). Throws NoSuchUpload once the upload has been
+ * completed, aborted or expired by the bucket's lifecycle rule.
+ * @param {string} bucket
+ * @param {string} key
+ * @param {string} uploadId
+ * @returns {Promise<{ partNumber: number, sizeBytes: number, etag: string }[]>}
+ */
+export async function listUploadedParts(bucket, key, uploadId) {
+  const client = createStorageClient();
+  const parts = [];
+  let marker;
+  for (;;) {
+    const page = await client.send(
+      new ListPartsCommand({ Bucket: bucket, Key: key, UploadId: uploadId, PartNumberMarker: marker })
+    );
+    for (const part of page.Parts ?? []) {
+      if (part.PartNumber && part.ETag) {
+        parts.push({ partNumber: part.PartNumber, sizeBytes: Number(part.Size ?? 0), etag: part.ETag });
+      }
+    }
+    if (!page.IsTruncated || !page.NextPartNumberMarker) break;
+    marker = page.NextPartNumberMarker;
+  }
+  return parts;
+}
+
+/**
+ * @param {string} bucket
+ * @param {string} key
+ * @param {string} uploadId
+ * @param {{ partNumber: number, etag: string }[]} parts
+ */
+export async function completeMultipartUpload(bucket, key, uploadId, parts) {
+  await createStorageClient().send(
+    new CompleteMultipartUploadCommand({
+      Bucket: bucket,
+      Key: key,
+      UploadId: uploadId,
+      MultipartUpload: {
+        Parts: [...parts]
+          .sort((left, right) => left.partNumber - right.partNumber)
+          .map((part) => ({ PartNumber: part.partNumber, ETag: part.etag })),
+      },
+    })
+  );
+}
+
+/** Best-effort: an upload that is already gone is the outcome wanted. */
+export async function abortMultipartUpload(bucket, key, uploadId) {
+  try {
+    await createStorageClient().send(new AbortMultipartUploadCommand({ Bucket: bucket, Key: key, UploadId: uploadId }));
+  } catch (error) {
+    if (!isNoSuchUpload(error)) throw error;
+  }
+}
+
+/** Storage no longer knows this upload id (completed, aborted, or expired). */
+export function isNoSuchUpload(error) {
+  const candidate = /** @type {{ name?: string, Code?: string, $metadata?: { httpStatusCode?: number } } | null} */ (error);
+  return candidate?.name === "NoSuchUpload" || candidate?.Code === "NoSuchUpload" || candidate?.$metadata?.httpStatusCode === 404;
+}
+
+/**
+ * A URL the device can PUT ONE part to. Like createSignedUploadUrl, `content-length` is signed, so
+ * a part of any other size is refused by storage (403).
+ * @param {string} bucket
+ * @param {string} key
+ * @param {{ uploadId: string, partNumber: number, contentLength: number, expiresInSeconds?: number }} options
+ * @returns {Promise<string>}
+ */
+export async function createSignedUploadPartUrl(
+  bucket,
+  key,
+  { uploadId, partNumber, contentLength, expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS }
+) {
+  const length = Number(contentLength);
+  if (!uploadId || !Number.isSafeInteger(partNumber) || partNumber < 1 || !Number.isSafeInteger(length) || length <= 0) {
+    throw new Error("An upload id, a part number and a positive content length are required.");
+  }
+  const endpoint = getEndpointUrl();
+  const config = getClientConfig();
+  const signer = new SignatureV4({
+    credentials: config.credentials,
+    region: config.region,
+    service: "s3",
+    sha256: Hash.bind(null, "sha256"),
+    uriEscapePath: false,
+  });
+  const request = new HttpRequest({
+    protocol: endpoint.protocol,
+    hostname: endpoint.hostname,
+    port: endpoint.port ? Number(endpoint.port) : undefined,
+    method: "PUT",
+    path: `/${String(bucket).trim()}/${encodeObjectKey(String(key).trim())}`,
+    query: { partNumber: String(partNumber), uploadId: String(uploadId) },
+    headers: {
+      host: endpoint.host,
+      "content-length": String(length),
+      "x-amz-content-sha256": "UNSIGNED-PAYLOAD",
+    },
+  });
+  const presigned = await signer.presign(request, {
+    expiresIn: Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_SIGNED_URL_TTL_SECONDS)),
+    unsignableHeaders: new Set(["x-amz-content-sha256"]),
+  });
+  return formatHttpRequestUrl(presigned);
+}
+
+/**
+ * Like createSignedDownloadUrl, but ALWAYS signed — for a bucket whose objects are private to one
+ * user even if the deployment happens to point it at a public bucket by mistake.
+ */
+export async function createPrivateSignedDownloadUrl(
+  bucket,
+  key,
+  expiresInSeconds = DEFAULT_SIGNED_URL_TTL_SECONDS
+) {
+  const safeBucket = String(bucket || "").trim();
+  const safeKey = String(key || "").trim();
+  if (!safeBucket || !safeKey) {
+    throw new Error("Bucket and key are required for signed URL generation.");
+  }
+
+  const endpoint = getEndpointUrl();
+  const config = getClientConfig();
+  const signer = new SignatureV4({
+    credentials: config.credentials,
+    region: config.region,
+    service: "s3",
+    sha256: Hash.bind(null, "sha256"),
+    uriEscapePath: false,
+  });
+  const request = new HttpRequest({
+    protocol: endpoint.protocol,
+    hostname: endpoint.hostname,
+    port: endpoint.port ? Number(endpoint.port) : undefined,
+    method: "GET",
+    path: `/${safeBucket}/${encodeObjectKey(safeKey)}`,
+    headers: { host: endpoint.host, "x-amz-content-sha256": "UNSIGNED-PAYLOAD" },
+  });
+  const presigned = await signer.presign(request, {
+    expiresIn: Math.max(60, Math.round(Number(expiresInSeconds) || DEFAULT_SIGNED_URL_TTL_SECONDS)),
+    unsignableHeaders: new Set(["x-amz-content-sha256"]),
+  });
   return formatHttpRequestUrl(presigned);
 }
 

@@ -19,6 +19,7 @@ import {
   type PlanKey,
 } from "@/lib/billing/products";
 import { normalizeMediaCreditSettings } from "@/lib/media/credits/config";
+import { normalizeDesignStorageSettings } from "@/lib/designSync/config.js";
 import { getMobileAppSettings } from "@/lib/settings/mobileAppSettings.server";
 
 export type CatalogPlan = {
@@ -34,10 +35,16 @@ export type CatalogPlan = {
 export type CatalogPackage = {
   package: PaidEntitlement;
   monthlyAllowance: number;
+  /** Cloud storage for the account's designs on this package, in bytes (dashboard-set). */
+  storageBytes: number;
   plans: CatalogPlan[];
 };
 
-export type SubscriptionCatalog = { packages: CatalogPackage[] };
+export type SubscriptionCatalog = {
+  packages: CatalogPackage[];
+  /** What a free account gets, so the paywall can say how much MORE a package holds. */
+  freeStorageBytes: number;
+};
 
 export async function buildSubscriptionCatalog(): Promise<SubscriptionCatalog> {
   const settings = await getMobileAppSettings();
@@ -49,6 +56,10 @@ export async function buildSubscriptionCatalog(): Promise<SubscriptionCatalog> {
   );
   // The normalizer types allowances but leaves the price map as {}.
   const prices = credits.referencePrices as Record<string, number>;
+  // The same normalizer the quota uses, so the paywall can never promise a different number.
+  const storage = normalizeDesignStorageSettings(
+    (settings as { designStorage?: object })?.designStorage
+  ).limitsBytes;
 
   const plan = (
     productId: string,
@@ -68,6 +79,7 @@ export async function buildSubscriptionCatalog(): Promise<SubscriptionCatalog> {
       {
         package: PLUS_ENTITLEMENT,
         monthlyAllowance: credits.plusMonthlyAllowance,
+        storageBytes: storage.plus,
         plans: [
           plan(APPLE_PLUS_PRODUCT_IDS.yearly, "yearly", "plus_yearly", 3_999),
           plan(APPLE_PLUS_PRODUCT_IDS.monthly, "monthly", "plus_monthly", 499),
@@ -76,11 +88,13 @@ export async function buildSubscriptionCatalog(): Promise<SubscriptionCatalog> {
       {
         package: PRO_ENTITLEMENT,
         monthlyAllowance: credits.proMonthlyAllowance,
+        storageBytes: storage.pro,
         plans: [
           plan(APPLE_PRO_PRODUCT_IDS.yearly, "yearly", "pro_yearly", 24_999),
           plan(APPLE_PRO_PRODUCT_IDS.monthly, "monthly", "pro_monthly", 2_499),
         ],
       },
     ],
+    freeStorageBytes: storage.free,
   };
 }
