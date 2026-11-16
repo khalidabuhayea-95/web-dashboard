@@ -20,13 +20,18 @@ import {
 } from "./config.js";
 
 test("image-to-layers is no longer a supported feature", () => {
+  // Pinned on purpose: adding a paid feature should be a deliberate change to this list.
   assert.deepEqual(SUPPORTED_MEDIA_CREDIT_FEATURES, [
     "edit-image",
     "ai-expand",
     "upscale",
     "object-removal",
+    "background-removal",
+    "image-generation",
+    "tashkeel",
     "ai-tools",
   ]);
+  assert.equal(SUPPORTED_MEDIA_CREDIT_FEATURES.includes("image-to-layers"), false);
   assert.equal(normalizeMediaCreditFeature("image-to-layers"), "");
 });
 

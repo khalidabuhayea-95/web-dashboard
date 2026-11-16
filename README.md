@@ -33,13 +33,17 @@ start, and apply schema changes with Prisma migrations.
 ## Checks
 
 ```bash
+npm test               # every unit test (src/**/*.test.*) + the Canva importer's tests
 npm run lint           # ESLint (incl. section boundaries) + mobile OpenAPI coverage gate
 npx tsc --noEmit       # types
-npm run test:surfaces  # hostname routing
 ```
 
-The extension, the editor and the other parts have their own test commands. `package.json`
-lists them (`test:*`, `smoke:*`).
+CI (`.github/workflows/ci.yml`) runs all three, plus the build, on every push and PR.
+
+A few tests need a real Postgres: credit reservations, search and taxonomy counts. Locally
+they skip unless `NAYROZ_TEST_DATABASE_URL` points at a throwaway database with migrations
+applied (never the dev database). CI provides one. The `smoke:*` scripts exercise a running
+setup against real services.
 
 ## Deploy
 
