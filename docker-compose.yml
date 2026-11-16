@@ -7,6 +7,13 @@
 #   docker compose run --rm web npx prisma migrate deploy
 #   docker compose up -d
 #   # then INSERT a pending import_jobs row and watch the worker claim it
+#
+# Through Caddy (:8080) the three surfaces answer like production (src/lib/surfaces.js):
+#   http://localhost:8080 website · http://admin.localhost:8080 dashboard ·
+#   http://api.localhost:8080/v1/health API
+#
+# Production = this file + docker-compose.prod.yml (real domains, TLS, secrets from
+# .env.production) — see docs/architecture.md.
 
 x-app-env: &app-env
   NODE_ENV: production
@@ -14,7 +21,11 @@ x-app-env: &app-env
   DATABASE_URL: postgresql://nayroz_user:localdev@postgres:5432/nayroz_app
   # Dummy auth secret — local only, not exercised by the worker path.
   AUTH_SECRET: local-dev-secret-not-for-prod
-  NEXT_PUBLIC_APP_URL: http://localhost:8080
+  # The dashboard's own origin (localhost:8080 is the website since the surfaces split).
+  NEXT_PUBLIC_APP_URL: http://admin.localhost:8080
+  # NextAuth builds its URLs from the request host (admin.localhost:8080 here); without it they
+  # default to http://localhost:3000 and dashboard sign-in fails.
+  AUTH_TRUST_HOST: "true"
   # R2: explicit LOCAL-TEST bucket names so a stray upload can never hit the
   # real `nayroz-media-dev` / `nayroz-processing-dev` code defaults. Creds are
   # intentionally unset → any actual upload throws (we don't exercise uploads).

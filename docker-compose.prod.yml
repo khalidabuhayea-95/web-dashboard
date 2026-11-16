@@ -1,0 +1,69 @@
+# Production override — real domains, TLS, real secrets. Layered on top of docker-compose.yml:
+#
+#   cp .env.production.example .env.production   # fill in real values (never committed)
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm web npx prisma migrate deploy
+#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#
+# What changes against the local stack:
+#   - Caddy serves nayroz.com, www.nayroz.com, admin.nayroz.com and api.nayroz.com on 80/443 and
+#     gets a certificate for each (DNS must point at this server first). Nothing else is published:
+#     not Next's :3000 (an IP request there would reach the all-in-one mode), not Postgres.
+#   - The local environment block (dummy AUTH_SECRET, throwaway database, test buckets) is reset;
+#     every service reads .env.production instead. `environment:` below only adds the non-secret
+#     values that are the same for every production deployment.
+#   - Services restart on failure and on reboot.
+#
+# Scaling the API on its own later: run more web containers with NAYROZ_SURFACES=api behind
+# api.nayroz.com (docs/architecture.md, "Scaling").
+
+x-prod-env: &prod-env
+  NODE_ENV: production
+  PORT: "3000"
+  NEXT_PUBLIC_APP_URL: https://admin.nayroz.com
+  AUTH_TRUST_HOST: "true"
+
+services:
+  postgres:
+    environment: !reset {}
+    env_file: .env.production
+    ports: !reset []
+    restart: unless-stopped
+
+  web:
+    build:
+      context: .
+      args:
+        # Baked into /.well-known/apple-app-site-association at build time (see .env.production.example).
+        IOS_TEAM_ID: ${IOS_TEAM_ID:-}
+    environment: !override
+      <<: *prod-env
+    env_file: .env.production
+    ports: !reset []
+    restart: unless-stopped
+
+  worker:
+    environment: !override
+      <<: *prod-env
+      IMPORT_JOBS_WORKER_ID: worker-1
+    env_file: .env.production
+    restart: unless-stopped
+
+  caddy:
+    environment:
+      NAYROZ_SITES: "nayroz.com, www.nayroz.com, admin.nayroz.com, api.nayroz.com"
+    ports: !override
+      - "80:80"
+      - "443:443"
+      - "443:443/udp" # HTTP/3
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates and ACME account — must survive container rebuilds, or Let's Encrypt
+      # rate limits will bite after a few redeploys.
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+
+volumes:
+  caddy_data:
+  caddy_config:

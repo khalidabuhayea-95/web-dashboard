@@ -8,10 +8,14 @@ out
 .git
 .gitignore
 
-# Secrets (env comes from docker-compose, not the image)
-.env
-.env.local
-.env.*.local
+# Secrets (env comes from docker-compose, not the image). Every .env* file — .env.production and
+# local backups like .env.backup-local-db hold real credentials and must never land in a layer.
+.env*
+
+# The self-hosted AI worker is its own service (ai-worker/Dockerfile, its own build context); the web
+# app only talks to it over HTTP (SELFHOST_AI_URL). Its .venv (~1 GB) also holds a python symlink
+# that points outside the repo, which makes Turbopack panic during `next build`.
+ai-worker
 
 # Local Python venv for rembg — its bin/python symlink points outside the repo
 # and makes Turbopack panic during `next build`. Never ship it in the image.
@@ -24,5 +28,4 @@ out
 
 # Repo docs / nested tooling not needed at build time
 extensions/**/.claude
-AUDIT_REPORT.md
-IMPORT_WORKER_SPEC.md
+docs

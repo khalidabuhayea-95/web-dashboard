@@ -1,7 +1,33 @@
-# Local-only reverse proxy. Listens on :80 inside the container (published as
-# host :8080 in docker-compose). No domain/TLS — for production you'd switch
-# this to `your.domain { reverse_proxy web:3000 }` and Caddy auto-provisions
-# certificates.
-:80 {
-	reverse_proxy web:3000
+# Reverse proxy in front of the Next.js server (docs/architecture.md).
+#
+# One Next build serves three surfaces, chosen by the Host header (src/lib/surfaces.js):
+#   nayroz.com / www.nayroz.com  website     admin.nayroz.com  dashboard     api.nayroz.com  API
+# Caddy's only jobs are TLS and forwarding. It passes the original Host through unchanged and adds
+# X-Forwarded-Host / X-Forwarded-Proto, which is what the app's routing and NextAuth
+# (AUTH_TRUST_HOST) read. Routing, the www→apex redirect and the API allowlist live in the app.
+#
+# NAYROZ_SITES picks the addresses:
+#   - local (docker-compose.yml, unset): plain http for any host on :80 — open
+#     http://localhost:8080 (website), http://admin.localhost:8080, http://api.localhost:8080/v1/health;
+#     a LAN IP reaches the app's all-in-one mode, like the dev server
+#   - production (docker-compose.prod.yml): the four real names; Caddy obtains and renews a
+#     Let's Encrypt certificate for each (ports 80 and 443 must reach this container, and the
+#     DNS A/AAAA records must already point here).
+#     Never use `:80` in production: a request by the server's bare IP would get the all-in-one
+#     mode (dashboard + every /api route) instead of being refused
+{$NAYROZ_SITES::80} {
+	encode zstd gzip
+
+	reverse_proxy web:3000 {
+		# Long AI runs, PSD and Canva imports (up to 600 MB, next.config.mjs) — don't cut them.
+		transport http {
+			read_timeout 10m
+			write_timeout 10m
+		}
+	}
+
+	log {
+		output stdout
+		format json
+	}
 }

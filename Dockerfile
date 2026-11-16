@@ -40,8 +40,11 @@ COPY . .
 # docker-compose. (Auth-gated pages are force-dynamic, so no DB is hit at build.)
 ARG AUTH_SECRET=build-time-placeholder
 ARG DATABASE_URL=postgresql://placeholder:placeholder@127.0.0.1:5432/placeholder
+# Not a secret: the Apple Team ID baked into the force-static /.well-known/apple-app-site-association
+# route at build time. Empty = the placeholder, and iOS Universal Links fall back to the web page.
+ARG IOS_TEAM_ID=
 RUN DATABASE_URL="$DATABASE_URL" npx prisma generate
-RUN AUTH_SECRET="$AUTH_SECRET" DATABASE_URL="$DATABASE_URL" npm run build
+RUN AUTH_SECRET="$AUTH_SECRET" DATABASE_URL="$DATABASE_URL" IOS_TEAM_ID="$IOS_TEAM_ID" npm run build
 
 # Drop root: run as the unprivileged `node` user shipped with the base image.
 # Own the app tree and the browser cache so the runtime/worker can read+write
