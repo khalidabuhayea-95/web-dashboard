@@ -24,13 +24,18 @@ import { completeMediaUploads, prepareMediaParts, prepareMediaUploads, removeUnr
 import { deleteFont, fontIdFor, putFont } from "@/lib/designSync/fonts.server";
 import { getStorageSummary } from "@/lib/designSync/quota.server";
 import { deleteMobileUserAccount } from "@/lib/mobile/accountDeletion.server";
-import { issueMobileSession } from "@/lib/mobile/userAuth.server";
+import { issueMobileSession, refreshMobileSession } from "@/lib/mobile/userAuth.server";
 import { saveMobileAppSettings } from "@/lib/settings/mobileAppSettings.server";
 import type { Prisma } from "@prisma/client";
 
 /** The settings row this script lowers the free limit in (mobileAppSettings.server). */
 const MOBILE_APP_SETTINGS_KEY = "mobile_app_settings_v1";
-import { getUserDesignsBucketName, headObject, listObjectKeys } from "@/lib/storage/objectStorage.server";
+import {
+  abortMultipartUpload,
+  getUserDesignsBucketName,
+  headObject,
+  listObjectKeys,
+} from "@/lib/storage/objectStorage.server";
 
 const FREE_LIMIT_BYTES = 400_000;
 
@@ -288,6 +293,47 @@ async function main() {
     await removeUnreferencedMedia(user.id, [video.sha256]);
     check("the sweep frees a large file no design uses", await objectExists(`${userMediaPrefix(user.id)}media/${video.sha256}`), false);
 
+    // ---- 6b'. Storage forgot an unfinished large upload ------------------------------------------
+    // R2's lifecycle rule aborts multipart uploads left unfinished for days: a device that comes back
+    // after that holds part links for an upload storage no longer knows. Aborting it here is exactly
+    // what that rule does.
+    const forgotten = makeFile(40 * 1024 * 1024, "video/mp4");
+    await prepareMediaUploads(paid, [forgotten]);
+    const forgottenPlan = await prepareMediaParts(paid, forgotten.sha256);
+    const forgottenSlice = (partNumber: number) =>
+      forgotten.bytes.subarray(
+        (partNumber - 1) * forgottenPlan.partBytes,
+        Math.min(forgotten.sizeBytes, partNumber * forgottenPlan.partBytes),
+      );
+    const uploadIdOf = async () =>
+      (
+        await prisma.userMediaObject.findUnique({
+          where: { mobileUserId_sha256: { mobileUserId: user.id, sha256: forgotten.sha256 } },
+          select: { uploadId: true },
+        })
+      )?.uploadId ?? null;
+    check("an unfinished upload: its first part goes up", await uploadPart(forgottenPlan.parts[0].uploadUrl, forgottenSlice(1)), 200);
+    const firstUploadId = await uploadIdOf();
+    await abortMultipartUpload(getUserDesignsBucketName(), `${userMediaPrefix(user.id)}media/${forgotten.sha256}`, firstUploadId!);
+    check(
+      "…storage forgets it: a part sent on its old link is refused",
+      (await uploadPart(forgottenPlan.parts[1].uploadUrl, forgottenSlice(2))) >= 400,
+      true,
+    );
+    check("…complete reports the file missing, not an error", (await completeMediaUploads(paid, [forgotten.sha256])).files[0].status, "missing");
+    const restarted = await prepareMediaParts(paid, forgotten.sha256);
+    const secondUploadId = await uploadIdOf();
+    check(
+      "…asking again starts a new upload, with every part to send",
+      [restarted.uploadedParts, restarted.parts.map((part) => part.partNumber), secondUploadId !== null && secondUploadId !== firstUploadId],
+      [[], [1, 2, 3], true],
+    );
+    for (const part of restarted.parts) await uploadPart(part.uploadUrl, forgottenSlice(part.partNumber));
+    check("…which completes", (await completeMediaUploads(paid, [forgotten.sha256])).files[0].status, "ready");
+    const forgottenStored = await headObject(getUserDesignsBucketName(), `${userMediaPrefix(user.id)}media/${forgotten.sha256}`);
+    check("…into one object of the full size", Number(forgottenStored.ContentLength), forgotten.sizeBytes);
+    await removeUnreferencedMedia(user.id, [forgotten.sha256]);
+
     // ---- 6c. Installed fonts -------------------------------------------------------------------
     const fontFile = makeFile(20_000, "font/ttf");
     const fontPrepared = await prepareMediaUploads(account, [fontFile]);
@@ -331,6 +377,23 @@ async function main() {
       const body = (await authed.json()) as { designs?: Array<{ purged: boolean }>; storage?: { limitBytes: number } };
       check("with a token: the library, its tombstone and the tier's limit", [authed.status, body.designs?.[0]?.purged, body.storage?.limitBytes], [200, true, FREE_LIMIT_BYTES]);
       check("sync answers are never cached", authed.headers.get("Cache-Control"), "no-store");
+
+      // The background sync's session and the screens' one can renew at the same instant with the
+      // same refresh token (device test 2026-11-13). It is spent once: one renewal, one refusal.
+      const together = await Promise.allSettled([
+        refreshMobileSession({ refreshToken: session.refreshToken }),
+        refreshMobileSession({ refreshToken: session.refreshToken }),
+      ]);
+      check(
+        "a refresh token spent by two renewals at once renews exactly one",
+        together.map((outcome) => outcome.status).sort(),
+        ["fulfilled", "rejected"],
+      );
+      check(
+        "…and leaves exactly one live refresh token",
+        await prisma.mobileRefreshToken.count({ where: { mobileUserId: user.id, revokedAt: null } }),
+        1,
+      );
     } catch (error) {
       console.log(`SKIP  bearer route check (${error instanceof Error ? error.message : String(error)})`);
     }

@@ -316,13 +316,19 @@ export async function refreshMobileSession({
     throw new Error("Refresh token is invalid or expired.");
   }
 
-  await prisma.mobileRefreshToken.update({
-    where: { id: storedToken.id },
+  // ★Spent atomically. Two refreshes with the same token used to BOTH pass the check above and BOTH
+  // get a new session — device test 2026-11-13: the background sync's session and the screens' one
+  // renewed in the same millisecond. Exactly one now wins; the other is refused like any spent token.
+  const spent = await prisma.mobileRefreshToken.updateMany({
+    where: { id: storedToken.id, revokedAt: null },
     data: {
       revokedAt: new Date(),
       lastUsedAt: new Date(),
     },
   });
+  if (spent.count !== 1) {
+    throw new Error("Refresh token is invalid or expired.");
+  }
 
   await prisma.mobileUser.update({
     where: { id: storedToken.mobileUserId },
