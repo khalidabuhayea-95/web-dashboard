@@ -1,36 +1,56 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# Nayroz web
 
-## Getting Started
+One Next.js project that serves three surfaces, each on its own subdomain:
 
-First, run the development server:
+| Surface   | Domain             | Code                                    |
+| --------- | ------------------ | --------------------------------------- |
+| Website   | `nayroz.com`       | `public/website/`, `src/app/(website)/` |
+| Dashboard | `admin.nayroz.com` | `src/app/(dashboard)/`                  |
+| API       | `api.nayroz.com`   | `src/app/api/` (public contract `/v1`)  |
+
+Shared code lives in `src/lib/`, `src/components/` and `src/store/`. How requests are split, the
+folder rules (`npm run lint` enforces them), API versioning and the go-live checklist are all in
+**[docs/architecture.md](docs/architecture.md)**.
+
+## Develop
 
 ```bash
+npm install
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+The dev server mirrors production by hostname:
 
-You can start editing the page by modifying `app/page.js`. The page auto-updates as you edit the file.
+- http://localhost:3000 is the website.
+- http://admin.localhost:3000 is the dashboard.
+- http://api.localhost:3000/v1/health is the API.
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+Phones and simulators reach the API by IP (`127.0.0.1`, `10.0.2.2` or your LAN IP).
 
-## Learn More
+The database is Postgres, configured by `DATABASE_URL` in `.env.local`. Copy `.env.example` to
+start, and apply schema changes with Prisma migrations.
 
-To learn more about Next.js, take a look at the following resources:
+## Checks
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+```bash
+npm run lint           # ESLint (incl. section boundaries) + mobile OpenAPI coverage gate
+npx tsc --noEmit       # types
+npm run test:surfaces  # hostname routing
+```
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+The extension, the editor and the other parts have their own test commands. `package.json`
+lists them (`test:*`, `smoke:*`).
 
-## Deploy on Vercel
+## Deploy
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+`docker compose -f docker-compose.yml -f docker-compose.prod.yml …`: Caddy (TLS for the four
+names) in front of the Next server and the import worker. Secrets go in `.env.production`
+(template: `.env.production.example`). The steps are in
+[docs/architecture.md](docs/architecture.md#go-live-checklist-when-the-server-exists).
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Other folders
+
+- `extensions/canva-importer/`: Chrome extension that imports Canva and CapCut designs.
+- `ai-worker/`: self-hosted AI worker (Python, its own Docker image).
+- `docs/`: specs, handoffs and audits (`docs/audits/`).
+- `scripts/`: maintenance and smoke scripts run with `npm run …`.

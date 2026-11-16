@@ -3,7 +3,7 @@
 **Project:** `web-dashboard` (Next.js 16 App Router · React 19 · Prisma/Postgres · NextAuth · Konva)
 **Date:** 2026-07-27
 **Scope:** All server code — API routes, auth layer, mobile backend, import pipeline, storage, editor client, infra.
-**Method:** 5 parallel deep-review passes (auth ×2, injection/SSRF/infra, backend perf, editor perf) + independent firsthand verification of every Critical/High against the current code and git history. This supersedes `AUDIT_REPORT.md` (2026-05-26); the codebase changed substantially since (8 commits, ~32k LOC).
+**Method:** 5 parallel deep-review passes (auth ×2, injection/SSRF/infra, backend perf, editor perf) + independent firsthand verification of every Critical/High against the current code and git history. This supersedes [`2026-05-project-audit.md`](2026-05-project-audit.md) (2026-05-26); the codebase changed substantially since (8 commits, ~32k LOC).
 
 ---
 

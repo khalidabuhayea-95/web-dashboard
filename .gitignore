@@ -32,6 +32,8 @@ yarn-error.log*
 
 # env files (can opt-in for committing if needed)
 .env*
+!.env.example
+!.env.production.example
 
 # vercel
 .vercel
@@ -52,3 +54,7 @@ __pycache__/
 /.codex_*
 /.tmp-*
 /.tmp/
+# Local scratch: pre-edit DB backups written by scripts (scripts/fix-*.ts) and one-off
+# debugging scripts. Kept on disk, never committed.
+/tmp/
+/scripts/.tmp/
