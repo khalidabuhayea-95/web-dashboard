@@ -33,6 +33,10 @@ RUN npx playwright install --with-deps chromium
 # App source (see .dockerignore: excludes node_modules, .next, .venv-rembg, .env*)
 COPY . .
 
+# The in-process tashkeel model (ichkil, 21 MB), pinned to a Hugging Face commit and checked by
+# SHA-256, so the running container never downloads anything.
+RUN node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-tashkeel-model.mjs
+
 # Build-time placeholders ONLY. Some route modules validate env at import time,
 # which `next build` triggers during page-data collection — and prisma's schema
 # references env("DATABASE_URL"). These are NOT real secrets and are passed

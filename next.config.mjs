@@ -11,6 +11,8 @@ const nextConfig = {
     "ag-psd",
     "ffmpeg-static",
     "@ffprobe-installer/ffprobe",
+    // Native ONNX Runtime for in-process tashkeel (src/lib/text/tashkeel/ichkil.server.ts).
+    "onnxruntime-node",
   ],
   // Added when pre-existing type errors blocked the production build. `npx tsc --noEmit`
   // is clean again as of 2026-09-24, so this is only a safety net now — drop it once CI

@@ -58,3 +58,5 @@ __pycache__/
 # debugging scripts. Kept on disk, never committed.
 /tmp/
 /scripts/.tmp/
+# Downloaded model files (scripts/fetch-tashkeel-model.mjs): pinned + checksummed, never committed.
+/.models/

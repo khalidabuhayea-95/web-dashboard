@@ -58,6 +58,16 @@ jobs:
         env:
           DATABASE_URL: ${{ env.NAYROZ_TEST_DATABASE_URL }}
 
+      # The in-process tashkeel model (21 MB, pinned + checksummed) for the ichkil parity test.
+      - name: Cache tashkeel model
+        uses: actions/cache@v4
+        with:
+          path: .models
+          key: ichkil-0.3.0
+
+      - name: Fetch tashkeel model
+        run: node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/fetch-tashkeel-model.mjs
+
       - name: Unit tests
         run: npm run test:unit
 
