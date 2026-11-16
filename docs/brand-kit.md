@@ -6,6 +6,22 @@ replace the files and re-check the token values below.
 
 ![Brand sheet](assets/nayroz-brand-sheet.png)
 
+> **2026-11-16: the logo was redrawn** (`Nayroz-Brand.zip`). The marks, icon
+> tile, favicons, lockups and social images in `public/brand/`, the site's
+> `public/website/nayroz-logo-color.svg` / `nayroz-icon.png`, and the app's launcher /
+> AppIcon / notification / in-app logo were all regenerated from it. Changes from
+> the first kit:
+> - The mark's viewBox is square and has 151/4096 padding on every side. The
+>   lockups embed it in the old mark's box using a tight viewBox, so the wordmark
+>   is untouched.
+> - `white-solid` is the kit's mono file recoloured white. The kit has no file
+>   of its own for it.
+> - The icon tile's gradient is now `#568695 → #365772`. The CSS
+>   `--brand-gradient` token was **not** changed, since the UI colours stayed as
+>   they were.
+> - The OG card keeps its background and wordmark. Only the mark area was
+>   repainted.
+
 ## Colour
 
 | Role     | Hex       | Token          | Where it is used                            |

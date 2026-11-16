@@ -11,7 +11,8 @@ import clsx from "clsx";
 
 // Native aspect ratios, from each file's viewBox. Height is the input everywhere
 // because that is what lines up with adjacent type.
-const MARK_RATIO = 149.404 / 148.962;
+// The 2026-11 kit's mark is a square viewBox (with ~3.7% built-in padding).
+const MARK_RATIO = 1;
 const LOCKUP_RATIO = {
   en: 357.434 / 148.962,
   ar: 294.499 / 148.962,
