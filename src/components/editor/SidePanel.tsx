@@ -2015,8 +2015,8 @@ function toEditorDesignFromTemplate(
               Boolean(item.textCurveEnabled) &&
               (Math.abs(toNumber(item.textCurveAmount, 0)) > 0.5 || Math.abs(toNumber(item.textCurveArcDegrees, 0)) > 0.5),
             textCurveAmount: Math.max(-200, Math.min(200, toNumber(item.textCurveAmount, 0))),
-            ...(toNumber(item.textCurveRingSpread, 0) > 0
-              ? { textCurveRingSpread: Math.min(1, toNumber(item.textCurveRingSpread, 0)) }
+            ...(toNumber(item.textCurveRingSpread, 0) !== 0
+              ? { textCurveRingSpread: Math.max(-1, Math.min(1, toNumber(item.textCurveRingSpread, 0))) }
               : {}),
             // The arc Canva actually drew; the canvas and the app both lay the text on it.
             ...(Math.abs(toNumber(item.textCurveArcDegrees, 0)) > 0.5

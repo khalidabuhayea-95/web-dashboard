@@ -13,6 +13,7 @@
  */
 import {
   buildCurvedRingStretch,
+  curvedGlyphScaleX,
   containsArabic,
   curvedTextFrame,
   isClosedRingArc,
@@ -111,7 +112,8 @@ export function measureCurvedText(input: CurvedTextPaintInput): CurvedTextMeasur
       const natural = ctx.measureText(source).width;
       const stretch = buildCurvedRingStretch(source, input.ringSpread, natural, tatweelWidth, closed);
       setTextState(ctx, font, rtl, input.letterSpacing, stretch.extraWordSpacing);
-      const advance = ctx.measureText(stretch.text).width;
+      // Below natural size the glyphs are condensed (curvedGlyphScaleX); drawFlatLine applies it.
+      const advance = ctx.measureText(stretch.text).width * curvedGlyphScaleX(input.ringSpread);
       return { source, stretch, advance, rtl };
     });
   setTextState(ctx, font, false, 0, 0);
@@ -197,6 +199,14 @@ function drawFlatLine(
   const ctx = canvas.getContext("2d") as SpacedContext | null;
   if (!ctx) return canvas;
   ctx.scale(resolution, resolution);
+  // A ring pulled below its natural size condenses the glyphs horizontally about the run's start, so
+  // the flat line is exactly [line.advance] wide (measureCurvedText already scaled it).
+  const glyphScaleX = curvedGlyphScaleX(input.ringSpread);
+  if (glyphScaleX < 0.999) {
+    ctx.translate(margin, 0);
+    ctx.scale(glyphScaleX, 1);
+    ctx.translate(-margin, 0);
+  }
   const baselineY = margin + measure.ascent;
   const spans = layer === "fill" ? lineSpans(paintOnlySpans(input.spans), lineStart, line) : [];
   if (spans.length > 0) {

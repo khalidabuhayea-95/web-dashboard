@@ -707,8 +707,9 @@ function createBaseElement(pageId: string, partial: Partial<EditorElement> = {})
     // turned into its arc once, here — that conversion reads the box width, and a curved box is
     // now derived from the arc, so leaving it live would feed back into itself.
     ...normalizedCurveArc(partial),
-    ...(Number(partial.textCurveRingSpread) > 0
-      ? { textCurveRingSpread: Math.min(1, Number(partial.textCurveRingSpread)) }
+    // −1..1: below zero the ring tightens (the app's condensed glyphs), above it opens out.
+    ...(Number.isFinite(Number(partial.textCurveRingSpread)) && Number(partial.textCurveRingSpread) !== 0
+      ? { textCurveRingSpread: Math.max(-1, Math.min(1, Number(partial.textCurveRingSpread))) }
       : {}),
     ...(partial.textBackgroundEnabled !== undefined || partial.textBackgroundColor !== undefined
       ? {

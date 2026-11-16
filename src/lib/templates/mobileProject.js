@@ -769,9 +769,10 @@ function readTextAlignment(item) {
  */
 function readCurveConfig(item) {
   const config = resolveTextCurveConfig(item);
-  // The Size slider (the app's ringSpread, 0..1); omitted at 0 so a plain curve is unchanged.
-  const ringSpread = Math.max(0, Math.min(1, numberOr(item?.textCurveRingSpread, 0)));
-  return config.enabled && ringSpread > 0 ? { ...config, ringSpread: Math.round(ringSpread * 1000) / 1000 } : config;
+  // The Size slider (the app's ringSpread, −1..1: below zero the ring tightens); omitted at 0 so a
+  // plain curve is unchanged.
+  const ringSpread = Math.max(-1, Math.min(1, numberOr(item?.textCurveRingSpread, 0)));
+  return config.enabled && ringSpread !== 0 ? { ...config, ringSpread: Math.round(ringSpread * 1000) / 1000 } : config;
 }
 
 function readLetterSpacingPx(item, fontSizePx) {

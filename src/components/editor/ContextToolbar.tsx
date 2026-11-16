@@ -1238,13 +1238,15 @@ export default function ContextToolbar() {
                 <div className="mt-3">
                   <SliderField
                     label="Size"
-                    min={0}
+                    min={-100}
                     max={100}
                     value={textCurveSizePercent}
                     display={`${textCurveSizePercent}%`}
                     disabled={!textCurveEnabled}
                     onChange={(value) =>
-                      updateSelectedElements({ textCurveRingSpread: value > 0 ? Math.min(1, value / 100) : undefined })
+                      updateSelectedElements({
+                        textCurveRingSpread: value !== 0 ? Math.max(-1, Math.min(1, value / 100)) : undefined,
+                      })
                     }
                   />
                 </div>

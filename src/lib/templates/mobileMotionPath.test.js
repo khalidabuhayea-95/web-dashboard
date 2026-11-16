@@ -146,3 +146,40 @@ test("a curved text sends its arc and its Size (ringSpread)", () => {
   assert.equal(plain.curveConfig.arcDegrees, -90);
   assert.equal("ringSpread" in plain.curveConfig, false);
 });
+
+test("a tightened ring (negative Size) reaches the app as is, clamped to −1", () => {
+  const [tight, beyond] = layersOf([
+    {
+      type: "textbox",
+      text: "يوم الأب",
+      left: 100,
+      top: 300,
+      width: 300,
+      height: 120,
+      fontSize: 60,
+      fontFamily: "Arial",
+      originX: "left",
+      originY: "top",
+      textCurveEnabled: true,
+      textCurveArcDegrees: 250,
+      textCurveRingSpread: -0.37,
+    },
+    {
+      type: "textbox",
+      text: "Hello",
+      left: 100,
+      top: 600,
+      width: 300,
+      height: 80,
+      fontSize: 50,
+      fontFamily: "Arial",
+      originX: "left",
+      originY: "top",
+      textCurveEnabled: true,
+      textCurveArcDegrees: 120,
+      textCurveRingSpread: -4,
+    },
+  ]);
+  assert.equal(tight.curveConfig.ringSpread, -0.37);
+  assert.equal(beyond.curveConfig.ringSpread, -1);
+});

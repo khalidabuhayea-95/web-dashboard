@@ -85,6 +85,63 @@ export async function translateText(text, { from = "auto", to, timeoutMs = TRANS
   throw lastError || new Error("Translate request failed.");
 }
 
+
+// ── Claude translator ────────────────────────────────────────────────────────────────────────
+// Used when ANTHROPIC_API_KEY is set: one request per chunk, answers keyed by index in JSON so a
+// shifted line can never pair a text with another text's translation (the reason the Google path
+// sends one text per request). Any chunk Claude fails on falls back to the Google path.
+const CLAUDE_MODEL = process.env.ANTHROPIC_TRANSLATE_MODEL || "claude-haiku-4-5";
+const CLAUDE_CHUNK = 60;
+const LANG_NAMES = { ar: "Arabic", en: "English" };
+
+function claudeAuthHeaders(key) {
+  return key.startsWith("sk-ant-api")
+    ? { "x-api-key": key }
+    : { Authorization: `Bearer ${key}` };
+}
+
+async function claudeTranslateChunk(texts, to, key) {
+  const target = LANG_NAMES[to] || to;
+  const numbered = Object.fromEntries(texts.map((text, index) => [String(index), text]));
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 60_000);
+  try {
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        "anthropic-version": "2023-06-01",
+        ...claudeAuthHeaders(key),
+      },
+      body: JSON.stringify({
+        model: CLAUDE_MODEL,
+        max_tokens: 8000,
+        system:
+          `You translate short labels of a graphic-design asset library (stickers, icons, illustrations, ` +
+          `template element titles and search tags) into natural ${target} as a designer would search for them. ` +
+          `Keep each label short. Single words are tags: give the closest common ${target} word, never leave it ` +
+          `untranslated unless it is a brand or proper noun. Answer ONLY with a JSON object mapping each input key ` +
+          `to its translation, same keys, nothing else.`,
+        messages: [{ role: "user", content: JSON.stringify(numbered) }],
+      }),
+      cache: "no-store",
+    });
+    if (!response.ok) throw new Error(`Claude translate failed (${response.status}).`);
+    const payload = await response.json();
+    const raw = (payload?.content || []).map((part) => part?.text || "").join("");
+    const json = JSON.parse(raw.slice(raw.indexOf("{"), raw.lastIndexOf("}") + 1));
+    const out = new Map();
+    texts.forEach((text, index) => {
+      const value = sanitizeText(json?.[String(index)]);
+      if (value) out.set(text, value);
+    });
+    return out;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /**
  * Many texts → Map(text → translation), one request per text (`concurrency` workers, each pausing
  * `delayMs` between requests). A text whose every attempt failed maps to itself and is listed in
@@ -110,6 +167,28 @@ export async function translateBatch(
   const translatedMap = new Map();
   translatedMap.failed = new Set();
   translatedMap.stopped = false;
+  const claudeKey = sanitizeText(process.env.ANTHROPIC_API_KEY);
+  if (claudeKey && unique.length) {
+    const pending = [];
+    for (const text of unique) {
+      if (skip && skip(text)) translatedMap.set(text, text);
+      else pending.push(text);
+    }
+    const leftover = [];
+    for (let start = 0; start < pending.length; start += CLAUDE_CHUNK) {
+      const chunk = pending.slice(start, start + CLAUDE_CHUNK);
+      try {
+        const answers = await claudeTranslateChunk(chunk, to, claudeKey);
+        chunk.forEach((text) => (answers.has(text) ? translatedMap.set(text, answers.get(text)) : leftover.push(text)));
+      } catch {
+        leftover.push(...chunk);
+      }
+    }
+    if (!leftover.length) return translatedMap;
+    // Whatever Claude could not answer goes through the Google path below.
+    unique.length = 0;
+    unique.push(...leftover);
+  }
   let consecutiveFailures = 0;
   let cursor = 0;
   const worker = async () => {

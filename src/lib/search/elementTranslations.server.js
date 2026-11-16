@@ -30,7 +30,11 @@ const needsArabic = (english, arabic) => LATIN_RE.test(String(english || "")) &&
 async function selectRows({ ids, limit, recheck }) {
   const where = [
     recheck
-      ? `(translation_status = 'fallback' OR title_ar !~ '${ARABIC_SQL}' OR (jsonb_array_length(tags_en) > 0 AND tags_ar::text !~ '${ARABIC_SQL}'))`
+      ? `(translation_status = 'fallback' OR title_ar !~ '${ARABIC_SQL}' OR EXISTS (
+           SELECT 1 FROM jsonb_array_elements_text(tags_en) WITH ORDINALITY AS en_tag(value, n)
+           LEFT JOIN jsonb_array_elements_text(tags_ar) WITH ORDINALITY AS ar_tag(value, n) USING (n)
+           WHERE en_tag.value ~ '[A-Za-z]' AND (ar_tag.value IS NULL OR ar_tag.value !~ '${ARABIC_SQL}')
+         ))`
       : `translation_status = 'fallback'`,
   ];
   const params = [];

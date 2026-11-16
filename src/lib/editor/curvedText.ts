@@ -6,9 +6,10 @@
  *  - a line is shaped WHOLE (joins, ligatures, bidi) and its outline is bent onto the arc — the
  *    arc's radius is whatever makes the line's advance fill `arcDegrees` (L = θ·R), centred on the
  *    box's axis with its sag centred in the band and the ink (ascent−descent middle) on the arc;
- *  - the الحجم/Size slider (`ringSpread`, 0..1) lengthens each line up to 3× — kashida (tatweel)
+ *  - the الحجم/Size slider (`ringSpread`, −1..1) lengthens each line up to 3× — kashida (tatweel)
  *    first inside Arabic words, then wider word gaps; letters are never tracked apart — so the ring
- *    grows without touching the glyphs; a closed ring (|arc| ≥ 359.5°) gets a seam space;
+ *    grows without touching the glyphs; a closed ring (|arc| ≥ 359.5°) gets a seam space; below
+ *    zero there is no run to shorten, so the glyphs are CONDENSED horizontally (to 0.5× at −1);
  *  - the box is DERIVED: the arc's bounding box per line, × the line count, plus 0.45 em padding.
  *
  * Pure geometry and text maths; the canvas side (measuring, shaping, bending) is curvedTextPaint.ts.
@@ -39,7 +40,7 @@ export function curvedTextArcDegrees(item: CurvedTextSource | null | undefined):
 }
 
 export function curvedTextRingSpread(item: CurvedTextSource | null | undefined): number {
-  return clamp(finiteOr(item?.textCurveRingSpread, 0), 0, 1);
+  return clamp(finiteOr(item?.textCurveRingSpread, 0), -1, 1);
 }
 
 /** The app's curve slider: −100..100 % of a full circle. */
@@ -237,10 +238,18 @@ export function kashidaInsertionPoints(text: string, start: number, end: number)
   return points;
 }
 
-/** How much longer the run gets at [ringSpread]: 1 … 3. */
+/** How much longer the run gets at [ringSpread]: 0.5 … 1 … 3 (the app's ringGrowthFactor). */
 export function ringGrowthFactor(ringSpread: number): number {
-  const spread = Number.isFinite(ringSpread) ? clamp(ringSpread, 0, 1) : 0;
-  return 1 + spread * (MAX_RING_GROWTH - 1);
+  const spread = Number.isFinite(ringSpread) ? clamp(ringSpread, -1, 1) : 0;
+  return spread >= 0 ? 1 + spread * (MAX_RING_GROWTH - 1) : 1 + spread * (1 - MIN_RING_COMPRESSION);
+}
+
+/** Tightest ring below natural size, as a multiple of the run's length. */
+const MIN_RING_COMPRESSION = 0.5;
+
+/** Horizontal glyph scale for a ring pulled below its natural size: 1 at or above it (the app's curvedGlyphScaleX). */
+export function curvedGlyphScaleX(ringSpread: number): number {
+  return Math.min(1, ringGrowthFactor(ringSpread));
 }
 
 export function isClosedRingArc(arcDegrees: number): boolean {

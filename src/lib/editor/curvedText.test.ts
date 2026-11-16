@@ -7,7 +7,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 
-import {
+import { curvedGlyphScaleX,
   buildCurvedRingStretch,
   canStretchCurvedRun,
   containsArabic,
@@ -129,11 +129,20 @@ test("a curve is active when enabled with more than half a degree", () => {
 
 // ── the Size slider (ring stretch) ──────────────────────────────────────────────────────────────
 
-test("ring growth: 1 at no spread, 3× at full, junk is 1", () => {
+test("ring growth: 1 at no spread, 3× at full, 0.5× at −1, junk is 1", () => {
   assert.equal(ringGrowthFactor(0), 1);
   assert.equal(ringGrowthFactor(1), 3);
   assert.equal(ringGrowthFactor(Number.NaN), 1);
-  assert.equal(ringGrowthFactor(-1), 1);
+  // Below zero the ring tightens (the app's rule, 2026-11-16).
+  assert.equal(ringGrowthFactor(-1), 0.5);
+  assert.equal(ringGrowthFactor(-2), 0.5);
+});
+
+test("a tightened ring condenses the glyphs; a grown one never touches them", () => {
+  assert.equal(curvedGlyphScaleX(-1), 0.5);
+  assert.equal(curvedGlyphScaleX(-0.5), 0.75);
+  assert.equal(curvedGlyphScaleX(0), 1);
+  assert.equal(curvedGlyphScaleX(1), 1);
 });
 
 test("a closed ring is ±360°, not 327.6°", () => {
