@@ -302,3 +302,46 @@ Magnific: free web generator only (Nano Banana 2.1, 1K), 0 credits used.
 - Fixed with Magnific free generator (0 credits): 6 new 3D teachers, 17 unique school objects (bell, abacus, microscope, crayons, apple, trophy, bulb, diploma, quill, notebook, hourglass, sprout-book, palette, telescope, magnifier, backpack, geometry set, hanging pencils), 5 new backgrounds, 3 new real photos for frames. T04 arches → rounded cards. T28 typo fixed.
 - Lesson: check media-ID reuse across the whole batch before handing links; T26 cards must match their words (العلم/الصبر/العطاء → notebook/hourglass/sprout).
 - Links: Desktop/canva-batch-teacher-day-1.txt (12 clean) + canva-batch-teacher-day-2.txt (18 fixed).
+
+## Batch FD — Father's Day F01–F30 (2026-11-13)
+- Audit: same frame photo in 7 frames; repeated cutouts (3D father-son ×3, wallet ×3, gift ×3, father-daughter ×2); arches in F02/F10/F22/F30. Backgrounds kept (Ali's choice).
+- Fixes: arches → rounded cards (F02, F10, F22, F30). New unique frame photos F07, F08, F13 (tie-tying, fits «الرجولة مواقف»), F16 (reading to daughter), F24 (daughter on shoulders, fits «ابتسامتك»), F25 (bike lesson). New cutouts F27/F28/F30 (Magnific 3D), F17 sapling, F23 book + heart hands, F24 white roses.
+- Lesson: match each new photo to the card's own line (son vs daughter, the specific value) before placing it; check queued prompts for repeats across both generators.
+- Links: Desktop/canva-batch-fathers-day.txt (30).
+
+## Batch AR — Arabic Language Day AR01–AR30 (2026-11-13)
+- Audit: book stack ×4, reed pen ×4, open book ×2, quill+inkwell ×2, gold brush ×2, ornamental ring ×2, duplicate headline «اقرأ بالعربية», arches AR09/AR16, near-black video bg AR05, AR09 "with logo" had no logo slot. Repeated backgrounds kept (Ali's choice).
+- Fixes: AR04 gramophone (أصوات), AR22 reading armchair (بيت يقرأ), AR25 laurel wreath + chalkboard (شكراً معلّم), AR02 globe (بين لغات العالم), AR18 astrolabe (حضارة), AR27 qalamdan, AR17 magnifier on the word card, AR14 pencil cup, AR26 highlighter band, AR20 headline → «القراءةُ حياة», AR09/AR16 arches → rounded cards, AR09 replaceable logo slot, AR05 plum tint over video.
+- Kept single copies: books AR08, reed pen AR21, gold brush AR03, ring AR11, open book AR19.
+- Lesson: when swapping a motif, check it doesn't duplicate another card's motif (avoided a 3rd speech bubble next to AR12/AR30).
+- Links: Desktop/canva-batch-arabic-language-day.txt (30).
+
+## Batch FR — Friendship Day FR01–FR30 (29 designs, FR23 missing) (2026-11-13)
+- Audit: FR03's two photos reused in FR04 and FR21; FR11 background had ghost/blur figures; FR07 near-black brick; silhouettes-of-two-friends concept ×3 (FR01, FR11, FR19); coffee concept ×2 (FR02, FR08).
+- Fixes: FR04 new photo (friends sharing earphones), FR21 two new circle photos (beach selfie, baking), FR11 new picnic background + dark title (renamed «نزهة الأصدقاء»), FR07 berry tint over the dark wall.
+- Kept: FR01/FR19 silhouettes (now 2), FR02/FR08 coffee (flagged to Ali).
+- Links: Desktop/canva-batch-friendship-day.txt (29).
+
+## Batch MD — Mother's Day M01–M30 (Canva folder FAHaQM6L5oI) (2026-11-13)
+- Audit: the same rose bouquet / single rose / gift box cutouts repeated across ~15 designs; two frame photos reused (M20 = M28-left, M21 = M28-right); arches in M04/M30; generic duplicate headlines. Backgrounds kept (Ali's choice).
+- Fixes (Magnific free queue, 0 credits): each object now matches its card's line — M02 braiding hair, M03 handkerchief, M05 bow, M09 hug, M10 mirror («أجملُ صورة»), M11 misbaha («الدعاء الذي لا ينقطع»), M12 shopping bag (offers), M15 peony vase («أنتِ الوردُ كلّه»), M16 pearl necklace, M19 sealed envelope («رسالة إلى أمي»), M21 tiara («تاجُ رأسي»), M23 orchid (corporate), M24 baby booties («نبقى صغاراً»), M04 white lily, M08 perfume («هديتي لأمي»), M30 new object. New photos: M04, M20 (son kissing his mother's forehead), M28 (cooking with daughter + newborn). Arches M04/M30 → rounded cards. Headline rewrites M10/M13/M18/M20/M22.
+- Kept single copies: M06 heart wreath, M25 gift, M26 bouquet, M18 3D rose, M22 3D mother, M29 family photo.
+- Lesson: insert_fill needs page_id; update_fill keeps the old rotation → for rotated cutouts, delete + insert_fill instead.
+- Links: Desktop/canva-batch-mothers-day.txt (30).
+
+## Batch JO (all) — Jordan Independence Day JO01–JO80, 78 designs (JO23, JO31 not in folder) — pre-import review 2026-11-14
+- Audit found heavy reuse: 9 portraits across 33 personal designs (up to 5× each); lockup «عيد الاستقلال الأردني» ×9 and «عيد الاستقلال» ×7; JO01–JO20 repeat JO21–JO40 subjects and photos (mansaf, shemagh, headphones, kunafa, Roman theatre); falconer ×2, gold 25 ×2, tatreez strip ×4.
+- Ali chose to include JO01–JO20 after fixing them, then stopped the dedupe pass part-way («خليهم زي ما همة»).
+- Fixed before the stop: JO05, JO06, JO10 drawn flags → real Canva flags (JO10 rebuilt on cream, near-black band removed); JO20 scalloped frame → circle; new portraits + new calligraphy lockups on JO17 «فخر الأردن», JO18 «وطني الأردن», JO20 «الأردن في القلب»; new lockups JO09 «عيدك يا وطن», JO10 «هنا الأردن», JO49 «بلادي بلادي».
+- Left as is (Ali's call): remaining portrait/lockup/object repeats listed above.
+- Lesson: check media-ID reuse before handing a batch over, not after; a free-queue dedupe of 90+ assets takes hours.
+- Links: Desktop/canva-batch-jordan-all.txt (78, JO01 → JO80 in order).
+
+## Batch EF — Eid al-Fitr greetings EF01–EF31 (Canva folder FAHa6tDpWQU) (2026-11-15)
+- Source: 31 Andalusi picks (3, 6, 9, 15, 16, 17, 19, 20, 21, 29, 30, 38, 99, 108, 112, 121, 122, 124, 126, 138, 146, 147, 148, 155, 163, 164, 179, 182, 184, 188, 189); every headline unique across the batch.
+- Formats: 10 square, 1 post 4:5, 20 story. Photo slots are real Canva frames, all full circles (no arch/dome/leaf frames); no lanterns (Eid, not Ramadan); no pure black.
+- Art: Magnific free queue + Canva generate-image in parallel (0 Magnific credits). Canva image gen cannot write Arabic → garbled lettering replaced by editable Lalezar text (EF10, EF17).
+- Fixes during build: green despill limited to near-background (EF08 letters), EF12 offer text anchoring, EF23 crop gap (zoom), EF31 face circle moved down onto the sketch neck.
+- Animation: Canva built-ins only, entrance on elements, nothing on backgrounds; cards share one animation with their text (EF22, EF24), ring+frame share (EF01, EF04, EF29), EF31 face = fade.
+- Lesson: __post only pairs text with short plates; tall cards need a manual pass (set texts to the card's animation).
+- Links: Desktop/canva-batch-eid-fitr.txt (31).
