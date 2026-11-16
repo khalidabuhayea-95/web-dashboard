@@ -11,9 +11,13 @@ permissions:
   contents: read
   packages: write
 
+# A running build always finishes, so its commit gets an image that deploy.sh can pin. If more
+# pushes arrive meanwhile, only the newest waits (GitHub replaces an older pending run).
+# cancel-in-progress used to be true; with pushes close together, every build was cancelled
+# by the next one and no image ever finished.
 concurrency:
   group: docker-image
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   image:
