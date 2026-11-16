@@ -103,7 +103,7 @@ export const DEFAULT_MODEL_PRICES_MICROS = {
   "nightmareai/real-esrgan": 2_000,
   "alexgenovese/upscaler": 4_000, // ESTIMATE (T4, per-second)
   "allenhooo/lama": 520, // ESTIMATE (T4, ~3s)
-  "selfhost/fine-tashkeel": 200, // ESTIMATE (text op, ~1 CPU-second; $0 on a local/dev box)
+  "local/ichkil-0.3.0": 0, // tashkeel in process on our own server: no per-call cost
   "selfhost/real-esrgan": 1_000, // ESTIMATE (our worker: ~1.5 GPU-seconds; $0 on a local/dev box)
   "selfhost/lama": 2_000, // ESTIMATE (our worker: serverless GPU-seconds; $0 while a local/dev box serves it)
   "zylim0702/remove-object": 910, // ESTIMATE (T4, ~5s)

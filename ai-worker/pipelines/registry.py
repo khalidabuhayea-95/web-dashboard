@@ -14,7 +14,6 @@ OPS = {
     "remove-bg": "pipelines.remove_bg",
     "edit": "pipelines.edit",
     "generate": "pipelines.generate",
-    "tashkeel": "pipelines.tashkeel",
 }
 
 

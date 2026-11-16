@@ -49,18 +49,6 @@ def fetch_small():
         print(f"warning: lama pre-cache failed: {error}", file=sys.stderr)
 
 
-# Fine-Tashkeel (ByT5, MIT): the only model production calls today (POST /api/mobile/text/tashkeel).
-# ~2.7 GB, so it is baked into the image; downloading it on a cold start would take minutes.
-TASHKEEL_REPO = os.environ.get("TASHKEEL_MODEL", "basharalrfooh/Fine-Tashkeel")
-
-
-def fetch_tashkeel():
-    from huggingface_hub import snapshot_download
-
-    print(f"caching {TASHKEEL_REPO} ...")
-    snapshot_download(TASHKEEL_REPO, token=os.environ.get("HF_TOKEN") or None)
-
-
 def fetch_diffusion():
     from huggingface_hub import snapshot_download
 
@@ -73,13 +61,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--small", action="store_true")
     parser.add_argument("--diffusion", action="store_true")
-    parser.add_argument("--tashkeel", action="store_true")
     args = parser.parse_args()
     if args.small:
         fetch_small()
-    if args.tashkeel:
-        fetch_tashkeel()
     if args.diffusion:
         fetch_diffusion()
-    if not (args.small or args.diffusion or args.tashkeel):
+    if not (args.small or args.diffusion):
         parser.print_help()

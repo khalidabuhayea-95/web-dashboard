@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
           durationMs: Date.now() - startedAt,
         });
         return {
-          usage: { provider: result.provider, model: `selfhost/${result.model}` },
+          usage: { provider: result.provider, model: `${result.provider}/${result.model}` },
           headers: { "Content-Type": "application/json" },
           body: new TextEncoder().encode(JSON.stringify({ text: result.text })),
         };

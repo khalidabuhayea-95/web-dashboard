@@ -108,14 +108,10 @@ Backups images.
 
 ## AI worker (optional)
 
-Production does not need it. Tashkeel runs in-process (`TASHKEEL_PROVIDER` unset = ichkil),
-and image AI uses Replicate. The `ai-worker/` image (RunPod Serverless) is only needed if one of
-these is switched on:
-- `TASHKEEL_PROVIDER=selfhost`, for the old Fine-Tashkeel path;
-- the `selfhost/*` object-removal or upscale models.
-
-In that case:
-1. Build the lean image (tashkeel + CPU-class weights, no diffusion models):
+Production does not need it. Tashkeel runs in-process (ichkil), and image AI uses Replicate. The
+`ai-worker/` image (RunPod Serverless) is only needed if a `selfhost/*` image model
+(object removal, upscale) is switched on in the AI settings. In that case:
+1. Build the lean image (CPU-class weights, no diffusion models):
    ```bash
    docker build --platform linux/amd64 --build-arg BAKE_DIFFUSION=0 -t <registry>/nayroz-ai-worker ai-worker
    ```

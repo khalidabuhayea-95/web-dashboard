@@ -1,17 +1,9 @@
-// Arabic diacritization (التشكيل).
+// Arabic diacritization (التشكيل), in process with ichkil: an ONNX model on the app server's own
+// CPU, a few milliseconds per text, nothing else to host. See ichkil.server.ts.
 //
 // Text in, the same text with harakat restored. The model only ADDS marks and must never
 // rewrite words, so this layer refuses any result whose letters changed.
-//
-// Provider (TASHKEEL_PROVIDER):
-//   - "ichkil" (default): in-process ONNX on the app server's CPU. A few ms, nothing to host,
-//     no GPU. See ichkil.server.ts for the benchmark.
-//   - "selfhost": the previous path, Fine-Tashkeel on our ai-worker (SELFHOST_AI_URL, a GPU).
 
-import {
-  isSelfhostConfigured,
-  selfhostRunSync,
-} from "@/lib/media/selfhost/client.server";
 import { ICHKIL_MODEL_ID, ichkilDiacritize } from "@/lib/text/tashkeel/ichkil.server";
 
 export const TASHKEEL_MAX_CHARS = 600;
@@ -57,10 +49,6 @@ export function normalizeTashkeelInput(value: unknown): string {
   return text;
 }
 
-export function tashkeelProvider(): "ichkil" | "selfhost" {
-  return String(process.env.TASHKEEL_PROVIDER || "").trim().toLowerCase() === "selfhost" ? "selfhost" : "ichkil";
-}
-
 function lettersOf(value: string): string {
   return stripArabicDiacritics(value).normalize("NFC").replace(/\s+/g, "");
 }
@@ -76,51 +64,16 @@ function assertLettersKept(input: string, result: string) {
 }
 
 export async function diacritizeArabicText(text: string) {
-  if (tashkeelProvider() === "ichkil") {
-    const startedAt = Date.now();
-    const result = await ichkilDiacritize(text).catch((error) => {
-      throw new TashkeelError(error instanceof Error ? error.message : "Diacritization failed.", {
-        status: 503,
-        code: "provider_unavailable",
-      });
-    });
-    if (!result.trim()) {
-      throw new TashkeelError("Diacritization returned no text.", { status: 502 });
-    }
-    assertLettersKept(text, result);
-    return { text: result, model: ICHKIL_MODEL_ID, provider: "local", durationMs: Date.now() - startedAt };
-  }
-  return diacritizeWithSelfhost(text);
-}
-
-async function diacritizeWithSelfhost(text: string) {
-  if (!isSelfhostConfigured()) {
-    throw new TashkeelError("Diacritization is not configured (set SELFHOST_AI_URL).", {
+  const startedAt = Date.now();
+  const result = await ichkilDiacritize(text).catch((error) => {
+    throw new TashkeelError(error instanceof Error ? error.message : "Diacritization failed.", {
       status: 503,
       code: "provider_unavailable",
     });
-  }
-
-  const output = await selfhostRunSync({ op: "tashkeel", text }, { timeoutMs: 60_000 }).catch(
-    (error) => {
-      throw new TashkeelError(
-        error instanceof Error ? error.message : "Diacritization failed.",
-        { status: 502, code: "provider_failed" }
-      );
-    }
-  );
-
-  const result = String(output.text || "").trim();
-  if (!result) {
+  });
+  if (!result.trim()) {
     throw new TashkeelError("Diacritization returned no text.", { status: 502 });
   }
-  // Fine-Tashkeel is generative: a bad sample can paraphrase instead of marking up.
   assertLettersKept(text, result);
-
-  return {
-    text: result,
-    model: String(output.model || "fine-tashkeel"),
-    provider: "selfhost",
-    durationMs: Number(output.duration_ms) || 0,
-  };
+  return { text: result, model: ICHKIL_MODEL_ID, provider: "local", durationMs: Date.now() - startedAt };
 }

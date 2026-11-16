@@ -18,11 +18,8 @@ COPY scripts/download_weights.py scripts/download_weights.py
 ENV HF_HOME=/app/hf-cache
 RUN python scripts/download_weights.py --small
 
-# Fine-Tashkeel (~2.7 GB): the model production uses today. Baked so a cold worker starts fast.
-RUN python scripts/download_weights.py --tashkeel
-
-# Heavy diffusion weights (~40GB with Qwen bf16). Production only needs tashkeel today, so build
-# the lean image with --build-arg BAKE_DIFFUSION=0 (docs/deploy-hetzner.md, "AI worker").
+# Heavy diffusion weights (~40GB with Qwen bf16). Build without them (--build-arg
+# BAKE_DIFFUSION=0) when only the CPU-class ops are switched on (docs/deploy-hetzner.md, "AI worker").
 # Uses HF_TOKEN build secret if a repo needs auth (none of ours do today).
 ARG BAKE_DIFFUSION=1
 RUN if [ "$BAKE_DIFFUSION" = "1" ]; then python scripts/download_weights.py --diffusion; fi
