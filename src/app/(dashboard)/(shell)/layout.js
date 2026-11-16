@@ -3,10 +3,10 @@ import { BellRing } from "lucide-react";
 
 import Button from "@/components/ui/button";
 import { NayrozIcon } from "@/components/brand/NayrozLogo";
-import SignOutButton from "@/app/login/SignOutButton";
+import SignOutButton from "@/components/dashboard/SignOutButton";
 import { requireRole, Roles } from "@/lib/auth/roles";
 import { buildDashboardNavItems } from "@/lib/dashboard/navItems.server";
-import DashboardNav from "@/app/(dashboard)/DashboardNav";
+import DashboardNav from "@/components/dashboard/DashboardNav";
 
 // Auth-gated, per-user pages (the layout calls requireRole → DB). They must be
 // rendered on demand, never statically prerendered at build time.

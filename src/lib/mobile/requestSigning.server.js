@@ -33,7 +33,7 @@ const DEFAULT_MODE = "report";
 // A mismatch kind is logged on its first occurrence, then at most once per window, with counts.
 const REPORT_INTERVAL_MS = 60_000;
 // Public documentation, readable without the app.
-const EXEMPT_PATHS = new Set(["/api/mobile/openapi"]);
+const EXEMPT_PATHS = new Set(["/api/mobile/openapi", "/v1/mobile/openapi"]);
 
 const OUTCOMES = [
   "verified",

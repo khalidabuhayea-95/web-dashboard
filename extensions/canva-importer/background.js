@@ -60,12 +60,17 @@ function numberOr(value, fallback = 0) {
   return Number.isFinite(numeric) ? numeric : fallback;
 }
 
+const DEFAULT_DASHBOARD_URL = "http://admin.localhost:3000";
+
 function normalizeDashboardUrl(raw) {
-  const value = String(raw || "").trim() || "http://localhost:3000";
+  const value = String(raw || "").trim() || DEFAULT_DASHBOARD_URL;
   const parsed = new URL(value);
   if (!/^https?:$/.test(parsed.protocol)) {
     throw new Error("Dashboard URL must start with http:// or https://");
   }
+  // localhost is the marketing website since the web project's surfaces split (web-dashboard
+  // src/lib/surfaces.js); the dashboard — and its import API — is admin.localhost on the same port.
+  if (parsed.hostname === "localhost") parsed.hostname = "admin.localhost";
   return parsed.toString().replace(/\/$/, "");
 }
 

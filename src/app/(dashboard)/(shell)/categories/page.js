@@ -1,4 +1,4 @@
-import SettingsClient from "@/app/(dashboard)/settings/SettingsClient";
+import SettingsClient from "@/app/(dashboard)/(shell)/settings/SettingsClient";
 import { requireRole, Roles } from "@/lib/auth/roles";
 
 export const metadata = {

@@ -8,6 +8,7 @@
     "start": "next start",
     "worker": "node --import tsx scripts/worker.ts",
     "lint": "eslint && npm run check:mobile-openapi",
+    "test:surfaces": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test src/lib/surfaces.test.js",
     "check:mobile-openapi": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/check-mobile-openapi-coverage.mjs",
     "import:canva": "node scripts/import-canva-template.mjs",
     "backfill:background-previews": "node scripts/backfill-background-previews.mjs",

@@ -1,3 +1,4 @@
+import { readSurfaceConfig, resolveVersionedApiPath } from "../surfaces.js";
 import {
   DESIGN_SYNC_TAG,
   designSyncOpenApiPaths,
@@ -151,6 +152,23 @@ function uniqueServers(...urls) {
       result.push({ url });
     });
   return result;
+}
+
+/**
+ * The spec as the versioned public API sees it: `/api/mobile/x` becomes `/mobile/x` under a
+ * `<origin>/v1` server, and routes the public API does not serve under that version (the
+ * website's /api/contact) are left out. Served for GET /v1/mobile/openapi.
+ */
+export function toVersionedOpenApiSpec(spec, version, ...origins) {
+  const paths = {};
+  for (const [key, value] of Object.entries(spec.paths || {})) {
+    if (!key.startsWith("/api/")) continue;
+    const publicPath = key.slice("/api".length);
+    if (!resolveVersionedApiPath(`/${version}${publicPath}`)) continue;
+    paths[publicPath] = value;
+  }
+  const servers = uniqueServers(...origins).map(({ url }) => ({ url: `${url}/${version}` }));
+  return { ...spec, servers, paths };
 }
 
 const localeHeaderParameters = [
@@ -2609,7 +2627,7 @@ export function buildMobileOpenApiSpec(serverOrigin) {
       description:
         "Mobile APIs for published templates, elements, fonts, and media tools. Read-oriented routes are public; account and AI routes take the session's bearer token.\n\n**Outages:** any mobile route can answer 503 `service_unavailable` (no-store, `Retry-After`) when a backing service is down — retry later; it never means the session is invalid.\n\n**Request signing (report-only):** a client may sign each request with `x-mobile-key`, `x-mobile-ts` (unix ms or s) and `x-mobile-sign` = hex HMAC-SHA256 of `METHOD\\npath\\nsearch\\ntimestamp` (`search` includes the leading `?`, empty when none). The server verifies and counts every signature but does NOT reject unsigned or mis-signed requests unless it runs with `MOBILE_REQUEST_SIGNING_MODE=enforce`, which then answers 401 `invalid_request_signature`.\n\nThe **Website** tag covers public endpoints that back nayroz.com rather than the app — they are documented here so one page describes every public surface.",
     },
-    servers: uniqueServers(serverOrigin, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
+    servers: uniqueServers(serverOrigin, readSurfaceConfig().origins.api, process.env.NEXT_PUBLIC_APP_URL, "http://127.0.0.1:3000"),
     tags: [
       { name: "Mobile App Settings" },
       { name: "Mobile Auth" },

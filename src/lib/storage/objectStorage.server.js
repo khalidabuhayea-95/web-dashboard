@@ -10,6 +10,7 @@ import {
   PutObjectCommand,
 } from "@aws-sdk/client-s3";
 import { S3Client } from "@aws-sdk/client-s3";
+import { allSurfaceHosts } from "../surfaces.js";
 import { Hash } from "@smithy/hash-node";
 import { HttpRequest } from "@smithy/protocol-http";
 import { SignatureV4 } from "@smithy/signature-v4";
@@ -158,6 +159,9 @@ export function getStoragePublicHostnames() {
       // Ignore malformed optional env values.
     }
   }
+
+  // nayroz.com / admin.nayroz.com / api.nayroz.com all serve /api/storage/public.
+  for (const host of allSurfaceHosts()) hosts.add(host);
 
   return hosts;
 }

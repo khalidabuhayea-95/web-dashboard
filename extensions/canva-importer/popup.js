@@ -37,8 +37,10 @@ function setStatus(message, type = "") {
   node.className = `status ${type}`.trim();
 }
 
+const DEFAULT_DASHBOARD_URL = "http://admin.localhost:3000";
+
 function normalizeDashboardUrl(raw) {
-  const value = String(raw || "").trim() || "http://localhost:3000";
+  const value = String(raw || "").trim() || DEFAULT_DASHBOARD_URL;
   let parsed = null;
   try {
     parsed = new URL(value);
@@ -48,6 +50,9 @@ function normalizeDashboardUrl(raw) {
   if (!/^https?:$/.test(parsed.protocol)) {
     throw new Error("Dashboard URL must start with http:// or https://");
   }
+  // localhost is the marketing website since the web project's surfaces split (web-dashboard
+  // src/lib/surfaces.js); the dashboard — and its import API — is admin.localhost on the same port.
+  if (parsed.hostname === "localhost") parsed.hostname = "admin.localhost";
   return parsed.toString().replace(/\/$/, "");
 }
 
@@ -92,7 +97,13 @@ function formatPhaseTimings(phaseTimings) {
 }
 
 function applySettings(settings = {}) {
-  $("dashboardUrl").value = settings.dashboardUrl || "http://localhost:3000";
+  let dashboardUrl = settings.dashboardUrl || DEFAULT_DASHBOARD_URL;
+  try {
+    dashboardUrl = normalizeDashboardUrl(settings.dashboardUrl);
+  } catch (_error) {
+    // Show the stored value as-is so it can be corrected.
+  }
+  $("dashboardUrl").value = dashboardUrl;
   $("importToken").value = settings.importToken || "";
   $("templateName").value = settings.templateName || "";
   $("templateSlug").value = settings.templateSlug || "";

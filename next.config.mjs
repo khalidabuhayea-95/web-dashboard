@@ -17,6 +17,10 @@ const nextConfig = {
   // runs the type check. Type/lint checks run via `npx tsc --noEmit` and `npm run lint`.
   // (Next 16's build no longer runs ESLint, so there is no `eslint` option to set here.)
   typescript: { ignoreBuildErrors: true },
+  // Dev only: the surfaces split (src/lib/surfaces.js) serves the dashboard on admin.localhost and
+  // the API on api.localhost. Next blocks dev-server resources (HMR, /_next chunks) requested from
+  // hosts other than localhost unless they are listed here.
+  allowedDevOrigins: ["*.localhost"],
   experimental: {
     // Needed for large PSD/PDF uploads routed through Next proxy/middleware (200MB PSD cap in
     // route.ts) and for Canva extension imports: a 163-element illustration collage arrives as

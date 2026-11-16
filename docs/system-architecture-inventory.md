@@ -21,9 +21,9 @@ Core application path: `/Users/khalidabuhayea/AndroidStudioProjects/web-dashboar
 
 | Component | Responsibility | Main files |
 |---|---|---|
-| Dashboard shell | Authenticated app shell, left navigation, top user bar | `src/app/(dashboard)/layout.js`, `src/app/(dashboard)/DashboardNav.js` |
-| Dashboard pages | Templates, Canva Import, Vector Import, Settings, Users, Analytics, Push, Design System | `src/app/(dashboard)/**/page.js`, `*Client.js` |
-| Editor Pro shell | Editor route protection + shell composition | `src/app/(editor)/layout.js`, `src/app/(editor)/editor-pro/page.tsx` |
+| Dashboard shell | Authenticated app shell, left navigation, top user bar | `src/app/(dashboard)/(shell)/layout.js`, `src/app/(dashboard)/(shell)/DashboardNav.js` |
+| Dashboard pages | Templates, Canva Import, Vector Import, Settings, Users, Analytics, Push, Design System | `src/app/(dashboard)/(shell)/**/page.js`, `*Client.js` |
+| Editor Pro shell | Editor route protection + shell composition | `src/app/(dashboard)/(editor)/layout.js`, `src/app/(dashboard)/(editor)/editor-pro/page.tsx` |
 | Editor UI composition | Toolbar, SidePanel, Properties, Timeline, canvas stage | `src/components/editor/EditorLayout.tsx` |
 | Canvas engine | Render/manipulate text/image/video/shapes, selection, transform, clipping to page | `src/components/editor/CanvasEditor.tsx` |
 | Editor state store | Central state/actions/history/template meta/font registry | `src/store/editorStore.ts` |

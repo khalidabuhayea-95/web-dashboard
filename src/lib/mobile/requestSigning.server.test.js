@@ -19,12 +19,15 @@ import { proxy } from "@/proxy";
 const CONFIG = { keyId: "test-key-id", secret: "test-signing-secret" };
 const NOW = Date.UTC(2026, 9, 2, 12, 0, 0);
 
-function signedRequest(path, { keyId = CONFIG.keyId, secret = CONFIG.secret, timestamp = NOW, method = "GET" } = {}) {
-  const url = new URL(`http://localhost${path}`);
+function signedRequest(
+  path,
+  { keyId = CONFIG.keyId, secret = CONFIG.secret, timestamp = NOW, method = "GET", origin = "http://localhost" } = {},
+) {
+  const url = new URL(`${origin}${path}`);
   const signature = signMobileRequest({ method, path: url.pathname, search: url.search, timestamp, secret });
   return new NextRequest(url, {
     method,
-    headers: { "x-mobile-key": keyId, "x-mobile-ts": String(timestamp), "x-mobile-sign": signature },
+    headers: { host: url.host, "x-mobile-key": keyId, "x-mobile-ts": String(timestamp), "x-mobile-sign": signature },
   });
 }
 
@@ -121,19 +124,35 @@ test("the proxy: report mode lets an unsigned app request through; enforce answe
   process.env.MOBILE_API_SIGNING_SECRET = CONFIG.secret;
   const quiet = [captureConsole("log"), captureConsole("warn"), captureConsole("info")];
   try {
-    const reported = await proxy(new NextRequest("http://localhost/api/mobile/templates/taxonomy"));
+    // App traffic reaches the API by IP (simulator, emulator, LAN) or on the API host — bare
+    // localhost is the website since the surfaces split (src/lib/surfaces.js). Routing reads the
+    // Host header (NextRequest itself reports 127.0.0.1 as localhost), so requests carry one.
+    const API = "http://127.0.0.1:3000";
+    const at = (url) => new NextRequest(url, { headers: { host: new URL(url).host } });
+    const reported = await proxy(at(`${API}/api/mobile/templates/taxonomy`));
     assert.equal(reported.headers.get("x-middleware-next"), "1", "passed through to the route");
 
     process.env.MOBILE_REQUEST_SIGNING_MODE = "enforce";
-    const rejected = await proxy(new NextRequest("http://localhost/api/mobile/templates/taxonomy"));
+    const rejected = await proxy(at(`${API}/api/mobile/templates/taxonomy`));
     assert.equal(rejected.status, 401);
     assert.equal((await rejected.json()).code, "invalid_request_signature");
     assert.equal(rejected.headers.get("cache-control"), "no-store");
 
-    const signed = await proxy(signedRequest("/api/mobile/templates/taxonomy", { timestamp: Date.now() }));
+    const signed = await proxy(signedRequest("/api/mobile/templates/taxonomy", { timestamp: Date.now(), origin: API }));
     assert.equal(signed.headers.get("x-middleware-next"), "1");
 
-    const dashboard = await proxy(new NextRequest("http://localhost/api/templates"));
+    // Versioned public path: checked against the path the client called and signed (/v1/...).
+    const versionedUnsigned = await proxy(at("http://api.localhost:3000/v1/mobile/templates/taxonomy"));
+    assert.equal(versionedUnsigned.status, 401);
+    const versionedSigned = await proxy(
+      signedRequest("/v1/mobile/templates/taxonomy", { timestamp: Date.now(), origin: "http://api.localhost:3000" }),
+    );
+    assert.equal(versionedSigned.status, 200);
+    assert.match(versionedSigned.headers.get("x-middleware-rewrite") || "", /\/api\/mobile\/templates\/taxonomy$/);
+    const versionedSpec = await proxy(at("http://api.localhost:3000/v1/mobile/openapi"));
+    assert.notEqual(versionedSpec.status, 401, "the versioned spec is public too");
+
+    const dashboard = await proxy(at(`${API}/api/templates`));
     assert.equal(dashboard.headers.get("x-middleware-next"), "1", "non-mobile routes are never checked");
   } finally {
     quiet.forEach((spy) => spy.restore());

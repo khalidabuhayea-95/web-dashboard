@@ -22,7 +22,7 @@ One URL, three behaviours:
 | iOS, app installed, AASA valid, link **tapped** | App opens on the template |
 | iOS, URL **pasted** into Safari | Web page — iOS never hands pasted URLs to apps |
 | iOS, link tapped on a page already on `nayroz.com` | Web page — same-domain taps do not trigger Universal Links |
-| No app / desktop / in-app browser | Web page (`src/app/t/[ref]/page.js`) |
+| No app / desktop / in-app browser | Web page (`src/app/(website)/t/[ref]/page.js`) |
 
 The landing page is therefore the fallback, not a redirector. Its "افتح القالب في
 تطبيق نيروز" button links to `nayroz://template?id=<ref>` rather than to the same
@@ -43,7 +43,7 @@ Visibility matches the mobile API exactly: `resolveTemplateAudience().statusWher
 
 ### `apple-app-site-association` (iOS)
 
-Route handler at `src/app/.well-known/apple-app-site-association/route.js`, served
+Route handler at `src/app/(website)/.well-known/apple-app-site-association/route.js`, served
 at `/.well-known/apple-app-site-association` as `application/json`, no extension.
 
 It is a route handler and not a file in `public/` on purpose: an extensionless
@@ -110,7 +110,7 @@ the placeholder baked in.
 
 ### 3. App Store id (landing page)
 
-`src/app/t/[ref]/appStores.js` → `APP_STORE_APP_ID = "REPLACE_WITH_APP_STORE_ID"`.
+`src/app/(website)/t/[ref]/appStores.js` → `APP_STORE_APP_ID = "REPLACE_WITH_APP_STORE_ID"`.
 The numeric id is assigned by App Store Connect on first submission and exists
 nowhere in either repo. Replace it with the digits from App Store Connect → *App
 Information* → **Apple ID**; `APP_STORE_URL` switches from the interim

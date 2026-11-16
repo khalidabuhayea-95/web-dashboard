@@ -22,7 +22,7 @@ import {
   X,
 } from "lucide-react";
 
-import DashboardNav from "@/app/(dashboard)/DashboardNav";
+import DashboardNav from "@/components/dashboard/DashboardNav";
 import { NayrozIcon } from "@/components/brand/NayrozLogo";
 import {
   cx,
