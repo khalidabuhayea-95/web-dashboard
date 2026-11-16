@@ -1,0 +1,71 @@
+#cloud-config
+# First-boot setup for the Nayroz production server (Hetzner Cloud, Ubuntu 24.04).
+# Paste this file into "Cloud config" when creating the server (docs/deploy-hetzner.md).
+# Hetzner puts the SSH key you select into root; it is copied to the `deploy` user below, and
+# root/password logins are then switched off.
+#
+# Results:
+#   - a `deploy` user (sudo, docker group) with root's SSH key
+#   - Docker Engine + compose plugin (Docker's own apt repository)
+#   - 4 GB swap: headroom for Chromium imports and ffmpeg spikes on an 8 GB box
+#   - unattended security upgrades, fail2ban for SSH
+#   - /srv/nayroz (compose files, .env.production, local DB dumps) owned by deploy
+#   - a nightly database backup at 02:30 UTC (deploy/backup-db.sh, copied in by deploy.sh)
+#
+# The network firewall is the Hetzner Cloud Firewall (22/80/443 only), not ufw: Docker's
+# published ports bypass ufw's rules.
+
+package_update: true
+package_upgrade: true
+packages:
+  - ca-certificates
+  - curl
+  - gnupg
+  - fail2ban
+  - unattended-upgrades
+  - rsync
+
+swap:
+  filename: /swapfile
+  size: 4G
+
+users:
+  - default
+  - name: deploy
+    shell: /bin/bash
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+
+write_files:
+  - path: /etc/ssh/sshd_config.d/10-nayroz.conf
+    permissions: "0644"
+    content: |
+      PasswordAuthentication no
+      KbdInteractiveAuthentication no
+      PermitRootLogin no
+  - path: /etc/cron.d/nayroz-db-backup
+    permissions: "0644"
+    content: |
+      SHELL=/bin/bash
+      PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+      30 2 * * * deploy [ -x /srv/nayroz/backup-db.sh ] && /srv/nayroz/backup-db.sh >> /srv/nayroz/backups/backup.log 2>&1
+  - path: /etc/docker/daemon.json
+    permissions: "0644"
+    content: |
+      { "log-driver": "json-file", "log-opts": { "max-size": "20m", "max-file": "5" } }
+
+runcmd:
+  # Docker Engine from Docker's official apt repository.
+  - install -m 0755 -d /etc/apt/keyrings
+  - curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+  - chmod a+r /etc/apt/keyrings/docker.asc
+  - echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" > /etc/apt/sources.list.d/docker.list
+  - apt-get update
+  - apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+  - systemctl enable --now docker
+  - usermod -aG docker deploy
+  # Root's key (from the Hetzner console) becomes deploy's key.
+  - install -d -m 0700 -o deploy -g deploy /home/deploy/.ssh
+  - install -m 0600 -o deploy -g deploy /root/.ssh/authorized_keys /home/deploy/.ssh/authorized_keys
+  - install -d -m 0750 -o deploy -g deploy /srv/nayroz /srv/nayroz/backups
+  - systemctl enable --now fail2ban
+  - systemctl restart ssh

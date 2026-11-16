@@ -47,14 +47,16 @@ setup against real services.
 
 ## Deploy
 
-`docker compose -f docker-compose.yml -f docker-compose.prod.yml …`: Caddy (TLS for the four
-names) in front of the Next server and the import worker. Secrets go in `.env.production`
-(template: `.env.production.example`). The steps are in
-[docs/architecture.md](docs/architecture.md#go-live-checklist-when-the-server-exists).
+CI builds the image and pushes it to GHCR (`.github/workflows/docker.yml`). The server pulls the
+image and runs `docker-compose.yml` + `docker-compose.prod.yml`: Caddy with TLS for the four
+names, the Next server, the import worker and Postgres. `deploy/deploy.sh <server> [sha]`
+deploys or rolls back. The full runbook (Hetzner server, firewall, secrets, backups, AI worker on
+RunPod) is in [docs/deploy-hetzner.md](docs/deploy-hetzner.md).
 
 ## Other folders
 
 - `extensions/canva-importer/`: Chrome extension that imports Canva and CapCut designs.
-- `ai-worker/`: self-hosted AI worker (Python, its own Docker image).
+- `ai-worker/`: self-hosted AI worker (Python, its own Docker image, deployed to RunPod Serverless).
+- `deploy/`: server bootstrap (cloud-init), the deploy script and the nightly DB backup.
 - `docs/`: specs, handoffs and audits (`docs/audits/`).
 - `scripts/`: maintenance and smoke scripts run with `npm run …`.

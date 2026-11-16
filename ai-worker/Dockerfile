@@ -15,13 +15,16 @@ RUN pip install --no-cache-dir -r requirements.txt
 # RUN pip install --no-cache-dir https://github.com/nunchaku-ai/nunchaku/releases/download/<ver>/nunchaku-<ver>+torch2.4-cp311-linux_x86_64.whl
 
 COPY scripts/download_weights.py scripts/download_weights.py
+ENV HF_HOME=/app/hf-cache
 RUN python scripts/download_weights.py --small
 
-# Heavy diffusion weights (~40GB with Qwen bf16; pass --no-qwen to skip and
-# rely on NUNCHAKU checkpoints only). Uses HF_TOKEN build secret if the repo
-# needs auth (none of ours do today).
+# Fine-Tashkeel (~2.7 GB): the model production uses today. Baked so a cold worker starts fast.
+RUN python scripts/download_weights.py --tashkeel
+
+# Heavy diffusion weights (~40GB with Qwen bf16). Production only needs tashkeel today, so build
+# the lean image with --build-arg BAKE_DIFFUSION=0 (docs/deploy-hetzner.md, "AI worker").
+# Uses HF_TOKEN build secret if a repo needs auth (none of ours do today).
 ARG BAKE_DIFFUSION=1
-ENV HF_HOME=/app/hf-cache
 RUN if [ "$BAKE_DIFFUSION" = "1" ]; then python scripts/download_weights.py --diffusion; fi
 
 COPY pipelines pipelines

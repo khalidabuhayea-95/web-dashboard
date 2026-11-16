@@ -1,0 +1,48 @@
+name: Docker image
+
+# Builds the production image once, on GitHub, and pushes it to GHCR. The server only pulls it
+# (docs/deploy-hetzner.md); it never builds. Tags: the commit SHA (what a deploy pins) and `main`.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: docker-image
+  cancel-in-progress: true
+
+jobs:
+  image:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - id: names
+        run: echo "image=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ steps.names.outputs.image }}:${{ github.sha }}
+            ${{ steps.names.outputs.image }}:main
+          # Baked into the force-static /.well-known/apple-app-site-association route.
+          # Set it under Settings → Secrets and variables → Actions → Variables.
+          build-args: |
+            IOS_TEAM_ID=${{ vars.IOS_TEAM_ID }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

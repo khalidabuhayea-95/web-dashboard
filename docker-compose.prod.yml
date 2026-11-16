@@ -1,21 +1,33 @@
-# Production override — real domains, TLS, real secrets. Layered on top of docker-compose.yml:
+# Production override — real domains, TLS, real secrets. Layered on top of docker-compose.yml.
+# The server never builds: GitHub Actions (.github/workflows/docker.yml) builds the image and
+# pushes it to GHCR, and the server pulls the tag it is told to run. The full procedure is in
+# docs/deploy-hetzner.md and deploy/deploy.sh.
 #
-#   cp .env.production.example .env.production   # fill in real values (never committed)
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm web npx prisma migrate deploy
-#   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+#   IMAGE_TAG=<commit sha> docker compose -f docker-compose.yml -f docker-compose.prod.yml pull
+#   IMAGE_TAG=<commit sha> docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm web npx prisma migrate deploy
+#   IMAGE_TAG=<commit sha> docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
 #
 # What changes against the local stack:
+#   - web and worker run ghcr.io/khalidabuhayea-95/web-dashboard:${IMAGE_TAG} (default `main`).
+#     Pinning a commit SHA makes every deploy reproducible and every rollback one command.
 #   - Caddy serves nayroz.com, www.nayroz.com, admin.nayroz.com and api.nayroz.com on 80/443 and
 #     gets a certificate for each (DNS must point at this server first). Nothing else is published:
 #     not Next's :3000 (an IP request there would reach the all-in-one mode), not Postgres.
 #   - The local environment block (dummy AUTH_SECRET, throwaway database, test buckets) is reset;
 #     every service reads .env.production instead. `environment:` below only adds the non-secret
 #     values that are the same for every production deployment.
-#   - Services restart on failure and on reboot.
+#   - Services restart on failure and on reboot; container logs are capped.
 #
 # Scaling the API on its own later: run more web containers with NAYROZ_SURFACES=api behind
 # api.nayroz.com (docs/architecture.md, "Scaling").
+
+x-image: &image ghcr.io/khalidabuhayea-95/web-dashboard:${IMAGE_TAG:-main}
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "20m"
+    max-file: "5"
 
 x-prod-env: &prod-env
   NODE_ENV: production
@@ -29,25 +41,29 @@ services:
     env_file: .env.production
     ports: !reset []
     restart: unless-stopped
+    logging: *logging
 
   web:
-    build:
-      context: .
-      args:
-        # Baked into /.well-known/apple-app-site-association at build time (see .env.production.example).
-        IOS_TEAM_ID: ${IOS_TEAM_ID:-}
+    # Built by CI (IOS_TEAM_ID comes from the repo's Actions variables), never on the server.
+    build: !reset null
+    image: *image
+    pull_policy: missing
     environment: !override
       <<: *prod-env
     env_file: .env.production
     ports: !reset []
     restart: unless-stopped
+    logging: *logging
 
   worker:
+    image: *image
+    pull_policy: missing
     environment: !override
       <<: *prod-env
       IMPORT_JOBS_WORKER_ID: worker-1
     env_file: .env.production
     restart: unless-stopped
+    logging: *logging
 
   caddy:
     environment:
@@ -63,6 +79,7 @@ services:
       - caddy_data:/data
       - caddy_config:/config
     restart: unless-stopped
+    logging: *logging
 
 volumes:
   caddy_data:

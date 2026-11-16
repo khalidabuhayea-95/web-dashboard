@@ -17,6 +17,12 @@ out
 # that points outside the repo, which makes Turbopack panic during `next build`.
 ai-worker
 
+# Locally downloaded models: the image fetches its own verified copy at build time.
+.models
+
+# Server bootstrap / deploy scripts: run on the host, never inside the image.
+deploy
+
 # Local Python venv for rembg — its bin/python symlink points outside the repo
 # and makes Turbopack panic during `next build`. Never ship it in the image.
 .venv-rembg

@@ -181,18 +181,13 @@ override does:
    this before the first `up`, because Caddy can only get certificates for names that already
    resolve to it.
 2. Open ports 80 and 443 (TCP, plus 443/UDP for HTTP/3) to the server.
-3. On the server:
-   ```bash
-   cp .env.production.example .env.production   # fill in every value
-   IOS_TEAM_ID=<Apple Team ID> docker compose -f docker-compose.yml -f docker-compose.prod.yml build
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml run --rm web npx prisma migrate deploy
-   docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
-   ```
-   `IOS_TEAM_ID` is a build argument. The `apple-app-site-association` route is force-static,
-   so the value is baked in when the image is built.
-   Tested locally on 2026-11-16 with the same image behind Caddy on `:8080`: all three surfaces,
-   the redirects, and NextAuth on `admin.localhost:8080` work. Run it yourself with
-   `docker compose up -d` (stop `next dev` first, or reset the web service's `3000:3000` port).
+3. Follow **[deploy-hetzner.md](deploy-hetzner.md)**. It covers the server (cloud-init),
+   the firewall, GHCR, `.env.production`, `deploy/deploy.sh`, backups and the AI worker. The
+   image is built by CI with `IOS_TEAM_ID` from the repo's Actions variables, never on the
+   server.
+
+   Tested locally on 2026-11-16 with the same image behind Caddy on `:8080`. All three
+   surfaces, the redirects, and NextAuth on `admin.localhost:8080` work.
 4. If you use another reverse proxy instead of Caddy, it must pass the original `Host` header
    through (nginx: `proxy_set_header Host $host;`), and it must answer only the four names.
 5. Google OAuth client: add `https://admin.nayroz.com` to the authorised
